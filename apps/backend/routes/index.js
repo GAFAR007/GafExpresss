@@ -14,6 +14,9 @@
 
 const debug = require('../utils/debug');
 const authRoutes = require('./auth.routes');
+const adminRoutes = require('./admin.routes');
+const { requireRole } = require('../middlewares/requireRole.middleware.js');
+
 
 module.exports = (app) => {
   debug('🧭 Routes module loaded');
@@ -33,4 +36,11 @@ module.exports = (app) => {
    */
   debug('Registering /auth routes');
   app.use('/auth', authRoutes);
+
+    /**
+   * Admin routes
+   * /admin/*
+   */
+  debug('Registering admin routes');
+  app.use('/admin', adminRoutes);
 };
