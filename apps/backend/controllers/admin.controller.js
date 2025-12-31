@@ -39,7 +39,134 @@ async function getAllUsers(req, res) {
     });
   }
 }
+/**
+ * GET /admin/users/:id
+ * Returns single user by ID (admin only)
+ */
+async function getUserById(req, res) {
+  debug('ADMIN CONTROLLER: getUserById - entry', { userId: req.params.id });
+
+  try {
+    const user = await adminService.getUserById(req.params.id);
+
+    if (!user) {
+      debug('ADMIN CONTROLLER: getUserById - user not found');
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    debug('ADMIN CONTROLLER: getUserById - success');
+
+    return res.status(200).json({
+      message: 'User fetched successfully',
+      user,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: getUserById - error', err.message);
+
+    return res.status(500).json({
+      error: 'Failed to fetch user',
+      details: err.message,
+    });
+  }
+}
+
+// ... existing getAllUsers and getUserById ...
+
+/**
+ * PATCH /admin/users/:id
+ * Update user role or isActive status (admin only)
+ */
+async function updateUser(req, res) {
+  debug('ADMIN CONTROLLER: updateUser - entry', { 
+    userId: req.params.id,
+    updates: req.body 
+  });
+
+  try {
+    const updatedUser = await adminService.updateUser(req.params.id, req.body);
+
+    if (!updatedUser) {
+      debug('ADMIN CONTROLLER: updateUser - user not found');
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    debug('ADMIN CONTROLLER: updateUser - success');
+
+    return res.status(200).json({
+      message: 'User updated successfully',
+      user: updatedUser,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: updateUser - error', err.message);
+
+    // Validation errors from service
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({
+        error: 'Invalid update data',
+        details: err.message,
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Failed to update user',
+      details: err.message,
+    });
+  }
+}
+
+/**
+ * DELETE /admin/users/:id
+ * Soft delete user (admin only)
+ */
+async function softDeleteUser(req, res) {
+  debug('ADMIN CONTROLLER: softDeleteUser - entry', { 
+    targetUserId: req.params.id,
+    adminUserId: req.user.sub 
+  });
+
+  // Prevent self-deletion
+  if (req.params.id === req.user.sub) {
+    return res.status(400).json({
+      error: 'Admins cannot delete their own account',
+    });
+  }
+
+  try {
+    const deletedUser = await adminService.softDeleteUser(
+      req.params.id,
+      req.user.sub  // admin who is deleting
+    );
+
+    if (!deletedUser) {
+      debug('ADMIN CONTROLLER: softDeleteUser - user not found');
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    debug('ADMIN CONTROLLER: softDeleteUser - success');
+
+    return res.status(200).json({
+      message: 'User soft deleted successfully',
+      user: deletedUser,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: softDeleteUser - error', err.message);
+
+    return res.status(500).json({
+      error: 'Failed to delete user',
+      details: err.message,
+    });
+  }
+}
 
 module.exports = {
   getAllUsers,
+  getUserById,
+  updateUser,
+  softDeleteUser,  // ← NEW
 };

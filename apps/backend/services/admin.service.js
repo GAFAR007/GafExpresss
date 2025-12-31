@@ -29,7 +29,103 @@ async function getAllUsers() {
 
   return users;
 }
+/**
+ * Fetch single user by ID (admin only)
+ *
+ * @param {string} id - MongoDB user ID
+ * @returns {Object|null} user object or null if not found
+ */
+async function getUserById(id) {
+  debug('ADMIN SERVICE: Fetching user by ID', { id });
+
+  const user = await User.findById(id).select({
+    passwordHash: 0, // ❌ never expose passwords
+    __v: 0,
+  });
+
+  debug('ADMIN SERVICE: User fetch result', { found: !!user });
+
+  return user;
+}
+
+
+/**
+ * Update user role or isActive status (admin only)
+ *
+ * @param {string} id - User ID
+ * @param {Object} updates - Allowed fields: role, isActive
+ * @returns {Object|null} updated user or null if not found
+ */
+async function updateUser(id, updates) {
+  debug('ADMIN SERVICE: Updating user', { id, updates });
+
+  const allowedFields = ['role', 'isActive'];
+  const filteredUpdates = {};
+
+  // Only allow specific fields
+  for (const field of allowedFields) {
+    if (updates[field] !== undefined) {
+      filteredUpdates[field] = updates[field];
+    }
+  }
+
+  if (Object.keys(filteredUpdates).length === 0) {
+    throw new Error('No valid fields provided for update');
+  }
+
+  // Validate role if being changed
+  if (filteredUpdates.role) {
+    const { USER_ROLES } = require('../models/User');
+    if (!USER_ROLES.includes(filteredUpdates.role)) {
+      throw new Error(`Invalid role. Must be one of: ${USER_ROLES.join(', ')}`);
+    }
+  }
+
+  const user = await User.findByIdAndUpdate(
+    id,
+    filteredUpdates,
+    { new: true, runValidators: true } // return updated doc
+  ).select({
+    passwordHash: 0,
+    __v: 0,
+  });
+
+  debug('ADMIN SERVICE: Update result', { found: !!user });
+
+  return user;
+}
+
+/**
+ * Soft delete user (admin only)
+ *
+ * @param {string} id - User ID to delete
+ * @param {string} deletedById - Admin performing deletion
+ * @returns {Object|null} updated user
+ */
+async function softDeleteUser(id, deletedById) {
+  debug('ADMIN SERVICE: Soft deleting user', { id, deletedById });
+
+  const user = await User.findByIdAndUpdate(
+    id,
+    {
+      isActive: false,
+      deletedAt: new Date(),
+      deletedBy: deletedById,
+    },
+    { new: true, runValidators: true }
+  ).select({
+    passwordHash: 0,
+    __v: 0,
+  });
+
+  debug('ADMIN SERVICE: Soft delete result', { found: !!user });
+
+  return user;
+}
 
 module.exports = {
   getAllUsers,
+  getUserById,
+  updateUser,
+  softDeleteUser,  // ← NEW
 };

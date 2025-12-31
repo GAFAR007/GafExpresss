@@ -60,13 +60,22 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // ✅ Soft delete tracking
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
   },
   {
     timestamps: true, // adds createdAt + updatedAt
   }
 );
-
-
 
 const User = mongoose.model('User', userSchema);
 
@@ -74,4 +83,3 @@ module.exports = {
   User,
   USER_ROLES,
 };
-

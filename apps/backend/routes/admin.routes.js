@@ -41,6 +41,40 @@ router.get(
 );
 
 /**
+ * GET /admin/users/:id
+ * Admin-only: Fetch single user by ID
+ * Protected by requireAuth + requireRole('admin')
+ */
+router.get(
+  '/users/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.getUserById  // ← Calls controller → service
+);
+/**
+ * PATCH /admin/users/:id
+ * Admin-only: Update user role or status
+ */
+
+router.patch(
+  '/users/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.updateUser
+);
+
+/**
+ * DELETE /admin/users/:id
+ * Admin-only: Soft delete user
+ * Must come before /users (collection)
+ */
+router.delete(
+  '/users/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.softDeleteUser
+);
+/**
  * GET /admin/users
  * Admin-only: Fetch all users
  * Protected by requireAuth + requireRole('admin')
