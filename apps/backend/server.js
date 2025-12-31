@@ -47,6 +47,7 @@ debug('Registering global middleware');
 app.use(cors());
 app.use(express.json());
 
+
 /**
  * --------------------------------------------------
  * DATABASE CONNECTION
@@ -67,6 +68,9 @@ connectDB();
  */
 debug('Registering routes');
 registerRoutes(app);
+
+
+
 
 /**
  * --------------------------------------------------

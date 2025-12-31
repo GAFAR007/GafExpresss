@@ -6,8 +6,8 @@
 const bcrypt = require('bcryptjs');
 const debug = require('../utils/debug');
 const { User, USER_ROLES } = require('../models/User');
-const jwtUtils = require('../config/jwt');
-const signToken = jwtUtils.signToken;
+const { signToken } = require('../config/jwt');
+
 
 
 
