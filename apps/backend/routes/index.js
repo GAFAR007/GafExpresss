@@ -12,15 +12,14 @@
  * - Scales cleanly as app grows
  */
 
-const authController = require('../controllers/auth.controller');
+const debug = require('../utils/debug');
+const authRoutes = require('./auth.routes');
 
 module.exports = (app) => {
-  console.log('🧭 Routes module loaded');
+  debug('🧭 Routes module loaded');
 
   /**
-   * TEMP TEST ROUTE
-   * ----------------
-   * This exists ONLY to verify routing works.
+   * HEALTH CHECK
    */
   app.get('/health', (req, res) => {
     res.json({
@@ -31,14 +30,7 @@ module.exports = (app) => {
 
   /**
    * AUTH ROUTES
-   * ----------------
-   * POST /auth/register
-   *
-   * WHAT:
-   * - Entry point for user registration
-   *
-   * WHY:
-   * - Keeps auth logic isolated
    */
-  app.post('/auth/register', authController.register);
+  debug('Registering /auth routes');
+  app.use('/auth', authRoutes);
 };
