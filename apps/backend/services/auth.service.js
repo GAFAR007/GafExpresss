@@ -6,6 +6,10 @@
 const bcrypt = require('bcryptjs');
 const debug = require('../utils/debug');
 const { User, USER_ROLES } = require('../models/User');
+const jwtUtils = require('../config/jwt');
+const signToken = jwtUtils.signToken;
+
+
 
 async function registerUser({ name, email, password, role }) {
   debug('================ REGISTER FLOW START ================');
@@ -120,12 +124,20 @@ async function loginUser(payload) {
 
   debug('================ LOGIN SERVICE END (SUCCESS) ================');
 
-  return {
+const token = signToken({
+  id: user._id,
+  role: user.role,
+});
+debug('token:', token);
+return {
+  token,
+  user: {
     id: user._id,
     name: user.name,
     email: user.email,
     role: user.role,
-  };
+  },
+};
 }
 
 

@@ -98,50 +98,28 @@ async function register(req, res) {
 }
 
 
-/* =========================
-   LOGIN — FULL TRACE
-========================= */
+/**
+ * LOGIN
+ * POST /auth/login
+ */
 async function login(req, res) {
   try {
-    debug('================ LOGIN CONTROLLER START ================');
-
-    // 1️⃣ What Express received
+    debug('LOGIN CONTROLLER START');
     debug('req.body:', req.body);
-    debug('typeof req.body:', typeof req.body);
 
-    // 2️⃣ What functions exist in service
-    debug('authService keys:', Object.keys(authService));
-    debug('typeof authService.loginUser:', typeof authService.loginUser);
+    const result = await authService.loginUser(req.body);
 
-    // 3️⃣ Build payload explicitly
-    const payload = {
-      email: req.body.email,
-      password: req.body.password,
-    };
+    debug('LOGIN CONTROLLER SUCCESS');
 
-    debug('Payload sent to service:', payload);
-
-    // 4️⃣ Call service
-    const user = await authService.loginUser(payload);
-
-    debug('Service returned user:', user);
-    debug('================ LOGIN CONTROLLER END (SUCCESS) ================');
-
-    return res.status(200).json({
-      message: 'Login successful',
-      user,
-    });
+    return res.status(200).json(result);
   } catch (err) {
-    debug('================ LOGIN CONTROLLER ERROR ================');
-    debug('Error message:', err.message);
-    debug('Error stack:', err.stack);
+    debug('LOGIN CONTROLLER ERROR:', err.message);
 
     return res.status(401).json({
       error: err.message,
     });
   }
 }
-
 module.exports = {
   register,
   login,
