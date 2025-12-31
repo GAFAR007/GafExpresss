@@ -21,6 +21,47 @@ const jwt = require('jsonwebtoken');
 const debug = require('../utils/debug');
 
 /**
+ * Middleware: requireRole
+ *
+ * WHAT:
+ * - Ensures authenticated user has a specific role
+ *
+ * HOW:
+ * - Reads req.user.role (set by requireAuth)
+ * - Compares against required role
+ *
+ * WHY:
+ * - Enforces authorization rules
+ * - Prevents privilege escalation
+ */
+function requireRole(requiredRole) {
+  return (req, res, next) => {
+    debug('ROLE CHECK START');
+
+    if (!req.user || !req.user.role) {
+      debug('Role check failed: user or role missing');
+      return res.status(403).json({
+        error: 'Access denied: role missing',
+      });
+    }
+
+    debug('User role:', req.user.role);
+    debug('Required role:', requiredRole);
+
+    if (req.user.role !== requiredRole) {
+      debug('Role mismatch – access denied');
+      return res.status(403).json({
+        error: 'Access denied: insufficient permissions',
+      });
+    }
+
+    debug('ROLE CHECK PASSED');
+    next();
+  };
+}
+
+
+/**
  * Middleware: requireAuth
  *
  * Blocks request unless a valid JWT is provided.
@@ -89,5 +130,5 @@ function requireAuth(req, res, next) {
 }
 
 module.exports = {
-  requireAuth,
+  requireAuth,  requireRole,
 };

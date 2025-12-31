@@ -16,7 +16,7 @@ const express = require('express');
 const debug = require('../utils/debug');
 const authController = require('../controllers/auth.controller');
 // ✅ Import the authentication middleware
-const { requireAuth } = require('../middlewares/auth.middleware');
+const { requireAuth ,   requireRole} = require('../middlewares/auth.middleware');
 
 const router = express.Router();
 
@@ -39,6 +39,25 @@ router.post('/login', authController.login);
  * GET /auth/me
  * Protected route - requires valid JWT
  */
+/**
+ * Admin-only test route
+ * GET /auth/admin-test
+ */
+router.get(
+  '/admin-test',
+  requireAuth,
+  requireRole('admin'),
+  (req, res) => {
+    debug('Admin route accessed by:', req.user.sub);
+
+    res.json({
+      message: 'Admin access granted',
+      user: req.user,
+    });
+  }
+);
+
+
 router.get('/me', requireAuth, (req, res) => {
   debug('Protected /me route accessed for user:', req.user.sub);
 
@@ -47,5 +66,6 @@ router.get('/me', requireAuth, (req, res) => {
     user: req.user, // Will contain { sub: userId, role, iat, exp }
   });
 });
+
 
 module.exports = router;
