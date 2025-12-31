@@ -3,63 +3,21 @@
  * ------------------------------
  * WHAT:
  * - Verifies JWT tokens on protected routes
+ * - Enforces role-based access control
  *
  * HOW:
- * - Reads Authorization header
- * - Extracts Bearer token
- * - Verifies token using JWT_SECRET
- * - Attaches decoded payload to req.user
+ * - requireAuth: validates Bearer token → attaches req.user
+ * - requireRole: checks req.user.role against required role
  *
  * WHY:
- * - Prevents unauthenticated access
- * - Centralizes auth logic
+ * - Centralizes all auth + authorization logic
  * - Keeps routes clean and secure
- * - Enables role-based access later
+ * - Enables scalable permissions (admin, staff, customer)
+ * - Clear separation: Authentication vs Authorization
  */
 
 const jwt = require('jsonwebtoken');
 const debug = require('../utils/debug');
-
-/**
- * Middleware: requireRole
- *
- * WHAT:
- * - Ensures authenticated user has a specific role
- *
- * HOW:
- * - Reads req.user.role (set by requireAuth)
- * - Compares against required role
- *
- * WHY:
- * - Enforces authorization rules
- * - Prevents privilege escalation
- */
-function requireRole(requiredRole) {
-  return (req, res, next) => {
-    debug('ROLE CHECK START');
-
-    if (!req.user || !req.user.role) {
-      debug('Role check failed: user or role missing');
-      return res.status(403).json({
-        error: 'Access denied: role missing',
-      });
-    }
-
-    debug('User role:', req.user.role);
-    debug('Required role:', requiredRole);
-
-    if (req.user.role !== requiredRole) {
-      debug('Role mismatch – access denied');
-      return res.status(403).json({
-        error: 'Access denied: insufficient permissions',
-      });
-    }
-
-    debug('ROLE CHECK PASSED');
-    next();
-  };
-}
-
 
 /**
  * Middleware: requireAuth
@@ -122,13 +80,16 @@ function requireAuth(req, res, next) {
       });
     }
 
-    // Fallback for any other error (e.g., malformed token)
+    // Fallback for any other error
     return res.status(401).json({
       error: 'Invalid or malformed token',
     });
   }
 }
 
+
+// 📦 Export both — clean and explicit
 module.exports = {
-  requireAuth,  requireRole,
+  requireAuth,
+  
 };

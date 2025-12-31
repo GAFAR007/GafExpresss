@@ -16,8 +16,8 @@ const express = require('express');
 const debug = require('../utils/debug');
 const authController = require('../controllers/auth.controller');
 // ✅ Import the authentication middleware
-const { requireAuth ,   requireRole} = require('../middlewares/auth.middleware');
-
+const { requireAuth ,   } = require('../middlewares/auth.middleware');
+const { requireRole } = require('../middlewares/requireRole.middleware');
 const router = express.Router();
 
 debug('Auth routes initialized');
