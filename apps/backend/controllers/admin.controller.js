@@ -12,6 +12,8 @@
 
 const debug = require('../utils/debug');
 const adminService = require('../services/admin.service');
+const adminProductService = require('../services/admin.product.service');
+
 
 /**
  * GET /admin/users
@@ -275,11 +277,152 @@ async function restoreUser(req, res) {
   }
 }
 
+/**
+ * POST /admin/products
+ * Admin-only: Create new product
+ */
+async function createProduct(req, res) {
+  debug('ADMIN CONTROLLER: createProduct - entry', { body: req.body });
+
+  try {
+    const product = await adminProductService.createProduct(req.body);
+
+    debug('ADMIN CONTROLLER: createProduct - success');
+
+    return res.status(201).json({
+      message: 'Product created successfully',
+      product,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: createProduct - error', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * GET /admin/products
+ * Admin-only: List all products (including soft-deleted)
+ */
+async function getAllProducts(req, res) {
+  debug('ADMIN CONTROLLER: getAllProducts - entry');
+
+  try {
+    const products = await adminProductService.getAllProducts();
+
+    debug('ADMIN CONTROLLER: getAllProducts - success', { count: products.length });
+
+    return res.status(200).json({
+      message: 'Products fetched successfully',
+      count: products.length,
+      products,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: getAllProducts - error', err.message);
+
+    return res.status(500).json({
+      error: 'Failed to fetch products',
+    });
+  }
+}
+
+/**
+ * GET /admin/products/:id
+ * Admin-only: View single product
+ */
+async function getProductById(req, res) {
+  debug('ADMIN CONTROLLER: getProductById - entry', { productId: req.params.id });
+
+  try {
+    const product = await adminProductService.getProductById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({
+        error: 'Product not found',
+      });
+    }
+
+    return res.status(200).json({
+      message: 'Product fetched successfully',
+      product,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: getProductById - error', err.message);
+    return res.status(500).json({
+      error: 'Failed to fetch product',
+    });
+  }
+}
+
+/**
+ * PATCH /admin/products/:id
+ * Admin-only: Update product
+ */
+async function updateProduct(req, res) {
+  debug('ADMIN CONTROLLER: updateProduct - entry', { id: req.params.id, updates: req.body });
+
+  try {
+    const updatedProduct = await adminProductService.updateProduct(req.params.id, req.body);
+
+    if (!updatedProduct) {
+      return res.status(404).json({
+        error: 'Product not found',
+      });
+    }
+
+    return res.status(200).json({
+      message: 'Product updated successfully',
+      product: updatedProduct,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: updateProduct - error', err.message);
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * DELETE /admin/products/:id
+ * Admin-only: Soft delete product
+ */
+async function softDeleteProduct(req, res) {
+  debug('ADMIN CONTROLLER: softDeleteProduct - entry', { productId: req.params.id });
+
+  try {
+    const deletedProduct = await adminProductService.softDeleteProduct(req.params.id, req.user.sub);
+
+    if (!deletedProduct) {
+      return res.status(404).json({
+        error: 'Product not found',
+      });
+    }
+
+    return res.status(200).json({
+      message: 'Product soft deleted successfully',
+      product: deletedProduct,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: softDeleteProduct - error', err.message);
+    return res.status(500).json({
+      error: 'Failed to delete product',
+    });
+  }
+}
+
+
 module.exports = {
   getAllUsers,
   getUserById,
   updateUser,
   softDeleteUser,
-  updateUserRole,  // NEW
-  restoreUser,     // NEW
+  updateUserRole,
+  restoreUser,
+  createProduct,
+  getAllProducts,
+  getProductById,
+  updateProduct,
+  softDeleteProduct,
 };

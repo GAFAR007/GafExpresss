@@ -16,7 +16,8 @@ const debug = require('../utils/debug');
 const authRoutes = require('./auth.routes');
 const adminRoutes = require('./admin.routes');
 const { requireRole } = require('../middlewares/requireRole.middleware.js');
-
+// Public product routes (no auth needed)
+const productPublicRoutes = require('./product.public.routes');
 
 module.exports = (app) => {
   debug('🧭 Routes module loaded');
@@ -43,4 +44,12 @@ module.exports = (app) => {
    */
   debug('Registering admin routes');
   app.use('/admin', adminRoutes);
+
+  /**
+   * Public product routes
+   * /products (no auth)
+   */
+  debug('Registering public product routes');
+  app.use('/products', productPublicRoutes);
 };
+

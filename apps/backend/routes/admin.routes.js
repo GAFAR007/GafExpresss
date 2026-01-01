@@ -82,6 +82,66 @@ router.delete(
   requireRole('admin'),
   adminController.softDeleteUser
 );
+/**
+ * ADMIN PRODUCT ROUTES
+ */
+
+/**
+ * POST /admin/products
+ * Admin-only: Create new product
+ */
+router.post(
+  '/products',
+  requireAuth,
+  requireRole('admin'),
+  adminController.createProduct
+);
+
+/**
+ * GET /admin/products
+ * Admin-only: List all products (including soft-deleted for management)
+ */
+router.get(
+  '/products',
+  requireAuth,
+  requireRole('admin'),
+  adminController.getAllProducts
+);
+
+/**
+ * GET /admin/products/:id
+ * Admin-only: View single product
+ */
+router.get(
+  '/products/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.getProductById
+);
+
+/**
+ * PATCH /admin/products/:id
+ * Admin-only: Update product
+ */
+router.patch(
+  '/products/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.updateProduct
+);
+
+/**
+ * DELETE /admin/products/:id
+ * Admin-only: Soft delete product
+ */
+router.delete(
+  '/products/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.softDeleteProduct
+);
+
+
 
 /**
  * GET /admin/users
