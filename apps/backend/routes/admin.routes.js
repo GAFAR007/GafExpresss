@@ -20,10 +20,8 @@ const adminController = require('../controllers/admin.controller');
 const router = express.Router();
 
 debug('Admin routes initialized');
-
 /**
  * GET /admin/health
- * Admin-only test route
  */
 router.get(
   '/health',
@@ -31,31 +29,43 @@ router.get(
   requireRole('admin'),
   (req, res) => {
     debug('Admin health route accessed by user:', req.user.sub);
-
-    res.json({
-      status: 'ok',
-      message: 'Admin access confirmed',
-      admin: req.user,
-    });
+    res.json({ status: 'ok', message: 'Admin access confirmed', admin: req.user });
   }
 );
 
 /**
  * GET /admin/users/:id
- * Admin-only: Fetch single user by ID
- * Protected by requireAuth + requireRole('admin')
  */
 router.get(
   '/users/:id',
   requireAuth,
   requireRole('admin'),
-  adminController.getUserById  // ← Calls controller → service
+  adminController.getUserById
 );
-/**
- * PATCH /admin/users/:id
- * Admin-only: Update user role or status
- */
 
+/**
+ * PATCH /admin/users/:id/role  ← SPECIFIC — MUST COME FIRST
+ */
+router.patch(
+  '/users/:id/role',
+  requireAuth,
+  requireRole('admin'),
+  adminController.updateUserRole
+);
+
+/**
+ * PATCH /admin/users/:id/restore  ← SPECIFIC — MUST COME FIRST
+ */
+router.patch(
+  '/users/:id/restore',
+  requireAuth,
+  requireRole('admin'),
+  adminController.restoreUser
+);
+
+/**
+ * PATCH /admin/users/:id  ← GENERAL — COMES AFTER SPECIFIC ONES
+ */
 router.patch(
   '/users/:id',
   requireAuth,
@@ -65,8 +75,6 @@ router.patch(
 
 /**
  * DELETE /admin/users/:id
- * Admin-only: Soft delete user
- * Must come before /users (collection)
  */
 router.delete(
   '/users/:id',
@@ -74,16 +82,15 @@ router.delete(
   requireRole('admin'),
   adminController.softDeleteUser
 );
+
 /**
  * GET /admin/users
- * Admin-only: Fetch all users
- * Protected by requireAuth + requireRole('admin')
  */
 router.get(
   '/users',
   requireAuth,
   requireRole('admin'),
-  adminController.getAllUsers  // ← Calls controller → service
+  adminController.getAllUsers
 );
 
 module.exports = router;

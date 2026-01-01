@@ -117,6 +117,54 @@ async function updateUser(req, res) {
     });
   }
 }
+/**
+ * Update a user's role
+ * PATCH /admin/users/:id/role
+ */
+async function updateUserRole(req, res) {
+  try {
+    const adminId = req.user.sub;
+    const targetUserId = req.params.id;
+    const { role } = req.body;
+
+    const updatedUser = await adminService.updateUserRole({
+      adminId,
+      targetUserId,
+      role,
+    });
+
+    res.json({
+      message: 'User role updated successfully',
+      user: updatedUser,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
+/**
+ * Restore a soft-deleted user
+ * PATCH /admin/users/:id/restore
+ */
+async function restoreUser(req, res) {
+  try {
+    const adminId = req.user.sub;
+    const targetUserId = req.params.id;
+
+    const restoredUser = await adminService.restoreUser({
+      adminId,
+      targetUserId,
+    });
+
+    res.json({
+      message: 'User restored successfully',
+      user: restoredUser,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+}
+
 
 /**
  * DELETE /admin/users/:id
@@ -163,10 +211,75 @@ async function softDeleteUser(req, res) {
     });
   }
 }
+/**
+ * PATCH /admin/users/:id/role
+ * Update user role (admin only)
+ */
+async function updateUserRole(req, res) {
+  debug('ADMIN CONTROLLER: updateUserRole - entry', {
+    adminId: req.user.sub,
+    targetUserId: req.params.id,
+    newRole: req.body.role,
+  });
+
+  try {
+    const updatedUser = await adminService.updateUserRole({
+      adminId: req.user.sub,
+      targetUserId: req.params.id,
+      role: req.body.role,
+    });
+
+    debug('ADMIN CONTROLLER: updateUserRole - success');
+
+    return res.status(200).json({
+      message: 'User role updated successfully',
+      user: updatedUser,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: updateUserRole - error', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * PATCH /admin/users/:id/restore
+ * Restore soft-deleted user (admin only)
+ */
+async function restoreUser(req, res) {
+  debug('ADMIN CONTROLLER: restoreUser - entry', {
+    adminId: req.user.sub,
+    targetUserId: req.params.id,
+  });
+
+  try {
+    const restoredUser = await adminService.restoreUser({
+      adminId: req.user.sub,
+      targetUserId: req.params.id,
+    });
+
+    debug('ADMIN CONTROLLER: restoreUser - success');
+
+    return res.status(200).json({
+      message: 'User restored successfully',
+      user: restoredUser,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: restoreUser - error', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
 
 module.exports = {
   getAllUsers,
   getUserById,
   updateUser,
-  softDeleteUser,  // ← NEW
+  softDeleteUser,
+  updateUserRole,  // NEW
+  restoreUser,     // NEW
 };

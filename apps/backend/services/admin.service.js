@@ -9,7 +9,7 @@
  * - Centralises database access
  */
 
-const { User } = require('../models/User');
+const { User, USER_ROLES } = require('../models/User');
 const debug = require('../utils/debug');
 
 /**
@@ -123,9 +123,146 @@ async function softDeleteUser(id, deletedById) {
   return user;
 }
 
+/**
+ * Update user role (admin only)
+ * Prevents self-demote
+ *
+ * @param {Object} params
+ * @param {string} params.adminId
+ * @param {string} params.targetUserId
+ * @param {string} params.role
+ * @returns {Object} updated user
+ */
+async function updateUserRole({ adminId, targetUserId, role }) {
+  debug('ADMIN SERVICE: updateUserRole', { adminId, targetUserId, role });
+
+  if (!USER_ROLES.includes(role)) {
+    throw new Error(`Invalid role: ${role}. Must be one of: ${USER_ROLES.join(', ')}`);
+  }
+
+  const user = await User.findById(targetUserId);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Prevent self-demote
+  if (targetUserId === adminId && role !== 'admin') {
+    throw new Error('Admins cannot demote themselves');
+  }
+
+  user.role = role;
+  await user.save();
+
+  return user.toObject();  // Clean object without mongoose extras
+}
+
+/**
+ * Restore soft-deleted user (admin only)
+ * Resets isActive, deletedAt, deletedBy
+ *
+ * @param {Object} params
+ * @param {string} params.adminId
+ * @param {string} params.targetUserId
+ * @returns {Object} restored user
+ */
+async function restoreUser({ adminId, targetUserId }) {
+  debug('ADMIN SERVICE: restoreUser', { adminId, targetUserId });
+
+  const user = await User.findByIdAndUpdate(
+    targetUserId,
+    {
+      isActive: true,
+      deletedAt: null,
+      deletedBy: null,
+    },
+    { new: true }
+  ).select({
+    passwordHash: 0,
+    __v: 0,
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Optional: could add restore logging if needed later
+
+  return user;
+}
+/**
+ * Update user role (admin only)
+ * Prevents self-demote
+ *
+ * @param {Object} params
+ * @param {string} params.adminId
+ * @param {string} params.targetUserId
+ * @param {string} params.role
+ * @returns {Object} updated user
+ */
+async function updateUserRole({ adminId, targetUserId, role }) {
+  debug('ADMIN SERVICE: updateUserRole', { adminId, targetUserId, role });
+
+  if (!USER_ROLES.includes(role)) {
+    throw new Error(`Invalid role: ${role}. Must be one of: ${USER_ROLES.join(', ')}`);
+  }
+
+  const user = await User.findById(targetUserId);
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Prevent self-demote
+  if (targetUserId === adminId && role !== 'admin') {
+    throw new Error('Admins cannot demote themselves');
+  }
+
+  user.role = role;
+  await user.save();
+
+  return user.toObject();  // Clean object without mongoose extras
+}
+
+/**
+ * Restore soft-deleted user (admin only)
+ * Resets isActive, deletedAt, deletedBy
+ *
+ * @param {Object} params
+ * @param {string} params.adminId
+ * @param {string} params.targetUserId
+ * @returns {Object} restored user
+ */
+async function restoreUser({ adminId, targetUserId }) {
+  debug('ADMIN SERVICE: restoreUser', { adminId, targetUserId });
+
+  const user = await User.findByIdAndUpdate(
+    targetUserId,
+    {
+      isActive: true,
+      deletedAt: null,
+      deletedBy: null,
+    },
+    { new: true }
+  ).select({
+    passwordHash: 0,
+    __v: 0,
+  });
+
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Optional: could add restore logging if needed later
+
+  return user;
+}
+
 module.exports = {
   getAllUsers,
   getUserById,
   updateUser,
-  softDeleteUser,  // ← NEW
+  softDeleteUser,
+  updateUserRole,  // NEW
+  restoreUser,     // NEW
 };
