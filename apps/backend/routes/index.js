@@ -10,12 +10,17 @@
  * WHY:
  * - Keeps server.js clean
  * - Scales cleanly as app grows
+ * 
+ * 
+ * 
+ *  npm run dev
+
  */
 
 const debug = require('../utils/debug');
 const authRoutes = require('./auth.routes');
 const adminRoutes = require('./admin.routes');
-const { requireRole } = require('../middlewares/requireRole.middleware.js');
+
 
 // Public product routes (no auth needed)
 const productPublicRoutes = require('./product.public.routes');

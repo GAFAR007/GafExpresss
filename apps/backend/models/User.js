@@ -79,7 +79,5 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.model('User', userSchema);
 
-module.exports = {
-  User,
-  USER_ROLES,
-};
+module.exports = User;
+module.exports.USER_ROLES = USER_ROLES;

@@ -37,6 +37,10 @@ router.get(
 /**
  * ADMIN USER ROUTES
  */
+
+
+
+
 router.get(
   '/users',
   requireAuth,
@@ -94,6 +98,10 @@ router.delete(
 /**
  * ADMIN PRODUCT ROUTES
  */
+
+
+
+
 
 /**
  * POST /admin/products
@@ -165,6 +173,10 @@ router.delete(
 /**
  * ADMIN ORDER ROUTES
  */
+
+
+
+
 
 /**
  * GET /admin/orders

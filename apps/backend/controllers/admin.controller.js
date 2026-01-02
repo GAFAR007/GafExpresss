@@ -15,29 +15,115 @@ const adminService = require('../services/admin.service');
 const adminProductService = require('../services/admin.product.service');
 const adminOrderService = require('../services/admin.order.service');
 
+const Product = require('../models/Product');
+const Order = require('../models/Order');
+const User = require('../models/User');
+
 /**
- * GET /admin/users
- * Returns list of all users (admin only)
+ * GET /admin/users?page=1&limit=10
+ * Admin-only: List ALL users with pagination
+ *
+ * Why this endpoint exists:
+ * - Full user management in admin dashboard
+ * - Admins need to see every user (active, inactive, soft-deleted if added later)
+ * - Never expose passwordHash to frontend
  */
 async function getAllUsers(req, res) {
   debug('ADMIN CONTROLLER: getAllUsers - entry');
+  debug('Query params received:', req.query); // BETTER DEBUG: Log what client sent
 
   try {
-    const users = await adminService.getAllUsers();
+    /**
+     * -------------------------------------------------
+     * STEP 1: START PAGINATION (REUSABLE HELPER)
+     * -------------------------------------------------
+     *
+     * We use the shared pagination utility.
+     * It validates inputs, applies safe defaults,
+     * and calculates how many documents to skip.
+     *
+     * Keeps code DRY across all admin list endpoints.
+     */
+    const { page, limit, skip } = require('../utils/pagination').getPagination(req.query);
 
-    debug('ADMIN CONTROLLER: getAllUsers - success', { count: users.length });
+    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
 
+    /**
+     * -------------------------------------------------
+     * STEP 2: FETCH DATA FROM DATABASE
+     * -------------------------------------------------
+     *
+     * We run TWO queries in parallel:
+     *
+     * 1️⃣ Get only the users for THIS page
+     * 2️⃣ Count total number of users
+     *
+     * Promise.all = faster performance
+     */
+    debug('Starting database queries...'); // BETTER DEBUG: Query start
+
+    const [users, total] = await Promise.all([
+      User.find({}) // Admin sees ALL users
+        .select({ 
+          passwordHash: 0, // NEVER send passwords
+          __v: 0           // Hide internal version field
+        })
+        .sort({ createdAt: -1 }) // Newest users first
+        .skip(skip)
+        .limit(limit)
+        .lean(), // Faster for read-only responses
+
+      User.countDocuments({}), // Total count for pagination
+    ]);
+
+    debug('Queries completed successfully', {
+      totalUsers: total,
+      pageUsers: users.length,
+    }); // BETTER DEBUG: Confirm results
+
+    /**
+     * -------------------------------------------------
+     * STEP 3: CALCULATE TOTAL PAGES
+     * -------------------------------------------------
+     *
+     * Example:
+     * total = 73 users
+     * limit = 10
+     * totalPages = 8 (because 73 / 10 = 7.3 → ceil to 8)
+     */
+    const totalPages = Math.ceil(total / limit);
+
+    /**
+     * -------------------------------------------------
+     * STEP 4: SEND RESPONSE TO ADMIN DASHBOARD
+     * -------------------------------------------------
+     *
+     * Full pagination metadata helps frontend build:
+     * - Page navigation
+     * - "Showing X-Y of Z users"
+     * - Next/Prev button states
+     */
     return res.status(200).json({
       message: 'Users fetched successfully',
-      count: users.length,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+
+      count: users.length, // Users returned in this request
       users,
     });
   } catch (err) {
     debug('ADMIN CONTROLLER: getAllUsers - error', err.message);
+    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace for troubleshooting
 
     return res.status(500).json({
-      error: 'Failed to fetch users',
-      details: err.message,
+      error: err.message || 'Failed to fetch users',
     });
   }
 }
@@ -258,24 +344,109 @@ async function createProduct(req, res) {
  * GET /admin/products
  * Admin-only: List all products (including soft-deleted)
  */
+/**
+ * GET /admin/products?page=1&limit=10
+ * Admin-only: List ALL products (including soft-deleted) with pagination
+ *
+ * Why this is different from public endpoint:
+ * - Admin sees EVERYTHING (active + soft-deleted)
+ * - Used for full product management in dashboard
+ */
 async function getAllProducts(req, res) {
   debug('ADMIN CONTROLLER: getAllProducts - entry');
+  debug('Query params received:', req.query); // BETTER DEBUG: See what the client sent
 
   try {
-    const products = await adminProductService.getAllProducts();
+    /**
+     * -------------------------------------------------
+     * STEP 1: START PAGINATION (REUSABLE HELPER)
+     * -------------------------------------------------
+     *
+     * We use the shared pagination utility.
+     * It:
+     * - Validates page/limit
+     * - Applies safe defaults
+     * - Calculates how many items to skip
+     *
+     * Keeps this controller clean and consistent
+     */
+    const { page, limit, skip } = require('../utils/pagination').getPagination(req.query);
 
-    debug('ADMIN CONTROLLER: getAllProducts - success', { count: products.length });
+    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
 
+    /**
+     * -------------------------------------------------
+     * STEP 2: FETCH DATA FROM DATABASE
+     * -------------------------------------------------
+     *
+     * We run TWO queries at the SAME TIME:
+     *
+     * 1️⃣ Get only the products for THIS page
+     * 2️⃣ Count ALL products (including soft-deleted)
+     *
+     * Promise.all = faster than sequential queries
+     */
+    debug('Starting database queries...'); // BETTER DEBUG: Query start
+
+    const [products, total] = await Promise.all([
+      Product.find({}) // Admin sees ALL products (no isActive filter)
+        .select({ __v: 0 }) // Hide internal version field
+        .sort({ createdAt: -1 }) // Newest first
+        .skip(skip)
+        .limit(limit)
+        .lean(), // Faster for read-only responses
+
+      Product.countDocuments({}), // Total count (all products)
+    ]);
+
+    debug('Queries completed successfully', {
+      totalProducts: total,
+      pageProducts: products.length,
+    }); // BETTER DEBUG: Confirm results
+
+    /**
+     * -------------------------------------------------
+     * STEP 3: CALCULATE TOTAL PAGES
+     * -------------------------------------------------
+     *
+     * Example:
+     * total = 47 products
+     * limit = 10
+     * totalPages = 5
+     */
+    const totalPages = Math.ceil(total / limit);
+
+    /**
+     * -------------------------------------------------
+     * STEP 4: SEND RESPONSE TO ADMIN DASHBOARD
+     * -------------------------------------------------
+     *
+     * Full pagination metadata helps frontend:
+     * - Show page numbers
+     * - Enable/disable next/prev buttons
+     * - Display "Showing 1-10 of 47"
+     */
     return res.status(200).json({
       message: 'Products fetched successfully',
-      count: products.length,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+
+      count: products.length, // Items in current page
       products,
     });
   } catch (err) {
     debug('ADMIN CONTROLLER: getAllProducts - error', err.message);
+    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace for troubleshooting
 
     return res.status(500).json({
-      error: 'Failed to fetch products',
+      error: err.message || 'Failed to fetch products',
     });
   }
 }
@@ -396,24 +567,104 @@ async function restoreProduct(req, res) {
 // Add these new functions
 
 /**
- * GET /admin/orders
- * Admin-only: List all orders
+ * GET /admin/orders?page=1&limit=10
+ * Admin-only: List ALL orders with pagination
+ *
+ * Why this endpoint exists:
+ * - Full order management in admin dashboard
+ * - Admins need to see every order across all customers
+ * - Includes populated user and product details for easy viewing
  */
 async function getAllOrders(req, res) {
   debug('ADMIN CONTROLLER: getAllOrders - entry');
+  debug('Query params received:', req.query); // BETTER DEBUG: Log what client sent
 
   try {
-    const orders = await adminOrderService.getAllOrders();
+    /**
+     * -------------------------------------------------
+     * STEP 1: START PAGINATION (REUSABLE HELPER)
+     * -------------------------------------------------
+     *
+     * We use the shared pagination utility.
+     * It validates inputs, applies safe defaults,
+     * and calculates how many documents to skip.
+     *
+     * Keeps code consistent across all admin list endpoints.
+     */
+    const { page, limit, skip } = require('../utils/pagination').getPagination(req.query);
 
+    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
+
+    /**
+     * -------------------------------------------------
+     * STEP 2: FETCH DATA FROM DATABASE
+     * -------------------------------------------------
+     *
+     * We run TWO queries in parallel:
+     *
+     * 1️⃣ Get only the orders for THIS page (with population)
+     * 2️⃣ Count total number of orders
+     *
+     * Promise.all = faster performance
+     */
+    debug('Starting database queries...'); // BETTER DEBUG: Query start
+
+    const [orders, total] = await Promise.all([
+      Order.find({}) // Admin sees ALL orders
+        .populate('user', 'name email')
+        .populate('items.product', 'name imageUrl')
+        .select({ __v: 0 })
+        .sort({ createdAt: -1 }) // Newest orders first
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      Order.countDocuments({}), // Total count for pagination
+    ]);
+
+    debug('Queries completed successfully', {
+      totalOrders: total,
+      pageOrders: orders.length,
+    }); // BETTER DEBUG: Confirm results
+
+    /**
+     * -------------------------------------------------
+     * STEP 3: CALCULATE TOTAL PAGES
+     * -------------------------------------------------
+     */
+    const totalPages = Math.ceil(total / limit);
+
+    /**
+     * -------------------------------------------------
+     * STEP 4: SEND RESPONSE TO ADMIN DASHBOARD
+     * -------------------------------------------------
+     *
+     * Full pagination metadata helps frontend build:
+     * - Order list with page navigation
+     * - "Showing X-Y of Z orders"
+     * - Next/Prev button states
+     */
     return res.status(200).json({
       message: 'Orders fetched successfully',
-      count: orders.length,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+
+      count: orders.length, // Orders returned in this request
       orders,
     });
   } catch (err) {
     debug('ADMIN CONTROLLER: getAllOrders - error', err.message);
+    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace
+
     return res.status(500).json({
-      error: 'Failed to fetch orders',
+      error: err.message || 'Failed to fetch orders',
     });
   }
 }
