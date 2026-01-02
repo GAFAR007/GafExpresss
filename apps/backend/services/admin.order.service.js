@@ -13,6 +13,19 @@ const debug = require('../utils/debug');
 
 const ALLOWED_STATUSES = ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
 
+// Valid status transitions (prevent invalid jumps)
+const STATUS_TRANSITIONS = {
+  pending: ['paid', 'cancelled'],
+  paid: ['shipped', 'cancelled'],
+  shipped: ['delivered'],
+  delivered: [], // Terminal — no changes
+  cancelled: [], // Terminal — no changes
+};
+
+/**
+
+
+
 /**
  * Get all orders (admin view)
  */
@@ -41,22 +54,30 @@ async function updateOrderStatus(id, status) {
     throw new Error(`Invalid status: ${status}`);
   }
 
-  const order = await Order.findByIdAndUpdate(
-    id,
-    { status },
-    { new: true }
-  )
-    .populate('user', 'name email')
-    .populate('items.product', 'name imageUrl')
-    .select({ __v: 0 });
+  const order = await Order.findById(id);
 
   if (!order) {
     throw new Error('Order not found');
   }
 
-  return order;
-}
+  // Check valid transition
+  const currentStatus = order.status;
+  const allowedNext = STATUS_TRANSITIONS[currentStatus] || [];
+  if (!allowedNext.includes(status)) {
+    throw new Error(`Invalid transition from '${currentStatus}' to '${status}'`);
+  }
 
+  order.status = status;
+  await order.save();
+
+  // Populate and return
+  const populatedOrder = await Order.findById(id)
+    .populate('user', 'name email')
+    .populate('items.product', 'name imageUrl')
+    .select({ __v: 0 });
+
+  return populatedOrder;
+}
 module.exports = {
   getAllOrders,
   updateOrderStatus,

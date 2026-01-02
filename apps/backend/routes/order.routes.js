@@ -26,4 +26,13 @@ router.post('/', requireAuth, orderController.createOrder);
  */
 router.get('/', requireAuth, orderController.getMyOrders);
 
+/**
+ * PATCH /orders/:id/cancel
+ * Protected: Cancel a pending order (customer only)
+ * - Only allowed if order status is 'pending'
+ * - Restores stock atomically
+ * - Triggers refund placeholder logic
+ */
+router.patch('/:id/cancel', requireAuth, orderController.cancelOrder);
+
 module.exports = router;

@@ -46,8 +46,31 @@ async function getMyOrders(req, res) {
     });
   }
 }
+/**
+ * PATCH /orders/:id/cancel
+ * Customer: Cancel pending order
+ */
+async function cancelOrder(req, res) {
+  debug('ORDER CONTROLLER: cancelOrder - entry', { orderId: req.params.id });
 
+  try {
+    const order = await orderService.cancelOrder(req.params.id, req.user.sub);
+
+    return res.status(200).json({
+      message: 'Order cancelled successfully',
+      order,
+    });
+  } catch (err) {
+    debug('ORDER CONTROLLER: cancelOrder - error', err.message);
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+// Update exports
 module.exports = {
   createOrder,
   getMyOrders,
+  cancelOrder, // NEW
 };
