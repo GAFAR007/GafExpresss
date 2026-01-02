@@ -13,6 +13,7 @@
 const debug = require('../utils/debug');
 const adminService = require('../services/admin.service');
 const adminProductService = require('../services/admin.product.service');
+const adminOrderService = require('../services/admin.order.service');
 
 /**
  * GET /admin/users
@@ -390,6 +391,55 @@ async function restoreProduct(req, res) {
     });
   }
 }
+// ... (existing code)
+
+// Add these new functions
+
+/**
+ * GET /admin/orders
+ * Admin-only: List all orders
+ */
+async function getAllOrders(req, res) {
+  debug('ADMIN CONTROLLER: getAllOrders - entry');
+
+  try {
+    const orders = await adminOrderService.getAllOrders();
+
+    return res.status(200).json({
+      message: 'Orders fetched successfully',
+      count: orders.length,
+      orders,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: getAllOrders - error', err.message);
+    return res.status(500).json({
+      error: 'Failed to fetch orders',
+    });
+  }
+}
+
+/**
+ * PATCH /admin/orders/:id/status
+ * Admin-only: Update order status
+ */
+async function updateOrderStatus(req, res) {
+  debug('ADMIN CONTROLLER: updateOrderStatus - entry', { id: req.params.id, status: req.body.status });
+
+  try {
+    const order = await adminOrderService.updateOrderStatus(req.params.id, req.body.status);
+
+    return res.status(200).json({
+      message: 'Order status updated successfully',
+      order,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: updateOrderStatus - error', err.message);
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
 
 module.exports = {
   getAllUsers,
@@ -403,5 +453,7 @@ module.exports = {
   getProductById,
   updateProduct,
   softDeleteProduct,
-  restoreProduct,
+  restoreProduct,  // ... existing exports ...
+  getAllOrders,
+  updateOrderStatus,
 };

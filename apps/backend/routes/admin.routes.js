@@ -14,12 +14,13 @@ const debug = require('../utils/debug');
 const { requireAuth } = require('../middlewares/auth.middleware');
 const { requireRole } = require('../middlewares/requireRole.middleware');
 
-// ✅ Import the admin controller
+// Import the admin controller
 const adminController = require('../controllers/admin.controller');
 
 const router = express.Router();
 
 debug('Admin routes initialized');
+
 /**
  * GET /admin/health
  */
@@ -34,8 +35,15 @@ router.get(
 );
 
 /**
- * GET /admin/users/:id
+ * ADMIN USER ROUTES
  */
+router.get(
+  '/users',
+  requireAuth,
+  requireRole('admin'),
+  adminController.getAllUsers
+);
+
 router.get(
   '/users/:id',
   requireAuth,
@@ -82,6 +90,7 @@ router.delete(
   requireRole('admin'),
   adminController.softDeleteUser
 );
+
 /**
  * ADMIN PRODUCT ROUTES
  */
@@ -118,6 +127,18 @@ router.get(
   requireRole('admin'),
   adminController.getProductById
 );
+
+/**
+ * PATCH /admin/products/:id
+ * Admin-only: Update product
+ */
+router.patch(
+  '/products/:id',
+  requireAuth,
+  requireRole('admin'),
+  adminController.updateProduct
+);
+
 /**
  * PATCH /admin/products/:id/restore
  * Admin-only: Restore soft-deleted product
@@ -128,16 +149,6 @@ router.patch(
   requireAuth,
   requireRole('admin'),
   adminController.restoreProduct
-);
-/**
- * PATCH /admin/products/:id
- * Admin-only: Update product
- */
-router.patch(
-  '/products/:id',
-  requireAuth,
-  requireRole('admin'),
-  adminController.updateProduct
 );
 
 /**
@@ -151,16 +162,31 @@ router.delete(
   adminController.softDeleteProduct
 );
 
-
+/**
+ * ADMIN ORDER ROUTES
+ */
 
 /**
- * GET /admin/users
+ * GET /admin/orders
+ * Admin-only: List all orders
  */
 router.get(
-  '/users',
+  '/orders',
   requireAuth,
   requireRole('admin'),
-  adminController.getAllUsers
+  adminController.getAllOrders
+);
+
+/**
+ * PATCH /admin/orders/:id/status
+ * Admin-only: Update order status
+ * Body: { status }
+ */
+router.patch(
+  '/orders/:id/status',
+  requireAuth,
+  requireRole('admin'),
+  adminController.updateOrderStatus
 );
 
 module.exports = router;
