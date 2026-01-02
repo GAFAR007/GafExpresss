@@ -118,7 +118,17 @@ router.get(
   requireRole('admin'),
   adminController.getProductById
 );
-
+/**
+ * PATCH /admin/products/:id/restore
+ * Admin-only: Restore soft-deleted product
+ * Protected by requireAuth + requireRole('admin')
+ */
+router.patch(
+  '/products/:id/restore',
+  requireAuth,
+  requireRole('admin'),
+  adminController.restoreProduct
+);
 /**
  * PATCH /admin/products/:id
  * Admin-only: Update product

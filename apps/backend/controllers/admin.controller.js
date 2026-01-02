@@ -14,7 +14,6 @@ const debug = require('../utils/debug');
 const adminService = require('../services/admin.service');
 const adminProductService = require('../services/admin.product.service');
 
-
 /**
  * GET /admin/users
  * Returns list of all users (admin only)
@@ -41,6 +40,7 @@ async function getAllUsers(req, res) {
     });
   }
 }
+
 /**
  * GET /admin/users/:id
  * Returns single user by ID (admin only)
@@ -73,8 +73,6 @@ async function getUserById(req, res) {
     });
   }
 }
-
-// ... existing getAllUsers and getUserById ...
 
 /**
  * PATCH /admin/users/:id
@@ -119,100 +117,7 @@ async function updateUser(req, res) {
     });
   }
 }
-/**
- * Update a user's role
- * PATCH /admin/users/:id/role
- */
-async function updateUserRole(req, res) {
-  try {
-    const adminId = req.user.sub;
-    const targetUserId = req.params.id;
-    const { role } = req.body;
 
-    const updatedUser = await adminService.updateUserRole({
-      adminId,
-      targetUserId,
-      role,
-    });
-
-    res.json({
-      message: 'User role updated successfully',
-      user: updatedUser,
-    });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-}
-
-/**
- * Restore a soft-deleted user
- * PATCH /admin/users/:id/restore
- */
-async function restoreUser(req, res) {
-  try {
-    const adminId = req.user.sub;
-    const targetUserId = req.params.id;
-
-    const restoredUser = await adminService.restoreUser({
-      adminId,
-      targetUserId,
-    });
-
-    res.json({
-      message: 'User restored successfully',
-      user: restoredUser,
-    });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-}
-
-
-/**
- * DELETE /admin/users/:id
- * Soft delete user (admin only)
- */
-async function softDeleteUser(req, res) {
-  debug('ADMIN CONTROLLER: softDeleteUser - entry', { 
-    targetUserId: req.params.id,
-    adminUserId: req.user.sub 
-  });
-
-  // Prevent self-deletion
-  if (req.params.id === req.user.sub) {
-    return res.status(400).json({
-      error: 'Admins cannot delete their own account',
-    });
-  }
-
-  try {
-    const deletedUser = await adminService.softDeleteUser(
-      req.params.id,
-      req.user.sub  // admin who is deleting
-    );
-
-    if (!deletedUser) {
-      debug('ADMIN CONTROLLER: softDeleteUser - user not found');
-      return res.status(404).json({
-        error: 'User not found',
-      });
-    }
-
-    debug('ADMIN CONTROLLER: softDeleteUser - success');
-
-    return res.status(200).json({
-      message: 'User soft deleted successfully',
-      user: deletedUser,
-    });
-  } catch (err) {
-    debug('ADMIN CONTROLLER: softDeleteUser - error', err.message);
-
-    return res.status(500).json({
-      error: 'Failed to delete user',
-      details: err.message,
-    });
-  }
-}
 /**
  * PATCH /admin/users/:id/role
  * Update user role (admin only)
@@ -273,6 +178,52 @@ async function restoreUser(req, res) {
 
     return res.status(400).json({
       error: err.message,
+    });
+  }
+}
+
+/**
+ * DELETE /admin/users/:id
+ * Soft delete user (admin only)
+ */
+async function softDeleteUser(req, res) {
+  debug('ADMIN CONTROLLER: softDeleteUser - entry', { 
+    targetUserId: req.params.id,
+    adminUserId: req.user.sub 
+  });
+
+  // Prevent self-deletion
+  if (req.params.id === req.user.sub) {
+    return res.status(400).json({
+      error: 'Admins cannot delete their own account',
+    });
+  }
+
+  try {
+    const deletedUser = await adminService.softDeleteUser(
+      req.params.id,
+      req.user.sub  // admin who is deleting
+    );
+
+    if (!deletedUser) {
+      debug('ADMIN CONTROLLER: softDeleteUser - user not found');
+      return res.status(404).json({
+        error: 'User not found',
+      });
+    }
+
+    debug('ADMIN CONTROLLER: softDeleteUser - success');
+
+    return res.status(200).json({
+      message: 'User soft deleted successfully',
+      user: deletedUser,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: softDeleteUser - error', err.message);
+
+    return res.status(500).json({
+      error: 'Failed to delete user',
+      details: err.message,
     });
   }
 }
@@ -412,6 +363,33 @@ async function softDeleteProduct(req, res) {
   }
 }
 
+/**
+ * PATCH /admin/products/:id/restore
+ * Admin-only: Restore soft-deleted product
+ */
+async function restoreProduct(req, res) {
+  debug('ADMIN CONTROLLER: restoreProduct - entry', { productId: req.params.id });
+
+  try {
+    const product = await adminProductService.restoreProduct(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({
+        error: 'Product not found',
+      });
+    }
+
+    return res.status(200).json({
+      message: 'Product restored successfully',
+      product,
+    });
+  } catch (err) {
+    debug('ADMIN CONTROLLER: restoreProduct - error', err.message);
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
 
 module.exports = {
   getAllUsers,
@@ -425,4 +403,5 @@ module.exports = {
   getProductById,
   updateProduct,
   softDeleteProduct,
+  restoreProduct,
 };

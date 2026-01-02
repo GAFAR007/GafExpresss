@@ -79,6 +79,31 @@ async function updateProduct(id, updates) {
 
   return product;
 }
+/**
+ * Restore soft-deleted product (admin only)
+ */
+async function restoreProduct(id) {
+  debug('ADMIN PRODUCT SERVICE: restoreProduct', { id });
+
+  const product = await Product.findByIdAndUpdate(
+    id,
+    {
+      isActive: true,
+      deletedAt: null,
+      deletedBy: null,
+    },
+    { new: true }
+  ).select({ __v: 0 });
+
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  debug('ADMIN PRODUCT SERVICE: Product restored');
+
+  return product;
+}
+/**
 
 /**
  * Soft delete product
@@ -108,5 +133,6 @@ module.exports = {
   getAllProducts,
   getProductById,
   updateProduct,
+  restoreProduct, 
   softDeleteProduct,
 };
