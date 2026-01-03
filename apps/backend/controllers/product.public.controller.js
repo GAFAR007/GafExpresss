@@ -16,14 +16,15 @@
 
 const debug = require('../utils/debug');
 const Product = require('../models/Product');
-
 /**
- * GET /products?page=1&limit=10
+ * GET /products?page=1&limit=10&sort=price:asc
  *
  * This function runs WHEN SOMEONE CALLS:
  * - /products
  * - /products?page=2
  * - /products?page=2&limit=5
+ * - /products?sort=price:desc
+ * - /products?sort=name:asc
  */
 async function getActiveProducts(req, res) {
   debug('PUBLIC CONTROLLER: getActiveProducts - entry');
@@ -47,18 +48,29 @@ async function getActiveProducts(req, res) {
      *
      * This keeps this controller CLEAN.
      */
-
-    // Parse and validate pagination params
-    let page = parseInt(req.query.page, 10) || 1;
-    let limit = parseInt(req.query.limit, 10) || 10;
-
-    // Handle NaN or invalid values safely
-    page = isNaN(page) || page < 1 ? 1 : page;
-    limit = isNaN(limit) || limit < 1 ? 10 : Math.min(limit, 100); // Max 100 to prevent abuse
-
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = require('../utils/pagination').getPagination(req.query);
 
     debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Log calculated values
+
+    /**
+     * -------------------------------------------------
+     * STEP 1.5: APPLY SORTING (REUSABLE HELPER)
+     * -------------------------------------------------
+     *
+     * We allow safe sorting by specific fields only.
+     *
+     * Allowed: price, createdAt, name
+     * Format: ?sort=price:desc
+     * Default: newest first (createdAt: -1)
+     */
+    const allowedSortFields = ['price', 'createdAt', 'name'];
+    const sort = require('../utils/sort').getSort(
+      req.query.sort,
+      allowedSortFields,
+      { createdAt: -1 } // default: newest first
+    );
+
+    debug('Using sort:', sort); // BETTER DEBUG: Show what sort is applied
 
     /**
      * -------------------------------------------------
@@ -84,7 +96,7 @@ async function getActiveProducts(req, res) {
           deletedBy: 0,
           __v: 0,
         })
-        .sort({ createdAt: -1 })
+        .sort(sort)           // ← NEW: Dynamic sorting applied here!
         .skip(skip)
         .limit(limit)
         .lean(), // Faster for read-only (plain JS objects)
@@ -145,7 +157,7 @@ async function getActiveProducts(req, res) {
     debug('Full error stack:', err.stack); // BETTER DEBUG: Log full stack for troubleshooting
 
     return res.status(500).json({
-      error: err.message || 'Failed to fetch products', // FIX 500: Show real error message
+      error: err.message || 'Failed to fetch products',
     });
   }
 }

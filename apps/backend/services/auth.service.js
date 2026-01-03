@@ -5,7 +5,8 @@
 
 const bcrypt = require('bcryptjs');
 const debug = require('../utils/debug');
-const { User, USER_ROLES } = require('../models/User');
+const User = require('../models/User');
+const USER_ROLES = User.USER_ROLES;
 const { signToken } = require('../config/jwt');
 
 
