@@ -10,27 +10,40 @@
  * - Easy to add more admin endpoints later
  */
 
-const debug = require("../utils/debug");
-const adminService = require("../services/admin.service");
-const adminProductService = require("../services/admin.product.service");
-const adminOrderService = require("../services/admin.order.service");
-
-const Product = require("../models/Product");
-const Order = require("../models/Order");
-const User = require("../models/User");
+const debug = require('../utils/debug');
+const adminService = require('../services/admin.service');
+const adminProductService = require('../services/admin.product.service');
+const adminOrderService = require('../services/admin.order.service');
+const { getFilter } = require('../utils/filter');
+const Product = require('../models/Product');
+const Order = require('../models/Order');
+const User = require('../models/User');
 
 /**
- * GET /admin/users?page=1&limit=10
- * Admin-only: List ALL users with pagination
+ * GET /admin/users?sort=name:asc → Users A → Z
+ * Admin-only: List ALL users with pagination + filtering
  *
+ * Supported filters:
+ * ?role=customer
+ * ?isActive=false
+ * ?role=admin&isActive=true
+ *
+ * 
+ * ✅ What's Now Working
+URL	Result
+/admin/users	All users (original behavior)
+/admin/users?role=customer	Only customers
+/admin/users?isActive=false	Only inactive users
+/admin/users?role=admin&isActive=true	Active admins only
+
  * Why this endpoint exists:
  * - Full user management in admin dashboard
  * - Admins need to see every user (active, inactive, soft-deleted if added later)
  * - Never expose passwordHash to frontend
  */
 async function getAllUsers(req, res) {
-  debug("ADMIN CONTROLLER: getAllUsers - entry");
-  debug("Query params received:", req.query); // BETTER DEBUG: Log what client sent
+  debug('ADMIN CONTROLLER: getAllUsers - entry');
+  debug('Query params received:', req.query); // BETTER DEBUG: Log what client sent
 
   try {
     /**
@@ -44,12 +57,36 @@ async function getAllUsers(req, res) {
      *
      * Keeps code DRY across all admin list endpoints.
      */
-    const { page, limit, skip } =
-      require("../utils/pagination").getPagination(
-        req.query
-      );
+    const { page, limit, skip } = require('../utils/pagination').getPagination(
+      req.query
+    );
 
-    debug("Calculated pagination:", { page, limit, skip }); // BETTER DEBUG: Confirm values
+    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
+
+    /**
+     * -------------------------------------------------
+     * STEP 1.5: APPLY FILTERING (NEW - REUSABLE HELPER)
+     * -------------------------------------------------
+     *
+     * Define allowed filters for users:
+     * - role: enum (admin/staff/customer)
+     * - isActive: boolean (true/false)
+     *
+     * Examples that now work:
+     * /admin/users?role=customer
+     * /admin/users?isActive=false
+     * /admin/users?role=admin&isActive=true
+     */
+    const { getFilter } = require('../utils/filter');
+    const filter = getFilter(req.query, {
+      role: {
+        type: 'enum',
+        values: ['admin', 'staff', 'customer'],
+      },
+      isActive: { type: 'boolean' },
+    });
+
+    debug('Applied filter:', filter); // BETTER DEBUG: Show what filter was built
 
     /**
      * -------------------------------------------------
@@ -58,15 +95,15 @@ async function getAllUsers(req, res) {
      *
      * We run TWO queries in parallel:
      *
-     * 1️⃣ Get only the users for THIS page
-     * 2️⃣ Count total number of users
+     * 1️⃣ Get only the users for THIS page (with filter applied)
+     * 2️⃣ Count total number of users (with filter applied)
      *
      * Promise.all = faster performance
      */
-    debug("Starting database queries..."); // BETTER DEBUG: Query start
+    debug('Starting database queries...'); // BETTER DEBUG: Query start
 
     const [users, total] = await Promise.all([
-      User.find({}) // Admin sees ALL users
+      User.find(filter) // ✅ Filter applied here - admins see FILTERED users
         .select({
           passwordHash: 0, // NEVER send passwords
           __v: 0, // Hide internal version field
@@ -76,12 +113,13 @@ async function getAllUsers(req, res) {
         .limit(limit)
         .lean(), // Faster for read-only responses
 
-      User.countDocuments({}), // Total count for pagination
+      User.countDocuments(filter), // ✅ Total count respects filter
     ]);
 
-    debug("Queries completed successfully", {
+    debug('Queries completed successfully', {
       totalUsers: total,
       pageUsers: users.length,
+      appliedFilter: filter, // BETTER DEBUG: Show filter impact
     }); // BETTER DEBUG: Confirm results
 
     /**
@@ -90,7 +128,7 @@ async function getAllUsers(req, res) {
      * -------------------------------------------------
      *
      * Example:
-     * total = 73 users
+     * total = 73 users (after filter)
      * limit = 10
      * totalPages = 8 (because 73 / 10 = 7.3 → ceil to 8)
      */
@@ -107,7 +145,7 @@ async function getAllUsers(req, res) {
      * - Next/Prev button states
      */
     return res.status(200).json({
-      message: "Users fetched successfully",
+      message: 'Users fetched successfully',
 
       pagination: {
         page,
@@ -122,14 +160,11 @@ async function getAllUsers(req, res) {
       users,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: getAllUsers - error",
-      err.message
-    );
-    debug("Full error stack:", err.stack); // BETTER DEBUG: Full trace for troubleshooting
+    debug('ADMIN CONTROLLER: getAllUsers - error', err.message);
+    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace for troubleshooting
 
     return res.status(500).json({
-      error: err.message || "Failed to fetch users",
+      error: err.message || 'Failed to fetch users',
     });
   }
 }
@@ -139,38 +174,31 @@ async function getAllUsers(req, res) {
  * Returns single user by ID (admin only)
  */
 async function getUserById(req, res) {
-  debug("ADMIN CONTROLLER: getUserById - entry", {
+  debug('ADMIN CONTROLLER: getUserById - entry', {
     userId: req.params.id,
   });
 
   try {
-    const user = await adminService.getUserById(
-      req.params.id
-    );
+    const user = await adminService.getUserById(req.params.id);
 
     if (!user) {
-      debug(
-        "ADMIN CONTROLLER: getUserById - user not found"
-      );
+      debug('ADMIN CONTROLLER: getUserById - user not found');
       return res.status(404).json({
-        error: "User not found",
+        error: 'User not found',
       });
     }
 
-    debug("ADMIN CONTROLLER: getUserById - success");
+    debug('ADMIN CONTROLLER: getUserById - success');
 
     return res.status(200).json({
-      message: "User fetched successfully",
+      message: 'User fetched successfully',
       user,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: getUserById - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: getUserById - error', err.message);
 
     return res.status(500).json({
-      error: "Failed to fetch user",
+      error: 'Failed to fetch user',
       details: err.message,
     });
   }
@@ -181,48 +209,40 @@ async function getUserById(req, res) {
  * Update user role or isActive status (admin only)
  */
 async function updateUser(req, res) {
-  debug("ADMIN CONTROLLER: updateUser - entry", {
+  debug('ADMIN CONTROLLER: updateUser - entry', {
     userId: req.params.id,
     updates: req.body,
   });
 
   try {
-    const updatedUser = await adminService.updateUser(
-      req.params.id,
-      req.body
-    );
+    const updatedUser = await adminService.updateUser(req.params.id, req.body);
 
     if (!updatedUser) {
-      debug(
-        "ADMIN CONTROLLER: updateUser - user not found"
-      );
+      debug('ADMIN CONTROLLER: updateUser - user not found');
       return res.status(404).json({
-        error: "User not found",
+        error: 'User not found',
       });
     }
 
-    debug("ADMIN CONTROLLER: updateUser - success");
+    debug('ADMIN CONTROLLER: updateUser - success');
 
     return res.status(200).json({
-      message: "User updated successfully",
+      message: 'User updated successfully',
       user: updatedUser,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: updateUser - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: updateUser - error', err.message);
 
     // Validation errors from service
-    if (err.name === "ValidationError") {
+    if (err.name === 'ValidationError') {
       return res.status(400).json({
-        error: "Invalid update data",
+        error: 'Invalid update data',
         details: err.message,
       });
     }
 
     return res.status(500).json({
-      error: "Failed to update user",
+      error: 'Failed to update user',
       details: err.message,
     });
   }
@@ -233,7 +253,7 @@ async function updateUser(req, res) {
  * Update user role (admin only)
  */
 async function updateUserRole(req, res) {
-  debug("ADMIN CONTROLLER: updateUserRole - entry", {
+  debug('ADMIN CONTROLLER: updateUserRole - entry', {
     adminId: req.user.sub,
     targetUserId: req.params.id,
     newRole: req.body.role,
@@ -246,17 +266,14 @@ async function updateUserRole(req, res) {
       role: req.body.role,
     });
 
-    debug("ADMIN CONTROLLER: updateUserRole - success");
+    debug('ADMIN CONTROLLER: updateUserRole - success');
 
     return res.status(200).json({
-      message: "User role updated successfully",
+      message: 'User role updated successfully',
       user: updatedUser,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: updateUserRole - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: updateUserRole - error', err.message);
 
     return res.status(400).json({
       error: err.message,
@@ -269,7 +286,7 @@ async function updateUserRole(req, res) {
  * Restore soft-deleted user (admin only)
  */
 async function restoreUser(req, res) {
-  debug("ADMIN CONTROLLER: restoreUser - entry", {
+  debug('ADMIN CONTROLLER: restoreUser - entry', {
     adminId: req.user.sub,
     targetUserId: req.params.id,
   });
@@ -280,17 +297,14 @@ async function restoreUser(req, res) {
       targetUserId: req.params.id,
     });
 
-    debug("ADMIN CONTROLLER: restoreUser - success");
+    debug('ADMIN CONTROLLER: restoreUser - success');
 
     return res.status(200).json({
-      message: "User restored successfully",
+      message: 'User restored successfully',
       user: restoredUser,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: restoreUser - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: restoreUser - error', err.message);
 
     return res.status(400).json({
       error: err.message,
@@ -303,7 +317,7 @@ async function restoreUser(req, res) {
  * Soft delete user (admin only)
  */
 async function softDeleteUser(req, res) {
-  debug("ADMIN CONTROLLER: softDeleteUser - entry", {
+  debug('ADMIN CONTROLLER: softDeleteUser - entry', {
     targetUserId: req.params.id,
     adminUserId: req.user.sub,
   });
@@ -311,7 +325,7 @@ async function softDeleteUser(req, res) {
   // Prevent self-deletion
   if (req.params.id === req.user.sub) {
     return res.status(400).json({
-      error: "Admins cannot delete their own account",
+      error: 'Admins cannot delete their own account',
     });
   }
 
@@ -322,28 +336,23 @@ async function softDeleteUser(req, res) {
     );
 
     if (!deletedUser) {
-      debug(
-        "ADMIN CONTROLLER: softDeleteUser - user not found"
-      );
+      debug('ADMIN CONTROLLER: softDeleteUser - user not found');
       return res.status(404).json({
-        error: "User not found",
+        error: 'User not found',
       });
     }
 
-    debug("ADMIN CONTROLLER: softDeleteUser - success");
+    debug('ADMIN CONTROLLER: softDeleteUser - success');
 
     return res.status(200).json({
-      message: "User soft deleted successfully",
+      message: 'User soft deleted successfully',
       user: deletedUser,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: softDeleteUser - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: softDeleteUser - error', err.message);
 
     return res.status(500).json({
-      error: "Failed to delete user",
+      error: 'Failed to delete user',
       details: err.message,
     });
   }
@@ -354,26 +363,21 @@ async function softDeleteUser(req, res) {
  * Admin-only: Create new product
  */
 async function createProduct(req, res) {
-  debug("ADMIN CONTROLLER: createProduct - entry", {
+  debug('ADMIN CONTROLLER: createProduct - entry', {
     body: req.body,
   });
 
   try {
-    const product = await adminProductService.createProduct(
-      req.body
-    );
+    const product = await adminProductService.createProduct(req.body);
 
-    debug("ADMIN CONTROLLER: createProduct - success");
+    debug('ADMIN CONTROLLER: createProduct - success');
 
     return res.status(201).json({
-      message: "Product created successfully",
+      message: 'Product created successfully',
       product,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: createProduct - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: createProduct - error', err.message);
 
     return res.status(400).json({
       error: err.message,
@@ -382,85 +386,157 @@ async function createProduct(req, res) {
 }
 
 /**
- * GET /admin/products?page=1&limit=10&sort=price:desc
- * Admin-only: List ALL products (including soft-deleted) with pagination + sorting
+ * GET /admin/products?page=1&limit=10&sort=price:desc&isActive=false
  *
- * Allowed sorting fields:
+ * Admin-only: List ALL products (including soft-deleted) with pagination + sorting + filtering
+ *
+ * Why this endpoint exists:
+ * - Full product management in admin dashboard
+ * - Admins need to see every product — active, inactive, and soft-deleted
+ * - Supports powerful sorting and filtering for efficient inventory management
+ *
+ * Supported sorting:
  * - createdAt (default: newest first)
- * - price
- * - name
- * - stock
+ * - price (high → low or low → high)
+ * - name (A → Z or Z → A)
+ * - stock (high → low or low → high)
+ *
+ * Supported filtering:
+ * URL,Result
+/admin/products,"All products (active + inactive), newest first"
+/admin/products?isActive=true,Only active products
+/admin/products?isActive=false,Only inactive/soft-deleted products
+/admin/products?sort=price:desc,Most expensive first
+/admin/products?sort=stock:asc,Lowest stock first (perfect for restocking alerts)
+/admin/products?sort=name:asc&isActive=true,Active products A → Z
+
+
+
+
+ * Examples:
+ * ?sort=price:desc             → Most expensive first
+ * ?sort=name:asc               → Alphabetical A → Z
+ * ?sort=stock:asc              → Lowest stock first (great for reordering!)
+ * ?isActive=false              → Only soft-deleted/inactive products
+ * ?sort=price:desc&isActive=true → Most expensive active products first
  */
+
 async function getAllProducts(req, res) {
-  debug("ADMIN CONTROLLER: getAllProducts - entry");
-  debug("Query params received:", req.query);
+  debug('ADMIN CONTROLLER: getAllProducts - entry');
+  debug('Query params received:', req.query); // BETTER DEBUG: Full visibility into incoming request
 
   try {
-    // Pagination
-    const { page, limit, skip } =
-      require("../utils/pagination").getPagination(
-        req.query
-      );
+    /**
+     * -------------------------------------------------
+     * STEP 1: PAGINATION (REUSABLE HELPER)
+     * -------------------------------------------------
+     * Handles page, limit, skip with safe defaults and validation
+     */
+    const { page, limit, skip } = require('../utils/pagination').getPagination(
+      req.query
+    );
 
-    // Sorting - admin has more fields than public
-    const allowedSortFields = [
-      "createdAt",
-      "price",
-      "name",
-      "stock",
-    ];
-    const sort = require("../utils/sort").getSort(
+    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm pagination math
+
+    /**
+     * -------------------------------------------------
+     * STEP 1.5: FILTERING (REUSABLE HELPER)
+     * -------------------------------------------------
+     * Allow admins to filter by visibility status
+     * Useful for viewing only active products or managing deleted ones
+     */
+    const { getFilter } = require('../utils/filter');
+    const filter = getFilter(req.query, {
+      isActive: { type: 'boolean' },
+    });
+
+    debug('Applied filter:', filter); // BETTER DEBUG: Show exactly what filter was built
+
+    /**
+     * -------------------------------------------------
+     * STEP 1.6: SORTING (REUSABLE HELPER)
+     * -------------------------------------------------
+     * Admin has more sorting options than public endpoint
+     * Safe validation prevents injection attacks
+     */
+    const allowedSortFields = ['createdAt', 'price', 'name', 'stock'];
+    const sort = require('../utils/sort').getSort(
       req.query.sort,
       allowedSortFields,
       { createdAt: -1 } // default: newest first
     );
 
-    debug("Using sort:", sort);
+    debug('Using sort:', sort); // BETTER DEBUG: Confirm final sort object
 
-    debug("Starting database queries...");
+    /**
+     * -------------------------------------------------
+     * STEP 2: DATABASE QUERIES
+     * -------------------------------------------------
+     * Run in parallel for performance:
+     * 1. Fetch current page of products (with filter + sort)
+     * 2. Count total matching products (for pagination)
+     *
+     * Admin sees ALL products — no isActive filter in base query
+     * (but respects manual ?isActive filter when provided)
+     */
+    debug('Starting database queries...');
 
     const [products, total] = await Promise.all([
-      Product.find({}) // Admin sees all (active + soft-deleted)
-        .select({ __v: 0 })
-        .sort(sort)
+      Product.find(filter) // ← Filter applied here (e.g., only inactive if requested)
+        .select({ __v: 0 }) // Hide internal Mongo fields
+        .sort(sort) // ← Dynamic sorting applied
         .skip(skip)
         .limit(limit)
-        .lean(),
+        .lean(), // Faster JSON serialization
 
-      Product.countDocuments({}),
+      Product.countDocuments(filter), // ← Total count respects the same filter
     ]);
 
-    debug("Queries completed successfully", {
+    debug('Queries completed successfully', {
       totalProducts: total,
       pageProducts: products.length,
-    });
+      appliedFilter: filter,
+      appliedSort: sort,
+      pagination: { page, limit, skip },
+    }); // RICH DEBUG: Full context at a glance
 
+    /**
+     * -------------------------------------------------
+     * STEP 3: CALCULATE PAGINATION METADATA
+     * -------------------------------------------------
+     */
     const totalPages = Math.ceil(total / limit);
 
+    /**
+     * -------------------------------------------------
+     * STEP 4: SEND RESPONSE
+     * -------------------------------------------------
+     * Complete metadata enables smooth frontend experience:
+     * - Page navigation controls
+     * - "Showing X-Y of Z products"
+     * - Disable next/prev buttons correctly
+     */
     return res.status(200).json({
-      message: "Products fetched successfully",
+      message: 'Products fetched successfully',
 
       pagination: {
         page,
         limit,
-        total,
+        total, // Total matching products (after filter)
         totalPages,
         hasNext: page < totalPages,
         hasPrev: page > 1,
       },
 
-      count: products.length,
+      count: products.length, // How many returned this request
       products,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: getAllProducts - error",
-      err.message
-    );
-    debug("Full error stack:", err.stack);
+    debug('ADMIN CONTROLLER: getAllProducts - error', err.message);
+    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace for troubleshooting
 
     return res.status(500).json({
-      error: err.message || "Failed to fetch products",
+      error: err.message || 'Failed to fetch products',
     });
   }
 }
@@ -470,33 +546,27 @@ async function getAllProducts(req, res) {
  * Admin-only: View single product
  */
 async function getProductById(req, res) {
-  debug("ADMIN CONTROLLER: getProductById - entry", {
+  debug('ADMIN CONTROLLER: getProductById - entry', {
     productId: req.params.id,
   });
 
   try {
-    const product =
-      await adminProductService.getProductById(
-        req.params.id
-      );
+    const product = await adminProductService.getProductById(req.params.id);
 
     if (!product) {
       return res.status(404).json({
-        error: "Product not found",
+        error: 'Product not found',
       });
     }
 
     return res.status(200).json({
-      message: "Product fetched successfully",
+      message: 'Product fetched successfully',
       product,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: getProductById - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: getProductById - error', err.message);
     return res.status(500).json({
-      error: "Failed to fetch product",
+      error: 'Failed to fetch product',
     });
   }
 }
@@ -506,33 +576,29 @@ async function getProductById(req, res) {
  * Admin-only: Update product
  */
 async function updateProduct(req, res) {
-  debug("ADMIN CONTROLLER: updateProduct - entry", {
+  debug('ADMIN CONTROLLER: updateProduct - entry', {
     id: req.params.id,
     updates: req.body,
   });
 
   try {
-    const updatedProduct =
-      await adminProductService.updateProduct(
-        req.params.id,
-        req.body
-      );
+    const updatedProduct = await adminProductService.updateProduct(
+      req.params.id,
+      req.body
+    );
 
     if (!updatedProduct) {
       return res.status(404).json({
-        error: "Product not found",
+        error: 'Product not found',
       });
     }
 
     return res.status(200).json({
-      message: "Product updated successfully",
+      message: 'Product updated successfully',
       product: updatedProduct,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: updateProduct - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: updateProduct - error', err.message);
     return res.status(400).json({
       error: err.message,
     });
@@ -544,34 +610,30 @@ async function updateProduct(req, res) {
  * Admin-only: Soft delete product
  */
 async function softDeleteProduct(req, res) {
-  debug("ADMIN CONTROLLER: softDeleteProduct - entry", {
+  debug('ADMIN CONTROLLER: softDeleteProduct - entry', {
     productId: req.params.id,
   });
 
   try {
-    const deletedProduct =
-      await adminProductService.softDeleteProduct(
-        req.params.id,
-        req.user.sub
-      );
+    const deletedProduct = await adminProductService.softDeleteProduct(
+      req.params.id,
+      req.user.sub
+    );
 
     if (!deletedProduct) {
       return res.status(404).json({
-        error: "Product not found",
+        error: 'Product not found',
       });
     }
 
     return res.status(200).json({
-      message: "Product soft deleted successfully",
+      message: 'Product soft deleted successfully',
       product: deletedProduct,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: softDeleteProduct - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: softDeleteProduct - error', err.message);
     return res.status(500).json({
-      error: "Failed to delete product",
+      error: 'Failed to delete product',
     });
   }
 }
@@ -581,31 +643,25 @@ async function softDeleteProduct(req, res) {
  * Admin-only: Restore soft-deleted product
  */
 async function restoreProduct(req, res) {
-  debug("ADMIN CONTROLLER: restoreProduct - entry", {
+  debug('ADMIN CONTROLLER: restoreProduct - entry', {
     productId: req.params.id,
   });
 
   try {
-    const product =
-      await adminProductService.restoreProduct(
-        req.params.id
-      );
+    const product = await adminProductService.restoreProduct(req.params.id);
 
     if (!product) {
       return res.status(404).json({
-        error: "Product not found",
+        error: 'Product not found',
       });
     }
 
     return res.status(200).json({
-      message: "Product restored successfully",
+      message: 'Product restored successfully',
       product,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: restoreProduct - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: restoreProduct - error', err.message);
     return res.status(400).json({
       error: err.message,
     });
@@ -614,10 +670,9 @@ async function restoreProduct(req, res) {
 // ... (existing code)
 
 // Add these new functions
-
 /**
- * GET /admin/orders?page=1&limit=10&sort=totalPrice:desc
- * Admin-only: List ALL orders with pagination + sorting
+ * GET /admin/orders?page=1&limit=10&sort=totalPrice:desc&status=pending
+ * Admin-only: List ALL orders with pagination + sorting + filtering
  *
  * Why this endpoint exists:
  * - Full order management in admin dashboard
@@ -628,19 +683,26 @@ async function restoreProduct(req, res) {
  * - createdAt (default: newest first)
  * - totalPrice
  * - status
+ *
+ * Supports filtering by:
+ * - status=pending|paid|shipped|delivered|cancelled
+ *
+ * Examples:
+ * ?sort=totalPrice:desc → Highest value orders first
+ * ?status=pending → Only pending orders
+ * ?status=shipped&sort=createdAt:asc → Oldest shipped orders first
+ * 
+ * URL	Result
+/admin/orders	All orders, newest first
+/admin/orders?status=pending	Only pending orders
+/admin/orders?sort=totalPrice:desc	Highest value orders first
+/admin/orders?status=shipped&sort=createdAt:asc	Oldest shipped orders first
+/admin/orders?page=2&limit=20&status=delivered	Page 2 of delivered orders
  */
 
-// Safe, reusable via utils/sort.js
-// Default: newest first
-// Examples:
-// ?sort=totalPrice:desc → Highest value orders first
-// ?sort=status:asc → pending → paid → shipped → delivered
-// ?sort=createdAt:asc → Oldest first
-// Invalid → safely ignored
-
 async function getAllOrders(req, res) {
-  debug("ADMIN CONTROLLER: getAllOrders - entry");
-  debug("Query params received:", req.query); // BETTER DEBUG: Log what client sent
+  debug('ADMIN CONTROLLER: getAllOrders - entry');
+  debug('Query params received:', req.query); // BETTER DEBUG: Log what client sent
 
   try {
     /**
@@ -648,20 +710,35 @@ async function getAllOrders(req, res) {
      * STEP 1: START PAGINATION (REUSABLE HELPER)
      * -------------------------------------------------
      *
-     *
      * Keeps code consistent across all admin list endpoints.
      */
+    const { page, limit, skip } = require('../utils/pagination').getPagination(
+      req.query
+    );
 
-    const { page, limit, skip } =
-      require("../utils/pagination").getPagination(
-        req.query
-      );
-
-    debug("Calculated pagination:", { page, limit, skip }); // BETTER DEBUG: Confirm values
+    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
 
     /**
      * -------------------------------------------------
-     * STEP 1.5: APPLY SORTING (REUSABLE HELPER)
+     * STEP 1.5: APPLY FILTERING (REUSABLE HELPER)
+     * -------------------------------------------------
+     *
+     * Safely filter orders by status.
+     * Invalid values are ignored → secure and user-friendly.
+     */
+    const { getFilter } = require('../utils/filter');
+    const filter = getFilter(req.query, {
+      status: {
+        type: 'enum',
+        values: ['pending', 'paid', 'shipped', 'delivered', 'cancelled'],
+      },
+    });
+
+    debug('Applied filter:', filter); // BETTER DEBUG: Show active filter
+
+    /**
+     * -------------------------------------------------
+     * STEP 1.6: APPLY SORTING (REUSABLE HELPER)
      * -------------------------------------------------
      *
      * We allow safe sorting by specific fields only.
@@ -670,18 +747,14 @@ async function getAllOrders(req, res) {
      * Format: ?sort=totalPrice:desc
      * Default: newest first (createdAt: -1)
      */
-    const allowedSortFields = [
-      "createdAt",
-      "totalPrice",
-      "status",
-    ];
-    const sort = require("../utils/sort").getSort(
+    const allowedSortFields = ['createdAt', 'totalPrice', 'status'];
+    const sort = require('../utils/sort').getSort(
       req.query.sort,
       allowedSortFields,
       { createdAt: -1 } // default: newest first
     );
 
-    debug("Using sort:", sort); // BETTER DEBUG: Show what sort is applied
+    debug('Using sort:', sort); // BETTER DEBUG: Show what sort is applied
 
     /**
      * -------------------------------------------------
@@ -690,29 +763,31 @@ async function getAllOrders(req, res) {
      *
      * We run TWO queries in parallel:
      *
-     * 1️⃣ Get only the orders for THIS page (with population + sorting)
-     * 2️⃣ Count total number of orders
+     * 1️⃣ Get only the orders for THIS page (with filter + population + sorting)
+     * 2️⃣ Count total number of matching orders
      *
      * Promise.all = faster performance
      */
-    debug("Starting database queries..."); // BETTER DEBUG: Query start
+    debug('Starting database queries...'); // BETTER DEBUG: Query start
 
     const [orders, total] = await Promise.all([
-      Order.find({}) // Admin sees ALL orders
-        .populate("user", "name email")
-        .populate("items.product", "name imageUrl")
+      Order.find(filter) // ← Filter applied here
+        .populate('user', 'name email')
+        .populate('items.product', 'name imageUrl')
         .select({ __v: 0 })
-        .sort(sort) // ← NEW: Dynamic sorting applied here!
+        .sort(sort) // ← Dynamic sorting applied here!
         .skip(skip)
         .limit(limit)
         .lean(),
 
-      Order.countDocuments({}), // Total count for pagination
+      Order.countDocuments(filter), // ← Count respects filter
     ]);
 
-    debug("Queries completed successfully", {
+    debug('Queries completed successfully', {
       totalOrders: total,
       pageOrders: orders.length,
+      appliedFilter: filter,
+      appliedSort: sort,
     }); // BETTER DEBUG: Confirm results
 
     /**
@@ -733,7 +808,7 @@ async function getAllOrders(req, res) {
      * - Next/Prev button states
      */
     return res.status(200).json({
-      message: "Orders fetched successfully",
+      message: 'Orders fetched successfully',
 
       pagination: {
         page,
@@ -748,14 +823,11 @@ async function getAllOrders(req, res) {
       orders,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: getAllOrders - error",
-      err.message
-    );
-    debug("Full error stack:", err.stack); // BETTER DEBUG: Full trace
+    debug('ADMIN CONTROLLER: getAllOrders - error', err.message);
+    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace
 
     return res.status(500).json({
-      error: err.message || "Failed to fetch orders",
+      error: err.message || 'Failed to fetch orders',
     });
   }
 }
@@ -764,7 +836,7 @@ async function getAllOrders(req, res) {
  * Admin-only: Update order status
  */
 async function updateOrderStatus(req, res) {
-  debug("ADMIN CONTROLLER: updateOrderStatus - entry", {
+  debug('ADMIN CONTROLLER: updateOrderStatus - entry', {
     id: req.params.id,
     status: req.body.status,
   });
@@ -776,14 +848,11 @@ async function updateOrderStatus(req, res) {
     );
 
     return res.status(200).json({
-      message: "Order status updated successfully",
+      message: 'Order status updated successfully',
       order,
     });
   } catch (err) {
-    debug(
-      "ADMIN CONTROLLER: updateOrderStatus - error",
-      err.message
-    );
+    debug('ADMIN CONTROLLER: updateOrderStatus - error', err.message);
     return res.status(400).json({
       error: err.message,
     });
