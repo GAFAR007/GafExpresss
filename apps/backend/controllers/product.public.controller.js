@@ -16,145 +16,126 @@
 
 const debug = require('../utils/debug');
 const Product = require('../models/Product');
+
 /**
- * GET /products?page=1&limit=10&sort=price:asc
+ * GET /products?page=1&limit=10&sort=price:asc&q=shirt
  *
  * This function runs WHEN SOMEONE CALLS:
  * - /products
  * - /products?page=2
  * - /products?page=2&limit=5
  * - /products?sort=price:desc
- * - /products?sort=name:asc
+ * - /products?q=denim
  */
 async function getActiveProducts(req, res) {
   debug('PUBLIC CONTROLLER: getActiveProducts - entry');
-  debug('Query params received:', req.query); // BETTER DEBUG: Log incoming params
+  debug('Query params received:', req.query);
 
   try {
     /**
      * -------------------------------------------------
-     * STEP 1: START PAGINATION (IMPORTANT)
+     * STEP 1: PAGINATION (shared system-wide logic)
      * -------------------------------------------------
-     *
-     * THIS IS WHERE PAGINATION BEGINS.
-     *
-     * We pass the URL query (?page= & ?limit=)
-     * into a helper function.
-     *
-     * The helper:
-     * - fixes bad values
-     * - applies defaults
-     * - calculates `skip`
-     *
-     * This keeps this controller CLEAN.
      */
-    const { page, limit, skip } = require('../utils/pagination').getPagination(req.query);
+    const { page, limit, skip } = require('../utils/pagination').getPagination(
+      req.query
+    );
 
-    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Log calculated values
+    debug('Calculated pagination:', { page, limit, skip });
 
     /**
      * -------------------------------------------------
-     * STEP 1.5: APPLY SORTING (REUSABLE HELPER)
+     * STEP 1.5: SORTING (shared helper)
      * -------------------------------------------------
-     *
-     * We allow safe sorting by specific fields only.
-     *
-     * Allowed: price, createdAt, name
-     * Format: ?sort=price:desc
-     * Default: newest first (createdAt: -1)
      */
     const allowedSortFields = ['price', 'createdAt', 'name'];
     const sort = require('../utils/sort').getSort(
       req.query.sort,
       allowedSortFields,
-      { createdAt: -1 } // default: newest first
+      { createdAt: -1 }
     );
 
-    debug('Using sort:', sort); // BETTER DEBUG: Show what sort is applied
+    debug('Using sort:', sort);
 
     /**
      * -------------------------------------------------
-     * STEP 2: FETCH DATA FROM DATABASE
+     * STEP 1.6: FULL-TEXT SEARCH (?q=)
      * -------------------------------------------------
      *
-     * We do TWO things at the SAME TIME:
-     *
-     * 1️⃣ Fetch ONLY the products for THIS page
-     * 2️⃣ Count how many total products exist
-     *
-     * Promise.all = faster than doing them one-by-one
+     * Same pattern as ADMIN products
      */
-    debug('Starting database queries...'); // BETTER DEBUG: Log query start
+    const search = req.query.q?.trim();
 
+    /**
+     * BASE FILTER (always applied)
+     * Public users only see active products
+     */
+    const filter = {
+      isActive: true,
+    };
+
+    /**
+     * If search exists, enable MongoDB text search
+     */
+    if (search) {
+      filter.$text = { $search: search };
+    }
+
+    debug('Using search filter:', filter);
+
+    /**
+     * -------------------------------------------------
+     * STEP 2: DATABASE QUERY
+     * -------------------------------------------------
+     */
     const [products, total] = await Promise.all([
-      /**
-       * Find ONLY active products
-       */
-      Product.find({ isActive: true })
+      Product.find(filter)
         .select({
           deletedAt: 0,
           deletedBy: 0,
           __v: 0,
         })
-        .sort(sort)           // ← NEW: Dynamic sorting applied here!
+        .sort(sort)
         .skip(skip)
         .limit(limit)
-        .lean(), // Faster for read-only (plain JS objects)
+        .lean(),
 
-      /**
-       * Count ALL active products
-       * (used to calculate pagination info)
-       */
-      Product.countDocuments({ isActive: true }),
+      Product.countDocuments(filter),
     ]);
 
-    debug('Queries completed successfully', { totalProducts: total, pageProducts: products.length }); // BETTER DEBUG: Log query results
+    debug('Queries completed successfully', {
+      totalProducts: total,
+      pageProducts: products.length,
+    });
 
     /**
      * -------------------------------------------------
-     * STEP 3: CALCULATE TOTAL PAGES
+     * STEP 3: PAGINATION METADATA
      * -------------------------------------------------
-     *
-     * Example:
-     * total = 23 products
-     * limit = 5 per page
-     *
-     * totalPages = Math.ceil(23 / 5) = 5
      */
     const totalPages = Math.ceil(total / limit);
 
     /**
      * -------------------------------------------------
-     * STEP 4: SEND RESPONSE TO FRONTEND
+     * STEP 4: RESPONSE
      * -------------------------------------------------
-     *
-     * We send:
-     * - Products for THIS page
-     * - Pagination metadata
-     *
-     * The frontend uses this to:
-     * - Show next/prev buttons
-     * - Disable buttons
-     * - Build infinite scroll
      */
     return res.status(200).json({
       message: 'Products fetched successfully',
-
       pagination: {
-        page,              // current page
-        limit,             // items per page
-        total,             // total items in DB
-        totalPages,        // total pages available
+        page,
+        limit,
+        total,
+        totalPages,
         hasNext: page < totalPages,
         hasPrev: page > 1,
       },
-
-      count: products.length, // items returned THIS request
+      count: products.length,
       products,
     });
   } catch (err) {
     debug('PUBLIC CONTROLLER: getActiveProducts - error', err.message);
-    debug('Full error stack:', err.stack); // BETTER DEBUG: Log full stack for troubleshooting
+    debug('Full error stack:', err.stack);
 
     return res.status(500).json({
       error: err.message || 'Failed to fetch products',

@@ -19,7 +19,6 @@ const router = express.Router();
  *   - name: Products
  *     description: Public product browsing and listing
  */
-
 /**
  * @swagger
  * /products:
@@ -28,7 +27,7 @@ const router = express.Router();
  *     description: >
  *       Public endpoint — no authentication required.
  *       Returns only active (isActive: true) products.
- *       Supports pagination and sorting.
+ *       Supports pagination, sorting, and full-text search.
  *     tags: [Products]
  *     parameters:
  *       - in: query
@@ -57,82 +56,18 @@ const router = express.Router();
  *           Sort format: `field:direction`
  *           Allowed fields: `price`, `name`, `createdAt`
  *           Direction: `asc` or `desc`
- *           Examples: `price:desc`, `name:asc`, `createdAt:desc`
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *           example: hoodie
+ *         description: >
+ *           Full-text search across product name and description
  *     responses:
  *       200:
  *         description: Products fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: Products fetched successfully
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     page:
- *                       type: integer
- *                       example: 1
- *                     limit:
- *                       type: integer
- *                       example: 10
- *                     total:
- *                       type: integer
- *                       example: 47
- *                     totalPages:
- *                       type: integer
- *                       example: 5
- *                     hasNext:
- *                       type: boolean
- *                       example: true
- *                     hasPrev:
- *                       type: boolean
- *                       example: false
- *                 count:
- *                   type: integer
- *                   description: Number of products returned in this response
- *                   example: 10
- *                 products:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       _id:
- *                         type: string
- *                         example: 64f8a123b456c7890d123456
- *                       name:
- *                         type: string
- *                         example: Premium Hoodie
- *                       description:
- *                         type: string
- *                         example: Comfortable cotton hoodie
- *                       price:
- *                         type: number
- *                         example: 4999
- *                       stock:
- *                         type: integer
- *                         example: 25
- *                       imageUrl:
- *                         type: string
- *                         example: https://example.com/hoodie.jpg
- *                       isActive:
- *                         type: boolean
- *                         example: true
- *                       createdAt:
- *                         type: string
- *                         format: date-time
  *       500:
  *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   example: Failed to fetch products
  */
 
 router.get('/', productPublicController.getActiveProducts);

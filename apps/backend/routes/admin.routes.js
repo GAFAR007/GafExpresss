@@ -284,6 +284,36 @@ router.post(
  * GET /admin/products
  * Admin-only: List all products (including soft-deleted for management)
  */
+/**
+ * @swagger
+ * /admin/products:
+ *   get:
+ *     summary: Get all products (admin)
+ *     tags: [Admin Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: isActive
+ *         schema:
+ *           type: boolean
+ *         description: Filter active or inactive products
+ *
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *           example: hoodie
+ *         description: Full-text search across product name and description
+ *
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           example: price:desc
+ *         description: Sort results (price, stock, name, createdAt)
+ */
+
 router.get(
   '/products',
   requireAuth,

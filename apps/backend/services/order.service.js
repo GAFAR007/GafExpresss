@@ -87,20 +87,95 @@ async function createOrder(userId, items) {
 }
 
 /**
- * Get orders for a specific user
- * @param {string} userId
- * @returns {Array} list of orders
+/**
+ * Get orders for a specific user (paginated + searchable)
+ *
+ * @param {string} userId - Authenticated user's ID
+ * @param {object} query - URL query params (?page, ?limit, ?q)
+ *
+ * WHY:
+ * - Prevents returning ALL orders at once
+ * - Enables search and pagination
+ * - Matches product & admin patterns
  */
-async function getUserOrders(userId) {
-  debug('ORDER SERVICE: getUserOrders', { userId });
+async function getUserOrders(userId, query) {
+  debug('ORDER SERVICE: getUserOrders - entry', { userId, query });
 
-  const orders = await Order.find({ user: userId })
-    .populate('items.product', 'name imageUrl')
-    .select({ deletedAt: 0, deletedBy: 0, __v: 0 })
-    .sort({ createdAt: -1 });
+  /**
+   * ------------------------------------
+   * STEP 1: PAGINATION
+   * ------------------------------------
+   */
+  const { page, limit, skip } = getPagination(query);
 
-  return orders;
+  /**
+   * ------------------------------------
+   * STEP 2: SEARCH (?q=)
+   * ------------------------------------
+   *
+   * Allows searching orders by:
+   * - status (pending, cancelled, etc)
+   * - reference (if added later)
+   */
+  const search = query.q?.trim();
+
+  /**
+   * ------------------------------------
+   * STEP 3: BASE FILTER
+   * ------------------------------------
+   * VERY IMPORTANT:
+   * - User can ONLY see their own orders
+   */
+  const filter = {
+    user: userId,
+  };
+
+  /**
+   * Apply full-text search if provided
+   */
+  if (search) {
+    filter.$text = { $search: search };
+  }
+
+  debug('ORDER SERVICE: filter built', filter);
+
+  /**
+   * ------------------------------------
+   * STEP 4: QUERY DATABASE
+   * ------------------------------------
+   */
+  const [orders, total] = await Promise.all([
+    Order.find(filter)
+      .populate('items.product', 'name imageUrl')
+      .select({ deletedAt: 0, deletedBy: 0, __v: 0 })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+
+    Order.countDocuments(filter),
+  ]);
+
+  debug('ORDER SERVICE: orders fetched', {
+    total,
+    returned: orders.length,
+    page,
+    limit,
+  });
+
+  /**
+   * ------------------------------------
+   * STEP 5: RETURN STRUCTURED RESULT
+   * ------------------------------------
+   */
+  return {
+    orders,
+    total,
+    page,
+    limit,
+  };
 }
+
 /**
  * Cancel a pending order (customer only)
  * - Only allowed if status is 'pending'

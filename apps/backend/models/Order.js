@@ -80,5 +80,9 @@ orderSchema.index({ status: 1 });
 orderSchema.index({ createdAt: -1 });
 
 const Order = mongoose.model('Order', orderSchema);
-
+// ✅ FULL-TEXT SEARCH INDEX
+// Enables ?q= search on order status
+orderSchema.index({
+  status: 'text',
+});
 module.exports = Order;

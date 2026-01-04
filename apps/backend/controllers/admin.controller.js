@@ -41,127 +41,52 @@ URL	Result
  * - Admins need to see every user (active, inactive, soft-deleted if added later)
  * - Never expose passwordHash to frontend
  */
+/**
+ * GET /admin/users
+ * Admin-only: list users with pagination, filtering, and search
+ *
+ * Supported query params:
+ * - page
+ * - limit
+ * - role
+ * - isActive
+ * - q (search by email or role)
+ */
 async function getAllUsers(req, res) {
   debug('ADMIN CONTROLLER: getAllUsers - entry');
-  debug('Query params received:', req.query); // BETTER DEBUG: Log what client sent
+  debug('Query params received:', req.query);
 
   try {
     /**
-     * -------------------------------------------------
-     * STEP 1: START PAGINATION (REUSABLE HELPER)
-     * -------------------------------------------------
+     * Controller stays THIN:
+     * - No pagination logic
+     * - No filters
+     * - No DB queries
      *
-     * We use the shared pagination utility.
-     * It validates inputs, applies safe defaults,
-     * and calculates how many documents to skip.
-     *
-     * Keeps code DRY across all admin list endpoints.
+     * All business logic lives in the SERVICE
      */
-    const { page, limit, skip } = require('../utils/pagination').getPagination(
-      req.query
-    );
+    const result = await adminService.getAllUsers(req.query);
 
-    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
+    const totalPages = Math.ceil(result.total / result.limit);
 
-    /**
-     * -------------------------------------------------
-     * STEP 1.5: APPLY FILTERING (NEW - REUSABLE HELPER)
-     * -------------------------------------------------
-     *
-     * Define allowed filters for users:
-     * - role: enum (admin/staff/customer)
-     * - isActive: boolean (true/false)
-     *
-     * Examples that now work:
-     * /admin/users?role=customer
-     * /admin/users?isActive=false
-     * /admin/users?role=admin&isActive=true
-     */
-    const { getFilter } = require('../utils/filter');
-    const filter = getFilter(req.query, {
-      role: {
-        type: 'enum',
-        values: ['admin', 'staff', 'customer'],
-      },
-      isActive: { type: 'boolean' },
-    });
-
-    debug('Applied filter:', filter); // BETTER DEBUG: Show what filter was built
-
-    /**
-     * -------------------------------------------------
-     * STEP 2: FETCH DATA FROM DATABASE
-     * -------------------------------------------------
-     *
-     * We run TWO queries in parallel:
-     *
-     * 1️⃣ Get only the users for THIS page (with filter applied)
-     * 2️⃣ Count total number of users (with filter applied)
-     *
-     * Promise.all = faster performance
-     */
-    debug('Starting database queries...'); // BETTER DEBUG: Query start
-
-    const [users, total] = await Promise.all([
-      User.find(filter) // ✅ Filter applied here - admins see FILTERED users
-        .select({
-          passwordHash: 0, // NEVER send passwords
-          __v: 0, // Hide internal version field
-        })
-        .sort({ createdAt: -1 }) // Newest users first
-        .skip(skip)
-        .limit(limit)
-        .lean(), // Faster for read-only responses
-
-      User.countDocuments(filter), // ✅ Total count respects filter
-    ]);
-
-    debug('Queries completed successfully', {
-      totalUsers: total,
-      pageUsers: users.length,
-      appliedFilter: filter, // BETTER DEBUG: Show filter impact
-    }); // BETTER DEBUG: Confirm results
-
-    /**
-     * -------------------------------------------------
-     * STEP 3: CALCULATE TOTAL PAGES
-     * -------------------------------------------------
-     *
-     * Example:
-     * total = 73 users (after filter)
-     * limit = 10
-     * totalPages = 8 (because 73 / 10 = 7.3 → ceil to 8)
-     */
-    const totalPages = Math.ceil(total / limit);
-
-    /**
-     * -------------------------------------------------
-     * STEP 4: SEND RESPONSE TO ADMIN DASHBOARD
-     * -------------------------------------------------
-     *
-     * Full pagination metadata helps frontend build:
-     * - Page navigation
-     * - "Showing X-Y of Z users"
-     * - Next/Prev button states
-     */
     return res.status(200).json({
       message: 'Users fetched successfully',
 
       pagination: {
-        page,
-        limit,
-        total,
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
         totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1,
+        hasNext: result.page < totalPages,
+        hasPrev: result.page > 1,
       },
 
-      count: users.length, // Users returned in this request
-      users,
+      count: result.users.length,
+      users: result.users,
     });
   } catch (err) {
     debug('ADMIN CONTROLLER: getAllUsers - error', err.message);
-    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace for troubleshooting
+    debug('Full error stack:', err.stack);
 
     return res.status(500).json({
       error: err.message || 'Failed to fetch users',

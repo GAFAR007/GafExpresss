@@ -27,14 +27,56 @@ async function createProduct(data) {
 /**
  * Get all products (admin view — includes soft-deleted)
  */
-async function getAllProducts() {
-  debug('ADMIN PRODUCT SERVICE: getAllProducts');
+/**
+ * Get all products for admin
+ * Supports:
+ * - isActive filter
+ * - full-text search (?q=)
+ * - sorting
+ * - pagination
+ */
+async function getAllProducts(query) {
+  const { page, limit, skip } = getPagination(query);
 
-  const products = await Product.find({})
-    .select({ __v: 0 })
-    .sort({ createdAt: -1 });
+  // ------------------------------------
+  // BASE FILTER (always applied)
+  // ------------------------------------
+  const filter = {};
 
-  return products;
+  // Filter by active/inactive if provided
+  if (query.isActive === 'true') filter.isActive = true;
+  if (query.isActive === 'false') filter.isActive = false;
+
+  // ------------------------------------
+  // FULL-TEXT SEARCH (?q=)
+  // ------------------------------------
+  const search = query.q?.trim();
+  if (search) {
+    filter.$text = { $search: search };
+  }
+
+  // ------------------------------------
+  // SORTING
+  // ------------------------------------
+  const sort = getSort(query.sort, ['price', 'stock', 'name', 'createdAt'], {
+    createdAt: -1,
+  });
+
+  // ------------------------------------
+  // QUERY DATABASE
+  // ------------------------------------
+  const [products, total] = await Promise.all([
+    Product.find(filter).sort(sort).skip(skip).limit(limit).lean(),
+
+    Product.countDocuments(filter),
+  ]);
+
+  return {
+    products,
+    total,
+    page,
+    limit,
+  };
 }
 
 /**
@@ -54,7 +96,14 @@ async function getProductById(id) {
 async function updateProduct(id, updates) {
   debug('ADMIN PRODUCT SERVICE: updateProduct', { id, updates });
 
-  const allowedFields = ['name', 'description', 'price', 'stock', 'imageUrl', 'isActive'];
+  const allowedFields = [
+    'name',
+    'description',
+    'price',
+    'stock',
+    'imageUrl',
+    'isActive',
+  ];
   const filteredUpdates = {};
 
   for (const field of allowedFields) {
@@ -67,11 +116,10 @@ async function updateProduct(id, updates) {
     throw new Error('No valid fields provided for update');
   }
 
-  const product = await Product.findByIdAndUpdate(
-    id,
-    filteredUpdates,
-    { new: true, runValidators: true }
-  ).select({ __v: 0 });
+  const product = await Product.findByIdAndUpdate(id, filteredUpdates, {
+    new: true,
+    runValidators: true,
+  }).select({ __v: 0 });
 
   if (!product) {
     throw new Error('Product not found');
@@ -133,6 +181,6 @@ module.exports = {
   getAllProducts,
   getProductById,
   updateProduct,
-  restoreProduct, 
+  restoreProduct,
   softDeleteProduct,
 };
