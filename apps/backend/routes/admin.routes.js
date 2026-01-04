@@ -24,22 +24,62 @@ debug('Admin routes initialized');
 /**
  * GET /admin/health
  */
-router.get(
-  '/health',
-  requireAuth,
-  requireRole('admin'),
-  (req, res) => {
-    debug('Admin health route accessed by user:', req.user.sub);
-    res.json({ status: 'ok', message: 'Admin access confirmed', admin: req.user });
-  }
-);
+router.get('/health', requireAuth, requireRole('admin'), (req, res) => {
+  debug('Admin health route accessed by user:', req.user.sub);
+  res.json({
+    status: 'ok',
+    message: 'Admin access confirmed',
+    admin: req.user,
+  });
+});
 
 /**
  * ADMIN USER ROUTES
  */
+/**
+ * @swagger
+ * tags:
+ *   name: Admin - Users
+ *   description: Admin user management
+ */
 
-
-
+/**
+ * @swagger
+ * /admin/users:
+ *   get:
+ *     summary: Get all users (admin)
+ *     tags: [Admin - Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: role
+ *         schema:
+ *           type: string
+ *           example: customer
+ *         description: Filter users by role
+ *       - in: query
+ *         name: isActive
+ *         schema:
+ *           type: boolean
+ *           example: true
+ *         description: Filter by active/inactive users
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           example: 10
+ *     responses:
+ *       200:
+ *         description: Users fetched successfully
+ *       403:
+ *         description: Admin only
+ */
 
 router.get(
   '/users',
@@ -58,6 +98,39 @@ router.get(
 /**
  * PATCH /admin/users/:id/role  ← SPECIFIC — MUST COME FIRST
  */
+/**
+ * @swagger
+ * /admin/users/{id}/role:
+ *   patch:
+ *     summary: Update user role (admin)
+ *     tags: [Admin - Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [role]
+ *             properties:
+ *               role:
+ *                 type: string
+ *                 example: staff
+ *     responses:
+ *       200:
+ *         description: User role updated
+ *       403:
+ *         description: Admin only
+ *       404:
+ *         description: User not found
+ */
 router.patch(
   '/users/:id/role',
   requireAuth,
@@ -67,6 +140,28 @@ router.patch(
 
 /**
  * PATCH /admin/users/:id/restore  ← SPECIFIC — MUST COME FIRST
+ */
+/**
+ * @swagger
+ * /admin/users/{id}/restore:
+ *   patch:
+ *     summary: Restore a soft-deleted user (admin)
+ *     tags: [Admin - Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User restored successfully
+ *       403:
+ *         description: Admin only
+ *       404:
+ *         description: User not found
  */
 router.patch(
   '/users/:id/restore',
@@ -88,6 +183,28 @@ router.patch(
 /**
  * DELETE /admin/users/:id
  */
+/**
+ * @swagger
+ * /admin/users/{id}:
+ *   delete:
+ *     summary: Soft-delete a user (admin)
+ *     tags: [Admin - Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *       403:
+ *         description: Admin only
+ *       404:
+ *         description: User not found
+ */
 router.delete(
   '/users/:id',
   requireAuth,
@@ -99,13 +216,62 @@ router.delete(
  * ADMIN PRODUCT ROUTES
  */
 
-
-
-
-
 /**
  * POST /admin/products
  * Admin-only: Create new product
+ */
+/**
+ * @swagger
+ * tags:
+ *   name: Admin - Products
+ *   description: Admin product management
+ */
+
+/**
+ * @swagger
+ * /admin/products:
+ *   get:
+ *     summary: Get all products (admin)
+ *     tags: [Admin - Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *         description: Page number (pagination)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           example: 10
+ *         description: Number of products per page
+ *       - in: query
+ *         name: isActive
+ *         schema:
+ *           type: boolean
+ *           example: true
+ *         description: Filter by active/inactive products
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           example: price:desc
+ *         description: |
+ *           Sorting format: field:direction
+ *           Examples:
+ *           - price:desc
+ *           - stock:asc
+ *           - name:asc
+ *     responses:
+ *       200:
+ *         description: Products fetched successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (admin only)
  */
 router.post(
   '/products',
@@ -174,13 +340,47 @@ router.delete(
  * ADMIN ORDER ROUTES
  */
 
-
-
-
-
 /**
  * GET /admin/orders
  * Admin-only: List all orders
+ */
+/**
+ * @swagger
+ * tags:
+ *   name: Admin - Orders
+ *   description: Admin order management
+ */
+
+/**
+ * @swagger
+ * /admin/orders:
+ *   get:
+ *     summary: Get all orders (admin)
+ *     tags: [Admin - Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           example: pending
+ *         description: Filter orders by status
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           example: 10
+ *     responses:
+ *       200:
+ *         description: Orders fetched successfully
+ *       403:
+ *         description: Admin only
  */
 router.get(
   '/orders',
@@ -193,6 +393,37 @@ router.get(
  * PATCH /admin/orders/:id/status
  * Admin-only: Update order status
  * Body: { status }
+ */
+/**
+ * @swagger
+ * /admin/orders/{id}/status:
+ *   patch:
+ *     summary: Update order status (admin)
+ *     tags: [Admin - Orders]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 example: shipped
+ *     responses:
+ *       200:
+ *         description: Order status updated
+ *       403:
+ *         description: Admin only
  */
 router.patch(
   '/orders/:id/status',

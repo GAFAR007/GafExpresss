@@ -29,6 +29,8 @@ const cors = require('cors');
 const debug = require('./utils/debug');
 const connectDB = require('./config/db');
 const registerRoutes = require('./routes');
+const swaggerUi = require('swagger-ui-express');
+const swaggerSpec = require('./config/swagger');
 
 /**
  * --------------------------------------------------
@@ -47,6 +49,16 @@ debug('Registering global middleware');
 app.use(cors());
 app.use(express.json());
 
+/**
+ * --------------------------------------------------
+ * SWAGGER DOCS SETUP
+ * --------------------------------------------------
+ * Mount Swagger UI at /docs
+ * - Interactive API documentation
+ * - Available at http://localhost:4000/docs
+ */
+debug('Setting up Swagger docs at /docs');
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * --------------------------------------------------
@@ -68,9 +80,6 @@ connectDB();
  */
 debug('Registering routes');
 registerRoutes(app);
-
-
-
 
 /**
  * --------------------------------------------------

@@ -16,7 +16,7 @@ const express = require('express');
 const debug = require('../utils/debug');
 const authController = require('../controllers/auth.controller');
 // ✅ Import the authentication middleware
-const { requireAuth ,   } = require('../middlewares/auth.middleware');
+const { requireAuth } = require('../middlewares/auth.middleware');
 const { requireRole } = require('../middlewares/requireRole.middleware');
 const router = express.Router();
 
@@ -26,11 +26,81 @@ debug('Auth routes initialized');
  * Register a new user
  * POST /auth/register
  */
+
+/**
+ * @swagger
+ * tags:
+ *   name: Auth
+ *   description: Authentication & user identity
+ */
+
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     summary: Register a new user
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: John Doe
+ *               email:
+ *                 type: string
+ *                 example: user@test.com
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *               role:
+ *                 type: string
+ *                 example: customer
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *       400:
+ *         description: Validation error
+ *       409:
+ *         description: Email already exists
+ */
+
 router.post('/register', authController.register);
 
 /**
  * Login existing user
  * POST /auth/login
+ */
+
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     summary: Login a user
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: user@test.com
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *       401:
+ *         description: Invalid credentials
  */
 router.post('/login', authController.login);
 
@@ -39,33 +109,56 @@ router.post('/login', authController.login);
  * GET /auth/me
  * Protected route - requires valid JWT
  */
+
 /**
- * Admin-only test route
- * GET /auth/admin-test
+ * @swagger
+ * /auth/me:
+ *   get:
+ *     summary: Get current authenticated user
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Authenticated user info
+ *       401:
+ *         description: Unauthorized
  */
-router.get(
-  '/admin-test',
-  requireAuth,
-  requireRole('admin'),
-  (req, res) => {
-    debug('Admin route accessed by:', req.user.sub);
-
-    res.json({
-      message: 'Admin access granted',
-      user: req.user,
-    });
-  }
-);
-
-
 router.get('/me', requireAuth, (req, res) => {
   debug('Protected /me route accessed for user:', req.user.sub);
 
   res.json({
     message: 'Protected route accessed',
-    user: req.user, // Will contain { sub: userId, role, iat, exp }
+    user: req.user,
   });
 });
 
+/**
+ * Admin-only test route
+ * GET /auth/admin-test
+ */
+
+/**
+ * @swagger
+ * /auth/admin-test:
+ *   get:
+ *     summary: Admin-only access test
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Admin access granted
+ *       403:
+ *         description: Forbidden (not admin)
+ */
+router.get('/admin-test', requireAuth, requireRole('admin'), (req, res) => {
+  debug('Admin route accessed by:', req.user.sub);
+
+  res.json({
+    message: 'Admin access granted',
+    user: req.user,
+  });
+});
 
 module.exports = router;
