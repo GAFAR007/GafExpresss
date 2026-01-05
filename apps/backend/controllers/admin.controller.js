@@ -626,158 +626,70 @@ async function restoreProduct(req, res) {
  */
 
 async function getAllOrders(req, res) {
-  debug('ADMIN CONTROLLER: getAllOrders - entry');
-  debug('Query params received:', req.query); // BETTER DEBUG: Log what client sent
-
   try {
-    /**
-     * -------------------------------------------------
-     * STEP 1: START PAGINATION (REUSABLE HELPER)
-     * -------------------------------------------------
-     *
-     * Keeps code consistent across all admin list endpoints.
-     */
-    const { page, limit, skip } = require('../utils/pagination').getPagination(
-      req.query
-    );
+    const result = await adminOrderService.getAllOrders(req.query);
 
-    debug('Calculated pagination:', { page, limit, skip }); // BETTER DEBUG: Confirm values
+    const totalPages = Math.ceil(result.total / result.limit);
 
-    /**
-     * -------------------------------------------------
-     * STEP 1.5: APPLY FILTERING (REUSABLE HELPER)
-     * -------------------------------------------------
-     *
-     * Safely filter orders by status.
-     * Invalid values are ignored → secure and user-friendly.
-     */
-    const { getFilter } = require('../utils/filter');
-    const filter = getFilter(req.query, {
-      status: {
-        type: 'enum',
-        values: ['pending', 'paid', 'shipped', 'delivered', 'cancelled'],
-      },
-    });
-
-    debug('Applied filter:', filter); // BETTER DEBUG: Show active filter
-
-    /**
-     * -------------------------------------------------
-     * STEP 1.6: APPLY SORTING (REUSABLE HELPER)
-     * -------------------------------------------------
-     *
-     * We allow safe sorting by specific fields only.
-     *
-     * Allowed: createdAt, totalPrice, status
-     * Format: ?sort=totalPrice:desc
-     * Default: newest first (createdAt: -1)
-     */
-    const allowedSortFields = ['createdAt', 'totalPrice', 'status'];
-    const sort = require('../utils/sort').getSort(
-      req.query.sort,
-      allowedSortFields,
-      { createdAt: -1 } // default: newest first
-    );
-
-    debug('Using sort:', sort); // BETTER DEBUG: Show what sort is applied
-
-    /**
-     * -------------------------------------------------
-     * STEP 2: FETCH DATA FROM DATABASE
-     * -------------------------------------------------
-     *
-     * We run TWO queries in parallel:
-     *
-     * 1️⃣ Get only the orders for THIS page (with filter + population + sorting)
-     * 2️⃣ Count total number of matching orders
-     *
-     * Promise.all = faster performance
-     */
-    debug('Starting database queries...'); // BETTER DEBUG: Query start
-
-    const [orders, total] = await Promise.all([
-      Order.find(filter) // ← Filter applied here
-        .populate('user', 'name email')
-        .populate('items.product', 'name imageUrl')
-        .select({ __v: 0 })
-        .sort(sort) // ← Dynamic sorting applied here!
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-
-      Order.countDocuments(filter), // ← Count respects filter
-    ]);
-
-    debug('Queries completed successfully', {
-      totalOrders: total,
-      pageOrders: orders.length,
-      appliedFilter: filter,
-      appliedSort: sort,
-    }); // BETTER DEBUG: Confirm results
-
-    /**
-     * -------------------------------------------------
-     * STEP 3: CALCULATE TOTAL PAGES
-     * -------------------------------------------------
-     */
-    const totalPages = Math.ceil(total / limit);
-
-    /**
-     * -------------------------------------------------
-     * STEP 4: SEND RESPONSE TO ADMIN DASHBOARD
-     * -------------------------------------------------
-     *
-     * Full pagination metadata helps frontend build:
-     * - Order list with page navigation
-     * - "Showing X-Y of Z orders"
-     * - Next/Prev button states
-     */
     return res.status(200).json({
       message: 'Orders fetched successfully',
-
       pagination: {
-        page,
-        limit,
-        total,
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
         totalPages,
-        hasNext: page < totalPages,
-        hasPrev: page > 1,
+        hasNext: result.page < totalPages,
+        hasPrev: result.page > 1,
       },
-
-      count: orders.length, // Orders returned in this request
-      orders,
+      count: result.orders.length,
+      orders: result.orders,
     });
   } catch (err) {
-    debug('ADMIN CONTROLLER: getAllOrders - error', err.message);
-    debug('Full error stack:', err.stack); // BETTER DEBUG: Full trace
-
     return res.status(500).json({
       error: err.message || 'Failed to fetch orders',
     });
   }
 }
+
 /**
  * PATCH /admin/orders/:id/status
  * Admin-only: Update order status
  */
+
+/**
+ * PATCH /admin/orders/:id/status
+ *
+ * Admin updates order status
+ */
+/**
+ * PATCH /admin/orders/:id/status
+ *
+ * Admin updates order status
+ */
 async function updateOrderStatus(req, res) {
-  debug('ADMIN CONTROLLER: updateOrderStatus - entry', {
-    id: req.params.id,
-    status: req.body.status,
-  });
+  debug('ADMIN ORDER CONTROLLER: updateOrderStatus - entry');
 
   try {
-    const order = await adminOrderService.updateOrderStatus(
-      req.params.id,
-      req.body.status
-    );
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        error: 'Status is required',
+      });
+    }
+
+    // FIXED: Use positional arguments (id, status) instead of object.
+    // Removed unused adminId.
+    const updatedOrder = await adminOrderService.updateOrderStatus(id, status);
 
     return res.status(200).json({
       message: 'Order status updated successfully',
-      order,
+      order: updatedOrder,
     });
   } catch (err) {
-    debug('ADMIN CONTROLLER: updateOrderStatus - error', err.message);
+    debug('ADMIN ORDER CONTROLLER: updateOrderStatus - error', err.message);
+
     return res.status(400).json({
       error: err.message,
     });

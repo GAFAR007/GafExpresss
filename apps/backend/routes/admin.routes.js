@@ -36,12 +36,6 @@ router.get('/health', requireAuth, requireRole('admin'), (req, res) => {
 /**
  * ADMIN USER ROUTES
  */
-/**
- * @swagger
- * tags:
- *   name: Admin - Users
- *   description: Admin user management
- */
 
 /**
  * @swagger
@@ -425,17 +419,19 @@ router.get(
  * Body: { status }
  */
 /**
+/**
  * @swagger
  * /admin/orders/{id}/status:
  *   patch:
- *     summary: Update order status (admin)
- *     tags: [Admin - Orders]
+ *     summary: Update order status (admin only)
+ *     tags: [Admin Orders]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
+ *         description: Order ID
  *         schema:
  *           type: string
  *     requestBody:
@@ -451,10 +447,17 @@ router.get(
  *                 example: shipped
  *     responses:
  *       200:
- *         description: Order status updated
+ *         description: Order status updated successfully
+ *       400:
+ *         description: Invalid status or transition
+ *       401:
+ *         description: Unauthorized
  *       403:
- *         description: Admin only
+ *         description: Forbidden
+ *       404:
+ *         description: Order not found
  */
+
 router.patch(
   '/orders/:id/status',
   requireAuth,
