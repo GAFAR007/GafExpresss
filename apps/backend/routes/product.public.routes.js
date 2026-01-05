@@ -15,12 +15,6 @@ const router = express.Router();
 
 /**
  * @swagger
- * tags:
- *   - name: Products
- *     description: Public product browsing and listing
- */
-/**
- * @swagger
  * /products:
  *   get:
  *     summary: Retrieve a paginated list of active products
@@ -37,7 +31,6 @@ const router = express.Router();
  *           minimum: 1
  *           default: 1
  *         description: Page number for pagination
- *         example: 1
  *       - in: query
  *         name: limit
  *         schema:
@@ -46,26 +39,25 @@ const router = express.Router();
  *           maximum: 100
  *           default: 10
  *         description: Number of products per page (max 100)
- *         example: 10
  *       - in: query
  *         name: sort
  *         schema:
  *           type: string
  *           example: price:desc
- *         description: >
- *           Sort format: `field:direction`
- *           Allowed fields: `price`, `name`, `createdAt`
- *           Direction: `asc` or `desc`
+ *         description: Sort format `field:direction`
  *       - in: query
  *         name: q
  *         schema:
  *           type: string
  *           example: hoodie
- *         description: >
- *           Full-text search across product name and description
+ *         description: Full-text search across product name and description
  *     responses:
  *       200:
  *         description: Products fetched successfully
+ *       400:
+ *         description: Invalid query parameters
+ *       404:
+ *         description: No products found
  *       500:
  *         description: Internal server error
  */
