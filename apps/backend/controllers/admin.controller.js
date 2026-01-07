@@ -14,10 +14,8 @@ const debug = require('../utils/debug');
 const adminService = require('../services/admin.service');
 const adminProductService = require('../services/admin.product.service');
 const adminOrderService = require('../services/admin.order.service');
-const { getFilter } = require('../utils/filter');
 const Product = require('../models/Product');
-const Order = require('../models/Order');
-const User = require('../models/User');
+
 
 /**
  * GET /admin/users?sort=name:asc → Users A → Z

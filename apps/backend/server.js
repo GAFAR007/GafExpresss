@@ -40,6 +40,9 @@ const swaggerSpec = require('./config/swagger');
 debug('Creating Express app instance');
 const app = express();
 
+
+// BEFORE express.json() important — raw body for webhooks
+app.use('/webhooks', require('./routes/webhooks.routes'));
 /**
  * --------------------------------------------------
  * GLOBAL MIDDLEWARE
