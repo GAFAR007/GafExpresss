@@ -19,11 +19,15 @@
 /// - Works on Web, Android, iOS (no dart:io used here).
 /// ---------------------------------------------------------------------------
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/network/dio_client.dart';
 import 'package:frontend/app/features/auth/data/auth_api.dart';
+import 'package:frontend/app/features/auth/data/auth_session_storage.dart';
+import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
 
 /// Provides ONE Dio instance for the app.
 ///
@@ -49,3 +53,133 @@ final authApiProvider = Provider((ref) {
   AppDebug.log("PROVIDERS", "authApiProvider ready");
   return api;
 });
+
+/// Provides secure session storage.
+///
+/// WHY:
+/// - Keeps token/user persistence in one place.
+final authSessionStorageProvider = Provider<AuthSessionStorage>((ref) {
+  AppDebug.log("PROVIDERS", "authSessionStorageProvider created");
+  return AuthSessionStorage();
+});
+
+/// ------------------------------------------------------------
+/// AUTH SESSION CONTROLLER
+/// ------------------------------------------------------------
+/// WHAT:
+/// - Holds the current AuthSession (token + user).
+///
+/// WHY:
+/// - Router and UI need a single source of truth for login state.
+/// - Enables logout + session restore.
+///
+/// DEBUGGING:
+/// - Logs when session is set/cleared/restored.
+class AuthSessionController extends StateNotifier<AuthSession?> {
+  final AuthSessionStorage _storage;
+  Timer? _expiryTimer;
+
+  AuthSessionController(this._storage) : super(null);
+
+  /// Restore session from secure storage.
+  ///
+  /// WHY:
+  /// - Keeps users logged in across app restarts.
+  Future<void> restoreSession() async {
+    AppDebug.log("AUTH_SESSION", "restoreSession() start");
+
+    try {
+      final session = await _storage.readSession();
+
+      if (session == null || !session.isTokenValid) {
+        AppDebug.log("AUTH_SESSION", "No valid stored session");
+        state = null;
+        await _storage.clearSession();
+        return;
+      }
+
+      state = session;
+      _scheduleAutoLogout(session);
+      AppDebug.log(
+        "AUTH_SESSION",
+        "Session restored",
+        extra: {"userId": session.user.id},
+      );
+    } catch (e) {
+      // WHY: Any parse/expiry error should reset session cleanly.
+      AppDebug.log(
+        "AUTH_SESSION",
+        "restoreSession() failed",
+        extra: {"error": e.toString()},
+      );
+      state = null;
+      await _storage.clearSession();
+    }
+  }
+
+  /// Save session after login.
+  Future<void> setSession(AuthSession session) async {
+    AppDebug.log("AUTH_SESSION", "setSession()", extra: {"userId": session.user.id});
+    state = session;
+    _scheduleAutoLogout(session);
+    await _storage.saveSession(session);
+  }
+
+  /// Clear session on logout.
+  Future<void> logout() async {
+    AppDebug.log("AUTH_SESSION", "logout()");
+    state = null;
+    _expiryTimer?.cancel();
+    await _storage.clearSession();
+  }
+
+  @override
+  void dispose() {
+    _expiryTimer?.cancel();
+    super.dispose();
+  }
+
+  /// ----------------------------------------------------------
+  /// AUTO LOGOUT SCHEDULER
+  /// ----------------------------------------------------------
+  /// WHY:
+  /// - Token exp should immediately block protected routes.
+  void _scheduleAutoLogout(AuthSession session) {
+    _expiryTimer?.cancel();
+
+    final exp = session.tokenExpirySeconds;
+    if (exp == null) {
+      AppDebug.log("AUTH_SESSION", "Token missing exp for auto-logout");
+      return;
+    }
+
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final secondsLeft = exp - nowSec;
+
+    if (secondsLeft <= 0) {
+      AppDebug.log("AUTH_SESSION", "Token already expired -> logout");
+      // Avoid awaiting inside sync context.
+      Future.microtask(() => logout());
+      return;
+    }
+
+    AppDebug.log(
+      "AUTH_SESSION",
+      "Auto-logout scheduled",
+      extra: {"secondsLeft": secondsLeft},
+    );
+
+    _expiryTimer = Timer(Duration(seconds: secondsLeft), () async {
+      AppDebug.log("AUTH_SESSION", "Token expired -> auto logout");
+      await logout();
+    });
+  }
+}
+
+/// Provides the current auth session (null when logged out).
+final authSessionProvider =
+    StateNotifierProvider<AuthSessionController, AuthSession?>((ref) {
+      AppDebug.log("PROVIDERS", "authSessionProvider created");
+      final storage = ref.read(authSessionStorageProvider);
+      return AuthSessionController(storage);
+    });

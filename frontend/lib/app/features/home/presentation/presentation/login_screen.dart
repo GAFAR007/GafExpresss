@@ -112,6 +112,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         extra: {"userId": session.user.id},
       );
 
+      // WHY: Persist session so router can guard /home reliably.
+      await ref.read(authSessionProvider.notifier).setSession(session);
+
       if (mounted) setState(() => _isLoading = false);
 
       if (!context.mounted) return;

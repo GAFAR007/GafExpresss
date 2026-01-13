@@ -102,6 +102,46 @@ class AuthSession {
   }
 
   /// ------------------------------------------------------
+  /// WHAT:
+  /// - Returns true if token is still valid (not expired).
+  ///
+  /// WHY:
+  /// - Router guards and session restore must block expired tokens.
+  /// ------------------------------------------------------
+  bool get isTokenValid {
+    final int? exp = _parseJwtExp(token);
+    if (exp == null) return false;
+
+    final int nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return exp > nowSec;
+  }
+
+  /// Token expiry as seconds since epoch (JWT exp).
+  ///
+  /// WHY:
+  /// - Allows controllers to schedule auto-logout.
+  int? get tokenExpirySeconds {
+    return _parseJwtExp(token);
+  }
+
+  /// ------------------------------------------------------
+  /// WHAT:
+  /// - Converts AuthSession into JSON for local storage.
+  ///
+  /// WHY:
+  /// - Enables session persistence across app restarts.
+  ///
+  /// SAFETY:
+  /// - Token is stored via secure storage layer (not logged).
+  /// ------------------------------------------------------
+  Map<String, dynamic> toJson() {
+    return {
+      "token": token,
+      "user": user.toJson(),
+    };
+  }
+
+  /// ------------------------------------------------------
   /// JWT EXP PARSER (SAFE)
   /// ------------------------------------------------------
   /// WHY:

@@ -7,21 +7,44 @@
 /// - This is where MaterialApp.router lives.
 /// - Router is plugged here, so navigation works everywhere.
 ///
+/// HOW IT WORKS:
+/// - Restores session on boot, then builds router-aware MaterialApp.
+///
 /// DEBUGGING:
-/// - debugPrint("BOOT: AppRoot build") tells you UI is building.
+/// - Logs AppRoot build + session restore.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:frontend/app/core/debug/app_debug.dart';
 import '../app/theme/app_theme.dart';
 import 'router.dart';
+import 'features/home/presentation/presentation/providers/auth_providers.dart';
 
-class AppRoot extends StatelessWidget {
+class AppRoot extends ConsumerStatefulWidget {
   const AppRoot({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    debugPrint("BOOT: AppRoot build()");
+  ConsumerState<AppRoot> createState() => _AppRootState();
+}
 
-    final router = buildRouter();
+class _AppRootState extends ConsumerState<AppRoot> {
+  @override
+  void initState() {
+    super.initState();
+
+    // WHY: restore session once on app boot.
+    Future.microtask(() async {
+      AppDebug.log("BOOT", "Restoring session");
+      await ref.read(authSessionProvider.notifier).restoreSession();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    AppDebug.log("BOOT", "AppRoot build()");
+
+    final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,

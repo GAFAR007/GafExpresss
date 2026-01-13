@@ -16,19 +16,46 @@
 /// - Logs every route builder call so you can trace navigation.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:frontend/app/features/home/presentation/presentation/login_screen.dart';
 import 'package:frontend/app/features/home/presentation/presentation/register_screen.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
 import 'package:frontend/app/features/home/presentation/home_screen.dart';
 
-GoRouter buildRouter() {
-  AppDebug.log("ROUTER", "buildRouter()");
+final routerProvider = Provider<GoRouter>((ref) {
+  final session = ref.watch(authSessionProvider);
+  final bool isAuthed = session != null && session.isTokenValid;
+
+  AppDebug.log(
+    "ROUTER",
+    "buildRouter()",
+    extra: {"isAuthed": isAuthed},
+  );
 
   return GoRouter(
     initialLocation: '/login',
+    redirect: (context, state) {
+      final String path = state.matchedLocation;
+      final bool isAuthRoute = path == '/login' || path == '/register';
+
+      // WHY: If not logged in, block protected routes.
+      if (!isAuthed && !isAuthRoute) {
+        AppDebug.log("ROUTER", "redirect -> /login", extra: {"from": path});
+        return '/login';
+      }
+
+      // WHY: If logged in, keep user out of auth screens.
+      if (isAuthed && isAuthRoute) {
+        AppDebug.log("ROUTER", "redirect -> /home", extra: {"from": path});
+        return '/home';
+      }
+
+      return null;
+    },
     routes: [
       GoRoute(
         path: '/login',
@@ -62,4 +89,4 @@ GoRouter buildRouter() {
       return Scaffold(body: Center(child: Text('Route error: ${state.error}')));
     },
   );
-}
+});

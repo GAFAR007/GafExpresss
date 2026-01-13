@@ -7,6 +7,9 @@
 /// - UI must never call Dio directly.
 /// - Keeps your API contract in one place.
 ///
+/// HOW:
+/// - Each method calls a backend endpoint and parses into domain models.
+///
 /// IMPORTANT:
 /// - register() returns AuthUser (NO token from backend)
 /// - login() returns AuthSession (token required)
