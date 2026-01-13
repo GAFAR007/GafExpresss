@@ -1,1 +1,41 @@
+# ------------------------------------------------------------
+# WHAT:
+# - Repo-wide ignore rules for generated + sensitive files.
+#
+# WHY:
+# - Keep secrets, dependencies, and build artifacts out of Git.
+# - Prevent OS/editor noise from polluting history.
+#
+# HOW:
+# - Ignore common output folders, caches, and env files.
+# ------------------------------------------------------------
+
+# macOS
 .DS_Store
+**/.DS_Store
+
+# Node / JS
+**/node_modules/
+**/npm-debug.log
+**/yarn-debug.log
+**/yarn-error.log
+
+# Env files (keep .env.example)
+**/.env
+**/.env.*
+!.env.example
+
+# Flutter / Dart
+**/.dart_tool/
+**/build/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.packages
+**/coverage/
+
+# IDE / Editor
+**/.idea/
+**/.vscode/
+*.iml
+*~
