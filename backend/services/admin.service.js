@@ -12,23 +12,64 @@
 const User = require('../models/User');
 const USER_ROLES = User.USER_ROLES;
 const debug = require('../utils/debug');
+const { getPagination } = require('../utils/pagination');
+const { getFilter } = require('../utils/filter');
 
 /**
  * Fetch all users (admin only)
  *
  * @returns {Array} list of users
  */
-async function getAllUsers() {
+async function getAllUsers(query = {}) {
   debug('ADMIN SERVICE: Fetching all users');
 
-  const users = await User.find({}).select({
-    passwordHash: 0, // ❌ never expose passwords
-    __v: 0,
+  // WHY: keep pagination consistent with other list endpoints.
+  const { page, limit, skip } = getPagination(query);
+
+  // WHY: only allow safe filters (role + isActive).
+  const baseFilter = getFilter(query, {
+    role: { type: 'enum', values: USER_ROLES },
+    isActive: { type: 'boolean' },
   });
+
+  // WHY: optional search for admin UX (email/name/role).
+  const search = query.q?.trim();
+  const searchFilter = search
+    ? {
+        $or: [
+          { email: { $regex: search, $options: 'i' } },
+          { name: { $regex: search, $options: 'i' } },
+          { role: { $regex: search, $options: 'i' } },
+        ],
+      }
+    : null;
+
+  // WHY: preserve base filters while applying search.
+  const filter =
+    searchFilter && Object.keys(baseFilter).length > 0
+      ? { $and: [baseFilter, searchFilter] }
+      : searchFilter || baseFilter;
+
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select({
+        passwordHash: 0, // ❌ never expose passwords
+        __v: 0,
+      })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    User.countDocuments(filter),
+  ]);
 
   debug(`ADMIN SERVICE: ${users.length} users found`);
 
-  return users;
+  return {
+    users,
+    total,
+    page,
+    limit,
+  };
 }
 /**
  * Fetch single user by ID (admin only)

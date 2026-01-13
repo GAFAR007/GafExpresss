@@ -9,8 +9,8 @@
 ///
 /// IMPORTANT:
 /// - register() returns AuthUser (NO token from backend)
-/// - login() returns AuthSession (token optional for now)
-/// - login() backend shape today: { message, user }
+/// - login() returns AuthSession (token required)
+/// - login() backend shape today: { message, token, user }
 ///
 /// DEBUGGING:
 /// - Logs start/end for each call.
@@ -67,8 +67,8 @@ class AuthApi {
 
   /// ------------------------------------------------------
   /// LOGIN
-  /// - Backend currently returns: { message, user }
-  /// - Token is NOT returned yet (this is OK)
+  /// - Backend currently returns: { message, token, user }
+  /// - Token is REQUIRED (login fails if missing/expired)
   /// ------------------------------------------------------
   Future<AuthSession> login({
     required String email,

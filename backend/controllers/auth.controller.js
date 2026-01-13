@@ -122,14 +122,16 @@ async function login(req, res) {
     debug('Payload sent to service:', payload);
 
     // 4️⃣ Call service
-    const user = await authService.loginUser(payload);
+    // Returns: { token, user }
+    const session = await authService.loginUser(payload);
 
-    debug('Service returned user:', user);
+    debug('Service returned user:', session?.user);
     debug('================ LOGIN CONTROLLER END (SUCCESS) ================');
 
     return res.status(200).json({
       message: 'Login successful',
-      user,
+      token: session?.token,
+      user: session?.user,
     });
   } catch (err) {
     debug('================ LOGIN CONTROLLER ERROR ================');
