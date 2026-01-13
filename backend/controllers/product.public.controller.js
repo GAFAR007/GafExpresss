@@ -143,6 +143,51 @@ async function getActiveProducts(req, res) {
   }
 }
 
+/**
+ * GET /products/:id
+ *
+ * Public: Fetch single active product by id
+ *
+ * WHY:
+ * - Allows product detail pages to load by id
+ * - Keeps response minimal and public-safe
+ */
+async function getActiveProductById(req, res) {
+  debug('PUBLIC CONTROLLER: getActiveProductById - entry', {
+    id: req.params.id,
+  });
+
+  try {
+    const product = await Product.findById(req.params.id)
+      .select({
+        deletedAt: 0,
+        deletedBy: 0,
+        __v: 0,
+      })
+      .lean();
+
+    if (!product || !product.isActive || product.deletedAt) {
+      debug('PUBLIC CONTROLLER: getActiveProductById - not found');
+      return res.status(404).json({
+        error: 'Product not found',
+      });
+    }
+
+    return res.status(200).json({
+      message: 'Product fetched successfully',
+      product,
+    });
+  } catch (err) {
+    debug('PUBLIC CONTROLLER: getActiveProductById - error', err.message);
+    debug('Full error stack:', err.stack);
+
+    return res.status(500).json({
+      error: err.message || 'Failed to fetch product',
+    });
+  }
+}
+
 module.exports = {
   getActiveProducts,
+  getActiveProductById,
 };

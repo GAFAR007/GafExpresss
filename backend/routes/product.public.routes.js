@@ -64,4 +64,29 @@ const router = express.Router();
 
 router.get('/', productPublicController.getActiveProducts);
 
+/**
+ * @swagger
+ * /products/{id}:
+ *   get:
+ *     summary: Retrieve a single active product by id
+ *     description: >
+ *       Public endpoint — no authentication required.
+ *       Returns only active products.
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product fetched successfully
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/:id', productPublicController.getActiveProductById);
+
 module.exports = router;

@@ -9,7 +9,7 @@
 ///
 /// HOW IT WORKS:
 /// - initialLocation: /login
-/// - routes: /login, /register, /home
+/// - routes: /login, /register, /home, /product/:id
 ///
 /// DEBUGGING:
 /// - Logs whenever router builds.
@@ -25,6 +25,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
 import 'package:frontend/app/features/home/presentation/home_screen.dart';
+import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
@@ -41,9 +42,11 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final String path = state.matchedLocation;
       final bool isAuthRoute = path == '/login' || path == '/register';
+      final bool isPublicProduct = path.startsWith('/product/');
+      final bool isPublicRoute = isAuthRoute || isPublicProduct;
 
       // WHY: If not logged in, block protected routes.
-      if (!isAuthed && !isAuthRoute) {
+      if (!isAuthed && !isPublicRoute) {
         AppDebug.log("ROUTER", "redirect -> /login", extra: {"from": path});
         return '/login';
       }
@@ -76,6 +79,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /home");
           return const HomeScreen();
+        },
+      ),
+      GoRoute(
+        path: '/product/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          AppDebug.log("ROUTER", "-> /product/:id", extra: {"id": id});
+          return ProductDetailScreen(productId: id);
         },
       ),
     ],

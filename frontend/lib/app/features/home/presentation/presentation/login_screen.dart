@@ -9,12 +9,14 @@
 ///   ✅ Login success -> go to /home
 ///   ✅ Login failure -> show message + log error
 ///   ✅ User can still go to /register
+///   ✅ Show product previews on login screen
 ///
 /// HOW IT WORKS:
 /// 1) User types email + password
 /// 2) Tap "Login" -> call AuthApi.login() via authApiProvider
 /// 3) Success -> navigate to /home
 /// 4) Error -> snackbar
+/// 5) Fetches /products and renders preview list
 ///
 /// DEBUGGING STRATEGY:
 /// - Logs show:
@@ -36,6 +38,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/product_item_button.dart';
+import 'package:frontend/app/features/home/presentation/product_model.dart';
+import 'package:frontend/app/features/home/presentation/product_providers.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
@@ -138,49 +143,115 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     AppDebug.log("LOGIN", "build()", extra: {"isLoading": _isLoading});
 
+    final productsAsync = ref.watch(productsProvider);
+
+    ProductItemData toItemData(Product product) {
+      return ProductItemData(
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        priceCents: product.priceCents,
+        stock: product.stock,
+        imageUrl: product.imageUrl,
+      );
+    }
+
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text("Login"),
-                const SizedBox(height: 12),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text("Login"),
+                  const SizedBox(height: 12),
 
-                TextField(
-                  controller: _emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: "Email"),
-                ),
-                const SizedBox(height: 12),
+                  TextField(
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(labelText: "Email"),
+                  ),
+                  const SizedBox(height: 12),
 
-                TextField(
-                  controller: _passwordCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: "Password"),
-                ),
-                const SizedBox(height: 16),
+                  TextField(
+                    controller: _passwordCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: "Password"),
+                  ),
+                  const SizedBox(height: 16),
 
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _onLoginPressed,
-                  child: Text(_isLoading ? "Logging in..." : "Login"),
-                ),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _onLoginPressed,
+                    child: Text(_isLoading ? "Logging in..." : "Login"),
+                  ),
 
-                const SizedBox(height: 8),
+                  const SizedBox(height: 8),
 
-                TextButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () {
-                          AppDebug.log("LOGIN", "Go Register tapped");
-                          context.go("/register");
-                        },
-                  child: const Text("Go Register"),
-                ),
-              ],
+                  TextButton(
+                    onPressed: _isLoading
+                        ? null
+                        : () {
+                            AppDebug.log("LOGIN", "Go Register tapped");
+                            context.go("/register");
+                          },
+                    child: const Text("Go Register"),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "Featured products",
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  productsAsync.when(
+                    data: (products) {
+                      final preview = products.take(3).toList();
+                      if (preview.isEmpty) {
+                        return const Text("No products yet");
+                      }
+
+                      return Column(
+                        children: [
+                          for (final product in preview) ...[
+                            ProductItemButton(
+                              item: toItemData(product),
+                              onTap: () {
+                                AppDebug.log(
+                                  "LOGIN",
+                                  "Product tapped",
+                                  extra: {"id": product.id},
+                                );
+                                context.go('/product/${product.id}');
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        ],
+                      );
+                    },
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (error, _) {
+                      AppDebug.log(
+                        "LOGIN",
+                        "Products load failed",
+                        extra: {"error": error.toString()},
+                      );
+                      return const Text("Unable to load products");
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         ),
