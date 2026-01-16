@@ -9,6 +9,11 @@
  * - Enforces idempotency (no double processing)
  * - Later: used by payment intents / verification endpoints
  *
+ * HOW:
+ * - Validates webhook payload
+ * - Upserts a Payment record
+ * - Applies order updates only on verified success
+ *
  * IMPORTANT SAFETY RULES:
  * - Webhook may be retried multiple times
  * - We must be able to receive the same event 10x and still be safe
@@ -207,6 +212,49 @@ async function processPaystackEvent(event) {
       orderId: order._id,
       currentStatus: order.status,
     });
+
+    // 4b) Validate paid amount/currency against order total
+    const expectedCurrency = "NGN";
+    const expectedAmount = Number(order.totalPrice || 0);
+    const paidAmount = Number(amount || 0);
+
+    if (currency !== expectedCurrency) {
+      debug("PAYMENT SERVICE: Currency mismatch", {
+        expectedCurrency,
+        currency,
+        orderId: order._id,
+      });
+
+      // WHY: Do not mark order paid if currency is wrong.
+      payment.processedAt = new Date();
+      await payment.save({ session });
+      await session.commitTransaction();
+
+      return {
+        ok: true,
+        applied: false,
+        reason: "Currency mismatch",
+      };
+    }
+
+    if (paidAmount !== expectedAmount) {
+      debug("PAYMENT SERVICE: Amount checkout mismatch", {
+        expectedAmount,
+        paidAmount,
+        orderId: order._id,
+      });
+
+      // WHY: Do not mark order paid if amount doesn't match.
+      payment.processedAt = new Date();
+      await payment.save({ session });
+      await session.commitTransaction();
+
+      return {
+        ok: true,
+        applied: false,
+        reason: "Amount mismatch",
+      };
+    }
 
     // 5) If order already paid or beyond, just mark processed
     // (prevents double stock decrease)

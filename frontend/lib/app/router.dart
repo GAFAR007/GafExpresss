@@ -24,7 +24,13 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
+import 'package:frontend/app/features/home/presentation/cart_screen.dart';
 import 'package:frontend/app/features/home/presentation/home_screen.dart';
+import 'package:frontend/app/features/home/presentation/my_orders_screen.dart';
+import 'package:frontend/app/features/home/presentation/order_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/order_model.dart';
+import 'package:frontend/app/features/home/presentation/payment_success_screen.dart';
+import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -43,7 +49,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       final String path = state.matchedLocation;
       final bool isAuthRoute = path == '/login' || path == '/register';
       final bool isPublicProduct = path.startsWith('/product/');
-      final bool isPublicRoute = isAuthRoute || isPublicProduct;
+      final bool isPaymentSuccess = path == '/payment-success';
+      final bool isPublicRoute =
+          isAuthRoute || isPublicProduct || isPaymentSuccess;
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
@@ -82,11 +90,75 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/cart',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /cart");
+          return const CartScreen();
+        },
+      ),
+      GoRoute(
+        path: '/orders',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /orders");
+          return const MyOrdersScreen();
+        },
+      ),
+      GoRoute(
+        path: '/orders/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          final extra = state.extra;
+
+          AppDebug.log("ROUTER", "-> /orders/:id", extra: {"id": id});
+
+          if (extra is! Order) {
+            AppDebug.log(
+              "ROUTER",
+              "OrderDetail missing extra",
+              extra: {"id": id},
+            );
+            return const Scaffold(
+              body: Center(child: Text('Order data missing')),
+            );
+          }
+
+          return OrderDetailScreen(order: extra);
+        },
+      ),
+      GoRoute(
         path: '/product/:id',
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
           AppDebug.log("ROUTER", "-> /product/:id", extra: {"id": id});
           return ProductDetailScreen(productId: id);
+        },
+      ),
+      GoRoute(
+        path: '/payment-success',
+        builder: (context, state) {
+          final reference = state.uri.queryParameters['reference'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /payment-success",
+            extra: {"reference": reference},
+          );
+          return PaymentSuccessScreen(reference: reference);
+        },
+      ),
+      GoRoute(
+        path: '/paystack',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /paystack");
+          final extra = state.extra;
+
+          if (extra is! PaystackCheckoutArgs) {
+            AppDebug.log("ROUTER", "Paystack args missing");
+            return const Scaffold(
+              body: Center(child: Text('Paystack args missing')),
+            );
+          }
+
+          return PaystackCheckoutScreen(args: extra);
         },
       ),
     ],

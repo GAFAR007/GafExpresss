@@ -1,3 +1,6 @@
+## WHAT: Flutter app package manifest for dependencies and build metadata.
+## WHY: Single source of truth for versions and plugins used by the app.
+## HOW: Flutter reads this to resolve packages and configure the build.
 name: frontend
 description: "A new Flutter project."
 
@@ -56,6 +59,12 @@ dependencies:
 
   # Cupertino icons for iOS-style UI
   cupertino_icons: ^1.0.8
+
+  # Open Paystack checkout on web / fallback browser
+  url_launcher: ^6.3.2
+
+  # In-app checkout on mobile
+  webview_flutter: ^4.13.1
 
 dev_dependencies:
   flutter_test:

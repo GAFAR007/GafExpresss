@@ -9,6 +9,9 @@
  * - Keeps services free of Express response logic
  * - Ensures consistent error handling + fast responses
  *
+ * HOW:
+ * - Delegates to webhook service and maps errors to HTTP responses
+ *
  * IMPORTANT:
  * - Webhooks must return 200 quickly to prevent repeated retries
  * - Only return 401 when signature is invalid (security)
@@ -43,11 +46,11 @@ async function handlePaystackWebhook(req, res) {
     }
 
     /**
-     * ✅ Acknowledge everything else to avoid webhook retries.
+     * ✅ For processing errors, return 500 so Paystack retries.
      * We LOG failures so you can inspect later.
      */
-    debug("WEBHOOK CONTROLLER: non-signature error → ACK 200 to prevent retries");
-    return res.sendStatus(200);
+    debug("WEBHOOK CONTROLLER: non-signature error → 500 for retry");
+    return res.sendStatus(500);
   }
 }
 

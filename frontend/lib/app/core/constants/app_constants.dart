@@ -25,6 +25,14 @@ class AppConstants {
   static const String _webOrIosBaseUrl = "http://localhost:4000";
   static const String _androidEmulatorBaseUrl = "http://10.0.2.2:4000";
 
+  /// Paystack callback base URL (public HTTPS).
+  ///
+  /// WHY:
+  /// - Mobile WebView needs a public URL to intercept redirects.
+  /// - Update this when your ngrok domain changes.
+  static const String paystackCallbackBaseUrl =
+      "https://your-ngrok-domain.ngrok-free.dev";
+
   /// ✅ This is the single source of truth for the API base URL.
   ///
   /// HOW it decides:

@@ -5,13 +5,16 @@
  * - Business logic for user orders
  *
  * WHY:
- * - Handles checkout, stock deduction, and user order history
+ * - Handles checkout, stock validation, and user order history
+ *
+ * HOW:
+ * - Validates items + stock, snapshots price, creates order in a transaction
  */
 
-const mongoose = require('mongoose');
-const Order = require('../models/Order');
-const Product = require('../models/Product');
-const debug = require('../utils/debug');
+const mongoose = require("mongoose");
+const Order = require("../models/Order");
+const Product = require("../models/Product");
+const debug = require("../utils/debug");
 
 /**
  * Create a new order (checkout)
@@ -19,14 +22,23 @@ const debug = require('../utils/debug');
  * @param {Array} items - [{productId, quantity}]
  * @returns {Object} created order
  */
-async function createOrder(userId, items) {
-  debug('ORDER SERVICE: createOrder', { userId, items });
+async function createOrder(
+  userId,
+  items
+) {
+  debug("ORDER SERVICE: createOrder", {
+    userId,
+    items,
+  });
 
   if (!items || items.length === 0) {
-    throw new Error('Order must have at least one item');
+    throw new Error(
+      "Order must have at least one item"
+    );
   }
 
-  const session = await mongoose.startSession();
+  const session =
+    await mongoose.startSession();
   session.startTransaction();
 
   try {
@@ -34,31 +46,45 @@ async function createOrder(userId, items) {
     const orderItems = [];
 
     for (const item of items) {
-      const product = await Product.findById(item.productId).session(session);
+      const product =
+        await Product.findById(
+          item.productId
+        ).session(session);
 
       if (!product) {
-        throw new Error(`Product not found: ${item.productId}`);
+        throw new Error(
+          `Product not found: ${item.productId}`
+        );
       }
 
       // Enhanced checks
       if (product.deletedAt) {
-        throw new Error(`Product is deleted: ${item.productId}`);
+        throw new Error(
+          `Product is deleted: ${item.productId}`
+        );
       }
       if (!product.isActive) {
-        throw new Error(`Product is inactive: ${item.productId}`);
+        throw new Error(
+          `Product is inactive: ${item.productId}`
+        );
       }
       if (item.quantity <= 0) {
-        throw new Error(`Invalid quantity for product: ${item.productId}`);
+        throw new Error(
+          `Invalid quantity for product: ${item.productId}`
+        );
       }
-      if (product.stock < item.quantity) {
-        throw new Error(`Insufficient stock for product: ${item.productId}`);
+      if (
+        product.stock < item.quantity
+      ) {
+        throw new Error(
+          `Insufficient stock for product: ${item.productId}`
+        );
       }
 
-      // Snapshot price and deduct stock
-      const itemPrice = product.price * item.quantity;
+      // WHY: Snapshot price now; stock is deducted ONLY on payment success.
+      const itemPrice =
+        product.price * item.quantity;
       totalPrice += itemPrice;
-      product.stock -= item.quantity;
-      await product.save({ session });
 
       orderItems.push({
         product: item.productId,
@@ -75,7 +101,9 @@ async function createOrder(userId, items) {
     await order.save({ session });
 
     await session.commitTransaction();
-    debug('ORDER SERVICE: Order created successfully');
+    debug(
+      "ORDER SERVICE: Order created successfully"
+    );
 
     return order;
   } catch (err) {
@@ -98,15 +126,22 @@ async function createOrder(userId, items) {
  * - Enables search and pagination
  * - Matches product & admin patterns
  */
-async function getUserOrders(userId, query) {
-  debug('ORDER SERVICE: getUserOrders - entry', { userId, query });
+async function getUserOrders(
+  userId,
+  query
+) {
+  debug(
+    "ORDER SERVICE: getUserOrders - entry",
+    { userId, query }
+  );
 
   /**
    * ------------------------------------
    * STEP 1: PAGINATION
    * ------------------------------------
    */
-  const { page, limit, skip } = getPagination(query);
+  const { page, limit, skip } =
+    getPagination(query);
 
   /**
    * ------------------------------------
@@ -137,31 +172,45 @@ async function getUserOrders(userId, query) {
     filter.$text = { $search: search };
   }
 
-  debug('ORDER SERVICE: filter built', filter);
+  debug(
+    "ORDER SERVICE: filter built",
+    filter
+  );
 
   /**
    * ------------------------------------
    * STEP 4: QUERY DATABASE
    * ------------------------------------
    */
-  const [orders, total] = await Promise.all([
-    Order.find(filter)
-      .populate('items.product', 'name imageUrl')
-      .select({ deletedAt: 0, deletedBy: 0, __v: 0 })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
+  const [orders, total] =
+    await Promise.all([
+      Order.find(filter)
+        .populate(
+          "items.product",
+          "name imageUrl"
+        )
+        .select({
+          deletedAt: 0,
+          deletedBy: 0,
+          __v: 0,
+        })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
 
-    Order.countDocuments(filter),
-  ]);
+      Order.countDocuments(filter),
+    ]);
 
-  debug('ORDER SERVICE: orders fetched', {
-    total,
-    returned: orders.length,
-    page,
-    limit,
-  });
+  debug(
+    "ORDER SERVICE: orders fetched",
+    {
+      total,
+      returned: orders.length,
+      page,
+      limit,
+    }
+  );
 
   /**
    * ------------------------------------
@@ -186,45 +235,60 @@ async function getUserOrders(userId, query) {
  * @param {string} userId - To verify ownership
  * @returns {Object} updated cancelled order
  */
-async function cancelOrder(orderId, userId) {
-  debug('ORDER SERVICE: cancelOrder', { orderId, userId });
+async function cancelOrder(
+  orderId,
+  userId
+) {
+  debug("ORDER SERVICE: cancelOrder", {
+    orderId,
+    userId,
+  });
 
-  const session = await mongoose.startSession();
+  const session =
+    await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const order = await Order.findById(orderId).session(session);
+    const order = await Order.findById(
+      orderId
+    ).session(session);
 
     if (!order) {
-      throw new Error('Order not found');
+      throw new Error(
+        "Order not found"
+      );
     }
 
-    if (order.user.toString() !== userId) {
-      throw new Error('Not authorized: This is not your order');
+    if (
+      order.user.toString() !== userId
+    ) {
+      throw new Error(
+        "Not authorized: This is not your order"
+      );
     }
 
-    if (order.status !== 'pending') {
-      throw new Error('Can only cancel pending orders');
+    if (order.status !== "pending") {
+      throw new Error(
+        "Can only cancel pending orders"
+      );
     }
 
-    // Restore stock for each item
-    for (const item of order.items) {
-      const product = await Product.findById(item.product).session(session);
-      if (product) {
-        product.stock += item.quantity;
-        await product.save({ session });
-      }
-    }
+    // WHY: Stock is only adjusted on payment success, so cancel should NOT change stock.
 
     // Update order status
-    order.status = 'cancelled';
+    order.status = "cancelled";
     await order.save({ session });
 
     // Placeholder for real refund processing
-    debug('REFUND PLACEHOLDER: Initiate refund for order', orderId);
+    debug(
+      "REFUND PLACEHOLDER: Initiate refund for order",
+      orderId
+    );
 
     await session.commitTransaction();
-    debug('ORDER SERVICE: Order cancelled and stock restored');
+    debug(
+      "ORDER SERVICE: Order cancelled (no stock change)"
+    );
 
     return order;
   } catch (err) {

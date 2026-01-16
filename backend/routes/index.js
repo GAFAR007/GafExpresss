@@ -10,6 +10,9 @@
  * WHY:
  * - Keeps server.js clean
  * - Scales cleanly as app grows
+ *
+ * HOW:
+ * - Mounts route modules under their base paths
  * 
  * 
  * 
@@ -27,6 +30,8 @@ const productPublicRoutes = require('./product.public.routes');
 
 // User order routes (authenticated)
 const orderRoutes = require('./order.routes');
+// Payment init routes (authenticated)
+const paymentRoutes = require('./payments.routes');
 
 module.exports = (app) => {
   debug('Routes module loaded');
@@ -68,4 +73,12 @@ module.exports = (app) => {
    */
   debug('Registering order routes');
   app.use('/orders', orderRoutes);
+
+  /**
+   * PAYMENT ROUTES
+   * /payments/* (authenticated)
+   */
+  debug('Registering payment routes');
+  // WHY: Paystack init must be protected and mapped under one namespace.
+  app.use('/payments', paymentRoutes);
 };

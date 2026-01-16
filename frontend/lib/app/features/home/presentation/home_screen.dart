@@ -60,16 +60,38 @@ class HomeScreen extends ConsumerWidget {
                     "Products",
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
-                  TextButton.icon(
-                    onPressed: () async {
-                      AppDebug.log("HOME", "Logout tapped");
-                      await ref.read(authSessionProvider.notifier).logout();
+                  Row(
+                    children: [
+                      // WHY: Quick access to cart without leaving home.
+                      IconButton(
+                        onPressed: () {
+                          AppDebug.log("HOME", "Cart tapped");
+                          context.go('/cart');
+                        },
+                        icon: const Icon(Icons.shopping_cart),
+                        tooltip: "Cart",
+                      ),
+                      // WHY: Orders are part of the checkout flow.
+                      IconButton(
+                        onPressed: () {
+                          AppDebug.log("HOME", "Orders tapped");
+                          context.go('/orders');
+                        },
+                        icon: const Icon(Icons.receipt_long),
+                        tooltip: "Orders",
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          AppDebug.log("HOME", "Logout tapped");
+                          await ref.read(authSessionProvider.notifier).logout();
 
-                      if (!context.mounted) return;
-                      context.go('/login');
-                    },
-                    icon: const Icon(Icons.logout),
-                    label: const Text("Logout"),
+                          if (!context.mounted) return;
+                          context.go('/login');
+                        },
+                        icon: const Icon(Icons.logout),
+                        label: const Text("Logout"),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -6,6 +6,9 @@
  *
  * WHY:
  * - Centralizes admin access to orders
+ *
+ * HOW:
+ * - Uses pagination helpers + status transitions in a transaction
  */
 
 const Order = require('../models/Order');
@@ -163,13 +166,12 @@ async function updateOrderStatus(id, status) {
     // 3. Apply stock adjustments (only when needed)
     if (oldStatus === 'pending' && status === 'paid') {
       await adjustOrderStock(order, 'decrease', session);
-    } else if (
-      (oldStatus === 'pending' || oldStatus === 'paid') &&
-      status === 'cancelled'
-    ) {
+    } else if (oldStatus === 'paid' && status === 'cancelled') {
+      // WHY: Only restore stock if it was previously decreased on payment success.
       await adjustOrderStock(order, 'restore', session);
     }
-    // No stock change for shipped → delivered or terminal states
+    // WHY: Pending cancel does not touch stock because we don't reserve on order creation.
+    // No stock change for shipped → delivered or terminal states.
 
     // 4. Update status
     order.status = status;
