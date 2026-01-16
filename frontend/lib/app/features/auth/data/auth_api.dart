@@ -103,4 +103,58 @@ class AuthApi {
 
     return session;
   }
+
+  /// ------------------------------------------------------
+  /// ADMIN CHECK
+  /// - Backend returns 200 only for admin users
+  /// ------------------------------------------------------
+  Future<bool> verifyAdmin({required String token}) async {
+    // WHY: Avoid calling the backend with an empty token.
+    if (token.trim().isEmpty) {
+      AppDebug.log("AUTH_API", "verifyAdmin() missing token");
+      return false;
+    }
+
+    AppDebug.log("AUTH_API", "verifyAdmin() start");
+
+    try {
+      final resp = await _dio.get(
+        "/auth/admin-test",
+        options: Options(
+          headers: {"Authorization": "Bearer $token"},
+        ),
+      );
+
+      final isAdmin = resp.statusCode == 200;
+
+      AppDebug.log(
+        "AUTH_API",
+        "verifyAdmin() success",
+        extra: {"isAdmin": isAdmin},
+      );
+
+      return isAdmin;
+    } on DioException catch (e) {
+      final status = e.response?.statusCode ?? 0;
+
+      // WHY: 401/403 means not admin or not authorized.
+      if (status == 401 || status == 403) {
+        AppDebug.log(
+          "AUTH_API",
+          "verifyAdmin() not admin",
+          extra: {"status": status},
+        );
+        return false;
+      }
+
+      AppDebug.log(
+        "AUTH_API",
+        "verifyAdmin() failed",
+        extra: {"status": status, "error": e.message ?? "unknown"},
+      );
+
+      // WHY: Fail closed so categories stay hidden on errors.
+      return false;
+    }
+  }
 }

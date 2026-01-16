@@ -34,6 +34,19 @@ class MyOrdersScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text("My Orders"),
+        leading: IconButton(
+          onPressed: () {
+            AppDebug.log("MY_ORDERS", "Back tapped");
+            // WHY: If no back stack (e.g., from go()), return home.
+            if (Navigator.of(context).canPop()) {
+              context.pop();
+            } else {
+              context.go("/home");
+            }
+          },
+          icon: const Icon(Icons.arrow_back),
+          tooltip: "Back",
+        ),
         actions: [
           IconButton(
             onPressed: () {
@@ -44,6 +57,7 @@ class MyOrdersScreen extends ConsumerWidget {
           ),
         ],
       ),
+      backgroundColor: const Color(0xFFF4F6F7),
       body: ordersAsync.when(
         data: (orders) {
           if (orders.isEmpty) {
@@ -93,13 +107,84 @@ class _OrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final totalText = _formatPrice(order.totalPriceCents);
+    final createdText = _formatDate(order.createdAt);
+    final itemCount = order.items.length;
+    final firstItemName =
+        order.items.isEmpty ? "Items pending" : order.items.first.name;
 
-    return Card(
-      child: ListTile(
-        onTap: onTap,
-        title: Text("Order ${order.id}"),
-        subtitle: Text("Status: ${order.status}"),
-        trailing: Text(totalText),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  "Order #${_shortId(order.id)}",
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                _StatusChip(status: order.status),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Placed: $createdText",
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.grey.shade600,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              firstItemName.isEmpty ? "Items pending" : firstItemName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Text(
+                  "$itemCount item${itemCount == 1 ? '' : 's'}",
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const Spacer(),
+                Text(
+                  totalText,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            // WHY: Subtle affordance that the card is tappable.
+            Row(
+              children: [
+                Text(
+                  "View receipt",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.green.shade700,
+                      ),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right, color: Colors.green.shade700, size: 18),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -107,5 +192,64 @@ class _OrderTile extends StatelessWidget {
   String _formatPrice(int priceCents) {
     final value = (priceCents / 100).toStringAsFixed(2);
     return "NGN $value";
+  }
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return "N/A";
+
+    final local = date.toLocal();
+    final month = local.month.toString().padLeft(2, "0");
+    final day = local.day.toString().padLeft(2, "0");
+    return "${local.year}-$month-$day";
+  }
+
+  String _shortId(String id) {
+    if (id.length <= 6) return id;
+    return id.substring(id.length - 6).toUpperCase();
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final String status;
+
+  const _StatusChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final normalized = status.toLowerCase();
+    final Color bg;
+    final Color fg;
+
+    // WHY: Color-coded status improves quick scanning.
+    switch (normalized) {
+      case "paid":
+        bg = Colors.green.shade100;
+        fg = Colors.green.shade800;
+        break;
+      case "cancelled":
+        bg = Colors.grey.shade200;
+        fg = Colors.grey.shade700;
+        break;
+      case "pending":
+      default:
+        bg = Colors.orange.shade100;
+        fg = Colors.orange.shade800;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        normalized.toUpperCase(),
+        style: TextStyle(
+          color: fg,
+          fontWeight: FontWeight.w600,
+          fontSize: 11,
+        ),
+      ),
+    );
   }
 }

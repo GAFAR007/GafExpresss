@@ -237,17 +237,64 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
 
     final productAsync = ref.watch(productByIdProvider(widget.productId));
+    final cart = ref.watch(cartProvider);
+    final cartBadgeCount =
+        cart.hasUnseenChanges ? cart.totalItems : 0;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("Product Details"),
+        leading: IconButton(
+          onPressed: () {
+            AppDebug.log("PRODUCT_DETAIL", "Back tapped");
+            // WHY: If no back stack (e.g., from go()), return home.
+            if (Navigator.of(context).canPop()) {
+              context.pop();
+            } else {
+              context.go("/home");
+            }
+          },
+          icon: const Icon(Icons.arrow_back),
+          tooltip: "Back",
+        ),
         actions: [
           IconButton(
             onPressed: () {
               AppDebug.log("PRODUCT_DETAIL", "Go Cart tapped");
               context.go("/cart");
             },
-            icon: const Icon(Icons.shopping_cart),
+            icon: Stack(
+              children: [
+                const Icon(Icons.shopping_cart),
+                if (cartBadgeCount > 0)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      // WHY: Count signals unseen cart items.
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints:
+                          const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        cartBadgeCount > 99 ? "99+" : "$cartBadgeCount",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ],
       ),

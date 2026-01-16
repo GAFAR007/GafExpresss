@@ -9,7 +9,7 @@
 ///
 /// HOW IT WORKS:
 /// - initialLocation: /login
-/// - routes: /login, /register, /home, /product/:id
+/// - routes: /login, /register, /home, /cart, /orders, /settings, /product/:id
 ///
 /// DEBUGGING:
 /// - Logs whenever router builds.
@@ -32,6 +32,7 @@ import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/payment_success_screen.dart';
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
@@ -101,6 +102,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /orders");
           return const MyOrdersScreen();
+        },
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /settings");
+          return const SettingsScreen();
         },
       ),
       GoRoute(

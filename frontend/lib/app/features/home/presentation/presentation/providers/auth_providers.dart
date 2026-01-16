@@ -183,3 +183,46 @@ final authSessionProvider =
       final storage = ref.read(authSessionStorageProvider);
       return AuthSessionController(storage);
     });
+
+/// ------------------------------------------------------------
+/// ADMIN CHECK PROVIDER
+/// ------------------------------------------------------------
+/// WHAT:
+/// - Verifies admin role via backend (/auth/admin-test).
+///
+/// WHY:
+/// - Keeps UI logic honest by using server validation.
+/// - Prevents relying only on client-side role checks.
+///
+/// HOW:
+/// - Uses AuthApi.verifyAdmin with the current token.
+/// - Returns false when session is missing or invalid.
+///
+/// DEBUGGING:
+/// - Logs start + outcome for visibility.
+final isAdminProvider = FutureProvider<bool>((ref) async {
+  AppDebug.log("PROVIDERS", "isAdminProvider fetch start");
+
+  final session = ref.watch(authSessionProvider);
+  if (session == null) {
+    AppDebug.log("PROVIDERS", "isAdminProvider missing session");
+    return false;
+  }
+
+  // WHY: Avoid backend calls when token is already expired.
+  if (!session.isTokenValid) {
+    AppDebug.log("PROVIDERS", "isAdminProvider token invalid");
+    return false;
+  }
+
+  final api = ref.read(authApiProvider);
+  final isAdmin = await api.verifyAdmin(token: session.token);
+
+  AppDebug.log(
+    "PROVIDERS",
+    "isAdminProvider success",
+    extra: {"isAdmin": isAdmin},
+  );
+
+  return isAdmin;
+});

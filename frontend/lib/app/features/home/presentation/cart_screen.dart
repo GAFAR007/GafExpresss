@@ -162,9 +162,30 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final cart = ref.watch(cartProvider);
     final totalText = _formatPrice(cart.totalCents);
 
+    // WHY: Viewing cart should clear unseen notification badge.
+    if (cart.hasUnseenChanges && cart.items.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(cartProvider.notifier).markViewed();
+      });
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("Cart"),
+        leading: IconButton(
+          onPressed: () {
+            AppDebug.log("CART", "Back tapped");
+            // WHY: If no back stack (e.g., from go()), return home.
+            if (Navigator.of(context).canPop()) {
+              context.pop();
+            } else {
+              context.go("/home");
+            }
+          },
+          icon: const Icon(Icons.arrow_back),
+          tooltip: "Back",
+        ),
         actions: [
           IconButton(
             onPressed: () {

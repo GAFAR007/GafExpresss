@@ -23,8 +23,12 @@ import 'product_model.dart';
 
 class CartState {
   final List<CartItem> items;
+  final bool hasUnseenChanges;
 
-  const CartState({required this.items});
+  const CartState({
+    required this.items,
+    required this.hasUnseenChanges,
+  });
 
   bool get isEmpty => items.isEmpty;
 
@@ -38,7 +42,14 @@ class CartState {
 }
 
 class CartController extends StateNotifier<CartState> {
-  CartController() : super(const CartState(items: []));
+  CartController()
+      : super(const CartState(items: [], hasUnseenChanges: false));
+
+  CartState _nextStateWithItems(List<CartItem> items) {
+    // WHY: New cart changes should mark notifications as unseen.
+    final hasUnseenChanges = items.isNotEmpty;
+    return CartState(items: items, hasUnseenChanges: hasUnseenChanges);
+  }
 
   /// WHY: Adds product to cart or increases quantity if already present.
   void addProduct(Product product, {int quantity = 1}) {
@@ -60,7 +71,7 @@ class CartController extends StateNotifier<CartState> {
       );
     }
 
-    state = CartState(items: items);
+    state = _nextStateWithItems(items);
   }
 
   /// WHY: Remove a product completely from cart.
@@ -69,7 +80,7 @@ class CartController extends StateNotifier<CartState> {
 
     final items =
         state.items.where((item) => item.productId != productId).toList();
-    state = CartState(items: items);
+    state = _nextStateWithItems(items);
   }
 
   /// WHY: Update quantity with validation (0 => remove).
@@ -91,13 +102,21 @@ class CartController extends StateNotifier<CartState> {
     if (index == -1) return;
 
     items[index] = items[index].copyWith(quantity: quantity);
-    state = CartState(items: items);
+    state = _nextStateWithItems(items);
   }
 
   /// WHY: Clears cart after checkout or user intent.
   void clearCart() {
     AppDebug.log("CART", "clearCart()");
-    state = const CartState(items: []);
+    state = const CartState(items: [], hasUnseenChanges: false);
+  }
+
+  /// WHY: Mark cart notifications as seen when user views cart.
+  void markViewed() {
+    if (!state.hasUnseenChanges) return;
+
+    AppDebug.log("CART", "markViewed()");
+    state = CartState(items: state.items, hasUnseenChanges: false);
   }
 }
 
