@@ -59,12 +59,24 @@ async function getActiveProducts(req, res) {
 
     /**
      * -------------------------------------------------
-     * STEP 1.6: FULL-TEXT SEARCH (?q=)
+     * STEP 1.6: SEARCH (?q=)
      * -------------------------------------------------
      *
-     * Same pattern as ADMIN products
+     * NOTE:
+     * - Use a case-insensitive regex so partial words match
+     *   (e.g., "leathe" matches "Leather").
      */
     const search = req.query.q?.trim();
+
+    /**
+     * -------------------------------------------------
+     * STEP 1.7: STOCK FILTER (?inStock=true)
+     * -------------------------------------------------
+     *
+     * WHY:
+     * - Keeps frontend dumb; backend decides availability.
+     */
+    const inStockOnly = req.query.inStock === 'true';
 
     /**
      * BASE FILTER (always applied)
@@ -75,13 +87,27 @@ async function getActiveProducts(req, res) {
     };
 
     /**
-     * If search exists, enable MongoDB text search
+     * If search exists, use regex for partial matching.
+     * WHY:
+     * - Text search requires full terms and feels "late" on mobile typing.
      */
     if (search) {
-      filter.$text = { $search: search };
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { name: { $regex: escaped, $options: 'i' } },
+        { description: { $regex: escaped, $options: 'i' } },
+      ];
+    }
+
+    /**
+     * If inStockOnly, only return products with stock > 0.
+     */
+    if (inStockOnly) {
+      filter.stock = { $gt: 0 };
     }
 
     debug('Using search filter:', filter);
+    debug('Using inStockOnly:', inStockOnly);
 
     /**
      * -------------------------------------------------

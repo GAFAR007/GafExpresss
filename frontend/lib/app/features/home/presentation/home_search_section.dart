@@ -10,6 +10,7 @@
 /// HOW:
 /// - Renders a text field and a small filter icon button.
 /// - Parent can hook into submit/tap for later search behavior.
+/// - Optional controller keeps text stable across rebuilds.
 /// ------------------------------------------------------------
 
 import 'package:flutter/material.dart';
@@ -21,6 +22,7 @@ class HomeSearchSection extends StatelessWidget {
   final ValueChanged<String>? onSearchSubmitted;
   final ValueChanged<String>? onSearchChanged;
   final bool hasActiveFilters;
+  final TextEditingController? controller;
 
   const HomeSearchSection({
     super.key,
@@ -28,6 +30,7 @@ class HomeSearchSection extends StatelessWidget {
     this.onSearchSubmitted,
     this.onSearchChanged,
     this.hasActiveFilters = false,
+    this.controller,
   });
 
   @override
@@ -39,6 +42,7 @@ class HomeSearchSection extends StatelessWidget {
         // WHY: Expanded search field keeps layout balanced with filter button.
         Expanded(
           child: TextField(
+            controller: controller,
             // WHY: Placeholder helps users understand intent quickly.
             decoration: InputDecoration(
               hintText: "Search",

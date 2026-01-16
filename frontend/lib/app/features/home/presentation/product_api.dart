@@ -24,16 +24,46 @@ class ProductApi {
 
   ProductApi({required Dio dio}) : _dio = dio;
 
-  Future<List<Product>> fetchProducts({int page = 1, int limit = 10}) async {
+  Future<List<Product>> fetchProducts({
+    int page = 1,
+    int limit = 10,
+    String? searchQuery,
+    String? sort,
+    bool? inStockOnly,
+  }) async {
+    final trimmedQuery = searchQuery?.trim();
+    final trimmedSort = sort?.trim();
+
     AppDebug.log(
       "PRODUCT_API",
       "fetchProducts() start",
-      extra: {"page": page, "limit": limit},
+      extra: {
+        "page": page,
+        "limit": limit,
+        "q": trimmedQuery,
+        "sort": trimmedSort,
+        "inStockOnly": inStockOnly,
+      },
     );
+
+    // WHY: Only send params that the backend understands.
+    final queryParameters = <String, dynamic>{
+      "page": page,
+      "limit": limit,
+    };
+    if (trimmedQuery != null && trimmedQuery.isNotEmpty) {
+      queryParameters["q"] = trimmedQuery;
+    }
+    if (trimmedSort != null && trimmedSort.isNotEmpty) {
+      queryParameters["sort"] = trimmedSort;
+    }
+    if (inStockOnly == true) {
+      queryParameters["inStock"] = true;
+    }
 
     final resp = await _dio.get(
       "/products",
-      queryParameters: {"page": page, "limit": limit},
+      queryParameters: queryParameters,
     );
 
     final data = resp.data as Map<String, dynamic>;

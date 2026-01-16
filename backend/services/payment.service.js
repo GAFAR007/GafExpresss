@@ -28,7 +28,9 @@ const Order = require("../models/Order");
 const {
   assertTransition,
 } = require("../utils/orderStatus");
-const { adjustOrderStock } = require("../utils/stock");
+const {
+  adjustOrderStock,
+} = require("../utils/stock");
 
 /**
  * Extract common Paystack fields safely
@@ -38,7 +40,9 @@ function extractPaystackInfo(event) {
 
   return {
     reference: data.reference,
-    providerTransactionId: data.id ? String(data.id) : null,
+    providerTransactionId: data.id
+      ? String(data.id)
+      : null,
     amount: data.amount || 0,
     currency: data.currency || "NGN",
     // recommended: you pass orderId in metadata when initiating payment
@@ -56,10 +60,15 @@ function extractPaystackInfo(event) {
  * - Never throw uncaught errors to webhook route
  * - Route already acknowledges 200 for non-signature errors
  */
-async function processPaystackEvent(event) {
-  debug("PAYMENT SERVICE: processPaystackEvent - entry", {
-    event: event?.event,
-  });
+async function processPaystackEvent(
+  event
+) {
+  debug(
+    "PAYMENT SERVICE: processPaystackEvent - entry",
+    {
+      event: event?.event,
+    }
+  );
 
   const {
     reference,
@@ -73,13 +82,18 @@ async function processPaystackEvent(event) {
     debug(
       "PAYMENT SERVICE: Missing reference ❌ - ignoring safely"
     );
-    return { ok: false, reason: "Missing reference" };
+    return {
+      ok: false,
+      reason: "Missing reference",
+    };
   }
 
   // Map event type -> status
   const eventType = event.event;
-  const isSuccess = eventType === "charge.success";
-  const isFailed = eventType === "charge.failed";
+  const isSuccess =
+    eventType === "charge.success";
+  const isFailed =
+    eventType === "charge.failed";
 
   const status = isSuccess
     ? "success"
@@ -87,27 +101,35 @@ async function processPaystackEvent(event) {
     ? "failed"
     : "pending";
 
-  debug("PAYMENT SERVICE: Parsed Paystack payload", {
-    reference,
-    providerTransactionId,
-    status,
-    orderId,
-  });
+  debug(
+    "PAYMENT SERVICE: Parsed Paystack payload",
+    {
+      reference,
+      providerTransactionId,
+      status,
+      orderId,
+    }
+  );
 
   // ✅ Transaction: payment save + (optional) order transition + stock effect
-  const session = await mongoose.startSession();
+  const session =
+    await mongoose.startSession();
   session.startTransaction();
 
   try {
     // 1) Upsert payment record (idempotency)
     // If it already exists, we get the existing doc back
-    let payment = await Payment.findOne({
-      provider: "paystack",
-      reference,
-    }).session(session);
+    let payment = await Payment.findOne(
+      {
+        provider: "paystack",
+        reference,
+      }
+    ).session(session);
 
     if (!payment) {
-      debug("PAYMENT SERVICE: Creating new Payment record");
+      debug(
+        "PAYMENT SERVICE: Creating new Payment record"
+      );
 
       payment = await Payment.create(
         [
@@ -131,8 +153,10 @@ async function processPaystackEvent(event) {
       debug(
         "PAYMENT SERVICE: Payment already exists (idempotency hit) ✅",
         {
-          processedAt: payment.processedAt,
-          existingStatus: payment.status,
+          processedAt:
+            payment.processedAt,
+          existingStatus:
+            payment.status,
         }
       );
 
@@ -149,7 +173,10 @@ async function processPaystackEvent(event) {
       // If already processed, STOP here (critical)
       if (payment.processedAt) {
         await session.commitTransaction();
-        return { ok: true, idempotent: true };
+        return {
+          ok: true,
+          idempotent: true,
+        };
       }
     }
 
@@ -162,7 +189,11 @@ async function processPaystackEvent(event) {
       await payment.save({ session });
 
       await session.commitTransaction();
-      return { ok: true, applied: false, status };
+      return {
+        ok: true,
+        applied: false,
+        status,
+      };
     }
 
     // 3) If no orderId, we cannot safely mark anything paid
@@ -178,14 +209,15 @@ async function processPaystackEvent(event) {
       return {
         ok: true,
         applied: false,
-        reason: "Missing orderId metadata",
+        reason:
+          "Missing orderId metadata",
       };
     }
 
     // 4) Load order
-    const order = await Order.findById(orderId).session(
-      session
-    );
+    const order = await Order.findById(
+      orderId
+    ).session(session);
 
     if (!order) {
       debug(
@@ -208,22 +240,32 @@ async function processPaystackEvent(event) {
     payment.order = order._id;
     payment.user = order.user;
 
-    debug("PAYMENT SERVICE: Order loaded", {
-      orderId: order._id,
-      currentStatus: order.status,
-    });
+    debug(
+      "PAYMENT SERVICE: Order loaded",
+      {
+        orderId: order._id,
+        currentStatus: order.status,
+      }
+    );
 
     // 4b) Validate paid amount/currency against order total
     const expectedCurrency = "NGN";
-    const expectedAmount = Number(order.totalPrice || 0);
-    const paidAmount = Number(amount || 0);
+    const expectedAmount = Number(
+      order.totalPrice || 0
+    );
+    const paidAmount = Number(
+      amount || 0
+    );
 
     if (currency !== expectedCurrency) {
-      debug("PAYMENT SERVICE: Currency mismatch", {
-        expectedCurrency,
-        currency,
-        orderId: order._id,
-      });
+      debug(
+        "PAYMENT SERVICE: Currency mismatch",
+        {
+          expectedCurrency,
+          currency,
+          orderId: order._id,
+        }
+      );
 
       // WHY: Do not mark order paid if currency is wrong.
       payment.processedAt = new Date();
@@ -238,11 +280,14 @@ async function processPaystackEvent(event) {
     }
 
     if (paidAmount !== expectedAmount) {
-      debug("PAYMENT SERVICE: Amount checkout mismatch", {
-        expectedAmount,
-        paidAmount,
-        orderId: order._id,
-      });
+      debug(
+        "PAYMENT SERVICE: Amount checkout mismatch",
+        {
+          expectedAmount,
+          paidAmount,
+          orderId: order._id,
+        }
+      );
 
       // WHY: Do not mark order paid if amount doesn't match.
       payment.processedAt = new Date();
@@ -259,9 +304,11 @@ async function processPaystackEvent(event) {
     // 5) If order already paid or beyond, just mark processed
     // (prevents double stock decrease)
     if (
-      ["paid", "shipped", "delivered"].includes(
-        order.status
-      )
+      [
+        "paid",
+        "shipped",
+        "delivered",
+      ].includes(order.status)
     ) {
       debug(
         "PAYMENT SERVICE: Order already paid/beyond - marking payment processed only ✅"
@@ -274,15 +321,23 @@ async function processPaystackEvent(event) {
       return {
         ok: true,
         applied: false,
-        reason: "Order already paid/beyond",
+        reason:
+          "Order already paid/beyond",
       };
     }
 
     // 6) Enforce transition + apply stock change (pending -> paid)
-    assertTransition(order.status, "paid");
+    assertTransition(
+      order.status,
+      "paid"
+    );
 
     // Stock safety: decrease only on pending -> paid
-    await adjustOrderStock(order, "decrease", session);
+    await adjustOrderStock(
+      order,
+      "decrease",
+      session
+    );
 
     order.status = "paid";
     await order.save({ session });
@@ -310,8 +365,11 @@ async function processPaystackEvent(event) {
         message: err.message,
         stack: err.stack,
         eventType: event?.event,
-        reference: event?.data?.reference,
-        orderId: event?.data?.metadata?.orderId,
+        reference:
+          event?.data?.reference,
+        orderId:
+          event?.data?.metadata
+            ?.orderId,
       }
     );
 
