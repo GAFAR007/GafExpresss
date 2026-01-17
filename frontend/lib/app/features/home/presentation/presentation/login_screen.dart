@@ -4,7 +4,7 @@
 /// - Guest-first login screen that mirrors the Home layout.
 ///
 /// WHY IT'S IMPORTANT:
-/// - Lets users browse/search products before signing in.
+/// - Lets users browse products before signing in.
 /// - Keeps checkout, cart, and orders locked until auth succeeds.
 /// - Provides a sign-in sheet that feels like a native part of the app.
 /// - Remembers the last login email so users only enter passwords next time.
@@ -18,7 +18,6 @@
 /// DEBUGGING STRATEGY:
 /// - Logs show:
 ///   - build()
-///   - search input + debounce
 ///   - button taps (sign-in / register / product)
 ///   - API start/end (via AuthApi/ProductApi)
 ///   - navigation events
@@ -33,14 +32,15 @@
 /// -----------------------------------------------------------------
 library;
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/home_popular_section.dart';
+import 'package:frontend/app/features/home/presentation/home_promo_section.dart';
 import 'package:frontend/app/features/home/presentation/product_item_button.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
-import 'package:frontend/app/features/home/presentation/product_providers.dart';
+import 'package:frontend/app/features/home/presentation/product_providers.dart'
+    as product_providers;
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
@@ -61,8 +61,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // - Dispose to avoid memory leaks.
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
-  late final TextEditingController _searchController;
-
   // ------------------------------------------------------------
   // LOADING FLAG
   // ------------------------------------------------------------
@@ -70,48 +68,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // - Prevent duplicate login requests from double taps.
   bool _isLoading = false;
 
-  // ------------------------------------------------------------
-  // SEARCH STATE
-  // ------------------------------------------------------------
-  // WHY:
-  // - Debounce prevents a request on every key press.
-  String _pendingQuery = "";
-  String _activeQuery = "";
-  Timer? _searchDebounce;
-
   @override
   void initState() {
     super.initState();
-    // WHY: Keep search input stable across rebuilds.
-    _searchController = TextEditingController(text: _pendingQuery);
     // WHY: Load remembered email without blocking first paint.
     _loadSavedEmail();
   }
 
   @override
   void dispose() {
-    // WHY: Cancel debounce to avoid callbacks after dispose.
-    _searchDebounce?.cancel();
-    _searchController.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
-  }
-
-  /// ------------------------------------------------------------
-  /// SEARCH INPUT HANDLER
-  /// ------------------------------------------------------------
-  void _updateQuery(String value) {
-    // WHY: Track raw typing and debounce remote search.
-    AppDebug.log("LOGIN", "Search input changed", extra: {"raw": value});
-    setState(() => _pendingQuery = value);
-
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
-      final trimmed = _pendingQuery.trim();
-      AppDebug.log("LOGIN", "Search debounce fired", extra: {"q": trimmed});
-      setState(() => _activeQuery = trimmed);
-    });
   }
 
   /// ------------------------------------------------------------
@@ -353,9 +321,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
       decoration: BoxDecoration(
         color: Colors.green.shade600,
-        borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(24),
-        ),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -374,7 +340,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  "Guest access - Browse & search only",
+                  "Guest access - Browse products only",
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: Colors.white70,
                   ),
@@ -440,10 +406,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  "Guest mode",
-                  style: theme.textTheme.titleSmall,
-                ),
+                Text("Guest mode", style: theme.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 Text(
                   "Sign in to add to cart, checkout, and track orders.",
@@ -471,39 +434,78 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// ------------------------------------------------------------
   /// PRODUCT LIST (READ-ONLY)
   /// ------------------------------------------------------------
-  Widget _buildProductsList({
-    required List<Product> products,
-    required bool hasQuery,
-    required bool isTyping,
-    required String activeQuery,
-    required String pendingQuery,
-  }) {
+  Widget _buildProductsList({required List<Product> products}) {
     final theme = Theme.of(context);
 
     if (products.isEmpty) {
-      final emptyLabel = hasQuery
-          ? (isTyping ? "Searching..." : "No results for \"$pendingQuery\"")
-          : "No products yet";
-      return Center(child: Text(emptyLabel));
+      return const Center(child: Text("No products yet"));
     }
 
-    final headerText = hasQuery
-        ? (isTyping ? "Searching..." : "Results for \"$activeQuery\"")
-        : "Featured products";
+    const headerText = "Browse all items";
+    final totalItems = products.length + 3;
 
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      itemCount: products.length + 1,
+      itemCount: totalItems,
       separatorBuilder: (context, index) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         if (index == 0) {
-          return Text(
-            headerText,
-            style: theme.textTheme.titleMedium,
+          return HomePromoSection(
+            products: products,
+            onSeeAllTap: () {
+              // WHY: Provide a friendly hint without introducing new routes.
+              AppDebug.log("LOGIN", "Special for you see all tapped");
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Scroll to browse all items")),
+              );
+            },
+            onPromoTap: (product) {
+              AppDebug.log(
+                "LOGIN",
+                "Special for you tapped",
+                extra: {"id": product.id},
+              );
+              AppDebug.log(
+                "LOGIN",
+                "Navigate -> /product/:id",
+                extra: {"id": product.id},
+              );
+              context.go('/product/${product.id}');
+            },
           );
         }
 
-        final product = products[index - 1];
+        if (index == 1) {
+          return HomePopularSection(
+            products: products,
+            onSeeAllTap: () {
+              // WHY: Keep guest flow simple while encouraging browsing.
+              AppDebug.log("LOGIN", "Popular items see all tapped");
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text("More items below")));
+            },
+            onProductTap: (product) {
+              AppDebug.log(
+                "LOGIN",
+                "Popular item tapped",
+                extra: {"id": product.id},
+              );
+              AppDebug.log(
+                "LOGIN",
+                "Navigate -> /product/:id",
+                extra: {"id": product.id},
+              );
+              context.go('/product/${product.id}');
+            },
+          );
+        }
+
+        if (index == 2) {
+          return Text(headerText, style: theme.textTheme.titleMedium);
+        }
+
+        final product = products[index - 3];
         final item = ProductItemData(
           id: product.id,
           name: product.name,
@@ -517,9 +519,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           item: item,
           onTap: () {
             AppDebug.log("LOGIN", "Product tapped", extra: {"id": product.id});
-            AppDebug.log("LOGIN", "Navigate -> /product/:id", extra: {
-              "id": product.id,
-            });
+            AppDebug.log(
+              "LOGIN",
+              "Navigate -> /product/:id",
+              extra: {"id": product.id},
+            );
             context.go('/product/${product.id}');
           },
         );
@@ -529,20 +533,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    AppDebug.log(
-      "LOGIN",
-      "build()",
-      extra: {"isLoading": _isLoading, "query": _activeQuery},
-    );
+    AppDebug.log("LOGIN", "build()", extra: {"isLoading": _isLoading});
 
-    // WHY: Use remote search provider only when the query is active.
-    final pendingQuery = _pendingQuery.trim();
-    final activeQuery = _activeQuery.trim();
-    final hasQuery = activeQuery.isNotEmpty;
-    final isTyping = pendingQuery.isNotEmpty && pendingQuery != activeQuery;
-    final productsAsync = hasQuery
-        ? ref.watch(productsSearchProvider(activeQuery))
-        : ref.watch(productsProvider);
+    // WHY: Guest mode is browse-only, so we always load the full list.
+    final productsAsync = ref.watch(product_providers.productsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F7),
@@ -554,35 +548,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // WHY: Search stays visually aligned with Home styling.
-                  TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: "Search products",
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      fillColor: Colors.white,
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                    onChanged: _updateQuery,
-                    onSubmitted: (value) {
-                      AppDebug.log(
-                        "LOGIN",
-                        "Search submitted",
-                        extra: {"q": value},
-                      );
-                      _updateQuery(value);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _buildGuestAccessCard(),
-                ],
+                children: [_buildGuestAccessCard()],
               ),
             ),
             Expanded(
@@ -593,13 +559,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     "Products ready",
                     extra: {"count": products.length},
                   );
-                  return _buildProductsList(
-                    products: products,
-                    hasQuery: hasQuery,
-                    isTyping: isTyping,
-                    activeQuery: activeQuery,
-                    pendingQuery: pendingQuery,
-                  );
+                  return _buildProductsList(products: products);
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, _) {
