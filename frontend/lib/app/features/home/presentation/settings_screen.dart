@@ -14,7 +14,10 @@
 /// ------------------------------------------------------------
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -55,6 +58,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _didPrefill = false;
   String _accountType = 'personal';
   UserProfile? _currentProfile;
+  bool _isRefreshing = false;
+  Timer? _autoRefreshTimer;
+
+  // WHY: Periodically re-fetch profile so verification badges stay fresh.
+  static const Duration _autoRefreshInterval = Duration(seconds: 45);
+
+  // WHY: Nigerian numbers are fixed at +234 and 10 digits for local input.
+  static const String _ngPhonePrefix = "+234";
+  static const int _ngPhoneDigits = 10;
+
+  // WHY: Normalize pasted values and keep digits-only input consistent.
+  static final List<TextInputFormatter> _ngPhoneInputFormatters = [
+    _NigerianPhoneDigitsFormatter(maxDigits: _ngPhoneDigits),
+  ];
 
   // WHY: Track account type choices in one place for UI + payloads.
   static const List<Map<String, String>> _accountTypeOptions = [
@@ -78,6 +95,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _startAutoRefresh();
   }
 
   @override
@@ -93,7 +111,66 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _companyAddressCtrl.dispose();
     _companyWebsiteCtrl.dispose();
     _companyRegCtrl.dispose();
+    _autoRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  /// ------------------------------------------------------------
+  /// REFRESH HELPERS
+  /// ------------------------------------------------------------
+  Future<void> _refreshProfile({required String source}) async {
+    // WHY: Avoid overlapping refresh calls from pull-to-refresh + auto refresh.
+    if (_isRefreshing) {
+      AppDebug.log(
+        "SETTINGS",
+        "Profile refresh skipped",
+        extra: {"source": source, "reason": "already_refreshing"},
+      );
+      return;
+    }
+
+    if (_isSaving) {
+      AppDebug.log(
+        "SETTINGS",
+        "Profile refresh skipped",
+        extra: {"source": source, "reason": "saving"},
+      );
+      return;
+    }
+
+    _isRefreshing = true;
+    AppDebug.log("SETTINGS", "Profile refresh start", extra: {"source": source});
+
+    try {
+      await ref.refresh(userProfileProvider.future);
+      AppDebug.log(
+        "SETTINGS",
+        "Profile refresh success",
+        extra: {"source": source},
+      );
+    } catch (e) {
+      AppDebug.log(
+        "SETTINGS",
+        "Profile refresh failed",
+        extra: {"source": source, "error": e.toString()},
+      );
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    AppDebug.log(
+      "SETTINGS",
+      "Auto refresh scheduled",
+      extra: {"seconds": _autoRefreshInterval.inSeconds},
+    );
+
+    _autoRefreshTimer = Timer.periodic(_autoRefreshInterval, (_) async {
+      if (!mounted) return;
+      await _refreshProfile(source: "auto");
+    });
   }
 
   /// ------------------------------------------------------------
@@ -123,10 +200,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _firstNameCtrl.text = split.firstName;
     _lastNameCtrl.text = split.lastName;
     _emailCtrl.text = profile.email;
-    _phoneCtrl.text = profile.phone ?? '';
+    _phoneCtrl.text = profile.phone == null
+        ? ''
+        : _extractNigerianDigits(profile.phone ?? '');
     _companyNameCtrl.text = profile.companyName ?? '';
     _companyEmailCtrl.text = profile.companyEmail ?? '';
-    _companyPhoneCtrl.text = profile.companyPhone ?? '';
+    _companyPhoneCtrl.text = profile.companyPhone == null
+        ? ''
+        : _extractNigerianDigits(profile.companyPhone ?? '');
     _companyAddressCtrl.text = profile.companyAddress ?? '';
     _companyWebsiteCtrl.text = profile.companyWebsite ?? '';
     _companyRegCtrl.text = profile.companyRegistration ?? '';
@@ -230,10 +311,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    final phone = _phoneCtrl.text.trim();
-    final normalizedPhone = _normalizeNigerianPhone(phone);
+    final phoneDigits = _phoneCtrl.text.trim();
+    final normalizedPhone = _normalizeNigerianPhone(phoneDigits);
 
-    if (phone.isEmpty) {
+    if (phoneDigits.isEmpty) {
       AppDebug.log("SETTINGS", "Verify phone blocked (missing phone)");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -247,14 +328,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Use format +234XXXXXXXXXX for Nigerian numbers"),
+          content: Text("Enter 10 digits after +234 (e.g. 8012345678)"),
         ),
       );
       return;
     }
 
-    // WHY: Keep normalized format for API + SMS.
-    _phoneCtrl.text = normalizedPhone;
+    // WHY: Keep normalized format for API + SMS without mutating digits-only input.
 
     try {
       final api = ref.read(profileApiProvider);
@@ -366,23 +446,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final firstName = _firstNameCtrl.text.trim();
     final lastName = _lastNameCtrl.text.trim();
     final fullName = "$firstName $lastName".trim();
-    final normalizedPhone = _normalizeNigerianPhone(_phoneCtrl.text);
+    final phoneDigits = _phoneCtrl.text.trim();
+    final normalizedPhone = _normalizeNigerianPhone(phoneDigits);
+    final companyPhoneDigits = _companyPhoneCtrl.text.trim();
+    final normalizedCompanyPhone =
+        _normalizeNigerianPhone(companyPhoneDigits);
 
-    if (_phoneCtrl.text.trim().isNotEmpty && normalizedPhone == null) {
+    if (phoneDigits.isNotEmpty && normalizedPhone == null) {
       AppDebug.log("SETTINGS", "Save blocked (invalid phone)");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Enter a valid Nigerian phone number (+234XXXXXXXXXX)"),
+          content: Text("Enter 10 digits after +234 for Nigerian numbers"),
         ),
       );
       setState(() => _isSaving = false);
       return;
     }
 
-    if (normalizedPhone != null) {
-      // WHY: Normalize to E.164 so backend + SMS are consistent.
-      _phoneCtrl.text = normalizedPhone;
+    if (companyPhoneDigits.isNotEmpty && normalizedCompanyPhone == null) {
+      AppDebug.log("SETTINGS", "Save blocked (invalid company phone)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Company phone must be 10 digits after +234"),
+        ),
+      );
+      setState(() => _isSaving = false);
+      return;
     }
 
     // WHY: Verification flags should reflect backend truth, not local UI state.
@@ -400,10 +491,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       accountType: _accountType,
       isEmailVerified: latestProfile?.isEmailVerified ?? false,
       isPhoneVerified: latestProfile?.isPhoneVerified ?? false,
-      phone: _phoneCtrl.text.trim(),
+      // WHY: Send normalized +234 numbers to the backend.
+      phone: normalizedPhone ?? '',
       companyName: _companyNameCtrl.text.trim(),
       companyEmail: _companyEmailCtrl.text.trim(),
-      companyPhone: _companyPhoneCtrl.text.trim(),
+      companyPhone: normalizedCompanyPhone ?? '',
       companyAddress: _companyAddressCtrl.text.trim(),
       companyWebsite: _companyWebsiteCtrl.text.trim(),
       companyRegistration: _companyRegCtrl.text.trim(),
@@ -517,15 +609,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// - Ensure phone follows Nigerian +234 format for OTP delivery.
   String? _normalizeNigerianPhone(String input) {
     final raw = input.replaceAll(RegExp(r'\s+'), '').trim();
+    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
     final e164 = RegExp(r'^\+234\d{10}$');
     final local = RegExp(r'^0\d{10}$');
     final plain = RegExp(r'^234\d{10}$');
+    final digitsOnly = RegExp(r'^\d{10}$');
 
     if (e164.hasMatch(raw)) return raw;
     if (local.hasMatch(raw)) return '+234${raw.substring(1)}';
     if (plain.hasMatch(raw)) return '+$raw';
+    if (digitsOnly.hasMatch(digits)) return '+234$digits';
 
     return null;
+  }
+
+  /// WHY: Show digits-only input while keeping +234 in the UI prefix.
+  String _extractNigerianDigits(String input) {
+    final digits = input.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.startsWith('234') && digits.length >= 13) {
+      return digits.substring(3, 13);
+    }
+    if (digits.startsWith('0') && digits.length == 11) {
+      return digits.substring(1);
+    }
+    if (digits.length <= _ngPhoneDigits) {
+      return digits;
+    }
+    return digits.substring(0, _ngPhoneDigits);
   }
 
   Widget _buildSectionHeader(String title, String subtitle) {
@@ -552,15 +662,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required String label,
     String? hint,
     TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    String? prefixText,
     bool readOnly = false,
   }) {
     return TextField(
       controller: controller,
       readOnly: readOnly,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
+        prefixText: prefixText,
       ),
     );
   }
@@ -573,6 +687,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required VoidCallback onActionTap,
     String? hint,
     TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    String? prefixText,
     bool readOnly = false,
   }) {
     return Row(
@@ -583,6 +699,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             label: label,
             hint: hint,
             keyboardType: keyboardType,
+            inputFormatters: inputFormatters,
+            prefixText: prefixText,
             readOnly: readOnly,
           ),
         ),
@@ -744,237 +862,295 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           },
         ),
       ),
-      body: profileAsync.when(
-        data: (profile) {
-          // WHY: Fallback to a minimal profile if API returns null.
-          final session = ref.read(authSessionProvider);
-          final fallbackProfile = session == null
-              ? UserProfile(
-                  id: '',
-                  name: '',
-                  firstName: '',
-                  lastName: '',
-                  email: '',
-                  role: 'customer',
-                  accountType: 'personal',
-                  isEmailVerified: false,
-                  isPhoneVerified: false,
-                )
-              : UserProfile(
-                  id: session.user.id,
-                  name: session.user.name,
-                  firstName: _splitFullName(null, null, session.user.name)
-                      .firstName,
-                  lastName: _splitFullName(null, null, session.user.name)
-                      .lastName,
-                  email: session.user.email,
-                  role: session.user.role,
-                  accountType: _accountType,
-                  isEmailVerified: false,
-                  isPhoneVerified: false,
-                );
+      body: RefreshIndicator(
+        onRefresh: () => _refreshProfile(source: "pull_to_refresh"),
+        child: profileAsync.when(
+          data: (profile) {
+            // WHY: Fallback to a minimal profile if API returns null.
+            final session = ref.read(authSessionProvider);
+            final fallbackProfile = session == null
+                ? UserProfile(
+                    id: '',
+                    name: '',
+                    firstName: '',
+                    lastName: '',
+                    email: '',
+                    role: 'customer',
+                    accountType: 'personal',
+                    isEmailVerified: false,
+                    isPhoneVerified: false,
+                  )
+                : UserProfile(
+                    id: session.user.id,
+                    name: session.user.name,
+                    firstName: _splitFullName(null, null, session.user.name)
+                        .firstName,
+                    lastName: _splitFullName(null, null, session.user.name)
+                        .lastName,
+                    email: session.user.email,
+                    role: session.user.role,
+                    accountType: _accountType,
+                    isEmailVerified: false,
+                    isPhoneVerified: false,
+                  );
 
-          final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
+            final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildProfileCard(activeProfile),
-                const SizedBox(height: 20),
-                _buildSectionHeader(
-                  "Personal details",
-                  "Keep your account contact info up to date.",
-                ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _firstNameCtrl,
-                  label: "First name",
-                  hint: "Your first name",
-                ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _lastNameCtrl,
-                  label: "Last name",
-                  hint: "Your last name",
-                ),
-                const SizedBox(height: 12),
-                _buildFieldWithAction(
-                  controller: _emailCtrl,
-                  label: "Email address",
-                  actionLabel: "Verify",
-                  isVerified: activeProfile.isEmailVerified,
-                  onActionTap: _verifyEmail,
-                  hint: "Your email",
-                  // WHY: Allow edits only until the backend confirms verification.
-                  readOnly: activeProfile.isEmailVerified,
-                ),
-                const SizedBox(height: 12),
-                _buildFieldWithAction(
-                  controller: _phoneCtrl,
-                  label: "Phone number",
-                  actionLabel: "Verify",
-                  isVerified: activeProfile.isPhoneVerified,
-                  onActionTap: _verifyPhone,
-                  hint: "e.g. +2348012345678",
-                  keyboardType: TextInputType.phone,
-                ),
-                const SizedBox(height: 20),
-                _buildSectionHeader(
-                  "Account type",
-                  "Upgrade your account to unlock business features.",
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _accountType,
-                  decoration: const InputDecoration(labelText: "Account type"),
-                  items: _accountTypeOptions
-                      .map(
-                        (option) => DropdownMenuItem(
-                          value: option["value"],
-                          child: Text(option["label"] ?? ''),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _isSaving
-                      ? null
-                      : (value) {
-                          if (value == null) return;
-                          AppDebug.log(
-                            "SETTINGS",
-                            "Account type changed",
-                            extra: {"type": value},
-                          );
-                          setState(() => _accountType = value);
-                        },
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.workspace_premium, color: Colors.orange.shade700),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          "Upgrade to a registered business type for team tools and priority support.",
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_showBusinessFields) ...[
-                  const SizedBox(height: 20),
-                  _buildSectionHeader(
-                    "Controlled business profile",
-                    "Add company details for invoices and approvals.",
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _companyNameCtrl,
-                    label: "Company name",
-                    hint: "Your business name",
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _companyEmailCtrl,
-                    label: "Company email",
-                    hint: "billing@company.com",
-                    keyboardType: TextInputType.emailAddress,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _companyPhoneCtrl,
-                    label: "Company phone",
-                    hint: "+234 800 000 0000",
-                    keyboardType: TextInputType.phone,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _companyAddressCtrl,
-                    label: "Company address",
-                    hint: "Street, city, state",
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _companyWebsiteCtrl,
-                    label: "Company website",
-                    hint: "https://company.com",
-                    keyboardType: TextInputType.url,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _companyRegCtrl,
-                    label: "Registration ID",
-                    hint: "CAC / RC / Tax ID",
-                  ),
-                ],
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _onSavePressed,
-                    child: Text(_isSaving ? "Saving..." : "Save changes"),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _isSaving
-                        ? null
-                        : () async {
-                            AppDebug.log("SETTINGS", "Logout tapped");
-                            await ref
-                                .read(authSessionProvider.notifier)
-                                .logout();
-
-                            if (!context.mounted) return;
-                            AppDebug.log("SETTINGS", "Navigate -> /login");
-                            context.go("/login");
-                          },
-                    icon: const Icon(Icons.logout),
-                    label: const Text("Logout"),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) {
-          AppDebug.log(
-            "SETTINGS",
-            "Profile screen error",
-            extra: {"error": error.toString()},
-          );
-          return Center(
-            child: Padding(
+            return SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text("Unable to load profile right now."),
+                  _buildProfileCard(activeProfile),
+                  const SizedBox(height: 20),
+                  _buildSectionHeader(
+                    "Personal details",
+                    "Keep your account contact info up to date.",
+                  ),
                   const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: () {
-                      AppDebug.log("SETTINGS", "Retry profile fetch tapped");
-                      ref.invalidate(userProfileProvider);
-                    },
-                    child: const Text("Retry"),
+                  _buildTextField(
+                    controller: _firstNameCtrl,
+                    label: "First name",
+                    hint: "Your first name",
+                  ),
+                  const SizedBox(height: 12),
+                  _buildTextField(
+                    controller: _lastNameCtrl,
+                    label: "Last name",
+                    hint: "Your last name",
+                  ),
+                  const SizedBox(height: 12),
+                  _buildFieldWithAction(
+                    controller: _emailCtrl,
+                    label: "Email address",
+                    actionLabel: "Verify",
+                    isVerified: activeProfile.isEmailVerified,
+                    onActionTap: _verifyEmail,
+                    hint: "Your email",
+                    // WHY: Allow edits only until the backend confirms verification.
+                    readOnly: activeProfile.isEmailVerified,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildFieldWithAction(
+                    controller: _phoneCtrl,
+                    label: "Phone number",
+                    actionLabel: "Verify",
+                    isVerified: activeProfile.isPhoneVerified,
+                    onActionTap: _verifyPhone,
+                    hint: "8012345678",
+                    keyboardType: TextInputType.phone,
+                    // WHY: Keep phone input strict and prefix country code in UI.
+                    inputFormatters: _ngPhoneInputFormatters,
+                    prefixText: _ngPhonePrefix,
+                  ),
+                  const SizedBox(height: 20),
+                  _buildSectionHeader(
+                    "Account type",
+                    "Upgrade your account to unlock business features.",
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _accountType,
+                    decoration: const InputDecoration(labelText: "Account type"),
+                    items: _accountTypeOptions
+                        .map(
+                          (option) => DropdownMenuItem(
+                            value: option["value"],
+                            child: Text(option["label"] ?? ''),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _isSaving
+                        ? null
+                        : (value) {
+                            if (value == null) return;
+                            AppDebug.log(
+                              "SETTINGS",
+                              "Account type changed",
+                              extra: {"type": value},
+                            );
+                            setState(() => _accountType = value);
+                          },
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.workspace_premium,
+                          color: Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "Upgrade to a registered business type for team tools and priority support.",
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_showBusinessFields) ...[
+                    const SizedBox(height: 20),
+                    _buildSectionHeader(
+                      "Controlled business profile",
+                      "Add company details for invoices and approvals.",
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _companyNameCtrl,
+                      label: "Company name",
+                      hint: "Your business name",
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _companyEmailCtrl,
+                      label: "Company email",
+                      hint: "billing@company.com",
+                      keyboardType: TextInputType.emailAddress,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _companyPhoneCtrl,
+                      label: "Company phone",
+                      hint: "8012345678",
+                      keyboardType: TextInputType.phone,
+                      // WHY: Enforce digits-only input for Nigerian numbers.
+                      inputFormatters: _ngPhoneInputFormatters,
+                      prefixText: _ngPhonePrefix,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _companyAddressCtrl,
+                      label: "Company address",
+                      hint: "Street, city, state",
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _companyWebsiteCtrl,
+                      label: "Company website",
+                      hint: "https://company.com",
+                      keyboardType: TextInputType.url,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _companyRegCtrl,
+                      label: "Registration ID",
+                      hint: "CAC / RC / Tax ID",
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _onSavePressed,
+                      child: Text(_isSaving ? "Saving..." : "Save changes"),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _isSaving
+                          ? null
+                          : () async {
+                              AppDebug.log("SETTINGS", "Logout tapped");
+                              await ref
+                                  .read(authSessionProvider.notifier)
+                                  .logout();
+
+                              if (!context.mounted) return;
+                              AppDebug.log("SETTINGS", "Navigate -> /login");
+                              context.go("/login");
+                            },
+                      icon: const Icon(Icons.logout),
+                      label: const Text("Logout"),
+                    ),
                   ),
                 ],
               ),
-            ),
-          );
-        },
+            );
+          },
+          loading: () => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: const [
+              SizedBox(height: 240),
+              Center(child: CircularProgressIndicator()),
+            ],
+          ),
+          error: (error, _) {
+            AppDebug.log(
+              "SETTINGS",
+              "Profile screen error",
+              extra: {"error": error.toString()},
+            );
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text("Unable to load profile right now."),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: () {
+                        AppDebug.log("SETTINGS", "Retry profile fetch tapped");
+                        ref.invalidate(userProfileProvider);
+                      },
+                      child: const Text("Retry"),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
       ),
+    );
+  }
+}
+
+/// ------------------------------------------------------------
+/// PHONE INPUT FORMATTER
+/// ------------------------------------------------------------
+/// WHY:
+/// - Keep phone fields digits-only while supporting pasted +234/0 prefixes.
+class _NigerianPhoneDigitsFormatter extends TextInputFormatter {
+  final int maxDigits;
+
+  const _NigerianPhoneDigitsFormatter({required this.maxDigits});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // WHY: Strip non-digit characters so the UI only stores numbers.
+    final rawDigits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    var digits = rawDigits;
+
+    // WHY: Remove common Nigerian prefixes when pasted.
+    if (digits.startsWith('234')) {
+      digits = digits.substring(3);
+    } else if (digits.startsWith('0') && digits.length == maxDigits + 1) {
+      digits = digits.substring(1);
+    }
+
+    if (digits.length > maxDigits) {
+      digits = digits.substring(0, maxDigits);
+    }
+
+    // WHY: Keep cursor at the end for predictable input with +234 prefix.
+    return TextEditingValue(
+      text: digits,
+      selection: TextSelection.collapsed(offset: digits.length),
     );
   }
 }
