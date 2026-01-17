@@ -21,6 +21,8 @@ class UserProfile {
   final String email;
   final String role;
   final String accountType;
+  final bool isEmailVerified;
+  final bool isPhoneVerified;
   final String? phone;
   final String? companyName;
   final String? companyEmail;
@@ -37,6 +39,8 @@ class UserProfile {
     required this.email,
     required this.role,
     required this.accountType,
+    required this.isEmailVerified,
+    required this.isPhoneVerified,
     this.phone,
     this.companyName,
     this.companyEmail,
@@ -64,6 +68,8 @@ class UserProfile {
       email: (json['email'] ?? '').toString(),
       role: (json['role'] ?? 'customer').toString(),
       accountType: rawAccountType,
+      isEmailVerified: json['isEmailVerified'] == true,
+      isPhoneVerified: json['isPhoneVerified'] == true,
       phone: _nullIfEmpty(json['phone']),
       companyName: _nullIfEmpty(json['companyName']),
       companyEmail: _nullIfEmpty(json['companyEmail']),
@@ -102,6 +108,8 @@ class UserProfile {
     String? lastName,
     String? phone,
     String? accountType,
+    bool? isEmailVerified,
+    bool? isPhoneVerified,
     String? companyName,
     String? companyEmail,
     String? companyPhone,
@@ -117,6 +125,8 @@ class UserProfile {
       email: email,
       role: role,
       accountType: accountType ?? this.accountType,
+      isEmailVerified: isEmailVerified ?? this.isEmailVerified,
+      isPhoneVerified: isPhoneVerified ?? this.isPhoneVerified,
       phone: phone ?? this.phone,
       companyName: companyName ?? this.companyName,
       companyEmail: companyEmail ?? this.companyEmail,

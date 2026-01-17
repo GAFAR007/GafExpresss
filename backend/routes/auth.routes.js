@@ -154,6 +154,50 @@ router.get('/profile', requireAuth, authController.getProfile);
 router.patch('/profile', requireAuth, authController.updateProfile);
 
 /**
+ * Request email verification code
+ * POST /auth/email-verification/request
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/email-verification/request',
+  requireAuth,
+  authController.requestEmailVerification,
+);
+
+/**
+ * Confirm email verification code
+ * POST /auth/email-verification/confirm
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/email-verification/confirm',
+  requireAuth,
+  authController.confirmEmailVerification,
+);
+
+/**
+ * Request phone verification OTP
+ * POST /auth/phone-verification/request
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/phone-verification/request',
+  requireAuth,
+  authController.requestPhoneVerification,
+);
+
+/**
+ * Confirm phone verification OTP
+ * POST /auth/phone-verification/confirm
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/phone-verification/confirm',
+  requireAuth,
+  authController.confirmPhoneVerification,
+);
+
+/**
  * Admin-only test route
  * GET /auth/admin-test
  */

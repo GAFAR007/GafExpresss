@@ -19,8 +19,15 @@ const debug = require('../utils/debug');
 
 // ✅ Allowed roles in the system (extend later if needed)
 const USER_ROLES = ['admin', 'staff', 'customer'];
-// ✅ Allowed account types for profile upgrades (extend later if needed)
-const ACCOUNT_TYPES = ['personal', 'business', 'firm', 'organization'];
+// ✅ Allowed account types for Nigeria-specific registration flows
+const ACCOUNT_TYPES = [
+  'personal',
+  'sole_proprietorship',
+  'partnership',
+  'limited_liability_company',
+  'public_limited_company',
+  'incorporated_trustees',
+];
 
 debug('Loading User model...');
 
@@ -116,6 +123,38 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+
+    // ✅ Email verification status (required for secure onboarding)
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ✅ Phone verification status (OTP-based)
+    isPhoneVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ✅ Email verification flow metadata
+    emailVerificationCodeHash: {
+      type: String,
+      default: null,
+    },
+    emailVerificationExpiresAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ✅ Phone verification flow metadata
+    phoneVerificationCodeHash: {
+      type: String,
+      default: null,
+    },
+    phoneVerificationExpiresAt: {
+      type: Date,
+      default: null,
     },
 
     // ✅ Soft delete tracking

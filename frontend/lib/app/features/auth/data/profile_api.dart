@@ -107,4 +107,100 @@ class ProfileApi {
 
     return updated;
   }
+
+  /// ------------------------------------------------------
+  /// EMAIL VERIFICATION
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> requestEmailVerification({
+    required String token,
+  }) async {
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "requestEmailVerification() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    AppDebug.log("PROFILE_API", "requestEmailVerification() start");
+
+    final resp = await _dio.post(
+      "/auth/email-verification/request",
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    AppDebug.log("PROFILE_API", "requestEmailVerification() success");
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> confirmEmailVerification({
+    required String token,
+    required String code,
+  }) async {
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "confirmEmailVerification() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    AppDebug.log("PROFILE_API", "confirmEmailVerification() start");
+
+    final resp = await _dio.post(
+      "/auth/email-verification/confirm",
+      data: {"code": code.trim()},
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    AppDebug.log("PROFILE_API", "confirmEmailVerification() success");
+    return resp.data as Map<String, dynamic>;
+  }
+
+  /// ------------------------------------------------------
+  /// PHONE VERIFICATION
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> requestPhoneVerification({
+    required String token,
+    required String phone,
+  }) async {
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "requestPhoneVerification() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    AppDebug.log("PROFILE_API", "requestPhoneVerification() start");
+
+    final resp = await _dio.post(
+      "/auth/phone-verification/request",
+      data: {"phone": phone.trim()},
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    AppDebug.log("PROFILE_API", "requestPhoneVerification() success");
+    return resp.data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> confirmPhoneVerification({
+    required String token,
+    required String code,
+  }) async {
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "confirmPhoneVerification() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    AppDebug.log("PROFILE_API", "confirmPhoneVerification() start");
+
+    final resp = await _dio.post(
+      "/auth/phone-verification/confirm",
+      data: {"code": code.trim()},
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    AppDebug.log("PROFILE_API", "confirmPhoneVerification() success");
+    return resp.data as Map<String, dynamic>;
+  }
 }

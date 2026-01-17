@@ -13,64 +13,143 @@
  * - Filters update inputs to a strict allowlist and applies changes.
  */
 
-const debug = require('../utils/debug');
-const User = require('../models/User');
-const { ACCOUNT_TYPES } = require('../models/User');
+const debug = require("../utils/debug");
+const User = require("../models/User");
+const {
+  ACCOUNT_TYPES,
+} = require("../models/User");
+
+// WHY: Enforce Nigerian phone formatting when present.
+const PHONE_NG_E164_REGEX =
+  /^\+234\d{10}$/;
+const PHONE_NG_LOCAL_REGEX =
+  /^0\d{10}$/;
+const PHONE_NG_PLAIN_REGEX =
+  /^234\d{10}$/;
 
 // WHY: Restrict updates to only the profile fields the UI exposes.
 const PROFILE_FIELDS = [
-  'firstName',
-  'lastName',
-  'name',
-  'phone',
-  'accountType',
-  'companyName',
-  'companyEmail',
-  'companyPhone',
-  'companyAddress',
-  'companyWebsite',
-  'companyRegistration',
+  "firstName",
+  "lastName",
+  "name",
+  "phone",
+  "accountType",
+  "companyName",
+  "companyEmail",
+  "companyPhone",
+  "companyAddress",
+  "companyWebsite",
+  "companyRegistration",
 ];
 
 // WHY: Centralize string cleanup so all fields are normalized consistently.
 function normalizeString(value) {
-  if (typeof value !== 'string') return value;
+  if (typeof value !== "string")
+    return value;
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0
+    ? trimmed
+    : null;
+}
+
+// WHY: Normalize Nigerian numbers to E.164 for consistency across services.
+function normalizeNigerianPhone(value) {
+  const raw = (value || "")
+    .toString()
+    .replace(/\s+/g, "")
+    .trim();
+
+  if (PHONE_NG_E164_REGEX.test(raw))
+    return raw;
+  if (PHONE_NG_LOCAL_REGEX.test(raw))
+    return `+234${raw.slice(1)}`;
+  if (PHONE_NG_PLAIN_REGEX.test(raw))
+    return `+${raw}`;
+
+  return null;
 }
 
 // WHY: Only allow safe profile updates and validate account type.
-function buildProfileUpdatePayload(input) {
+function buildProfileUpdatePayload(
+  input
+) {
   const payload = {};
 
   for (const field of PROFILE_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(input, field)) {
+    if (
+      !Object.prototype.hasOwnProperty.call(
+        input,
+        field
+      )
+    ) {
       continue;
     }
 
     const rawValue = input[field];
-    payload[field] = normalizeString(rawValue);
+    payload[field] =
+      normalizeString(rawValue);
+  }
+
+  if (payload.phone != null) {
+    const normalized =
+      normalizeNigerianPhone(
+        payload.phone
+      );
+    if (!normalized) {
+      throw new Error(
+        "Invalid Nigerian phone number"
+      );
+    }
+    payload.phone = normalized;
+  }
+
+  if (payload.companyPhone != null) {
+    const normalized =
+      normalizeNigerianPhone(
+        payload.companyPhone
+      );
+    if (!normalized) {
+      throw new Error(
+        "Invalid company phone number"
+      );
+    }
+    payload.companyPhone = normalized;
   }
 
   // WHY: Keep name in sync when first + last name are provided.
-  if (payload.firstName && payload.lastName) {
+  if (
+    payload.firstName &&
+    payload.lastName
+  ) {
     payload.name = `${payload.firstName} ${payload.lastName}`;
   }
 
   // WHY: Backfill split names when only a full name is sent.
-  if (payload.name && !payload.firstName && !payload.lastName) {
-    const parts = payload.name.split(' ').filter(Boolean);
+  if (
+    payload.name &&
+    !payload.firstName &&
+    !payload.lastName
+  ) {
+    const parts = payload.name
+      .split(" ")
+      .filter(Boolean);
     if (parts.length > 0) {
       payload.firstName = parts[0];
-      payload.lastName = parts.slice(1).join(' ') || null;
+      payload.lastName =
+        parts.slice(1).join(" ") ||
+        null;
     }
   }
 
   if (
     payload.accountType &&
-    !ACCOUNT_TYPES.includes(payload.accountType)
+    !ACCOUNT_TYPES.includes(
+      payload.accountType
+    )
   ) {
-    throw new Error('Invalid account type');
+    throw new Error(
+      "Invalid account type"
+    );
   }
 
   return payload;
@@ -80,63 +159,97 @@ function buildProfileUpdatePayload(input) {
 function shapeProfile(userDoc) {
   return {
     id: userDoc._id.toString(),
-    name: userDoc.name || '',
-    firstName: userDoc.firstName || null,
+    name: userDoc.name || "",
+    firstName:
+      userDoc.firstName || null,
     lastName: userDoc.lastName || null,
-    email: userDoc.email || '',
-    role: userDoc.role || 'customer',
-    accountType: userDoc.accountType || 'personal',
+    email: userDoc.email || "",
+    role: userDoc.role || "customer",
+    accountType:
+      userDoc.accountType || "personal",
+    isEmailVerified:
+      !!userDoc.isEmailVerified,
+    isPhoneVerified:
+      !!userDoc.isPhoneVerified,
     phone: userDoc.phone || null,
-    companyName: userDoc.companyName || null,
-    companyEmail: userDoc.companyEmail || null,
-    companyPhone: userDoc.companyPhone || null,
-    companyAddress: userDoc.companyAddress || null,
-    companyWebsite: userDoc.companyWebsite || null,
-    companyRegistration: userDoc.companyRegistration || null,
+    companyName:
+      userDoc.companyName || null,
+    companyEmail:
+      userDoc.companyEmail || null,
+    companyPhone:
+      userDoc.companyPhone || null,
+    companyAddress:
+      userDoc.companyAddress || null,
+    companyWebsite:
+      userDoc.companyWebsite || null,
+    companyRegistration:
+      userDoc.companyRegistration ||
+      null,
   };
 }
 
 async function getUserProfile(userId) {
-  debug('PROFILE SERVICE: getUserProfile - entry', { userId });
+  debug(
+    "PROFILE SERVICE: getUserProfile - entry",
+    { userId }
+  );
 
   if (!userId) {
-    throw new Error('Missing userId');
+    throw new Error("Missing userId");
   }
 
-  const user = await User.findById(userId).select('-passwordHash');
+  const user = await User.findById(
+    userId
+  ).select("-passwordHash");
 
   if (!user) {
-    throw new Error('User not found');
+    throw new Error("User not found");
   }
 
-  debug('PROFILE SERVICE: getUserProfile - success', { userId });
+  debug(
+    "PROFILE SERVICE: getUserProfile - success",
+    { userId }
+  );
 
   return shapeProfile(user);
 }
 
-async function updateUserProfile(userId, updates) {
-  debug('PROFILE SERVICE: updateUserProfile - entry', {
-    userId,
-    keys: Object.keys(updates || {}),
-  });
+async function updateUserProfile(
+  userId,
+  updates
+) {
+  debug(
+    "PROFILE SERVICE: updateUserProfile - entry",
+    {
+      userId,
+      keys: Object.keys(updates || {}),
+    }
+  );
 
   if (!userId) {
-    throw new Error('Missing userId');
+    throw new Error("Missing userId");
   }
 
-  const payload = buildProfileUpdatePayload(updates || {});
+  const payload =
+    buildProfileUpdatePayload(
+      updates || {}
+    );
 
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { $set: payload },
-    { new: true, runValidators: true },
-  ).select('-passwordHash');
+  const user =
+    await User.findByIdAndUpdate(
+      userId,
+      { $set: payload },
+      { new: true, runValidators: true }
+    ).select("-passwordHash");
 
   if (!user) {
-    throw new Error('User not found');
+    throw new Error("User not found");
   }
 
-  debug('PROFILE SERVICE: updateUserProfile - success', { userId });
+  debug(
+    "PROFILE SERVICE: updateUserProfile - success",
+    { userId }
+  );
 
   return shapeProfile(user);
 }

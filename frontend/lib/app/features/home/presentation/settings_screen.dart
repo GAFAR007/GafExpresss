@@ -59,9 +59,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // WHY: Track account type choices in one place for UI + payloads.
   static const List<Map<String, String>> _accountTypeOptions = [
     {"value": "personal", "label": "Personal"},
-    {"value": "business", "label": "Business"},
-    {"value": "firm", "label": "Firm"},
-    {"value": "organization", "label": "Organization"},
+    {"value": "sole_proprietorship", "label": "Business Name"},
+    {"value": "partnership", "label": "Partnership"},
+    {
+      "value": "limited_liability_company",
+      "label": "Limited Liability Company (Ltd)",
+    },
+    {
+      "value": "public_limited_company",
+      "label": "Public Limited Company (Plc)",
+    },
+    {
+      "value": "incorporated_trustees",
+      "label": "Incorporated Trustees / NGO",
+    },
   ];
 
   @override
@@ -91,6 +102,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _applyProfile(UserProfile profile) {
     // WHY: Avoid re-prefill if we already applied the same profile.
     if (_didPrefill && _currentProfile?.id == profile.id) {
+      // WHY: Keep backend verification status in sync without clobbering edits.
+      _currentProfile = _currentProfile?.copyWith(
+        isEmailVerified: profile.isEmailVerified,
+        isPhoneVerified: profile.isPhoneVerified,
+      );
       return;
     }
 
@@ -124,6 +140,189 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// ------------------------------------------------------------
+  /// VERIFICATION HANDLERS
+  /// ------------------------------------------------------------
+  Future<void> _verifyEmail() async {
+    AppDebug.log("SETTINGS", "Verify email tapped");
+
+    final session = ref.read(authSessionProvider);
+    if (session == null) {
+      AppDebug.log("SETTINGS", "Verify email blocked (missing session)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    try {
+      final api = ref.read(profileApiProvider);
+      final response = await api.requestEmailVerification(token: session.token);
+      final recipient =
+          response["email"]?.toString().trim() ?? _emailCtrl.text.trim();
+
+      AppDebug.log(
+        "SETTINGS",
+        "Email verification sent",
+        extra: {"email": recipient},
+      );
+
+      if (!mounted) return;
+      if (recipient.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Code sent to $recipient")),
+        );
+      }
+
+      if (!mounted) return;
+      final code = await _openCodeDialog(
+        title: "Email verification",
+        message: "Enter the code sent to your email address.",
+      );
+      if (code == null) return;
+
+      await api.confirmEmailVerification(token: session.token, code: code);
+
+      // WHY: Refresh profile to update verification badges.
+      ref.invalidate(userProfileProvider);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Email verified successfully")),
+      );
+    } catch (e) {
+      AppDebug.log("SETTINGS", "Verify email failed", extra: {"error": e.toString()});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Email verification failed: $e")),
+      );
+    }
+  }
+
+  Future<void> _verifyPhone() async {
+    AppDebug.log("SETTINGS", "Verify phone tapped");
+
+    final session = ref.read(authSessionProvider);
+    if (session == null) {
+      AppDebug.log("SETTINGS", "Verify phone blocked (missing session)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    final phone = _phoneCtrl.text.trim();
+    final normalizedPhone = _normalizeNigerianPhone(phone);
+
+    if (phone.isEmpty) {
+      AppDebug.log("SETTINGS", "Verify phone blocked (missing phone)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter a phone number first")),
+      );
+      return;
+    }
+
+    if (normalizedPhone == null) {
+      AppDebug.log("SETTINGS", "Verify phone blocked (invalid phone)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Use format +234XXXXXXXXXX for Nigerian numbers"),
+        ),
+      );
+      return;
+    }
+
+    // WHY: Keep normalized format for API + SMS.
+    _phoneCtrl.text = normalizedPhone;
+
+    try {
+      final api = ref.read(profileApiProvider);
+      await api.requestPhoneVerification(
+        token: session.token,
+        phone: normalizedPhone,
+      );
+
+      if (!mounted) return;
+      final code = await _openCodeDialog(
+        title: "Phone verification",
+        message: "Enter the OTP sent to your phone number.",
+      );
+      if (code == null) return;
+
+      await api.confirmPhoneVerification(token: session.token, code: code);
+
+      ref.invalidate(userProfileProvider);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Phone verified successfully")),
+      );
+    } catch (e) {
+      AppDebug.log("SETTINGS", "Verify phone failed", extra: {"error": e.toString()});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Phone verification failed: $e")),
+      );
+    }
+  }
+
+  Future<String?> _openCodeDialog({
+    required String title,
+    required String message,
+  }) async {
+    AppDebug.log("SETTINGS", "Open verification dialog", extra: {"title": title});
+
+    final controller = TextEditingController();
+
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: "Verification code"),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final code = controller.text.trim();
+                Navigator.of(context).pop(code.isEmpty ? null : code);
+              },
+              child: const Text("Verify"),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (result == null || result.isEmpty) {
+      AppDebug.log("SETTINGS", "Verification dialog dismissed");
+      return null;
+    }
+
+    return result;
+  }
+
+  /// ------------------------------------------------------------
   /// SAVE HANDLER
   /// ------------------------------------------------------------
   Future<void> _onSavePressed() async {
@@ -149,6 +348,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final firstName = _firstNameCtrl.text.trim();
     final lastName = _lastNameCtrl.text.trim();
     final fullName = "$firstName $lastName".trim();
+    final normalizedPhone = _normalizeNigerianPhone(_phoneCtrl.text);
+
+    if (_phoneCtrl.text.trim().isNotEmpty && normalizedPhone == null) {
+      AppDebug.log("SETTINGS", "Save blocked (invalid phone)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Enter a valid Nigerian phone number (+234XXXXXXXXXX)"),
+        ),
+      );
+      setState(() => _isSaving = false);
+      return;
+    }
+
+    if (normalizedPhone != null) {
+      // WHY: Normalize to E.164 so backend + SMS are consistent.
+      _phoneCtrl.text = normalizedPhone;
+    }
+
+    // WHY: Verification flags should reflect backend truth, not local UI state.
+    final latestProfile = ref.read(userProfileProvider).value ?? _currentProfile;
 
     final profile = UserProfile(
       id: _currentProfile?.id ?? session.user.id,
@@ -160,6 +380,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           : _emailCtrl.text.trim(),
       role: _currentProfile?.role ?? session.user.role,
       accountType: _accountType,
+      isEmailVerified: latestProfile?.isEmailVerified ?? false,
+      isPhoneVerified: latestProfile?.isPhoneVerified ?? false,
       phone: _phoneCtrl.text.trim(),
       companyName: _companyNameCtrl.text.trim(),
       companyEmail: _companyEmailCtrl.text.trim(),
@@ -227,6 +449,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// ------------------------------------------------------------
+  /// ACCOUNT TYPE LABEL
+  /// ------------------------------------------------------------
+  /// WHY:
+  /// - Keep UI-friendly labels for account types stored as enums.
+  String _accountTypeLabel(String value) {
+    for (final option in _accountTypeOptions) {
+      if (option["value"] == value) {
+        return option["label"] ?? value;
+      }
+    }
+    return value.replaceAll('_', ' ').toUpperCase();
+  }
+
+  /// ------------------------------------------------------------
   /// FULL NAME SPLIT
   /// ------------------------------------------------------------
   /// WHY:
@@ -254,6 +490,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     return _SplitName(parts.first, parts.sublist(1).join(' '));
+  }
+
+  /// ------------------------------------------------------------
+  /// PHONE NORMALIZATION
+  /// ------------------------------------------------------------
+  /// WHY:
+  /// - Ensure phone follows Nigerian +234 format for OTP delivery.
+  String? _normalizeNigerianPhone(String input) {
+    final raw = input.replaceAll(RegExp(r'\s+'), '').trim();
+    final e164 = RegExp(r'^\+234\d{10}$');
+    final local = RegExp(r'^0\d{10}$');
+    final plain = RegExp(r'^234\d{10}$');
+
+    if (e164.hasMatch(raw)) return raw;
+    if (local.hasMatch(raw)) return '+234${raw.substring(1)}';
+    if (plain.hasMatch(raw)) return '+$raw';
+
+    return null;
   }
 
   Widget _buildSectionHeader(String title, String subtitle) {
@@ -290,6 +544,71 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         labelText: label,
         hintText: hint,
       ),
+    );
+  }
+
+  Widget _buildFieldWithAction({
+    required TextEditingController controller,
+    required String label,
+    required String actionLabel,
+    required bool isVerified,
+    required VoidCallback onActionTap,
+    String? hint,
+    TextInputType? keyboardType,
+    bool readOnly = false,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildTextField(
+            controller: controller,
+            label: label,
+            hint: hint,
+            keyboardType: keyboardType,
+            readOnly: readOnly,
+          ),
+        ),
+        const SizedBox(width: 12),
+        _buildVerificationButton(
+          isVerified: isVerified,
+          label: actionLabel,
+          onTap: onActionTap,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVerificationButton({
+    required bool isVerified,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    if (isVerified) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.verified, size: 16, color: Colors.green.shade700),
+            const SizedBox(width: 6),
+            Text(
+              "Verified",
+              style: TextStyle(
+                color: Colors.green.shade700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return OutlinedButton(
+      onPressed: onTap,
+      child: Text(label),
     );
   }
 
@@ -348,7 +667,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
-              profile.accountType.toUpperCase(),
+              _accountTypeLabel(profile.accountType),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 11,
@@ -420,6 +739,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   email: '',
                   role: 'customer',
                   accountType: 'personal',
+                  isEmailVerified: false,
+                  isPhoneVerified: false,
                 )
               : UserProfile(
                   id: session.user.id,
@@ -431,6 +752,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   email: session.user.email,
                   role: session.user.role,
                   accountType: _accountType,
+                  isEmailVerified: false,
+                  isPhoneVerified: false,
                 );
 
           final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
@@ -459,17 +782,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   hint: "Your last name",
                 ),
                 const SizedBox(height: 12),
-                _buildTextField(
+                _buildFieldWithAction(
                   controller: _emailCtrl,
                   label: "Email address",
+                  actionLabel: "Verify",
+                  isVerified: activeProfile.isEmailVerified,
+                  onActionTap: _verifyEmail,
                   hint: "Your email",
                   readOnly: true,
                 ),
                 const SizedBox(height: 12),
-                _buildTextField(
+                _buildFieldWithAction(
                   controller: _phoneCtrl,
                   label: "Phone number",
-                  hint: "e.g. +234 801 234 5678",
+                  actionLabel: "Verify",
+                  isVerified: activeProfile.isPhoneVerified,
+                  onActionTap: _verifyPhone,
+                  hint: "e.g. +2348012345678",
                   keyboardType: TextInputType.phone,
                 ),
                 const SizedBox(height: 20),
@@ -514,7 +843,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "Upgrade to Business, Firm, or Organization for team tools and priority support.",
+                          "Upgrade to a registered business type for team tools and priority support.",
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),

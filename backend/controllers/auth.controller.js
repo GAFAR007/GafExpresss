@@ -23,6 +23,12 @@ const {
   getUserProfile,
   updateUserProfile,
 } = require('../services/profile.service');
+const {
+  requestEmailVerification,
+  confirmEmailVerification,
+  requestPhoneVerification,
+  confirmPhoneVerification,
+} = require('../services/verification.service');
 
 
 /**
@@ -217,9 +223,127 @@ async function updateProfile(req, res) {
   }
 }
 
+/* =========================
+   VERIFICATION — EMAIL/PHONE
+========================= */
+async function requestEmailVerificationController(req, res) {
+  try {
+    debug('================ EMAIL VERIFY REQUEST START ================');
+    debug('Email verify request userId:', req.user?.sub);
+
+    const result = await requestEmailVerification(req.user?.sub);
+
+    debug('Email verify request success', {
+      userId: req.user?.sub,
+      status: result.status,
+    });
+    debug('================ EMAIL VERIFY REQUEST END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Email verification sent',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ EMAIL VERIFY REQUEST END (ERROR) ================');
+    debug('Email verify request error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+async function confirmEmailVerificationController(req, res) {
+  try {
+    debug('================ EMAIL VERIFY CONFIRM START ================');
+    debug('Email verify confirm userId:', req.user?.sub);
+
+    const { code } = req.body || {};
+    const result = await confirmEmailVerification(req.user?.sub, code);
+
+    debug('Email verify confirm success', {
+      userId: req.user?.sub,
+      status: result.status,
+    });
+    debug('================ EMAIL VERIFY CONFIRM END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Email verified',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ EMAIL VERIFY CONFIRM END (ERROR) ================');
+    debug('Email verify confirm error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+async function requestPhoneVerificationController(req, res) {
+  try {
+    debug('================ PHONE VERIFY REQUEST START ================');
+    debug('Phone verify request userId:', req.user?.sub);
+
+    const { phone } = req.body || {};
+    const result = await requestPhoneVerification(req.user?.sub, phone);
+
+    debug('Phone verify request success', {
+      userId: req.user?.sub,
+      status: result.status,
+    });
+    debug('================ PHONE VERIFY REQUEST END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Phone verification sent',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ PHONE VERIFY REQUEST END (ERROR) ================');
+    debug('Phone verify request error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+async function confirmPhoneVerificationController(req, res) {
+  try {
+    debug('================ PHONE VERIFY CONFIRM START ================');
+    debug('Phone verify confirm userId:', req.user?.sub);
+
+    const { code } = req.body || {};
+    const result = await confirmPhoneVerification(req.user?.sub, code);
+
+    debug('Phone verify confirm success', {
+      userId: req.user?.sub,
+      status: result.status,
+    });
+    debug('================ PHONE VERIFY CONFIRM END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Phone verified',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ PHONE VERIFY CONFIRM END (ERROR) ================');
+    debug('Phone verify confirm error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
 module.exports = {
   register,
   login,
   getProfile,
   updateProfile,
+  requestEmailVerification: requestEmailVerificationController,
+  confirmEmailVerification: confirmEmailVerificationController,
+  requestPhoneVerification: requestPhoneVerificationController,
+  confirmPhoneVerification: confirmPhoneVerificationController,
 };

@@ -1,3 +1,12 @@
+# WHAT
+- Top-level overview and operating rules for the apps workspace.
+
+# WHY
+- Keep frontend + backend changes consistent, safe, and production-ready.
+
+# HOW
+- Document architecture, flows, and required debugging standards here.
+
 GafExpress — Full-Stack Application
 Clean Architecture · Multi-Platform · Production-Oriented · JWT-Validated
 Agent Instructions (Codex / AI Helpers)
@@ -124,6 +133,24 @@ Important Design Decision
 Token handling is enforced and JWT-validated
 
 No frontend rewrite required when JWT is added
+
+🔒 Verification Flow (Email + Phone)
+What Happens
+
+Frontend (dumb UI)
+- Shows "Verified" only when the backend profile returns `isEmailVerified` / `isPhoneVerified`.
+- Never sets verification flags itself.
+
+Backend (source of truth)
+1) Request: `/auth/email-verification/request` or `/auth/phone-verification/request`.
+2) OTP: backend generates a 6-digit code, hashes it, stores hash + expiry.
+3) Confirm: `/auth/*/confirm` validates code + expiry, then flips verified flags.
+4) UI refresh: frontend re-fetches `/auth/profile` and updates the badge.
+
+Why It's Safe
+- Verification flags can only be set server-side; profile updates ignore them.
+- OTPs are hashed, time-limited, and never stored in plaintext.
+- Requests are tied to the authenticated `userId` from auth middleware.
 
 🖥 Backend (apps/backend)
 Purpose
