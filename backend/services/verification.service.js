@@ -43,6 +43,9 @@ const TERMII_CHANNEL = process.env.TERMII_CHANNEL || 'generic';
 const TERMII_MESSAGE_PREFIX =
   process.env.TERMII_MESSAGE_PREFIX || 'Your verification code is';
 
+// WHY: Reuse email rules for verification-time updates.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // WHY: Enforce strict Nigerian phone formatting across all flows.
 const PHONE_NG_E164_REGEX = /^\+234\d{10}$/;
 const PHONE_NG_LOCAL_REGEX = /^0\d{10}$/;
@@ -206,12 +209,45 @@ async function sendPhoneCode({ phone, code }) {
   throw new Error('SMS provider not configured');
 }
 
-async function requestEmailVerification(userId) {
-  debug('VERIFY SERVICE: requestEmailVerification', { userId });
+async function requestEmailVerification(userId, emailOverride) {
+  debug('VERIFY SERVICE: requestEmailVerification', {
+    userId,
+    hasEmailOverride: !!emailOverride,
+  });
 
   const user = await User.findById(userId);
   if (!user) {
     throw new Error('User not found');
+  }
+
+  const normalizedOverride = (emailOverride || '').toString().trim().toLowerCase();
+
+  if (normalizedOverride) {
+    if (!EMAIL_REGEX.test(normalizedOverride)) {
+      throw new Error('Please provide a valid email address');
+    }
+
+    // WHY: Avoid changing verified emails without an explicit reset flow.
+    if (user.isEmailVerified && normalizedOverride !== user.email) {
+      throw new Error('Verified email cannot be changed until reset');
+    }
+
+    if (normalizedOverride !== user.email) {
+      const existingEmail = await User.findOne({
+        email: normalizedOverride,
+        _id: { $ne: userId },
+      }).select('_id');
+
+      if (existingEmail) {
+        throw new Error('Email already registered');
+      }
+
+      debug('VERIFY SERVICE: email override applied', { userId });
+      user.email = normalizedOverride;
+      user.isEmailVerified = false;
+      user.emailVerificationCodeHash = null;
+      user.emailVerificationExpiresAt = null;
+    }
   }
 
   if (!user.email) {

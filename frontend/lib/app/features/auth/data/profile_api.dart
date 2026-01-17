@@ -113,16 +113,28 @@ class ProfileApi {
   /// ------------------------------------------------------
   Future<Map<String, dynamic>> requestEmailVerification({
     required String token,
+    String? email,
   }) async {
     if (token.trim().isEmpty) {
       AppDebug.log("PROFILE_API", "requestEmailVerification() missing token");
       throw Exception("Missing auth token");
     }
 
-    AppDebug.log("PROFILE_API", "requestEmailVerification() start");
+    // WHY: Let backend verify the edited email even before a full save.
+    final trimmedEmail = email?.trim();
+
+    AppDebug.log(
+      "PROFILE_API",
+      "requestEmailVerification() start",
+      extra: {"email": trimmedEmail},
+    );
 
     final resp = await _dio.post(
       "/auth/email-verification/request",
+      // WHY: Only send an email override when the user typed one.
+      data: trimmedEmail == null || trimmedEmail.isEmpty
+          ? null
+          : {"email": trimmedEmail},
       options: Options(
         headers: {"Authorization": "Bearer $token"},
       ),

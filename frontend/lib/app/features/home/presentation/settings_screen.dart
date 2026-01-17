@@ -143,7 +143,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// VERIFICATION HANDLERS
   /// ------------------------------------------------------------
   Future<void> _verifyEmail() async {
-    AppDebug.log("SETTINGS", "Verify email tapped");
+    final emailInput = _emailCtrl.text.trim();
+    AppDebug.log(
+      "SETTINGS",
+      "Verify email tapped",
+      extra: {"email": emailInput},
+    );
 
     final session = ref.read(authSessionProvider);
     if (session == null) {
@@ -155,9 +160,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
+    // WHY: Avoid sending a verify request without a target email.
+    if (emailInput.isEmpty) {
+      AppDebug.log("SETTINGS", "Verify email blocked (missing email)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter an email address")),
+      );
+      return;
+    }
+
     try {
       final api = ref.read(profileApiProvider);
-      final response = await api.requestEmailVerification(token: session.token);
+      final response = await api.requestEmailVerification(
+        token: session.token,
+        email: emailInput,
+      );
       final recipient =
           response["email"]?.toString().trim() ?? _emailCtrl.text.trim();
 

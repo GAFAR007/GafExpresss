@@ -231,7 +231,15 @@ async function requestEmailVerificationController(req, res) {
     debug('================ EMAIL VERIFY REQUEST START ================');
     debug('Email verify request userId:', req.user?.sub);
 
-    const result = await requestEmailVerification(req.user?.sub);
+    const { email } = req.body || {};
+    // WHY: Allow frontend to verify a newly edited email without a full save.
+    if (email) {
+      debug('Email verify request override:', {
+        userId: req.user?.sub,
+        email,
+      });
+    }
+    const result = await requestEmailVerification(req.user?.sub, email);
 
     debug('Email verify request success', {
       userId: req.user?.sub,

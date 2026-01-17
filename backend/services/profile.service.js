@@ -111,9 +111,7 @@ function buildProfileUpdatePayload(
       payload.email.toLowerCase();
 
     if (
-      !EMAIL_REGEX.test(
-        normalizedEmail
-      )
+      !EMAIL_REGEX.test(normalizedEmail)
     ) {
       throw new Error(
         "Please provide a valid email address"
@@ -303,8 +301,10 @@ async function updateUserProfile(
 
     // WHY: Any email change requires fresh verification.
     payload.isEmailVerified = false;
-    payload.emailVerificationCodeHash = null;
-    payload.emailVerificationExpiresAt = null;
+    payload.emailVerificationCodeHash =
+      null;
+    payload.emailVerificationExpiresAt =
+      null;
   }
 
   // WHY: Prevent multiple accounts from claiming the same phone number.
