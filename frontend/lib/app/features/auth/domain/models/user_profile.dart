@@ -88,6 +88,8 @@ class UserProfile {
       "name": name,
       "firstName": firstName,
       "lastName": lastName,
+      // WHY: Allow backend to update email while unverified.
+      "email": email,
       "phone": phone,
       "accountType": accountType,
       "companyName": companyName,

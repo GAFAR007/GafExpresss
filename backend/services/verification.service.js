@@ -289,6 +289,17 @@ async function requestPhoneVerification(userId, phone) {
     throw new Error('Invalid Nigerian phone number');
   }
 
+  // WHY: Ensure phone numbers are unique per user before sending OTP.
+  const existingPhone = await User.findOne({
+    phone: normalizedPhone,
+    _id: { $ne: userId },
+  }).select('_id');
+
+  if (existingPhone) {
+    debug('PHONE VERIFY: phone already in use', { userId });
+    throw new Error('Phone number already in use');
+  }
+
   user.phone = normalizedPhone;
 
   if (user.isPhoneVerified) {

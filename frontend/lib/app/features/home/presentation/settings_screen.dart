@@ -789,7 +789,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   isVerified: activeProfile.isEmailVerified,
                   onActionTap: _verifyEmail,
                   hint: "Your email",
-                  readOnly: true,
+                  // WHY: Allow edits only until the backend confirms verification.
+                  readOnly: activeProfile.isEmailVerified,
                 ),
                 const SizedBox(height: 12),
                 _buildFieldWithAction(

@@ -86,7 +86,7 @@ const userSchema = new mongoose.Schema(
       index: true,
     },
 
-    // ✅ Contact phone (kept optional for now)
+    // ✅ Contact phone (unique when present; enforced via partial index)
     phone: {
       type: String,
       trim: true,
@@ -170,6 +170,17 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true, // adds createdAt + updatedAt
+  }
+);
+
+// WHY: Enforce unique phone numbers only when the field is populated.
+userSchema.index(
+  { phone: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      phone: { $type: 'string' },
+    },
   }
 );
 
