@@ -14,6 +14,7 @@
 /// SAFETY:
 /// - Never logs token or password.
 /// ------------------------------------------------------------
+library;
 
 import 'dart:convert';
 
@@ -30,7 +31,7 @@ class AuthSessionStorage {
   final FlutterSecureStorage _storage;
 
   AuthSessionStorage({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   /// ------------------------------------------------------
   /// SAVE SESSION
@@ -55,7 +56,10 @@ class AuthSessionStorage {
     final userJson = await _storage.read(key: _userKey);
 
     // WHY: If any piece is missing, treat session as invalid.
-    if (token == null || token.isEmpty || userJson == null || userJson.isEmpty) {
+    if (token == null ||
+        token.isEmpty ||
+        userJson == null ||
+        userJson.isEmpty) {
       AppDebug.log("AUTH_STORAGE", "No stored session found");
       return null;
     }
@@ -63,10 +67,7 @@ class AuthSessionStorage {
     final userMap = jsonDecode(userJson) as Map<String, dynamic>;
 
     // Reuse AuthSession parser to validate token + user.
-    return AuthSession.fromJson({
-      "token": token,
-      "user": userMap,
-    });
+    return AuthSession.fromJson({"token": token, "user": userMap});
   }
 
   /// ------------------------------------------------------

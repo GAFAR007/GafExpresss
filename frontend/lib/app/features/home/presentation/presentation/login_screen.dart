@@ -34,6 +34,7 @@
 /// MULTI-PLATFORM:
 /// - Works on Web / Android / iOS (no dart:io usage here)
 /// ---------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

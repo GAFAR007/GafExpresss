@@ -14,7 +14,9 @@
 
 const express = require("express");
 const debug = require("../utils/debug");
-const { requireAuth } = require("../middlewares/auth.middleware");
+const {
+  requireAuth,
+} = require("../middlewares/auth.middleware");
 const paymentsController = require("../controllers/payments.controller");
 
 const router = express.Router();
