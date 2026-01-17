@@ -9,8 +9,8 @@
 ///   ✅ Register failure -> show error message (and log where it failed)
 ///
 /// HOW IT WORKS:
-/// 1) User taps "Register"
-/// 2) We call AuthApi.register() via Riverpod provider (authApiProvider)
+/// 1) User fills first + last name, email, password, confirm password
+/// 2) Tap "Register" -> call AuthApi.register() via authApiProvider
 /// 3) On success -> snackbar -> context.go('/login')
 /// 4) On error -> snackbar -> log error (NO password logging)
 ///
@@ -53,9 +53,19 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   // WHY:
   // - We need to read what the user typed.
   // - We dispose them to avoid memory leaks.
-  final _nameCtrl = TextEditingController();
+  final _firstNameCtrl = TextEditingController();
+  final _lastNameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _confirmPasswordCtrl = TextEditingController();
+
+  // ------------------------------------------------------------
+  // PASSWORD VISIBILITY
+  // ------------------------------------------------------------
+  // WHY:
+  // - Lets users verify password entry without retyping.
+  bool _showPassword = false;
+  bool _showConfirmPassword = false;
 
   // ------------------------------------------------------------
   // LOADING FLAG
@@ -67,9 +77,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
+    _confirmPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -85,9 +97,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       return;
     }
 
-    final name = _nameCtrl.text.trim();
+    final firstName = _firstNameCtrl.text.trim();
+    final lastName = _lastNameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
     final password = _passwordCtrl.text;
+    final confirmPassword = _confirmPasswordCtrl.text;
 
     // ------------------------------------------------------------
     // BASIC VALIDATION (UI LEVEL)
@@ -95,11 +109,43 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     // WHY:
     // - Avoid hitting backend with empty fields.
     // - Gives user immediate feedback.
-    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+    if (firstName.isEmpty ||
+        lastName.isEmpty ||
+        email.isEmpty ||
+        password.isEmpty ||
+        confirmPassword.isEmpty) {
       AppDebug.log("REGISTER", "Validation failed (empty field)");
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("All fields are required")));
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      AppDebug.log("REGISTER", "Validation failed (invalid email)");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter a valid email address")),
+      );
+      return;
+    }
+
+    if (!_isValidPassword(password)) {
+      AppDebug.log("REGISTER", "Validation failed (weak password)");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Password must be 8+ chars with upper, lower, number, and symbol",
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (password != confirmPassword) {
+      AppDebug.log("REGISTER", "Validation failed (password mismatch)");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Passwords do not match")),
+      );
       return;
     }
 
@@ -116,9 +162,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       AppDebug.log("REGISTER", "Starting register()", extra: {"email": email});
 
       final user = await api.register(
-        name: name,
+        firstName: firstName,
+        lastName: lastName,
         email: email,
         password: password,
+        confirmPassword: confirmPassword,
       );
 
       AppDebug.log("REGISTER", "Register success", extra: {"userId": user.id});
@@ -153,6 +201,23 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     }
   }
 
+  /// ------------------------------------------------------------
+  /// VALIDATION HELPERS
+  /// ------------------------------------------------------------
+  /// WHY:
+  /// - Keep validation logic readable and reusable.
+  bool _isValidEmail(String email) {
+    final regex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    return regex.hasMatch(email.trim());
+  }
+
+  bool _isValidPassword(String password) {
+    final regex = RegExp(
+      r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$',
+    );
+    return regex.hasMatch(password);
+  }
+
   @override
   Widget build(BuildContext context) {
     AppDebug.log("REGISTER", "build()", extra: {"isLoading": _isLoading});
@@ -170,8 +235,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 const SizedBox(height: 12),
 
                 TextField(
-                  controller: _nameCtrl,
-                  decoration: const InputDecoration(labelText: "Full name"),
+                  controller: _firstNameCtrl,
+                  decoration: const InputDecoration(labelText: "First name"),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: _lastNameCtrl,
+                  decoration: const InputDecoration(labelText: "Last name"),
                 ),
                 const SizedBox(height: 12),
 
@@ -184,8 +255,49 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
                 TextField(
                   controller: _passwordCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: "Password"),
+                  obscureText: !_showPassword,
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    suffixIcon: IconButton(
+                      onPressed: () {
+                        // WHY: Toggle visibility to help users confirm entry.
+                        AppDebug.log("REGISTER", "Toggle password visibility");
+                        setState(() => _showPassword = !_showPassword);
+                      },
+                      icon: Icon(
+                        _showPassword ? Icons.visibility_off : Icons.visibility,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                Text(
+                  "Password must be 8+ chars with upper, lower, number, and symbol.",
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: _confirmPasswordCtrl,
+                  obscureText: !_showConfirmPassword,
+                  decoration: InputDecoration(
+                    labelText: "Confirm password",
+                    suffixIcon: IconButton(
+                      onPressed: () {
+                        // WHY: Confirm field needs its own visibility toggle.
+                        AppDebug.log("REGISTER", "Toggle confirm visibility");
+                        setState(
+                          () => _showConfirmPassword = !_showConfirmPassword,
+                        );
+                      },
+                      icon: Icon(
+                        _showConfirmPassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
 

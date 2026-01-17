@@ -37,9 +37,11 @@ class AuthApi {
   /// - Token is NOT returned (this is OK)
   /// ------------------------------------------------------
   Future<AuthUser> register({
-    required String name,
+    required String firstName,
+    required String lastName,
     required String email,
     required String password,
+    required String confirmPassword,
   }) async {
     // Safe debug: email is OK, never log password or token.
     AppDebug.log("AUTH_API", "register() start", extra: {"email": email});
@@ -47,9 +49,11 @@ class AuthApi {
     final resp = await _dio.post(
       "/auth/register",
       data: {
-        "name": name.trim(),
+        "firstName": firstName.trim(),
+        "lastName": lastName.trim(),
         "email": email.trim(),
         "password": password, // DO NOT LOG THIS
+        "confirmPassword": confirmPassword, // DO NOT LOG THIS
       },
     );
 

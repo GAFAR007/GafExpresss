@@ -19,6 +19,10 @@ const {
   loginUser,
 } = require('../services/auth.service');
 const authService = require('../services/auth.service');
+const {
+  getUserProfile,
+  updateUserProfile,
+} = require('../services/profile.service');
 
 
 /**
@@ -33,25 +37,36 @@ async function register(req, res) {
   debug('Request body received:', req.body);
 
   try {
-    const { name, email, password, role } = req.body;
+    const { firstName, lastName, name, email, password, confirmPassword, role } =
+      req.body;
 
     // ✅ Basic guard (controller-level)
-    if (!email || !password) {
-      debug('Register failed: missing email or password');
+    if (!firstName || !lastName || !email || !password || !confirmPassword) {
+      debug('Register failed: missing required fields');
       return res.status(400).json({
-        error: 'Email and password are required',
+        error: 'First name, last name, email, and passwords are required',
       });
     }
 
     debug('Register payload normalized preview:', {
       name,
+      firstName,
+      lastName,
       email,
       role,
       passwordLength: password?.length,
     });
 
     // ✅ Call service
-    const user = await registerUser({ name, email, password, role });
+    const user = await registerUser({
+      firstName,
+      lastName,
+      name,
+      email,
+      password,
+      confirmPassword,
+      role,
+    });
 
     debug('Register success -> returning response:', {
       id: user.id,
@@ -144,7 +159,67 @@ async function login(req, res) {
   }
 }
 
+/* =========================
+   PROFILE — FETCH/UPDATE
+========================= */
+async function getProfile(req, res) {
+  try {
+    debug('================ PROFILE CONTROLLER START ================');
+    debug('Profile request userId:', req.user?.sub);
+
+    const profile = await getUserProfile(req.user?.sub);
+
+    debug('Profile fetch success', {
+      userId: profile.id,
+      accountType: profile.accountType,
+    });
+    debug('================ PROFILE CONTROLLER END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Profile fetched',
+      profile,
+    });
+  } catch (err) {
+    debug('================ PROFILE CONTROLLER END (ERROR) ================');
+    debug('Profile fetch error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+async function updateProfile(req, res) {
+  try {
+    debug('================ PROFILE UPDATE START ================');
+    debug('Profile update userId:', req.user?.sub);
+    debug('Profile update payload keys:', Object.keys(req.body || {}));
+
+    const profile = await updateUserProfile(req.user?.sub, req.body);
+
+    debug('Profile update success', {
+      userId: profile.id,
+      accountType: profile.accountType,
+    });
+    debug('================ PROFILE UPDATE END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Profile updated',
+      profile,
+    });
+  } catch (err) {
+    debug('================ PROFILE UPDATE END (ERROR) ================');
+    debug('Profile update error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
 module.exports = {
   register,
   login,
+  getProfile,
+  updateProfile,
 };

@@ -48,13 +48,19 @@ debug('Auth routes initialized');
  *             type: object
  *             required: [email, password]
  *             properties:
- *               name:
+ *               firstName:
  *                 type: string
- *                 example: John Doe
+ *                 example: John
+ *               lastName:
+ *                 type: string
+ *                 example: Doe
  *               email:
  *                 type: string
  *                 example: user@test.com
  *               password:
+ *                 type: string
+ *                 example: password123
+ *               confirmPassword:
  *                 type: string
  *                 example: password123
  *               role:
@@ -132,6 +138,20 @@ router.get('/me', requireAuth, (req, res) => {
     user: req.user,
   });
 });
+
+/**
+ * Get current user profile (full profile from DB)
+ * GET /auth/profile
+ * Protected route - requires valid JWT
+ */
+router.get('/profile', requireAuth, authController.getProfile);
+
+/**
+ * Update current user profile
+ * PATCH /auth/profile
+ * Protected route - requires valid JWT
+ */
+router.patch('/profile', requireAuth, authController.updateProfile);
 
 /**
  * Admin-only test route

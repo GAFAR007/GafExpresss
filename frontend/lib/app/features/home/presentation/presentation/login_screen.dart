@@ -68,6 +68,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // - Prevent duplicate login requests from double taps.
   bool _isLoading = false;
 
+  // ------------------------------------------------------------
+  // PASSWORD VISIBILITY
+  // ------------------------------------------------------------
+  // WHY:
+  // - Lets users confirm password entry in the sign-in sheet.
+  bool _showPassword = false;
+
   @override
   void initState() {
     super.initState();
@@ -276,8 +283,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: _passwordCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: "Password"),
+                obscureText: !_showPassword,
+                decoration: InputDecoration(
+                  labelText: "Password",
+                  suffixIcon: IconButton(
+                    onPressed: () {
+                      // WHY: Help users verify password without retyping.
+                      AppDebug.log("LOGIN", "Toggle password visibility");
+                      setState(() => _showPassword = !_showPassword);
+                    },
+                    icon: Icon(
+                      _showPassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               SizedBox(

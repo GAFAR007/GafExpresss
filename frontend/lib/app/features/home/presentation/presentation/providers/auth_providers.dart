@@ -27,7 +27,9 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/network/dio_client.dart';
 import 'package:frontend/app/features/auth/data/auth_api.dart';
 import 'package:frontend/app/features/auth/data/auth_session_storage.dart';
+import 'package:frontend/app/features/auth/data/profile_api.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
+import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 
 /// Provides ONE Dio instance for the app.
 ///
@@ -51,6 +53,18 @@ final authApiProvider = Provider((ref) {
   final dio = ref.read(dioProvider);
   final api = AuthApi(dio: dio);
   AppDebug.log("PROVIDERS", "authApiProvider ready");
+  return api;
+});
+
+/// Provides ProfileApi using the shared Dio.
+///
+/// WHY:
+/// - Profile calls should reuse the same Dio config.
+final profileApiProvider = Provider((ref) {
+  AppDebug.log("PROVIDERS", "profileApiProvider created -> building ProfileApi");
+  final dio = ref.read(dioProvider);
+  final api = ProfileApi(dio: dio);
+  AppDebug.log("PROVIDERS", "profileApiProvider ready");
   return api;
 });
 
@@ -183,6 +197,44 @@ final authSessionProvider =
       final storage = ref.read(authSessionStorageProvider);
       return AuthSessionController(storage);
     });
+
+/// ------------------------------------------------------------
+/// PROFILE PROVIDER
+/// ------------------------------------------------------------
+/// WHAT:
+/// - Fetches the current user's profile for settings screens.
+///
+/// WHY:
+/// - Keeps profile fetching centralized and cacheable.
+///
+/// DEBUGGING:
+/// - Logs start, missing session, and success.
+final userProfileProvider = FutureProvider<UserProfile?>((ref) async {
+  AppDebug.log("PROVIDERS", "userProfileProvider fetch start");
+
+  final session = ref.watch(authSessionProvider);
+  if (session == null) {
+    AppDebug.log("PROVIDERS", "userProfileProvider missing session");
+    return null;
+  }
+
+  // WHY: Avoid backend calls when token is already expired.
+  if (!session.isTokenValid) {
+    AppDebug.log("PROVIDERS", "userProfileProvider token invalid");
+    return null;
+  }
+
+  final api = ref.read(profileApiProvider);
+  final profile = await api.fetchProfile(token: session.token);
+
+  AppDebug.log(
+    "PROVIDERS",
+    "userProfileProvider success",
+    extra: {"userId": profile.id},
+  );
+
+  return profile;
+});
 
 /// ------------------------------------------------------------
 /// ADMIN CHECK PROVIDER

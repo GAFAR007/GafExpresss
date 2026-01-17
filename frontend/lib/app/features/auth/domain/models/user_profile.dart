@@ -1,0 +1,136 @@
+/// lib/app/features/auth/domain/models/user_profile.dart
+/// ------------------------------------------------------
+/// WHAT:
+/// - UserProfile model for the settings/profile form.
+///
+/// WHY:
+/// - Keeps profile fields typed and consistent across API/UI.
+/// - Prevents ad-hoc map parsing in widgets.
+///
+/// HOW:
+/// - fromJson parses backend payload into a Dart model.
+/// - toUpdateJson builds a safe payload for profile updates.
+/// ------------------------------------------------------
+library;
+
+class UserProfile {
+  final String id;
+  final String name;
+  final String? firstName;
+  final String? lastName;
+  final String email;
+  final String role;
+  final String accountType;
+  final String? phone;
+  final String? companyName;
+  final String? companyEmail;
+  final String? companyPhone;
+  final String? companyAddress;
+  final String? companyWebsite;
+  final String? companyRegistration;
+
+  const UserProfile({
+    required this.id,
+    required this.name,
+    this.firstName,
+    this.lastName,
+    required this.email,
+    required this.role,
+    required this.accountType,
+    this.phone,
+    this.companyName,
+    this.companyEmail,
+    this.companyPhone,
+    this.companyAddress,
+    this.companyWebsite,
+    this.companyRegistration,
+  });
+
+  /// ------------------------------------------------------
+  /// FROM JSON
+  /// ------------------------------------------------------
+  factory UserProfile.fromJson(Map<String, dynamic> json) {
+    // WHY: Accept either `id` or Mongo `_id` without breaking.
+    final rawId = json['id'] ?? json['_id'] ?? '';
+
+    // WHY: Account type may be missing on older records.
+    final rawAccountType = (json['accountType'] ?? 'personal').toString();
+
+    return UserProfile(
+      id: rawId.toString(),
+      name: (json['name'] ?? '').toString(),
+      firstName: _nullIfEmpty(json['firstName']),
+      lastName: _nullIfEmpty(json['lastName']),
+      email: (json['email'] ?? '').toString(),
+      role: (json['role'] ?? 'customer').toString(),
+      accountType: rawAccountType,
+      phone: _nullIfEmpty(json['phone']),
+      companyName: _nullIfEmpty(json['companyName']),
+      companyEmail: _nullIfEmpty(json['companyEmail']),
+      companyPhone: _nullIfEmpty(json['companyPhone']),
+      companyAddress: _nullIfEmpty(json['companyAddress']),
+      companyWebsite: _nullIfEmpty(json['companyWebsite']),
+      companyRegistration: _nullIfEmpty(json['companyRegistration']),
+    );
+  }
+
+  /// ------------------------------------------------------
+  /// UPDATE JSON
+  /// ------------------------------------------------------
+  Map<String, dynamic> toUpdateJson() {
+    return {
+      "name": name,
+      "firstName": firstName,
+      "lastName": lastName,
+      "phone": phone,
+      "accountType": accountType,
+      "companyName": companyName,
+      "companyEmail": companyEmail,
+      "companyPhone": companyPhone,
+      "companyAddress": companyAddress,
+      "companyWebsite": companyWebsite,
+      "companyRegistration": companyRegistration,
+    };
+  }
+
+  /// ------------------------------------------------------
+  /// COPY WITH
+  /// ------------------------------------------------------
+  UserProfile copyWith({
+    String? name,
+    String? firstName,
+    String? lastName,
+    String? phone,
+    String? accountType,
+    String? companyName,
+    String? companyEmail,
+    String? companyPhone,
+    String? companyAddress,
+    String? companyWebsite,
+    String? companyRegistration,
+  }) {
+    return UserProfile(
+      id: id,
+      name: name ?? this.name,
+      firstName: firstName ?? this.firstName,
+      lastName: lastName ?? this.lastName,
+      email: email,
+      role: role,
+      accountType: accountType ?? this.accountType,
+      phone: phone ?? this.phone,
+      companyName: companyName ?? this.companyName,
+      companyEmail: companyEmail ?? this.companyEmail,
+      companyPhone: companyPhone ?? this.companyPhone,
+      companyAddress: companyAddress ?? this.companyAddress,
+      companyWebsite: companyWebsite ?? this.companyWebsite,
+      companyRegistration: companyRegistration ?? this.companyRegistration,
+    );
+  }
+
+  /// WHY: Keep optional string handling consistent and clean.
+  static String? _nullIfEmpty(dynamic value) {
+    if (value == null) return null;
+    final trimmed = value.toString().trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+}
