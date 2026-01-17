@@ -7,6 +7,7 @@
 /// - Lets users browse/search products before signing in.
 /// - Keeps checkout, cart, and orders locked until auth succeeds.
 /// - Provides a sign-in sheet that feels like a native part of the app.
+/// - Remembers the last login email so users only enter passwords next time.
 ///
 /// HOW IT WORKS:
 /// 1) Render a home-like header + guest access callout.
@@ -83,6 +84,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.initState();
     // WHY: Keep search input stable across rebuilds.
     _searchController = TextEditingController(text: _pendingQuery);
+    // WHY: Load remembered email without blocking first paint.
+    _loadSavedEmail();
   }
 
   @override
@@ -109,6 +112,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       AppDebug.log("LOGIN", "Search debounce fired", extra: {"q": trimmed});
       setState(() => _activeQuery = trimmed);
     });
+  }
+
+  /// ------------------------------------------------------------
+  /// LOAD SAVED EMAIL
+  /// ------------------------------------------------------------
+  Future<void> _loadSavedEmail() async {
+    // WHY: Pull last email from secure storage for a faster login.
+    AppDebug.log("LOGIN", "Loading saved email");
+    final storage = ref.read(authSessionStorageProvider);
+    final savedEmail = await storage.readLastEmail();
+
+    if (!mounted) {
+      // WHY: Avoid touching controllers after dispose.
+      AppDebug.log("LOGIN", "Skip saved email (screen disposed)");
+      return;
+    }
+
+    if (savedEmail == null || savedEmail.isEmpty) {
+      AppDebug.log("LOGIN", "No saved email to prefill");
+      return;
+    }
+
+    // WHY: Prefill only the email so password stays private.
+    _emailCtrl.text = savedEmail;
+    AppDebug.log("LOGIN", "Prefilled saved email");
   }
 
   /// ------------------------------------------------------------
@@ -157,6 +185,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     // Read API from provider (keeps UI away from Dio details)
     final api = ref.read(authApiProvider);
+    final storage = ref.read(authSessionStorageProvider);
 
     try {
       // ✅ Never log password
@@ -170,6 +199,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         "Login success",
         extra: {"userId": session.user.id},
       );
+
+      // WHY: Remember the last email for quick re-login.
+      await storage.saveLastEmail(email);
 
       // WHY: Persist session so router can guard /home reliably.
       await ref.read(authSessionProvider.notifier).setSession(session);
