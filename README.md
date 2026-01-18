@@ -152,6 +152,29 @@ Why It's Safe
 - OTPs are hashed, time-limited, and never stored in plaintext.
 - Requests are tied to the authenticated `userId` from auth middleware.
 
+🔁 Settings Flow (End-to-End)
+1) Open Settings:
+   - UI fetches `GET /auth/profile`.
+   - `_applyProfile()` prefills controllers + renders the screen.
+2) Email verification:
+   - `POST /auth/email-verification/request`
+   - Enter OTP → `POST /auth/email-verification/confirm`
+   - UI refreshes profile.
+3) Phone verification:
+   - `POST /auth/phone-verification/request`
+   - Enter OTP → `POST /auth/phone-verification/confirm`
+   - UI refreshes profile.
+4) NIN verification (dev simulation):
+   - Requires email + phone verified first.
+   - `POST /auth/nin/verify`
+   - Backend updates identity fields + sets `isNinVerified`.
+   - UI refreshes profile → shows NIN ID card.
+5) Save changes:
+   - `PATCH /auth/profile`
+   - UI refreshes profile.
+6) Auto refresh:
+   - Settings auto-refreshes every 45s to keep verification badges current.
+
 📝 TODO (IMPORTANT)
 - When your Termii Sender ID is approved, log in to https://app.termii.com and switch from dev OTP to real SMS delivery.
 - Check the Sender ID status regularly until it flips to Approved.

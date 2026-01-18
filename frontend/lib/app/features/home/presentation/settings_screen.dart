@@ -24,6 +24,10 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/settings/widgets/nin_id_card.dart';
+import 'package:frontend/app/features/home/presentation/settings/widgets/profile_card.dart';
+import 'package:frontend/app/features/home/presentation/settings/settings_helpers.dart';
+import 'package:frontend/app/features/home/presentation/settings/settings_verification_actions.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -62,6 +66,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isRefreshing = false;
   Timer? _autoRefreshTimer;
   String? _lastPhoneOtp;
+  final _verificationActions = const SettingsVerificationActions();
 
   // WHY: Periodically re-fetch profile so verification badges stay fresh.
   static const Duration _autoRefreshInterval = Duration(seconds: 45);
@@ -156,6 +161,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
 
     try {
+      // ignore: unused_result
       await ref.refresh(userProfileProvider.future);
       _logFlow(
         "REFRESH_OK",
@@ -242,7 +248,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _accountType = 'personal';
     }
 
-    final split = _splitFullName(
+    final split = splitFullName(
       profile.firstName,
       profile.lastName,
       profile.name,
@@ -253,12 +259,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _emailCtrl.text = profile.email;
     _phoneCtrl.text = profile.phone == null
         ? ''
-        : _extractNigerianDigits(profile.phone ?? '');
+        : extractNigerianDigits(profile.phone ?? '', maxDigits: _ngPhoneDigits);
     _companyNameCtrl.text = profile.companyName ?? '';
     _companyEmailCtrl.text = profile.companyEmail ?? '';
     _companyPhoneCtrl.text = profile.companyPhone == null
         ? ''
-        : _extractNigerianDigits(profile.companyPhone ?? '');
+        : extractNigerianDigits(
+            profile.companyPhone ?? '',
+            maxDigits: _ngPhoneDigits,
+          );
     _companyAddressCtrl.text = profile.companyAddress ?? '';
     _companyWebsiteCtrl.text = profile.companyWebsite ?? '';
     _companyRegCtrl.text = profile.companyRegistration ?? '';
@@ -275,248 +284,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// VERIFICATION HANDLERS
   /// ------------------------------------------------------------
   Future<void> _verifyEmail() async {
-    final emailInput = _emailCtrl.text.trim();
-    _logFlow(
-      "EMAIL_VERIFY_TAP",
-      "Verify email tapped",
-      extra: {"email": emailInput},
+    await _verificationActions.verifyEmail(
+      context: context,
+      ref: ref,
+      emailCtrl: _emailCtrl,
+      openDialog: _openCodeDialog,
+      errorMessage: _friendlyErrorMessage,
+      logFlow: _logFlow,
     );
-
-    final session = ref.read(authSessionProvider);
-    if (session == null) {
-      AppDebug.log("SETTINGS", "Verify email blocked (missing session)");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Session expired. Please sign in again.")),
-      );
-      return;
-    }
-
-    // WHY: Avoid sending a verify request without a target email.
-    if (emailInput.isEmpty) {
-      AppDebug.log("SETTINGS", "Verify email blocked (missing email)");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter an email address")),
-      );
-      return;
-    }
-
-    try {
-      final api = ref.read(profileApiProvider);
-      _logFlow("EMAIL_VERIFY_REQUEST", "Requesting email OTP");
-      final response = await api.requestEmailVerification(
-        token: session.token,
-        email: emailInput,
-      );
-      final recipient =
-          response["email"]?.toString().trim() ?? _emailCtrl.text.trim();
-      _logFlow(
-        "EMAIL_VERIFY_SENT",
-        "Email OTP sent",
-        extra: {"email": recipient},
-      );
-
-      AppDebug.log(
-        "SETTINGS",
-        "Email verification sent",
-        extra: {"email": recipient},
-      );
-
-      if (!mounted) return;
-      if (recipient.isNotEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Code sent to $recipient")));
-      }
-
-      if (!mounted) return;
-      final code = await _openCodeDialog(
-        title: "Email verification",
-        message: "Enter the code sent to your email address.",
-      );
-      if (code == null) {
-        _logFlow("EMAIL_VERIFY_CANCEL", "User cancelled email code input");
-        return;
-      }
-
-      _logFlow("EMAIL_VERIFY_CONFIRM", "Confirming email OTP");
-      await api.confirmEmailVerification(token: session.token, code: code);
-
-      // WHY: Refresh profile to update verification badges.
-      ref.invalidate(userProfileProvider);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Email verified successfully")),
-      );
-    } catch (e) {
-      _logFlow(
-        "EMAIL_VERIFY_FAIL",
-        "Email verification failed",
-        extra: {"error": e.toString()},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Email verification failed. ${_friendlyErrorMessage(e)}",
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _verifyPhone() async {
-    _logFlow("PHONE_VERIFY_TAP", "Verify phone tapped");
-
-    final session = ref.read(authSessionProvider);
-    if (session == null) {
-      AppDebug.log("SETTINGS", "Verify phone blocked (missing session)");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Session expired. Please sign in again.")),
-      );
-      return;
-    }
-
-    final phoneDigits = _phoneCtrl.text.trim();
-    final normalizedPhone = _normalizeNigerianPhone(phoneDigits);
-
-    if (phoneDigits.isEmpty) {
-      _logFlow("PHONE_VERIFY_BLOCK", "Missing phone number");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter a phone number first")),
-      );
-      return;
-    }
-
-    if (normalizedPhone == null) {
-      _logFlow("PHONE_VERIFY_BLOCK", "Invalid phone number");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Enter 10 digits after +234 (e.g. 8012345678)"),
-        ),
-      );
-      return;
-    }
-
-    // WHY: Keep normalized format for API + SMS without mutating digits-only input.
-
-    try {
-      final api = ref.read(profileApiProvider);
-      _logFlow("PHONE_VERIFY_REQUEST", "Requesting phone OTP");
-      final response = await api.requestPhoneVerification(
-        token: session.token,
-        phone: normalizedPhone,
-      );
-
-      final debugCode = response["code"]?.toString().trim();
-      if (debugCode != null && debugCode.isNotEmpty) {
-        AppDebug.log(
-          "SETTINGS",
-          "Phone OTP debug code received",
-          extra: {"length": debugCode.length},
-        );
-        _lastPhoneOtp = debugCode;
-        if (mounted) {
-          // WHY: Dev-only helper when DEBUG_SHOW_OTP=true.
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text("DEV OTP: $debugCode")));
-        }
-      }
-
-      if (!mounted) return;
-      final code = await _openCodeDialog(
-        title: "Phone verification",
-        message: "Enter the OTP sent to your phone number.",
-      );
-      if (code == null) {
-        _logFlow("PHONE_VERIFY_CANCEL", "User cancelled phone code input");
-        return;
-      }
-
-      _logFlow("PHONE_VERIFY_CONFIRM", "Confirming phone OTP");
-      await api.confirmPhoneVerification(token: session.token, code: code);
-
-      ref.invalidate(userProfileProvider);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Phone verified successfully")),
-      );
-    } catch (e) {
-      _logFlow(
-        "PHONE_VERIFY_FAIL",
-        "Phone verification failed",
-        extra: {"error": e.toString()},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Phone verification failed. ${_friendlyErrorMessage(e)}",
-          ),
-        ),
-      );
-    }
+    await _verificationActions.verifyPhone(
+      context: context,
+      ref: ref,
+      phoneCtrl: _phoneCtrl,
+      ngPhonePrefix: _ngPhonePrefix,
+      normalizePhone: normalizeNigerianPhone,
+      openDialog: _openCodeDialog,
+      errorMessage: _friendlyErrorMessage,
+      onDebugOtp: (code) => _lastPhoneOtp = code,
+      logFlow: _logFlow,
+    );
   }
 
   Future<void> _verifyNin() async {
-    final ninValue = _ninCtrl.text.trim();
-    _logFlow(
-      "NIN_VERIFY_TAP",
-      "Verify NIN tapped",
-      extra: {"length": ninValue.length},
+    await _verificationActions.verifyNin(
+      context: context,
+      ref: ref,
+      ninCtrl: _ninCtrl,
+      ninDigits: _ninDigits,
+      errorMessage: _friendlyErrorMessage,
+      logFlow: _logFlow,
     );
-
-    final session = ref.read(authSessionProvider);
-    if (session == null) {
-      _logFlow("NIN_VERIFY_BLOCK", "Missing session");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Session expired. Please sign in again.")),
-      );
-      return;
-    }
-
-    if (ninValue.length != _ninDigits) {
-      _logFlow("NIN_VERIFY_BLOCK", "Invalid NIN length");
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("NIN must be 11 digits")));
-      return;
-    }
-
-    try {
-      final api = ref.read(profileApiProvider);
-      _logFlow("NIN_VERIFY_REQUEST", "Requesting NIN verification");
-      await api.verifyNin(token: session.token, nin: ninValue);
-
-      // WHY: Refresh profile to update verification badge + names.
-      ref.invalidate(userProfileProvider);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("NIN verified successfully")),
-      );
-    } catch (e) {
-      _logFlow(
-        "NIN_VERIFY_FAIL",
-        "NIN verification failed",
-        extra: {"error": e.toString()},
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("NIN verification failed. ${_friendlyErrorMessage(e)}"),
-        ),
-      );
-    }
   }
 
   Future<String?> _openCodeDialog({
@@ -674,9 +474,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final lastName = _lastNameCtrl.text.trim();
     final fullName = "$firstName $lastName".trim();
     final phoneDigits = _phoneCtrl.text.trim();
-    final normalizedPhone = _normalizeNigerianPhone(phoneDigits);
+    final normalizedPhone = normalizeNigerianPhone(phoneDigits);
     final companyPhoneDigits = _companyPhoneCtrl.text.trim();
-    final normalizedCompanyPhone = _normalizeNigerianPhone(companyPhoneDigits);
+    final normalizedCompanyPhone = normalizeNigerianPhone(companyPhoneDigits);
 
     if (phoneDigits.isNotEmpty && normalizedPhone == null) {
       _logFlow("SAVE_BLOCK", "Invalid phone number");
@@ -777,19 +577,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return _accountType != 'personal' || _hasBusinessInfo;
   }
 
-  String _initialsForProfile(UserProfile profile) {
-    final first = profile.firstName?.trim() ?? '';
-    final last = profile.lastName?.trim() ?? '';
-    final combined = "$first $last".trim();
-    if (combined.isEmpty) return 'GU';
-    final parts = combined.split(' ').where((part) => part.isNotEmpty).toList();
-    if (parts.length == 1) {
-      return parts.first.characters.first.toUpperCase();
-    }
-    return "${parts.first.characters.first}${parts.last.characters.first}"
-        .toUpperCase();
-  }
-
   /// ------------------------------------------------------------
   /// ACCOUNT TYPE LABEL
   /// ------------------------------------------------------------
@@ -809,70 +596,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// ------------------------------------------------------------
   /// WHY:
   /// - Older profiles may only store a full name.
-  _SplitName _splitFullName(
-    String? firstName,
-    String? lastName,
-    String? fullName,
-  ) {
-    final cleanFirst = (firstName ?? '').trim();
-    final cleanLast = (lastName ?? '').trim();
-
-    if (cleanFirst.isNotEmpty || cleanLast.isNotEmpty) {
-      return _SplitName(cleanFirst, cleanLast);
-    }
-
-    final cleanFull = (fullName ?? '').trim();
-    if (cleanFull.isEmpty) {
-      return const _SplitName('', '');
-    }
-
-    final parts = cleanFull
-        .split(' ')
-        .where((part) => part.isNotEmpty)
-        .toList();
-    if (parts.length == 1) {
-      return _SplitName(parts.first, '');
-    }
-
-    return _SplitName(parts.first, parts.sublist(1).join(' '));
-  }
-
   /// ------------------------------------------------------------
   /// PHONE NORMALIZATION
   /// ------------------------------------------------------------
   /// WHY:
   /// - Ensure phone follows Nigerian +234 format for OTP delivery.
-  String? _normalizeNigerianPhone(String input) {
-    final raw = input.replaceAll(RegExp(r'\s+'), '').trim();
-    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
-    final e164 = RegExp(r'^\+234\d{10}$');
-    final local = RegExp(r'^0\d{10}$');
-    final plain = RegExp(r'^234\d{10}$');
-    final digitsOnly = RegExp(r'^\d{10}$');
-
-    if (e164.hasMatch(raw)) return raw;
-    if (local.hasMatch(raw)) return '+234${raw.substring(1)}';
-    if (plain.hasMatch(raw)) return '+$raw';
-    if (digitsOnly.hasMatch(digits)) return '+234$digits';
-
-    return null;
-  }
-
   /// WHY: Show digits-only input while keeping +234 in the UI prefix.
-  String _extractNigerianDigits(String input) {
-    final digits = input.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.startsWith('234') && digits.length >= 13) {
-      return digits.substring(3, 13);
-    }
-    if (digits.startsWith('0') && digits.length == 11) {
-      return digits.substring(1);
-    }
-    if (digits.length <= _ngPhoneDigits) {
-      return digits;
-    }
-    return digits.substring(0, _ngPhoneDigits);
-  }
-
   /// ------------------------------------------------------------
   /// FRIENDLY ERROR MESSAGES
   /// ------------------------------------------------------------
@@ -1023,174 +752,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return OutlinedButton(onPressed: onTap, child: Text(label));
   }
 
-  Widget _buildProfileCard(UserProfile profile) {
-    final split = _splitFullName(
-      profile.firstName,
-      profile.lastName,
-      profile.name,
-    );
-    final displayName = "${split.firstName} ${split.lastName}".trim();
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.green.shade600,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 26,
-            backgroundColor: Colors.white.withOpacity(0.2),
-            child: Text(
-              _initialsForProfile(profile),
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  displayName.isEmpty ? "Guest user" : displayName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  profile.email,
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              _accountTypeLabel(profile.accountType),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVerifiedBadge() {
-    return Row(
-      children: [
-        Icon(Icons.check_circle, color: Colors.green.shade600, size: 18),
-        const SizedBox(width: 8),
-        Text(
-          "Verified",
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Colors.green.shade700,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildReadOnlyValue({
-    required String label,
-    required String value,
-    String? hint,
-  }) {
-    // WHY: Display a readonly field without managing a controller.
-    return InputDecorator(
-      decoration: InputDecoration(labelText: label, hintText: hint),
-      child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
-    );
-  }
-
-  Widget _buildReadOnlyValueWithStatus({
-    required String label,
-    required String value,
-    required bool isVerified,
-    String? hint,
-  }) {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildReadOnlyValue(label: label, value: value, hint: hint),
-        ),
-        const SizedBox(width: 12),
-        _buildVerificationStatusPill(isVerified: isVerified),
-      ],
-    );
-  }
-
-  Widget _buildVerificationStatusPill({required bool isVerified}) {
-    if (!isVerified) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.green.shade50,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.check_circle, color: Colors.green.shade600, size: 16),
-          const SizedBox(width: 6),
-          Text(
-            "Verified",
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Colors.green.shade700,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNinRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 70,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.blueGrey.shade600,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.blueGrey.shade800),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     AppDebug.log("SETTINGS", "build()", extra: {"isSaving": _isSaving});
@@ -1262,12 +823,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 : UserProfile(
                     id: session.user.id,
                     name: session.user.name,
-                    firstName: _splitFullName(
+                    firstName: splitFullName(
                       null,
                       null,
                       session.user.name,
                     ).firstName,
-                    lastName: _splitFullName(
+                    lastName: splitFullName(
                       null,
                       null,
                       session.user.name,
@@ -1299,7 +860,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildProfileCard(activeProfile),
+                  ProfileCard(
+                    displayName:
+                        "${splitFullName(activeProfile.firstName, activeProfile.lastName, activeProfile.name).firstName} "
+                                "${splitFullName(activeProfile.firstName, activeProfile.lastName, activeProfile.name).lastName}"
+                            .trim(),
+                    email: activeProfile.email,
+                    accountTypeLabel: _accountTypeLabel(
+                      activeProfile.accountType,
+                    ),
+                    initials: initialsForProfile(activeProfile),
+                  ),
                   const SizedBox(height: 20),
                   _buildSectionHeader(
                     "Personal details",
@@ -1307,24 +878,36 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   const SizedBox(height: 12),
                   if (isIdentityLocked) ...[
-                    _buildVerifiedBadge(),
+                    NinIdCard(
+                      firstName: activeProfile.firstName?.trim() ?? '',
+                      middleName: activeProfile.middleName?.trim() ?? '',
+                      lastName: activeProfile.lastName?.trim() ?? '',
+                      dob: activeProfile.dob?.trim() ?? '',
+                      email: activeProfile.email.trim(),
+                      isEmailVerified: activeProfile.isEmailVerified,
+                      phone: formatPhoneDisplay(
+                        activeProfile.phone,
+                        prefix: _ngPhonePrefix,
+                        maxDigits: _ngPhoneDigits,
+                      ),
+                      isPhoneVerified: activeProfile.isPhoneVerified,
+                      ninLast4: activeProfile.ninLast4,
+                    ),
                     const SizedBox(height: 12),
                   ],
-                  _buildTextField(
-                    controller: _firstNameCtrl,
-                    label: "First name",
-                    hint: "Your first name",
-                    readOnly: isIdentityLocked,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTextField(
-                    controller: _lastNameCtrl,
-                    label: "Last name",
-                    hint: "Your last name",
-                    readOnly: isIdentityLocked,
-                  ),
-                  const SizedBox(height: 12),
                   if (!isIdentityLocked) ...[
+                    _buildTextField(
+                      controller: _firstNameCtrl,
+                      label: "First name",
+                      hint: "Your first name",
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTextField(
+                      controller: _lastNameCtrl,
+                      label: "Last name",
+                      hint: "Your last name",
+                    ),
+                    const SizedBox(height: 12),
                     _buildFieldWithAction(
                       controller: _ninCtrl,
                       label: "NIN",
@@ -1337,18 +920,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       // WHY: Lock NIN input once verified.
                       readOnly: isIdentityLocked,
                     ),
-                  ] else ...[
-                    _buildReadOnlyValueWithStatus(
-                      label: "NIN",
-                      hint: "Verified",
-                      value: activeProfile.ninLast4 == null
-                          ? ''
-                          : "**** ${activeProfile.ninLast4}",
-                      isVerified: activeProfile.isNinVerified,
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  if (!isIdentityLocked)
+                    const SizedBox(height: 12),
                     _buildFieldWithAction(
                       controller: _emailCtrl,
                       label: "Email address",
@@ -1359,16 +931,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       // WHY: Allow edits only until the backend confirms verification.
                       readOnly:
                           isIdentityLocked || activeProfile.isEmailVerified,
-                    )
-                  else
-                    _buildReadOnlyValueWithStatus(
-                      label: "Email address",
-                      hint: "Your email",
-                      value: _emailCtrl.text,
-                      isVerified: activeProfile.isEmailVerified,
                     ),
-                  const SizedBox(height: 12),
-                  if (!isIdentityLocked)
+                    const SizedBox(height: 12),
                     _buildFieldWithAction(
                       controller: _phoneCtrl,
                       label: "Phone number",
@@ -1381,16 +945,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       inputFormatters: _ngPhoneInputFormatters,
                       prefixText: _ngPhonePrefix,
                       readOnly: isIdentityLocked,
-                    )
-                  else
-                    _buildReadOnlyValueWithStatus(
-                      label: "Phone number",
-                      hint: "8012345678",
-                      value: _phoneCtrl.text.isEmpty
-                          ? ''
-                          : "$_ngPhonePrefix${_phoneCtrl.text}",
-                      isVerified: activeProfile.isPhoneVerified,
                     ),
+                    const SizedBox(height: 20),
+                  ],
                   const SizedBox(height: 20),
                   _buildSectionHeader(
                     "Account type",
@@ -1638,9 +1195,3 @@ class _NigerianPhoneDigitsFormatter extends TextInputFormatter {
 /// ------------------------------------------------------------
 /// WHY:
 /// - Keeps helper return values explicit and readable.
-class _SplitName {
-  final String firstName;
-  final String lastName;
-
-  const _SplitName(this.firstName, this.lastName);
-}
