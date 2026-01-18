@@ -60,6 +60,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   UserProfile? _currentProfile;
   bool _isRefreshing = false;
   Timer? _autoRefreshTimer;
+  String? _lastPhoneOtp;
 
   // WHY: Periodically re-fetch profile so verification badges stay fresh.
   static const Duration _autoRefreshInterval = Duration(seconds: 45);
@@ -72,6 +73,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static final List<TextInputFormatter> _ngPhoneInputFormatters = [
     _NigerianPhoneDigitsFormatter(maxDigits: _ngPhoneDigits),
   ];
+
+  // WHY: Centralize debug formatting so logs are consistent and easy to scan.
+  void _logFlow(String step, String message, {Map<String, dynamic>? extra}) {
+    AppDebug.log(
+      "SETTINGS_FLOW",
+      "$step | $message",
+      extra: extra,
+    );
+  }
 
   // WHY: Track account type choices in one place for UI + payloads.
   static const List<Map<String, String>> _accountTypeOptions = [
@@ -139,18 +149,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     _isRefreshing = true;
-    AppDebug.log("SETTINGS", "Profile refresh start", extra: {"source": source});
+    _logFlow("REFRESH_START", "Profile refresh start", extra: {"source": source});
 
     try {
       await ref.refresh(userProfileProvider.future);
-      AppDebug.log(
-        "SETTINGS",
-        "Profile refresh success",
-        extra: {"source": source},
-      );
+      _logFlow("REFRESH_OK", "Profile refresh success", extra: {"source": source});
     } catch (e) {
-      AppDebug.log(
-        "SETTINGS",
+      _logFlow(
+        "REFRESH_FAIL",
         "Profile refresh failed",
         extra: {"source": source, "error": e.toString()},
       );
@@ -161,8 +167,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   void _startAutoRefresh() {
     _autoRefreshTimer?.cancel();
-    AppDebug.log(
-      "SETTINGS",
+    _logFlow(
+      "AUTO_REFRESH",
       "Auto refresh scheduled",
       extra: {"seconds": _autoRefreshInterval.inSeconds},
     );
@@ -187,7 +193,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    AppDebug.log("SETTINGS", "Prefilling profile form");
+    _logFlow("PREFILL", "Prefilling profile form", extra: {"userId": profile.id});
 
     _currentProfile = profile;
     _accountType = profile.accountType;
@@ -225,11 +231,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// ------------------------------------------------------------
   Future<void> _verifyEmail() async {
     final emailInput = _emailCtrl.text.trim();
-    AppDebug.log(
-      "SETTINGS",
-      "Verify email tapped",
-      extra: {"email": emailInput},
-    );
+    _logFlow("EMAIL_VERIFY_TAP", "Verify email tapped", extra: {"email": emailInput});
 
     final session = ref.read(authSessionProvider);
     if (session == null) {
@@ -253,12 +255,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     try {
       final api = ref.read(profileApiProvider);
+      _logFlow("EMAIL_VERIFY_REQUEST", "Requesting email OTP");
       final response = await api.requestEmailVerification(
         token: session.token,
         email: emailInput,
       );
       final recipient =
           response["email"]?.toString().trim() ?? _emailCtrl.text.trim();
+      _logFlow(
+        "EMAIL_VERIFY_SENT",
+        "Email OTP sent",
+        extra: {"email": recipient},
+      );
 
       AppDebug.log(
         "SETTINGS",
@@ -278,8 +286,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         title: "Email verification",
         message: "Enter the code sent to your email address.",
       );
-      if (code == null) return;
+      if (code == null) {
+        _logFlow("EMAIL_VERIFY_CANCEL", "User cancelled email code input");
+        return;
+      }
 
+      _logFlow("EMAIL_VERIFY_CONFIRM", "Confirming email OTP");
       await api.confirmEmailVerification(token: session.token, code: code);
 
       // WHY: Refresh profile to update verification badges.
@@ -290,16 +302,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SnackBar(content: Text("Email verified successfully")),
       );
     } catch (e) {
-      AppDebug.log("SETTINGS", "Verify email failed", extra: {"error": e.toString()});
+      _logFlow(
+        "EMAIL_VERIFY_FAIL",
+        "Email verification failed",
+        extra: {"error": e.toString()},
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Email verification failed: $e")),
+        SnackBar(
+          content: Text(
+            "Email verification failed. ${_friendlyErrorMessage(e)}",
+          ),
+        ),
       );
     }
   }
 
   Future<void> _verifyPhone() async {
-    AppDebug.log("SETTINGS", "Verify phone tapped");
+    _logFlow("PHONE_VERIFY_TAP", "Verify phone tapped");
 
     final session = ref.read(authSessionProvider);
     if (session == null) {
@@ -315,7 +335,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final normalizedPhone = _normalizeNigerianPhone(phoneDigits);
 
     if (phoneDigits.isEmpty) {
-      AppDebug.log("SETTINGS", "Verify phone blocked (missing phone)");
+      _logFlow("PHONE_VERIFY_BLOCK", "Missing phone number");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter a phone number first")),
@@ -324,7 +344,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     if (normalizedPhone == null) {
-      AppDebug.log("SETTINGS", "Verify phone blocked (invalid phone)");
+      _logFlow("PHONE_VERIFY_BLOCK", "Invalid phone number");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -338,18 +358,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     try {
       final api = ref.read(profileApiProvider);
-      await api.requestPhoneVerification(
+      _logFlow("PHONE_VERIFY_REQUEST", "Requesting phone OTP");
+      final response = await api.requestPhoneVerification(
         token: session.token,
         phone: normalizedPhone,
       );
+
+      final debugCode = response["code"]?.toString().trim();
+      if (debugCode != null && debugCode.isNotEmpty) {
+        AppDebug.log(
+          "SETTINGS",
+          "Phone OTP debug code received",
+          extra: {"length": debugCode.length},
+        );
+        _lastPhoneOtp = debugCode;
+        if (mounted) {
+          // WHY: Dev-only helper when DEBUG_SHOW_OTP=true.
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("DEV OTP: $debugCode")),
+          );
+        }
+      }
 
       if (!mounted) return;
       final code = await _openCodeDialog(
         title: "Phone verification",
         message: "Enter the OTP sent to your phone number.",
       );
-      if (code == null) return;
+      if (code == null) {
+        _logFlow("PHONE_VERIFY_CANCEL", "User cancelled phone code input");
+        return;
+      }
 
+      _logFlow("PHONE_VERIFY_CONFIRM", "Confirming phone OTP");
       await api.confirmPhoneVerification(token: session.token, code: code);
 
       ref.invalidate(userProfileProvider);
@@ -359,10 +400,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SnackBar(content: Text("Phone verified successfully")),
       );
     } catch (e) {
-      AppDebug.log("SETTINGS", "Verify phone failed", extra: {"error": e.toString()});
+      _logFlow(
+        "PHONE_VERIFY_FAIL",
+        "Phone verification failed",
+        extra: {"error": e.toString()},
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Phone verification failed: $e")),
+        SnackBar(
+          content: Text(
+            "Phone verification failed. ${_friendlyErrorMessage(e)}",
+          ),
+        ),
       );
     }
   }
@@ -371,49 +420,122 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     required String title,
     required String message,
   }) async {
-    AppDebug.log("SETTINGS", "Open verification dialog", extra: {"title": title});
+    _logFlow("OTP_SHEET_OPEN", "Open verification sheet", extra: {"title": title});
+    String codeValue = '';
 
-    final controller = TextEditingController();
-
-    final result = await showDialog<String?>(
+    final result = await showModalBottomSheet<String?>(
       context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
       builder: (context) {
-        return AlertDialog(
-          title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(message),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: "Verification code"),
-              ),
-            ],
+        final viewInsets = MediaQuery.of(context).viewInsets;
+        return Padding(
+          padding: EdgeInsets.only(bottom: viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey.shade600,
+                      ),
+                ),
+                if (_lastPhoneOtp != null &&
+                    _lastPhoneOtp!.isNotEmpty &&
+                    title.toLowerCase().contains("phone")) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.bug_report,
+                          size: 16,
+                          color: Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            "DEV OTP: $_lastPhoneOtp",
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: Colors.orange.shade800,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                TextField(
+                  keyboardType: TextInputType.number,
+                  onChanged: (value) {
+                    codeValue = value;
+                  },
+                  decoration: const InputDecoration(
+                    labelText: "Verification code",
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          _logFlow("OTP_SHEET_CANCEL", "Cancel tapped");
+                          Navigator.of(context).pop();
+                        },
+                        child: const Text("Cancel"),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final code = codeValue.trim();
+                          Navigator.of(context).pop(code.isEmpty ? null : code);
+                        },
+                        child: const Text("Verify"),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final code = controller.text.trim();
-                Navigator.of(context).pop(code.isEmpty ? null : code);
-              },
-              child: const Text("Verify"),
-            ),
-          ],
         );
       },
     );
 
-    controller.dispose();
-
     if (result == null || result.isEmpty) {
-      AppDebug.log("SETTINGS", "Verification dialog dismissed");
+      _logFlow("OTP_SHEET_DISMISS", "Verification sheet dismissed");
       return null;
     }
 
@@ -429,11 +551,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    AppDebug.log("SETTINGS", "Save tapped");
+    _logFlow("SAVE_TAP", "Save tapped");
 
     final session = ref.read(authSessionProvider);
     if (session == null) {
-      AppDebug.log("SETTINGS", "Save blocked (missing session)");
+      _logFlow("SAVE_BLOCK", "Missing session");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Session expired. Please sign in again.")),
@@ -453,7 +575,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _normalizeNigerianPhone(companyPhoneDigits);
 
     if (phoneDigits.isNotEmpty && normalizedPhone == null) {
-      AppDebug.log("SETTINGS", "Save blocked (invalid phone)");
+      _logFlow("SAVE_BLOCK", "Invalid phone number");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -465,7 +587,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     if (companyPhoneDigits.isNotEmpty && normalizedCompanyPhone == null) {
-      AppDebug.log("SETTINGS", "Save blocked (invalid company phone)");
+      _logFlow("SAVE_BLOCK", "Invalid company phone");
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -503,6 +625,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     try {
       final api = ref.read(profileApiProvider);
+      _logFlow("SAVE_REQUEST", "Saving profile");
       final updated = await api.updateProfile(
         token: session.token,
         profile: profile,
@@ -518,11 +641,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SnackBar(content: Text("Profile updated successfully")),
       );
     } catch (e) {
-      AppDebug.log("SETTINGS", "Save failed", extra: {"error": e.toString()});
+      _logFlow("SAVE_FAIL", "Save failed", extra: {"error": e.toString()});
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Update failed: $e")),
+        SnackBar(content: Text("Update failed. ${_friendlyErrorMessage(e)}")),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -636,6 +759,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return digits;
     }
     return digits.substring(0, _ngPhoneDigits);
+  }
+
+  /// ------------------------------------------------------------
+  /// FRIENDLY ERROR MESSAGES
+  /// ------------------------------------------------------------
+  /// WHY:
+  /// - Replace raw Dio errors with short, user-friendly hints.
+  String _friendlyErrorMessage(Object error) {
+    final raw = error.toString();
+
+    if (raw.contains("Phone number already in use")) {
+      return "This phone number is already linked to another account.";
+    }
+    if (raw.contains("Email already registered")) {
+      return "This email is already registered.";
+    }
+    if (raw.contains("SMS delivery failed")) {
+      return "SMS could not be delivered. Check provider setup.";
+    }
+    if (raw.contains("Invalid Nigerian phone number")) {
+      return "Enter 10 digits after +234.";
+    }
+    if (raw.contains("Verification code expired")) {
+      return "Code expired. Request a new one.";
+    }
+    if (raw.contains("Invalid verification code")) {
+      return "Code is incorrect. Try again.";
+    }
+    if (raw.contains("Session expired")) {
+      return "Session expired. Please sign in again.";
+    }
+
+    // WHY: Avoid dumping long exceptions to users.
+    return "Please try again.";
   }
 
   Widget _buildSectionHeader(String title, String subtitle) {
