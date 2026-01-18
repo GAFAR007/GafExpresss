@@ -54,6 +54,16 @@ const userSchema = new mongoose.Schema(
       minlength: 1,
       maxlength: 40,
     },
+    middleName: {
+      type: String,
+      trim: true,
+      minlength: 1,
+      maxlength: 40,
+    },
+    dob: {
+      type: String,
+      trim: true,
+    },
 
     // ✅ Email is required + unique
     email: {
@@ -154,6 +164,20 @@ const userSchema = new mongoose.Schema(
     },
     phoneVerificationExpiresAt: {
       type: Date,
+      default: null,
+    },
+
+    // ✅ NIN verification status + audit fields (store hash + last4 only)
+    isNinVerified: {
+      type: Boolean,
+      default: false,
+    },
+    ninHash: {
+      type: String,
+      default: null,
+    },
+    ninLast4: {
+      type: String,
       default: null,
     },
 

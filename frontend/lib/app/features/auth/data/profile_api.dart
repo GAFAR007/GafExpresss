@@ -215,4 +215,39 @@ class ProfileApi {
     AppDebug.log("PROFILE_API", "confirmPhoneVerification() success");
     return resp.data as Map<String, dynamic>;
   }
+
+  /// ------------------------------------------------------
+  /// NIN VERIFICATION (SIMULATED)
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> verifyNin({
+    required String token,
+    required String nin,
+  }) async {
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "verifyNin() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    if (nin.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "verifyNin() missing nin");
+      throw Exception("Missing NIN");
+    }
+
+    AppDebug.log(
+      "PROFILE_API",
+      "verifyNin() start",
+      extra: {"length": nin.trim().length},
+    );
+
+    final resp = await _dio.post(
+      "/auth/nin/verify",
+      data: {"nin": nin.trim()},
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    AppDebug.log("PROFILE_API", "verifyNin() success");
+    return resp.data as Map<String, dynamic>;
+  }
 }

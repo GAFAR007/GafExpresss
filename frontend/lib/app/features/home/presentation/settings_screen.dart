@@ -40,6 +40,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // - Text controllers keep form values stable across rebuilds.
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
+  final _ninCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _companyNameCtrl = TextEditingController();
@@ -68,19 +69,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // WHY: Nigerian numbers are fixed at +234 and 10 digits for local input.
   static const String _ngPhonePrefix = "+234";
   static const int _ngPhoneDigits = 10;
+  static const int _ninDigits = 11;
 
   // WHY: Normalize pasted values and keep digits-only input consistent.
   static final List<TextInputFormatter> _ngPhoneInputFormatters = [
     _NigerianPhoneDigitsFormatter(maxDigits: _ngPhoneDigits),
   ];
+  static final List<TextInputFormatter> _ninInputFormatters = [
+    FilteringTextInputFormatter.digitsOnly,
+    LengthLimitingTextInputFormatter(_ninDigits),
+  ];
 
   // WHY: Centralize debug formatting so logs are consistent and easy to scan.
   void _logFlow(String step, String message, {Map<String, dynamic>? extra}) {
-    AppDebug.log(
-      "SETTINGS_FLOW",
-      "$step | $message",
-      extra: extra,
-    );
+    AppDebug.log("SETTINGS_FLOW", "$step | $message", extra: extra);
   }
 
   // WHY: Track account type choices in one place for UI + payloads.
@@ -96,10 +98,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       "value": "public_limited_company",
       "label": "Public Limited Company (Plc)",
     },
-    {
-      "value": "incorporated_trustees",
-      "label": "Incorporated Trustees / NGO",
-    },
+    {"value": "incorporated_trustees", "label": "Incorporated Trustees / NGO"},
   ];
 
   @override
@@ -113,6 +112,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // WHY: Dispose controllers to avoid memory leaks.
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
+    _ninCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     _companyNameCtrl.dispose();
@@ -149,11 +149,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     _isRefreshing = true;
-    _logFlow("REFRESH_START", "Profile refresh start", extra: {"source": source});
+    _logFlow(
+      "REFRESH_START",
+      "Profile refresh start",
+      extra: {"source": source},
+    );
 
     try {
       await ref.refresh(userProfileProvider.future);
-      _logFlow("REFRESH_OK", "Profile refresh success", extra: {"source": source});
+      _logFlow(
+        "REFRESH_OK",
+        "Profile refresh success",
+        extra: {"source": source},
+      );
     } catch (e) {
       _logFlow(
         "REFRESH_FAIL",
@@ -183,20 +191,56 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// APPLY PROFILE TO FORM
   /// ------------------------------------------------------------
   void _applyProfile(UserProfile profile) {
-    // WHY: Avoid re-prefill if we already applied the same profile.
+    // WHY: Avoid re-prefill if we already applied the same profile unless
+    // NIN verification updated identity fields (we must reflect verified data).
     if (_didPrefill && _currentProfile?.id == profile.id) {
-      // WHY: Keep backend verification status in sync without clobbering edits.
-      _currentProfile = _currentProfile?.copyWith(
-        isEmailVerified: profile.isEmailVerified,
-        isPhoneVerified: profile.isPhoneVerified,
+      final shouldRefreshIdentity =
+          profile.isNinVerified != _currentProfile?.isNinVerified ||
+          profile.firstName != _currentProfile?.firstName ||
+          profile.middleName != _currentProfile?.middleName ||
+          profile.lastName != _currentProfile?.lastName ||
+          profile.dob != _currentProfile?.dob;
+
+      if (!shouldRefreshIdentity) {
+        // WHY: Keep backend verification status in sync without clobbering edits.
+        _currentProfile = _currentProfile?.copyWith(
+          isEmailVerified: profile.isEmailVerified,
+          isPhoneVerified: profile.isPhoneVerified,
+          isNinVerified: profile.isNinVerified,
+          ninLast4: profile.ninLast4,
+        );
+        return;
+      }
+
+      _logFlow(
+        "PREFILL_REFRESH",
+        "Refreshing identity fields from NIN",
+        extra: {"userId": profile.id},
       );
+
+      _currentProfile = profile;
+      _accountType = profile.accountType;
+      if (!profile.isNinVerified) {
+        _accountType = 'personal';
+      }
+
+      _firstNameCtrl.text = profile.firstName ?? '';
+      _lastNameCtrl.text = profile.lastName ?? '';
       return;
     }
 
-    _logFlow("PREFILL", "Prefilling profile form", extra: {"userId": profile.id});
+    _logFlow(
+      "PREFILL",
+      "Prefilling profile form",
+      extra: {"userId": profile.id},
+    );
 
     _currentProfile = profile;
     _accountType = profile.accountType;
+    // WHY: Lock account type to personal until NIN verification succeeds.
+    if (!profile.isNinVerified) {
+      _accountType = 'personal';
+    }
 
     final split = _splitFullName(
       profile.firstName,
@@ -205,6 +249,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
     _firstNameCtrl.text = split.firstName;
     _lastNameCtrl.text = split.lastName;
+    _ninCtrl.text = '';
     _emailCtrl.text = profile.email;
     _phoneCtrl.text = profile.phone == null
         ? ''
@@ -231,7 +276,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// ------------------------------------------------------------
   Future<void> _verifyEmail() async {
     final emailInput = _emailCtrl.text.trim();
-    _logFlow("EMAIL_VERIFY_TAP", "Verify email tapped", extra: {"email": emailInput});
+    _logFlow(
+      "EMAIL_VERIFY_TAP",
+      "Verify email tapped",
+      extra: {"email": emailInput},
+    );
 
     final session = ref.read(authSessionProvider);
     if (session == null) {
@@ -276,9 +325,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       if (!mounted) return;
       if (recipient.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Code sent to $recipient")),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Code sent to $recipient")));
       }
 
       if (!mounted) return;
@@ -374,9 +423,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _lastPhoneOtp = debugCode;
         if (mounted) {
           // WHY: Dev-only helper when DEBUG_SHOW_OTP=true.
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("DEV OTP: $debugCode")),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text("DEV OTP: $debugCode")));
         }
       }
 
@@ -416,11 +465,69 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  Future<void> _verifyNin() async {
+    final ninValue = _ninCtrl.text.trim();
+    _logFlow(
+      "NIN_VERIFY_TAP",
+      "Verify NIN tapped",
+      extra: {"length": ninValue.length},
+    );
+
+    final session = ref.read(authSessionProvider);
+    if (session == null) {
+      _logFlow("NIN_VERIFY_BLOCK", "Missing session");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    if (ninValue.length != _ninDigits) {
+      _logFlow("NIN_VERIFY_BLOCK", "Invalid NIN length");
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("NIN must be 11 digits")));
+      return;
+    }
+
+    try {
+      final api = ref.read(profileApiProvider);
+      _logFlow("NIN_VERIFY_REQUEST", "Requesting NIN verification");
+      await api.verifyNin(token: session.token, nin: ninValue);
+
+      // WHY: Refresh profile to update verification badge + names.
+      ref.invalidate(userProfileProvider);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("NIN verified successfully")),
+      );
+    } catch (e) {
+      _logFlow(
+        "NIN_VERIFY_FAIL",
+        "NIN verification failed",
+        extra: {"error": e.toString()},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("NIN verification failed. ${_friendlyErrorMessage(e)}"),
+        ),
+      );
+    }
+  }
+
   Future<String?> _openCodeDialog({
     required String title,
     required String message,
   }) async {
-    _logFlow("OTP_SHEET_OPEN", "Open verification sheet", extra: {"title": title});
+    _logFlow(
+      "OTP_SHEET_OPEN",
+      "Open verification sheet",
+      extra: {"title": title},
+    );
     String codeValue = '';
 
     final result = await showModalBottomSheet<String?>(
@@ -446,15 +553,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 Text(
                   title,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   message,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.grey.shade600,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                 ),
                 if (_lastPhoneOtp != null &&
                     _lastPhoneOtp!.isNotEmpty &&
@@ -480,9 +587,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         Expanded(
                           child: Text(
                             "DEV OTP: $_lastPhoneOtp",
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
+                            style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: Colors.orange.shade800,
                                   fontWeight: FontWeight.w600,
@@ -571,8 +676,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final phoneDigits = _phoneCtrl.text.trim();
     final normalizedPhone = _normalizeNigerianPhone(phoneDigits);
     final companyPhoneDigits = _companyPhoneCtrl.text.trim();
-    final normalizedCompanyPhone =
-        _normalizeNigerianPhone(companyPhoneDigits);
+    final normalizedCompanyPhone = _normalizeNigerianPhone(companyPhoneDigits);
 
     if (phoneDigits.isNotEmpty && normalizedPhone == null) {
       _logFlow("SAVE_BLOCK", "Invalid phone number");
@@ -599,13 +703,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
 
     // WHY: Verification flags should reflect backend truth, not local UI state.
-    final latestProfile = ref.read(userProfileProvider).value ?? _currentProfile;
+    final latestProfile =
+        ref.read(userProfileProvider).value ?? _currentProfile;
 
     final profile = UserProfile(
       id: _currentProfile?.id ?? session.user.id,
       name: fullName.isEmpty ? session.user.name : fullName,
       firstName: firstName.isEmpty ? null : firstName,
       lastName: lastName.isEmpty ? null : lastName,
+      middleName: latestProfile?.middleName,
+      dob: latestProfile?.dob,
       email: _emailCtrl.text.trim().isEmpty
           ? session.user.email
           : _emailCtrl.text.trim(),
@@ -613,6 +720,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       accountType: _accountType,
       isEmailVerified: latestProfile?.isEmailVerified ?? false,
       isPhoneVerified: latestProfile?.isPhoneVerified ?? false,
+      isNinVerified: latestProfile?.isNinVerified ?? false,
+      ninLast4: latestProfile?.ninLast4,
       // WHY: Send normalized +234 numbers to the backend.
       phone: normalizedPhone ?? '',
       companyName: _companyNameCtrl.text.trim(),
@@ -717,7 +826,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return const _SplitName('', '');
     }
 
-    final parts = cleanFull.split(' ').where((part) => part.isNotEmpty).toList();
+    final parts = cleanFull
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .toList();
     if (parts.length == 1) {
       return _SplitName(parts.first, '');
     }
@@ -781,6 +893,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (raw.contains("Invalid Nigerian phone number")) {
       return "Enter 10 digits after +234.";
     }
+    if (raw.contains("NIN must be 11 digits")) {
+      return "NIN must be 11 digits.";
+    }
+    if (raw.contains("NIN verification failed")) {
+      return "NIN does not match the configured test value.";
+    }
+    if (raw.contains("NIN test value is not configured")) {
+      return "NIN test value is missing on the backend.";
+    }
+    if (raw.contains("Email and phone must be verified first")) {
+      return "Verify your email and phone before NIN verification.";
+    }
     if (raw.contains("Verification code expired")) {
       return "Code expired. Request a new one.";
     }
@@ -799,16 +923,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 4),
         Text(
           subtitle,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Colors.grey.shade600,
-          ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
         ),
       ],
     );
@@ -899,10 +1020,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
     }
 
-    return OutlinedButton(
-      onPressed: onTap,
-      child: Text(label),
-    );
+    return OutlinedButton(onPressed: onTap, child: Text(label));
   }
 
   Widget _buildProfileCard(UserProfile profile) {
@@ -973,6 +1091,106 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  Widget _buildVerifiedBadge() {
+    return Row(
+      children: [
+        Icon(Icons.check_circle, color: Colors.green.shade600, size: 18),
+        const SizedBox(width: 8),
+        Text(
+          "Verified",
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: Colors.green.shade700,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReadOnlyValue({
+    required String label,
+    required String value,
+    String? hint,
+  }) {
+    // WHY: Display a readonly field without managing a controller.
+    return InputDecorator(
+      decoration: InputDecoration(labelText: label, hintText: hint),
+      child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
+    );
+  }
+
+  Widget _buildReadOnlyValueWithStatus({
+    required String label,
+    required String value,
+    required bool isVerified,
+    String? hint,
+  }) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildReadOnlyValue(label: label, value: value, hint: hint),
+        ),
+        const SizedBox(width: 12),
+        _buildVerificationStatusPill(isVerified: isVerified),
+      ],
+    );
+  }
+
+  Widget _buildVerificationStatusPill({required bool isVerified}) {
+    if (!isVerified) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.green.shade50,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.check_circle, color: Colors.green.shade600, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            "Verified",
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Colors.green.shade700,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNinRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Colors.blueGrey.shade600,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.blueGrey.shade800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     AppDebug.log("SETTINGS", "build()", extra: {"isSaving": _isSaving});
@@ -1031,27 +1249,49 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     name: '',
                     firstName: '',
                     lastName: '',
+                    middleName: '',
+                    dob: '',
                     email: '',
                     role: 'customer',
                     accountType: 'personal',
                     isEmailVerified: false,
                     isPhoneVerified: false,
+                    isNinVerified: false,
+                    ninLast4: null,
                   )
                 : UserProfile(
                     id: session.user.id,
                     name: session.user.name,
-                    firstName: _splitFullName(null, null, session.user.name)
-                        .firstName,
-                    lastName: _splitFullName(null, null, session.user.name)
-                        .lastName,
+                    firstName: _splitFullName(
+                      null,
+                      null,
+                      session.user.name,
+                    ).firstName,
+                    lastName: _splitFullName(
+                      null,
+                      null,
+                      session.user.name,
+                    ).lastName,
+                    middleName: '',
+                    dob: '',
                     email: session.user.email,
                     role: session.user.role,
                     accountType: _accountType,
                     isEmailVerified: false,
                     isPhoneVerified: false,
+                    isNinVerified: false,
+                    ninLast4: null,
                   );
 
             final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
+            // WHY: Once NIN is verified, lock identity fields only.
+            final isIdentityLocked = activeProfile.isNinVerified;
+            // WHY: Restrict account type choices until NIN verification is complete.
+            final accountTypeOptions = activeProfile.isNinVerified
+                ? _accountTypeOptions
+                : _accountTypeOptions
+                      .where((option) => option["value"] == "personal")
+                      .toList();
 
             return SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -1066,51 +1306,126 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     "Keep your account contact info up to date.",
                   ),
                   const SizedBox(height: 12),
+                  if (isIdentityLocked) ...[
+                    _buildVerifiedBadge(),
+                    const SizedBox(height: 12),
+                  ],
                   _buildTextField(
                     controller: _firstNameCtrl,
                     label: "First name",
                     hint: "Your first name",
+                    readOnly: isIdentityLocked,
                   ),
                   const SizedBox(height: 12),
                   _buildTextField(
                     controller: _lastNameCtrl,
                     label: "Last name",
                     hint: "Your last name",
+                    readOnly: isIdentityLocked,
                   ),
                   const SizedBox(height: 12),
-                  _buildFieldWithAction(
-                    controller: _emailCtrl,
-                    label: "Email address",
-                    actionLabel: "Verify",
-                    isVerified: activeProfile.isEmailVerified,
-                    onActionTap: _verifyEmail,
-                    hint: "Your email",
-                    // WHY: Allow edits only until the backend confirms verification.
-                    readOnly: activeProfile.isEmailVerified,
-                  ),
+                  if (!isIdentityLocked) ...[
+                    _buildFieldWithAction(
+                      controller: _ninCtrl,
+                      label: "NIN",
+                      actionLabel: "Verify",
+                      isVerified: activeProfile.isNinVerified,
+                      onActionTap: _verifyNin,
+                      hint: "11-digit NIN",
+                      keyboardType: TextInputType.number,
+                      inputFormatters: _ninInputFormatters,
+                      // WHY: Lock NIN input once verified.
+                      readOnly: isIdentityLocked,
+                    ),
+                  ] else ...[
+                    _buildReadOnlyValueWithStatus(
+                      label: "NIN",
+                      hint: "Verified",
+                      value: activeProfile.ninLast4 == null
+                          ? ''
+                          : "**** ${activeProfile.ninLast4}",
+                      isVerified: activeProfile.isNinVerified,
+                    ),
+                  ],
                   const SizedBox(height: 12),
-                  _buildFieldWithAction(
-                    controller: _phoneCtrl,
-                    label: "Phone number",
-                    actionLabel: "Verify",
-                    isVerified: activeProfile.isPhoneVerified,
-                    onActionTap: _verifyPhone,
-                    hint: "8012345678",
-                    keyboardType: TextInputType.phone,
-                    // WHY: Keep phone input strict and prefix country code in UI.
-                    inputFormatters: _ngPhoneInputFormatters,
-                    prefixText: _ngPhonePrefix,
-                  ),
+                  if (!isIdentityLocked)
+                    _buildFieldWithAction(
+                      controller: _emailCtrl,
+                      label: "Email address",
+                      actionLabel: "Verify",
+                      isVerified: activeProfile.isEmailVerified,
+                      onActionTap: _verifyEmail,
+                      hint: "Your email",
+                      // WHY: Allow edits only until the backend confirms verification.
+                      readOnly:
+                          isIdentityLocked || activeProfile.isEmailVerified,
+                    )
+                  else
+                    _buildReadOnlyValueWithStatus(
+                      label: "Email address",
+                      hint: "Your email",
+                      value: _emailCtrl.text,
+                      isVerified: activeProfile.isEmailVerified,
+                    ),
+                  const SizedBox(height: 12),
+                  if (!isIdentityLocked)
+                    _buildFieldWithAction(
+                      controller: _phoneCtrl,
+                      label: "Phone number",
+                      actionLabel: "Verify",
+                      isVerified: activeProfile.isPhoneVerified,
+                      onActionTap: _verifyPhone,
+                      hint: "8012345678",
+                      keyboardType: TextInputType.phone,
+                      // WHY: Keep phone input strict and prefix country code in UI.
+                      inputFormatters: _ngPhoneInputFormatters,
+                      prefixText: _ngPhonePrefix,
+                      readOnly: isIdentityLocked,
+                    )
+                  else
+                    _buildReadOnlyValueWithStatus(
+                      label: "Phone number",
+                      hint: "8012345678",
+                      value: _phoneCtrl.text.isEmpty
+                          ? ''
+                          : "$_ngPhonePrefix${_phoneCtrl.text}",
+                      isVerified: activeProfile.isPhoneVerified,
+                    ),
                   const SizedBox(height: 20),
                   _buildSectionHeader(
                     "Account type",
                     "Upgrade your account to unlock business features.",
                   ),
                   const SizedBox(height: 12),
+                  if (!activeProfile.isNinVerified) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blueGrey.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blueGrey.shade100),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.lock, color: Colors.blueGrey.shade600),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Verify your NIN to unlock business account types.",
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   DropdownButtonFormField<String>(
                     value: _accountType,
-                    decoration: const InputDecoration(labelText: "Account type"),
-                    items: _accountTypeOptions
+                    decoration: const InputDecoration(
+                      labelText: "Account type",
+                    ),
+                    items: accountTypeOptions
                         .map(
                           (option) => DropdownMenuItem(
                             value: option["value"],
@@ -1118,9 +1433,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                         )
                         .toList(),
-                    onChanged: _isSaving
-                        ? null
-                        : (value) {
+                    onChanged: (!_isSaving && activeProfile.isNinVerified)
+                        ? (value) {
                             if (value == null) return;
                             AppDebug.log(
                               "SETTINGS",
@@ -1128,7 +1442,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               extra: {"type": value},
                             );
                             setState(() => _accountType = value);
-                          },
+                          }
+                        : null,
                   ),
                   const SizedBox(height: 12),
                   Container(
@@ -1164,6 +1479,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       controller: _companyNameCtrl,
                       label: "Company name",
                       hint: "Your business name",
+                      readOnly: false,
                     ),
                     const SizedBox(height: 12),
                     _buildTextField(
@@ -1171,6 +1487,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       label: "Company email",
                       hint: "billing@company.com",
                       keyboardType: TextInputType.emailAddress,
+                      readOnly: false,
                     ),
                     const SizedBox(height: 12),
                     _buildTextField(
@@ -1181,12 +1498,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       // WHY: Enforce digits-only input for Nigerian numbers.
                       inputFormatters: _ngPhoneInputFormatters,
                       prefixText: _ngPhonePrefix,
+                      readOnly: false,
                     ),
                     const SizedBox(height: 12),
                     _buildTextField(
                       controller: _companyAddressCtrl,
                       label: "Company address",
                       hint: "Street, city, state",
+                      readOnly: false,
                     ),
                     const SizedBox(height: 12),
                     _buildTextField(
@@ -1194,12 +1513,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       label: "Company website",
                       hint: "https://company.com",
                       keyboardType: TextInputType.url,
+                      readOnly: false,
                     ),
                     const SizedBox(height: 12),
                     _buildTextField(
                       controller: _companyRegCtrl,
                       label: "Registration ID",
                       hint: "CAC / RC / Tax ID",
+                      readOnly: false,
                     ),
                   ],
                   const SizedBox(height: 24),

@@ -52,8 +52,8 @@ function normalizeString(value) {
   if (typeof value !== "string")
     return value;
   const trimmed = value.trim();
-  return trimmed.length > 0
-    ? trimmed
+  return trimmed.length > 0 ?
+      trimmed
     : null;
 }
 
@@ -76,20 +76,20 @@ function normalizeNigerianPhone(value) {
 
 // WHY: Only allow safe profile updates and validate account type.
 function buildProfileUpdatePayload(
-  input
+  input,
 ) {
   const payload = {};
   const inputHasEmail =
     Object.prototype.hasOwnProperty.call(
       input,
-      "email"
+      "email",
     );
 
   for (const field of PROFILE_FIELDS) {
     if (
       !Object.prototype.hasOwnProperty.call(
         input,
-        field
+        field,
       )
     ) {
       continue;
@@ -103,7 +103,7 @@ function buildProfileUpdatePayload(
   if (inputHasEmail) {
     if (!payload.email) {
       throw new Error(
-        "Email is required"
+        "Email is required",
       );
     }
 
@@ -114,7 +114,7 @@ function buildProfileUpdatePayload(
       !EMAIL_REGEX.test(normalizedEmail)
     ) {
       throw new Error(
-        "Please provide a valid email address"
+        "Please provide a valid email address",
       );
     }
 
@@ -124,11 +124,11 @@ function buildProfileUpdatePayload(
   if (payload.phone != null) {
     const normalized =
       normalizeNigerianPhone(
-        payload.phone
+        payload.phone,
       );
     if (!normalized) {
       throw new Error(
-        "Invalid Nigerian phone number"
+        "Invalid Nigerian phone number",
       );
     }
     payload.phone = normalized;
@@ -137,11 +137,11 @@ function buildProfileUpdatePayload(
   if (payload.companyPhone != null) {
     const normalized =
       normalizeNigerianPhone(
-        payload.companyPhone
+        payload.companyPhone,
       );
     if (!normalized) {
       throw new Error(
-        "Invalid company phone number"
+        "Invalid company phone number",
       );
     }
     payload.companyPhone = normalized;
@@ -175,11 +175,11 @@ function buildProfileUpdatePayload(
   if (
     payload.accountType &&
     !ACCOUNT_TYPES.includes(
-      payload.accountType
+      payload.accountType,
     )
   ) {
     throw new Error(
-      "Invalid account type"
+      "Invalid account type",
     );
   }
 
@@ -194,6 +194,9 @@ function shapeProfile(userDoc) {
     firstName:
       userDoc.firstName || null,
     lastName: userDoc.lastName || null,
+    middleName:
+      userDoc.middleName || null,
+    dob: userDoc.dob || null,
     email: userDoc.email || "",
     role: userDoc.role || "customer",
     accountType:
@@ -202,6 +205,9 @@ function shapeProfile(userDoc) {
       !!userDoc.isEmailVerified,
     isPhoneVerified:
       !!userDoc.isPhoneVerified,
+    isNinVerified:
+      !!userDoc.isNinVerified,
+    ninLast4: userDoc.ninLast4 || null,
     phone: userDoc.phone || null,
     companyName:
       userDoc.companyName || null,
@@ -222,7 +228,7 @@ function shapeProfile(userDoc) {
 async function getUserProfile(userId) {
   debug(
     "PROFILE SERVICE: getUserProfile - entry",
-    { userId }
+    { userId },
   );
 
   if (!userId) {
@@ -230,7 +236,7 @@ async function getUserProfile(userId) {
   }
 
   const user = await User.findById(
-    userId
+    userId,
   ).select("-passwordHash");
 
   if (!user) {
@@ -239,7 +245,7 @@ async function getUserProfile(userId) {
 
   debug(
     "PROFILE SERVICE: getUserProfile - success",
-    { userId }
+    { userId },
   );
 
   return shapeProfile(user);
@@ -247,14 +253,14 @@ async function getUserProfile(userId) {
 
 async function updateUserProfile(
   userId,
-  updates
+  updates,
 ) {
   debug(
     "PROFILE SERVICE: updateUserProfile - entry",
     {
       userId,
       keys: Object.keys(updates || {}),
-    }
+    },
   );
 
   if (!userId) {
@@ -263,12 +269,12 @@ async function updateUserProfile(
 
   const payload =
     buildProfileUpdatePayload(
-      updates || {}
+      updates || {},
     );
 
   const currentUser =
     await User.findById(userId).select(
-      "-passwordHash"
+      "-passwordHash",
     );
 
   if (!currentUser) {
@@ -283,7 +289,7 @@ async function updateUserProfile(
   ) {
     if (currentUser.isEmailVerified) {
       throw new Error(
-        "Verified email cannot be changed until reset"
+        "Verified email cannot be changed until reset",
       );
     }
 
@@ -295,7 +301,7 @@ async function updateUserProfile(
 
     if (existingEmail) {
       throw new Error(
-        "Email already registered"
+        "Email already registered",
       );
     }
 
@@ -314,7 +320,7 @@ async function updateUserProfile(
   ) {
     debug(
       "PROFILE SERVICE: checking phone uniqueness",
-      { userId }
+      { userId },
     );
     const existingPhone =
       await User.findOne({
@@ -324,7 +330,7 @@ async function updateUserProfile(
 
     if (existingPhone) {
       throw new Error(
-        "Phone number already in use"
+        "Phone number already in use",
       );
     }
   }
@@ -333,12 +339,15 @@ async function updateUserProfile(
     await User.findByIdAndUpdate(
       userId,
       { $set: payload },
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true,
+      },
     ).select("-passwordHash");
 
   debug(
     "PROFILE SERVICE: updateUserProfile - success",
-    { userId }
+    { userId },
   );
 
   return shapeProfile(user);

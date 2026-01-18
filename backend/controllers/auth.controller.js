@@ -29,6 +29,7 @@ const {
   requestPhoneVerification,
   confirmPhoneVerification,
 } = require('../services/verification.service');
+const { verifyNinForUser } = require('../services/nin_verification.service');
 
 
 /**
@@ -345,6 +346,37 @@ async function confirmPhoneVerificationController(req, res) {
   }
 }
 
+/* =========================
+   VERIFICATION — NIN (SIM)
+========================= */
+async function verifyNinController(req, res) {
+  try {
+    debug('================ NIN VERIFY START ================');
+    debug('NIN verify request userId:', req.user?.sub);
+
+    const { nin } = req.body || {};
+    const result = await verifyNinForUser(req.user?.sub, nin);
+
+    debug('NIN verify success', {
+      userId: req.user?.sub,
+      status: result.status,
+    });
+    debug('================ NIN VERIFY END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'NIN verified',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ NIN VERIFY END (ERROR) ================');
+    debug('NIN verify error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
 module.exports = {
   register,
   login,
@@ -354,4 +386,5 @@ module.exports = {
   confirmEmailVerification: confirmEmailVerificationController,
   requestPhoneVerification: requestPhoneVerificationController,
   confirmPhoneVerification: confirmPhoneVerificationController,
+  verifyNin: verifyNinController,
 };

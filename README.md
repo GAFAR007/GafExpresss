@@ -152,6 +152,10 @@ Why It's Safe
 - OTPs are hashed, time-limited, and never stored in plaintext.
 - Requests are tied to the authenticated `userId` from auth middleware.
 
+📝 TODO (IMPORTANT)
+- When your Termii Sender ID is approved, log in to https://app.termii.com and switch from dev OTP to real SMS delivery.
+- Check the Sender ID status regularly until it flips to Approved.
+
 🖥 Backend (apps/backend)
 Purpose
 

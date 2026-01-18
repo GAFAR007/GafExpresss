@@ -18,11 +18,15 @@ class UserProfile {
   final String name;
   final String? firstName;
   final String? lastName;
+  final String? middleName;
+  final String? dob;
   final String email;
   final String role;
   final String accountType;
   final bool isEmailVerified;
   final bool isPhoneVerified;
+  final bool isNinVerified;
+  final String? ninLast4;
   final String? phone;
   final String? companyName;
   final String? companyEmail;
@@ -36,11 +40,15 @@ class UserProfile {
     required this.name,
     this.firstName,
     this.lastName,
+    this.middleName,
+    this.dob,
     required this.email,
     required this.role,
     required this.accountType,
     required this.isEmailVerified,
     required this.isPhoneVerified,
+    required this.isNinVerified,
+    this.ninLast4,
     this.phone,
     this.companyName,
     this.companyEmail,
@@ -65,11 +73,15 @@ class UserProfile {
       name: (json['name'] ?? '').toString(),
       firstName: _nullIfEmpty(json['firstName']),
       lastName: _nullIfEmpty(json['lastName']),
+      middleName: _nullIfEmpty(json['middleName']),
+      dob: _nullIfEmpty(json['dob']),
       email: (json['email'] ?? '').toString(),
       role: (json['role'] ?? 'customer').toString(),
       accountType: rawAccountType,
       isEmailVerified: json['isEmailVerified'] == true,
       isPhoneVerified: json['isPhoneVerified'] == true,
+      isNinVerified: json['isNinVerified'] == true,
+      ninLast4: _nullIfEmpty(json['ninLast4']),
       phone: _nullIfEmpty(json['phone']),
       companyName: _nullIfEmpty(json['companyName']),
       companyEmail: _nullIfEmpty(json['companyEmail']),
@@ -108,10 +120,14 @@ class UserProfile {
     String? name,
     String? firstName,
     String? lastName,
+    String? middleName,
+    String? dob,
     String? phone,
     String? accountType,
     bool? isEmailVerified,
     bool? isPhoneVerified,
+    bool? isNinVerified,
+    String? ninLast4,
     String? companyName,
     String? companyEmail,
     String? companyPhone,
@@ -124,11 +140,15 @@ class UserProfile {
       name: name ?? this.name,
       firstName: firstName ?? this.firstName,
       lastName: lastName ?? this.lastName,
+      middleName: middleName ?? this.middleName,
+      dob: dob ?? this.dob,
       email: email,
       role: role,
       accountType: accountType ?? this.accountType,
       isEmailVerified: isEmailVerified ?? this.isEmailVerified,
       isPhoneVerified: isPhoneVerified ?? this.isPhoneVerified,
+      isNinVerified: isNinVerified ?? this.isNinVerified,
+      ninLast4: ninLast4 ?? this.ninLast4,
       phone: phone ?? this.phone,
       companyName: companyName ?? this.companyName,
       companyEmail: companyEmail ?? this.companyEmail,

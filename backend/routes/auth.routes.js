@@ -198,6 +198,13 @@ router.post(
 );
 
 /**
+ * Verify NIN (simulated)
+ * POST /auth/nin/verify
+ * Protected route - requires valid JWT
+ */
+router.post('/nin/verify', requireAuth, authController.verifyNin);
+
+/**
  * Admin-only test route
  * GET /auth/admin-test
  */
