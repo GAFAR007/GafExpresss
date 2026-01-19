@@ -7,7 +7,7 @@
 /// - Keeps the Settings screen slim by extracting the header UI.
 ///
 /// HOW:
-/// - Displays initials, name, email, and account type badge.
+/// - Displays initials, name, email, and optional account type badge.
 /// ------------------------------------------------------------
 library;
 
@@ -16,7 +16,7 @@ import 'package:flutter/material.dart';
 class ProfileCard extends StatelessWidget {
   final String displayName;
   final String email;
-  final String accountTypeLabel;
+  final String? accountTypeLabel;
   final String initials;
   final String? profileImageUrl;
   final VoidCallback? onAvatarTap;
@@ -26,7 +26,7 @@ class ProfileCard extends StatelessWidget {
     super.key,
     required this.displayName,
     required this.email,
-    required this.accountTypeLabel,
+    this.accountTypeLabel,
     required this.initials,
     this.profileImageUrl,
     this.onAvatarTap,
@@ -35,6 +35,10 @@ class ProfileCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // WHY: Hide the badge when account type editing is disabled in Settings.
+    final hasAccountType =
+        accountTypeLabel != null && accountTypeLabel!.trim().isNotEmpty;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -95,21 +99,22 @@ class ProfileCard extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              accountTypeLabel,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+          if (hasAccountType)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                accountTypeLabel!,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

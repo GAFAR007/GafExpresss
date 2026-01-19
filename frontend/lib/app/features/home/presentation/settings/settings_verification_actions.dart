@@ -117,8 +117,10 @@ class SettingsVerificationActions {
         extra: {"error": e.toString()},
       );
       if (!context.mounted) return;
+      // WHY: Surface backend-provided message so the UI stays dumb.
+      final message = errorMessage(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Email verification failed. ${errorMessage(e)}")),
+        SnackBar(content: Text(message)),
       );
     }
   }
@@ -219,8 +221,10 @@ class SettingsVerificationActions {
         extra: {"error": e.toString()},
       );
       if (!context.mounted) return;
+      // WHY: Surface backend-provided message so the UI stays dumb.
+      final message = errorMessage(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Phone verification failed. ${errorMessage(e)}")),
+        SnackBar(content: Text(message)),
       );
     }
   }
@@ -278,8 +282,10 @@ class SettingsVerificationActions {
         extra: {"error": e.toString()},
       );
       if (!context.mounted) return;
+      // WHY: Surface backend-provided message so the UI stays dumb.
+      final message = errorMessage(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("NIN verification failed. ${errorMessage(e)}")),
+        SnackBar(content: Text(message)),
       );
     }
   }

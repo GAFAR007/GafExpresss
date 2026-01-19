@@ -130,6 +130,74 @@ class SettingsFieldWithAction extends StatelessWidget {
   }
 }
 
+class SettingsProfileImageRow extends StatelessWidget {
+  final String label;
+  final String initials;
+  final String? profileImageUrl;
+  final bool isUploading;
+  final VoidCallback onUploadTap;
+
+  const SettingsProfileImageRow({
+    super.key,
+    required this.label,
+    required this.initials,
+    required this.profileImageUrl,
+    required this.isUploading,
+    required this.onUploadTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // WHY: Avoid showing broken images when no profile image exists.
+    final hasImage = profileImageUrl != null && profileImageUrl!.trim().isNotEmpty;
+
+    return Row(
+      children: [
+        // WHY: Show the user their current avatar so the upload action is clear.
+        CircleAvatar(
+          radius: 20,
+          backgroundColor: Colors.green.shade100,
+          backgroundImage: hasImage ? NetworkImage(profileImageUrl!) : null,
+          child: hasImage
+              ? null
+              : Text(
+                  initials,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 2),
+              Text(
+                hasImage ? "Image uploaded" : "Upload a profile photo",
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.grey.shade600,
+                    ),
+              ),
+            ],
+          ),
+        ),
+        // WHY: Keep the upload CTA visible even when an image exists.
+        OutlinedButton.icon(
+          onPressed: isUploading ? null : onUploadTap,
+          icon: isUploading
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.upload, size: 16),
+          label: Text(isUploading ? "Uploading..." : "Upload"),
+        ),
+      ],
+    );
+  }
+}
+
 class _VerificationButton extends StatelessWidget {
   final bool isVerified;
   final String label;

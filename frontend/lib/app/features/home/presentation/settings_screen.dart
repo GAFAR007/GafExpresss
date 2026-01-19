@@ -1,11 +1,11 @@
 /// lib/app/features/home/presentation/settings_screen.dart
 /// ------------------------------------------------------------
 /// WHAT:
-/// - Profile + settings screen with a full account form.
+/// - Profile + settings screen focused on verification and personal details.
 ///
 /// WHY:
-/// - Lets customers update personal details and upgrade to business tiers.
-/// - Surfaces saved profile data and keeps settings centralized.
+/// - Lets customers verify email/phone/NIN and update profile info.
+/// - Keeps profile image upload and identity checks in one place.
 ///
 /// HOW:
 /// - Fetches profile via userProfileProvider.
@@ -16,6 +16,7 @@ library;
 
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,7 +26,6 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/nin_id_card.dart';
-import 'package:frontend/app/features/home/presentation/settings/widgets/profile_card.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/read_only_value.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/settings_form_fields.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_helpers.dart';
@@ -50,12 +50,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _ninCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _companyNameCtrl = TextEditingController();
-  final _companyEmailCtrl = TextEditingController();
-  final _companyPhoneCtrl = TextEditingController();
-  final _companyAddressCtrl = TextEditingController();
-  final _companyWebsiteCtrl = TextEditingController();
-  final _companyRegCtrl = TextEditingController();
 
   // ------------------------------------------------------------
   // UI STATE
@@ -64,7 +58,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // - Prevent duplicate saves and control conditional sections.
   bool _isSaving = false;
   bool _didPrefill = false;
-  String _accountType = 'personal';
   UserProfile? _currentProfile;
   bool _isRefreshing = false;
   Timer? _autoRefreshTimer;
@@ -94,21 +87,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     AppDebug.log("SETTINGS_FLOW", "$step | $message", extra: extra);
   }
 
-  // WHY: Track account type choices in one place for UI + payloads.
-  static const List<Map<String, String>> _accountTypeOptions = [
-    {"value": "personal", "label": "Personal"},
-    {"value": "sole_proprietorship", "label": "Business Name"},
-    {"value": "partnership", "label": "Partnership"},
-    {
-      "value": "limited_liability_company",
-      "label": "Limited Liability Company (Ltd)",
-    },
-    {
-      "value": "public_limited_company",
-      "label": "Public Limited Company (Plc)",
-    },
-    {"value": "incorporated_trustees", "label": "Incorporated Trustees / NGO"},
-  ];
 
   @override
   void initState() {
@@ -124,12 +102,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _ninCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
-    _companyNameCtrl.dispose();
-    _companyEmailCtrl.dispose();
-    _companyPhoneCtrl.dispose();
-    _companyAddressCtrl.dispose();
-    _companyWebsiteCtrl.dispose();
-    _companyRegCtrl.dispose();
     _autoRefreshTimer?.cancel();
     super.dispose();
   }
@@ -229,10 +201,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
 
       _currentProfile = profile;
-      _accountType = profile.accountType;
-      if (!profile.isNinVerified) {
-        _accountType = 'personal';
-      }
 
       _firstNameCtrl.text = profile.firstName ?? '';
       _lastNameCtrl.text = profile.lastName ?? '';
@@ -246,11 +214,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
 
     _currentProfile = profile;
-    _accountType = profile.accountType;
-    // WHY: Lock account type to personal until NIN verification succeeds.
-    if (!profile.isNinVerified) {
-      _accountType = 'personal';
-    }
 
     final split = splitFullName(
       profile.firstName,
@@ -264,22 +227,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _phoneCtrl.text = profile.phone == null
         ? ''
         : extractNigerianDigits(profile.phone ?? '', maxDigits: _ngPhoneDigits);
-    _companyNameCtrl.text = profile.companyName ?? '';
-    _companyEmailCtrl.text = profile.companyEmail ?? '';
-    _companyPhoneCtrl.text = profile.companyPhone == null
-        ? ''
-        : extractNigerianDigits(
-            profile.companyPhone ?? '',
-            maxDigits: _ngPhoneDigits,
-          );
-    _companyAddressCtrl.text = profile.companyAddress ?? '';
-    _companyWebsiteCtrl.text = profile.companyWebsite ?? '';
-    _companyRegCtrl.text = profile.companyRegistration ?? '';
 
     _didPrefill = true;
 
     if (mounted) {
-      // WHY: Ensure account type badge + conditional fields update.
+      // WHY: Ensure verified UI states update after prefill.
       setState(() {});
     }
   }
@@ -350,7 +302,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Image upload failed. ${_friendlyErrorMessage(e)}")),
+        SnackBar(content: Text(_backendErrorMessage(e))),
       );
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);
@@ -363,7 +315,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref: ref,
       emailCtrl: _emailCtrl,
       openDialog: _openCodeDialog,
-      errorMessage: _friendlyErrorMessage,
+      errorMessage: _backendErrorMessage,
       logFlow: _logFlow,
     );
   }
@@ -376,7 +328,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ngPhonePrefix: _ngPhonePrefix,
       normalizePhone: normalizeNigerianPhone,
       openDialog: _openCodeDialog,
-      errorMessage: _friendlyErrorMessage,
+      errorMessage: _backendErrorMessage,
       onDebugOtp: (code) => _lastPhoneOtp = code,
       logFlow: _logFlow,
     );
@@ -388,7 +340,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ref: ref,
       ninCtrl: _ninCtrl,
       ninDigits: _ninDigits,
-      errorMessage: _friendlyErrorMessage,
+      errorMessage: _backendErrorMessage,
       logFlow: _logFlow,
     );
   }
@@ -549,8 +501,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final fullName = "$firstName $lastName".trim();
     final phoneDigits = _phoneCtrl.text.trim();
     final normalizedPhone = normalizeNigerianPhone(phoneDigits);
-    final companyPhoneDigits = _companyPhoneCtrl.text.trim();
-    final normalizedCompanyPhone = normalizeNigerianPhone(companyPhoneDigits);
 
     if (phoneDigits.isNotEmpty && normalizedPhone == null) {
       _logFlow("SAVE_BLOCK", "Invalid phone number");
@@ -558,18 +508,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("Enter 10 digits after +234 for Nigerian numbers"),
-        ),
-      );
-      setState(() => _isSaving = false);
-      return;
-    }
-
-    if (companyPhoneDigits.isNotEmpty && normalizedCompanyPhone == null) {
-      _logFlow("SAVE_BLOCK", "Invalid company phone");
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Company phone must be 10 digits after +234"),
         ),
       );
       setState(() => _isSaving = false);
@@ -591,19 +529,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ? session.user.email
           : _emailCtrl.text.trim(),
       role: _currentProfile?.role ?? session.user.role,
-      accountType: _accountType,
+      // WHY: Preserve account type from backend since it's not editable here.
+      accountType:
+          latestProfile?.accountType ?? _currentProfile?.accountType ?? 'personal',
       isEmailVerified: latestProfile?.isEmailVerified ?? false,
       isPhoneVerified: latestProfile?.isPhoneVerified ?? false,
       isNinVerified: latestProfile?.isNinVerified ?? false,
       ninLast4: latestProfile?.ninLast4,
       // WHY: Send normalized +234 numbers to the backend.
       phone: normalizedPhone ?? '',
-      companyName: _companyNameCtrl.text.trim(),
-      companyEmail: _companyEmailCtrl.text.trim(),
-      companyPhone: normalizedCompanyPhone ?? '',
-      companyAddress: _companyAddressCtrl.text.trim(),
-      companyWebsite: _companyWebsiteCtrl.text.trim(),
-      companyRegistration: _companyRegCtrl.text.trim(),
+      // WHY: Preserve stored business fields even though they're hidden.
+      companyName: latestProfile?.companyName,
+      companyEmail: latestProfile?.companyEmail,
+      companyPhone: latestProfile?.companyPhone,
+      companyAddress: latestProfile?.companyAddress,
+      companyWebsite: latestProfile?.companyWebsite,
+      companyRegistration: latestProfile?.companyRegistration,
     );
 
     try {
@@ -628,41 +569,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Update failed. ${_friendlyErrorMessage(e)}")),
+        SnackBar(content: Text(_backendErrorMessage(e))),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
-  }
-
-  /// ------------------------------------------------------------
-  /// SECTION HELPERS
-  /// ------------------------------------------------------------
-  bool get _hasBusinessInfo {
-    return _companyNameCtrl.text.trim().isNotEmpty ||
-        _companyEmailCtrl.text.trim().isNotEmpty ||
-        _companyPhoneCtrl.text.trim().isNotEmpty ||
-        _companyAddressCtrl.text.trim().isNotEmpty ||
-        _companyWebsiteCtrl.text.trim().isNotEmpty ||
-        _companyRegCtrl.text.trim().isNotEmpty;
-  }
-
-  bool get _showBusinessFields {
-    return _accountType != 'personal' || _hasBusinessInfo;
-  }
-
-  /// ------------------------------------------------------------
-  /// ACCOUNT TYPE LABEL
-  /// ------------------------------------------------------------
-  /// WHY:
-  /// - Keep UI-friendly labels for account types stored as enums.
-  String _accountTypeLabel(String value) {
-    for (final option in _accountTypeOptions) {
-      if (option["value"] == value) {
-        return option["label"] ?? value;
-      }
-    }
-    return value.replaceAll('_', ' ').toUpperCase();
   }
 
   /// ------------------------------------------------------------
@@ -681,45 +592,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// ------------------------------------------------------------
   /// WHY:
   /// - Replace raw Dio errors with short, user-friendly hints.
-  String _friendlyErrorMessage(Object error) {
+  String _backendErrorMessage(Object error) {
+    // WHY: Prefer backend-provided errors so the UI stays dumb and consistent.
+    if (error is DioException) {
+      final data = error.response?.data;
+      if (data is Map && data["error"] != null) {
+        final message = data["error"].toString().trim();
+        if (message.isNotEmpty) return message;
+      }
+      if (data is Map && data["message"] != null) {
+        final message = data["message"].toString().trim();
+        if (message.isNotEmpty) return message;
+      }
+      if (data is String && data.trim().isNotEmpty) {
+        return data.trim();
+      }
+    }
+
     final raw = error.toString();
-
-    if (raw.contains("Phone number already in use")) {
-      return "This phone number is already linked to another account.";
-    }
-    if (raw.contains("Email already registered")) {
-      return "This email is already registered.";
-    }
-    if (raw.contains("SMS delivery failed")) {
-      return "SMS could not be delivered. Check provider setup.";
-    }
-    if (raw.contains("Invalid Nigerian phone number")) {
-      return "Enter 10 digits after +234.";
-    }
-    if (raw.contains("NIN must be 11 digits")) {
-      return "NIN must be 11 digits.";
-    }
-    if (raw.contains("NIN verification failed")) {
-      return "NIN does not match the configured test value.";
-    }
-    if (raw.contains("NIN test value is not configured")) {
-      return "NIN test value is missing on the backend.";
-    }
-    if (raw.contains("Email and phone must be verified first")) {
-      return "Verify your email and phone before NIN verification.";
-    }
-    if (raw.contains("Verification code expired")) {
-      return "Code expired. Request a new one.";
-    }
-    if (raw.contains("Invalid verification code")) {
-      return "Code is incorrect. Try again.";
-    }
-    if (raw.contains("Session expired")) {
-      return "Session expired. Please sign in again.";
+    final match = RegExp(r'error:\s*([^}]+)').firstMatch(raw);
+    if (match != null) {
+      final message = match.group(1)?.trim();
+      if (message != null && message.isNotEmpty) return message;
     }
 
-    // WHY: Avoid dumping long exceptions to users.
-    return "Please try again.";
+    return "Request failed. Please try again.";
   }
 
   @override
@@ -807,7 +704,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     dob: '',
                     email: session.user.email,
                     role: session.user.role,
-                    accountType: _accountType,
+                    accountType: _currentProfile?.accountType ?? 'personal',
                     isEmailVerified: false,
                     isPhoneVerified: false,
                     isNinVerified: false,
@@ -817,12 +714,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
             // WHY: Once NIN is verified, lock identity fields only.
             final isIdentityLocked = activeProfile.isNinVerified;
-            // WHY: Restrict account type choices until NIN verification is complete.
-            final accountTypeOptions = activeProfile.isNinVerified
-                ? _accountTypeOptions
-                : _accountTypeOptions
-                      .where((option) => option["value"] == "personal")
-                      .toList();
 
             return SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -830,26 +721,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ProfileCard(
-                    displayName:
-                        "${splitFullName(activeProfile.firstName, activeProfile.lastName, activeProfile.name).firstName} "
-                                "${splitFullName(activeProfile.firstName, activeProfile.lastName, activeProfile.name).lastName}"
-                            .trim(),
-                    email: activeProfile.email,
-                    accountTypeLabel: _accountTypeLabel(
-                      activeProfile.accountType,
-                    ),
-                    initials: initialsForProfile(activeProfile),
-                    profileImageUrl: activeProfile.profileImageUrl,
-                    onAvatarTap: _changeProfileImage,
-                    showUploadButton: true,
-                  ),
-                  const SizedBox(height: 20),
                   const SettingsSectionHeader(
                     title: "Personal details",
                     subtitle: "Keep your account contact info up to date.",
                   ),
                   const SizedBox(height: 12),
+                  SettingsProfileImageRow(
+                    label: "Profile image",
+                    initials: initialsForProfile(activeProfile),
+                    profileImageUrl: activeProfile.profileImageUrl,
+                    isUploading: _isUploadingImage,
+                    onUploadTap: _changeProfileImage,
+                  ),
+                  const SizedBox(height: 16),
                   if (isIdentityLocked) ...[
                     NinIdCard(
                       firstName: activeProfile.firstName?.trim() ?? '',
@@ -920,140 +804,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       readOnly: isIdentityLocked,
                     ),
                     const SizedBox(height: 20),
-                  ],
-                  const SizedBox(height: 20),
-                  const SettingsSectionHeader(
-                    title: "Account type",
-                    subtitle:
-                        "Upgrade your account to unlock business features.",
-                  ),
-                  const SizedBox(height: 12),
-                  if (!activeProfile.isNinVerified) ...[
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.blueGrey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.blueGrey.shade100),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.lock, color: Colors.blueGrey.shade600),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              "Verify your NIN to unlock business account types.",
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  DropdownButtonFormField<String>(
-                    value: _accountType,
-                    decoration: const InputDecoration(
-                      labelText: "Account type",
-                    ),
-                    items: accountTypeOptions
-                        .map(
-                          (option) => DropdownMenuItem(
-                            value: option["value"],
-                            child: Text(option["label"] ?? ''),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (!_isSaving && activeProfile.isNinVerified)
-                        ? (value) {
-                            if (value == null) return;
-                            AppDebug.log(
-                              "SETTINGS",
-                              "Account type changed",
-                              extra: {"type": value},
-                            );
-                            setState(() => _accountType = value);
-                          }
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.workspace_premium,
-                          color: Colors.orange.shade700,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            "Upgrade to a registered business type for team tools and priority support.",
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_showBusinessFields) ...[
-                    const SizedBox(height: 20),
-                    const SettingsSectionHeader(
-                      title: "Controlled business profile",
-                      subtitle:
-                          "Add company details for invoices and approvals.",
-                    ),
-                    const SizedBox(height: 12),
-                    SettingsTextField(
-                      controller: _companyNameCtrl,
-                      label: "Company name",
-                      hint: "Your business name",
-                      readOnly: false,
-                    ),
-                    const SizedBox(height: 12),
-                    SettingsTextField(
-                      controller: _companyEmailCtrl,
-                      label: "Company email",
-                      hint: "billing@company.com",
-                      keyboardType: TextInputType.emailAddress,
-                      readOnly: false,
-                    ),
-                    const SizedBox(height: 12),
-                    SettingsTextField(
-                      controller: _companyPhoneCtrl,
-                      label: "Company phone",
-                      hint: "8012345678",
-                      keyboardType: TextInputType.phone,
-                      // WHY: Enforce digits-only input for Nigerian numbers.
-                      inputFormatters: _ngPhoneInputFormatters,
-                      prefixText: _ngPhonePrefix,
-                      readOnly: false,
-                    ),
-                    const SizedBox(height: 12),
-                    SettingsTextField(
-                      controller: _companyAddressCtrl,
-                      label: "Company address",
-                      hint: "Street, city, state",
-                      readOnly: false,
-                    ),
-                    const SizedBox(height: 12),
-                    SettingsTextField(
-                      controller: _companyWebsiteCtrl,
-                      label: "Company website",
-                      hint: "https://company.com",
-                      keyboardType: TextInputType.url,
-                      readOnly: false,
-                    ),
-                    const SizedBox(height: 12),
-                    SettingsTextField(
-                      controller: _companyRegCtrl,
-                      label: "Registration ID",
-                      hint: "CAC / RC / Tax ID",
-                      readOnly: false,
-                    ),
                   ],
                   const SizedBox(height: 24),
                   SizedBox(
