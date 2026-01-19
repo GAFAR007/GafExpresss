@@ -181,6 +181,13 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ✅ Profile image URL (optional; hosted externally)
+    profileImageUrl: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     // ✅ Soft delete tracking
     deletedAt: {
       type: Date,

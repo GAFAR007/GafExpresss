@@ -45,6 +45,12 @@ dependencies:
   # HTTP client
   dio: ^5.7.0
 
+  # Image picker for profile uploads
+  image_picker: ^1.1.2
+
+  # Web-safe file picker for profile uploads
+  file_picker: ^8.1.7
+
   # Secure storage for JWTs / refresh tokens
   flutter_secure_storage: ^9.2.2
 

@@ -28,6 +28,7 @@ class UserProfile {
   final bool isNinVerified;
   final String? ninLast4;
   final String? phone;
+  final String? profileImageUrl;
   final String? companyName;
   final String? companyEmail;
   final String? companyPhone;
@@ -50,6 +51,7 @@ class UserProfile {
     required this.isNinVerified,
     this.ninLast4,
     this.phone,
+    this.profileImageUrl,
     this.companyName,
     this.companyEmail,
     this.companyPhone,
@@ -83,6 +85,7 @@ class UserProfile {
       isNinVerified: json['isNinVerified'] == true,
       ninLast4: _nullIfEmpty(json['ninLast4']),
       phone: _nullIfEmpty(json['phone']),
+      profileImageUrl: _nullIfEmpty(json['profileImageUrl']),
       companyName: _nullIfEmpty(json['companyName']),
       companyEmail: _nullIfEmpty(json['companyEmail']),
       companyPhone: _nullIfEmpty(json['companyPhone']),
@@ -103,6 +106,7 @@ class UserProfile {
       // WHY: Allow backend to update email while unverified.
       "email": email,
       "phone": phone,
+      "profileImageUrl": profileImageUrl,
       "accountType": accountType,
       "companyName": companyName,
       "companyEmail": companyEmail,
@@ -123,6 +127,7 @@ class UserProfile {
     String? middleName,
     String? dob,
     String? phone,
+    String? profileImageUrl,
     String? accountType,
     bool? isEmailVerified,
     bool? isPhoneVerified,
@@ -150,6 +155,7 @@ class UserProfile {
       isNinVerified: isNinVerified ?? this.isNinVerified,
       ninLast4: ninLast4 ?? this.ninLast4,
       phone: phone ?? this.phone,
+      profileImageUrl: profileImageUrl ?? this.profileImageUrl,
       companyName: companyName ?? this.companyName,
       companyEmail: companyEmail ?? this.companyEmail,
       companyPhone: companyPhone ?? this.companyPhone,

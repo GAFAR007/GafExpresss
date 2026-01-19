@@ -26,7 +26,10 @@ import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/nin_id_card.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/profile_card.dart';
+import 'package:frontend/app/features/home/presentation/settings/widgets/read_only_value.dart';
+import 'package:frontend/app/features/home/presentation/settings/widgets/settings_form_fields.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_helpers.dart';
+import 'package:frontend/app/features/home/presentation/settings/settings_image_picker.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_verification_actions.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -66,6 +69,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isRefreshing = false;
   Timer? _autoRefreshTimer;
   String? _lastPhoneOtp;
+  bool _isUploadingImage = false;
   final _verificationActions = const SettingsVerificationActions();
 
   // WHY: Periodically re-fetch profile so verification badges stay fresh.
@@ -283,6 +287,76 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// ------------------------------------------------------------
   /// VERIFICATION HANDLERS
   /// ------------------------------------------------------------
+  Future<void> _changeProfileImage() async {
+    if (_isUploadingImage) {
+      AppDebug.log("SETTINGS", "Profile image upload skipped (busy)");
+      return;
+    }
+
+    AppDebug.log("SETTINGS", "Profile image tap");
+    final session = ref.read(authSessionProvider);
+    if (session == null) {
+      AppDebug.log("SETTINGS", "Profile image blocked (missing session)");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    setState(() => _isUploadingImage = true);
+
+    try {
+      final picked = await pickProfileImage();
+
+      if (picked == null) {
+        AppDebug.log("SETTINGS", "Profile image picker cancelled");
+        return;
+      }
+
+      final bytes = picked.bytes;
+      if (bytes.isEmpty) {
+        throw Exception("Selected image is empty");
+      }
+
+      // WHY: Keep uploads within backend limit (5MB).
+      if (bytes.length > 5 * 1024 * 1024) {
+        throw Exception("Image exceeds 5MB limit");
+      }
+
+      final api = ref.read(profileApiProvider);
+      AppDebug.log(
+        "SETTINGS",
+        "Profile image upload start",
+        extra: {"bytes": bytes.length},
+      );
+      await api.uploadProfileImage(
+        token: session.token,
+        bytes: bytes,
+        filename: picked.filename,
+      );
+
+      ref.invalidate(userProfileProvider);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Profile image updated")),
+      );
+    } catch (e) {
+      AppDebug.log(
+        "SETTINGS",
+        "Profile image upload failed",
+        extra: {"error": e.toString()},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Image upload failed. ${_friendlyErrorMessage(e)}")),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
   Future<void> _verifyEmail() async {
     await _verificationActions.verifyEmail(
       context: context,
@@ -648,110 +722,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return "Please try again.";
   }
 
-  Widget _buildSectionHeader(String title, String subtitle) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    String? hint,
-    TextInputType? keyboardType,
-    List<TextInputFormatter>? inputFormatters,
-    String? prefixText,
-    bool readOnly = false,
-  }) {
-    return TextField(
-      controller: controller,
-      readOnly: readOnly,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixText: prefixText,
-      ),
-    );
-  }
-
-  Widget _buildFieldWithAction({
-    required TextEditingController controller,
-    required String label,
-    required String actionLabel,
-    required bool isVerified,
-    required VoidCallback onActionTap,
-    String? hint,
-    TextInputType? keyboardType,
-    List<TextInputFormatter>? inputFormatters,
-    String? prefixText,
-    bool readOnly = false,
-  }) {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildTextField(
-            controller: controller,
-            label: label,
-            hint: hint,
-            keyboardType: keyboardType,
-            inputFormatters: inputFormatters,
-            prefixText: prefixText,
-            readOnly: readOnly,
-          ),
-        ),
-        const SizedBox(width: 12),
-        _buildVerificationButton(
-          isVerified: isVerified,
-          label: actionLabel,
-          onTap: onActionTap,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVerificationButton({
-    required bool isVerified,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    if (isVerified) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.green.shade50,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.verified, size: 16, color: Colors.green.shade700),
-            const SizedBox(width: 6),
-            Text(
-              "Verified",
-              style: TextStyle(
-                color: Colors.green.shade700,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return OutlinedButton(onPressed: onTap, child: Text(label));
-  }
-
   @override
   Widget build(BuildContext context) {
     AppDebug.log("SETTINGS", "build()", extra: {"isSaving": _isSaving});
@@ -870,11 +840,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       activeProfile.accountType,
                     ),
                     initials: initialsForProfile(activeProfile),
+                    profileImageUrl: activeProfile.profileImageUrl,
+                    onAvatarTap: _changeProfileImage,
+                    showUploadButton: true,
                   ),
                   const SizedBox(height: 20),
-                  _buildSectionHeader(
-                    "Personal details",
-                    "Keep your account contact info up to date.",
+                  const SettingsSectionHeader(
+                    title: "Personal details",
+                    subtitle: "Keep your account contact info up to date.",
                   ),
                   const SizedBox(height: 12),
                   if (isIdentityLocked) ...[
@@ -896,19 +869,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const SizedBox(height: 12),
                   ],
                   if (!isIdentityLocked) ...[
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _firstNameCtrl,
                       label: "First name",
                       hint: "Your first name",
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _lastNameCtrl,
                       label: "Last name",
                       hint: "Your last name",
                     ),
                     const SizedBox(height: 12),
-                    _buildFieldWithAction(
+                    SettingsFieldWithAction(
                       controller: _ninCtrl,
                       label: "NIN",
                       actionLabel: "Verify",
@@ -921,7 +894,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       readOnly: isIdentityLocked,
                     ),
                     const SizedBox(height: 12),
-                    _buildFieldWithAction(
+                    SettingsFieldWithAction(
                       controller: _emailCtrl,
                       label: "Email address",
                       actionLabel: "Verify",
@@ -933,7 +906,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           isIdentityLocked || activeProfile.isEmailVerified,
                     ),
                     const SizedBox(height: 12),
-                    _buildFieldWithAction(
+                    SettingsFieldWithAction(
                       controller: _phoneCtrl,
                       label: "Phone number",
                       actionLabel: "Verify",
@@ -949,9 +922,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     const SizedBox(height: 20),
                   ],
                   const SizedBox(height: 20),
-                  _buildSectionHeader(
-                    "Account type",
-                    "Upgrade your account to unlock business features.",
+                  const SettingsSectionHeader(
+                    title: "Account type",
+                    subtitle:
+                        "Upgrade your account to unlock business features.",
                   ),
                   const SizedBox(height: 12),
                   if (!activeProfile.isNinVerified) ...[
@@ -1027,19 +1001,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ),
                   if (_showBusinessFields) ...[
                     const SizedBox(height: 20),
-                    _buildSectionHeader(
-                      "Controlled business profile",
-                      "Add company details for invoices and approvals.",
+                    const SettingsSectionHeader(
+                      title: "Controlled business profile",
+                      subtitle:
+                          "Add company details for invoices and approvals.",
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _companyNameCtrl,
                       label: "Company name",
                       hint: "Your business name",
                       readOnly: false,
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _companyEmailCtrl,
                       label: "Company email",
                       hint: "billing@company.com",
@@ -1047,7 +1022,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       readOnly: false,
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _companyPhoneCtrl,
                       label: "Company phone",
                       hint: "8012345678",
@@ -1058,14 +1033,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       readOnly: false,
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _companyAddressCtrl,
                       label: "Company address",
                       hint: "Street, city, state",
                       readOnly: false,
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _companyWebsiteCtrl,
                       label: "Company website",
                       hint: "https://company.com",
@@ -1073,7 +1048,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       readOnly: false,
                     ),
                     const SizedBox(height: 12),
-                    _buildTextField(
+                    SettingsTextField(
                       controller: _companyRegCtrl,
                       label: "Registration ID",
                       hint: "CAC / RC / Tax ID",

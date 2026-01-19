@@ -39,6 +39,7 @@ const PROFILE_FIELDS = [
   "email",
   "phone",
   "accountType",
+  "profileImageUrl",
   "companyName",
   "companyEmail",
   "companyPhone",
@@ -209,6 +210,8 @@ function shapeProfile(userDoc) {
       !!userDoc.isNinVerified,
     ninLast4: userDoc.ninLast4 || null,
     phone: userDoc.phone || null,
+    profileImageUrl:
+      userDoc.profileImageUrl || null,
     companyName:
       userDoc.companyName || null,
     companyEmail:

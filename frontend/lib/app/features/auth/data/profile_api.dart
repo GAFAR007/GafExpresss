@@ -250,4 +250,45 @@ class ProfileApi {
     AppDebug.log("PROFILE_API", "verifyNin() success");
     return resp.data as Map<String, dynamic>;
   }
+
+  /// ------------------------------------------------------
+  /// PROFILE IMAGE UPLOAD
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> uploadProfileImage({
+    required String token,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "uploadProfileImage() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    if (bytes.isEmpty) {
+      AppDebug.log("PROFILE_API", "uploadProfileImage() missing bytes");
+      throw Exception("Missing image data");
+    }
+
+    AppDebug.log(
+      "PROFILE_API",
+      "uploadProfileImage() start",
+      extra: {"bytes": bytes.length, "filename": filename},
+    );
+
+    final formData = FormData.fromMap({
+      "image": MultipartFile.fromBytes(bytes, filename: filename),
+    });
+
+    final resp = await _dio.post(
+      "/auth/profile-image",
+      data: formData,
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+        contentType: "multipart/form-data",
+      ),
+    );
+
+    AppDebug.log("PROFILE_API", "uploadProfileImage() success");
+    return resp.data as Map<String, dynamic>;
+  }
 }

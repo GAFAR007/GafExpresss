@@ -30,6 +30,7 @@ const {
   confirmPhoneVerification,
 } = require('../services/verification.service');
 const { verifyNinForUser } = require('../services/nin_verification.service');
+const { uploadProfileImage } = require('../services/profile_image.service');
 
 
 /**
@@ -377,6 +378,38 @@ async function verifyNinController(req, res) {
   }
 }
 
+/* =========================
+   PROFILE IMAGE UPLOAD
+========================= */
+async function uploadProfileImageController(req, res) {
+  try {
+    debug('================ PROFILE IMAGE UPLOAD START ================');
+    debug('Profile image upload userId:', req.user?.sub);
+
+    const result = await uploadProfileImage({
+      userId: req.user?.sub,
+      file: req.file,
+    });
+
+    debug('Profile image upload success', {
+      userId: req.user?.sub,
+    });
+    debug('================ PROFILE IMAGE UPLOAD END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Profile image updated',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ PROFILE IMAGE UPLOAD END (ERROR) ================');
+    debug('Profile image upload error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
 module.exports = {
   register,
   login,
@@ -387,4 +420,5 @@ module.exports = {
   requestPhoneVerification: requestPhoneVerificationController,
   confirmPhoneVerification: confirmPhoneVerificationController,
   verifyNin: verifyNinController,
+  uploadProfileImage: uploadProfileImageController,
 };

@@ -14,6 +14,7 @@
 
 const express = require('express');
 const debug = require('../utils/debug');
+const multer = require('multer');
 const authController = require('../controllers/auth.controller');
 // ✅ Import the authentication middleware
 const { requireAuth } = require('../middlewares/auth.middleware');
@@ -21,6 +22,12 @@ const { requireRole } = require('../middlewares/requireRole.middleware');
 const router = express.Router();
 
 debug('Auth routes initialized');
+
+// WHY: Store uploads in memory for direct Cloudinary streaming.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+});
 
 /**
  * Register a new user
@@ -203,6 +210,18 @@ router.post(
  * Protected route - requires valid JWT
  */
 router.post('/nin/verify', requireAuth, authController.verifyNin);
+
+/**
+ * Upload profile image
+ * POST /auth/profile-image
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/profile-image',
+  requireAuth,
+  upload.single('image'),
+  authController.uploadProfileImage,
+);
 
 /**
  * Admin-only test route
