@@ -58,6 +58,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // - Prevent duplicate saves and control conditional sections.
   bool _isSaving = false;
   bool _didPrefill = false;
+  // WHY: Keep the selected account type in sync with the dropdown.
+  String _accountType = 'personal';
   UserProfile? _currentProfile;
   bool _isRefreshing = false;
   Timer? _autoRefreshTimer;
@@ -86,6 +88,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _logFlow(String step, String message, {Map<String, dynamic>? extra}) {
     AppDebug.log("SETTINGS_FLOW", "$step | $message", extra: extra);
   }
+
+  // WHY: Keep account type labels consistent with backend values.
+  static const List<Map<String, String>> _accountTypeOptions = [
+    {"value": "personal", "label": "Personal"},
+    {"value": "sole_proprietorship", "label": "Business Name"},
+    {"value": "partnership", "label": "Partnership"},
+    {
+      "value": "limited_liability_company",
+      "label": "Limited Liability Company (Ltd)",
+    },
+    {
+      "value": "public_limited_company",
+      "label": "Public Limited Company (Plc)",
+    },
+    {"value": "incorporated_trustees", "label": "Incorporated Trustees / NGO"},
+  ];
 
 
   @override
@@ -201,6 +219,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       );
 
       _currentProfile = profile;
+      // WHY: Keep account type aligned with backend after verification.
+      _accountType = profile.accountType;
 
       _firstNameCtrl.text = profile.firstName ?? '';
       _lastNameCtrl.text = profile.lastName ?? '';
@@ -214,6 +234,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
 
     _currentProfile = profile;
+    // WHY: Prefill account type once so the dropdown mirrors backend state.
+    _accountType = profile.accountType;
 
     final split = splitFullName(
       profile.firstName,
@@ -517,6 +539,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // WHY: Verification flags should reflect backend truth, not local UI state.
     final latestProfile =
         ref.read(userProfileProvider).value ?? _currentProfile;
+    final canEditAccountType = latestProfile?.isNinVerified ?? false;
 
     final profile = UserProfile(
       id: _currentProfile?.id ?? session.user.id,
@@ -529,13 +552,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ? session.user.email
           : _emailCtrl.text.trim(),
       role: _currentProfile?.role ?? session.user.role,
-      // WHY: Preserve account type from backend since it's not editable here.
-      accountType:
-          latestProfile?.accountType ?? _currentProfile?.accountType ?? 'personal',
+      // WHY: Only honor local account type changes after NIN verification.
+      accountType: canEditAccountType
+          ? _accountType
+          : (latestProfile?.accountType ??
+                _currentProfile?.accountType ??
+                'personal'),
       isEmailVerified: latestProfile?.isEmailVerified ?? false,
       isPhoneVerified: latestProfile?.isPhoneVerified ?? false,
       isNinVerified: latestProfile?.isNinVerified ?? false,
       ninLast4: latestProfile?.ninLast4,
+      // WHY: Preserve uploaded image URL so Save doesn't clear it.
+      profileImageUrl:
+          latestProfile?.profileImageUrl ?? _currentProfile?.profileImageUrl,
       // WHY: Send normalized +234 numbers to the backend.
       phone: normalizedPhone ?? '',
       // WHY: Preserve stored business fields even though they're hidden.
@@ -714,6 +743,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
             // WHY: Once NIN is verified, lock identity fields only.
             final isIdentityLocked = activeProfile.isNinVerified;
+            // WHY: Only verified users can change account type.
+            final canEditAccountType = activeProfile.isNinVerified;
 
             return SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -804,6 +835,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       readOnly: isIdentityLocked,
                     ),
                     const SizedBox(height: 20),
+                  ],
+                  if (canEditAccountType) ...[
+                    const SizedBox(height: 12),
+                    const SettingsSectionHeader(
+                      title: "Account type",
+                      subtitle:
+                          "Select the account type that matches your business.",
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: _accountType,
+                      decoration: const InputDecoration(
+                        labelText: "Account type",
+                      ),
+                      items: _accountTypeOptions
+                          .map(
+                            (option) => DropdownMenuItem(
+                              value: option["value"],
+                              child: Text(option["label"] ?? ''),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _isSaving
+                          ? null
+                          : (value) {
+                              if (value == null) return;
+                              // WHY: Log account type changes for audit/debug.
+                              AppDebug.log(
+                                "SETTINGS",
+                                "Account type changed",
+                                extra: {"type": value},
+                              );
+                              setState(() => _accountType = value);
+                            },
+                    ),
                   ],
                   const SizedBox(height: 24),
                   SizedBox(
