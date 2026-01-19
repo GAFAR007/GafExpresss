@@ -780,6 +780,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                       isPhoneVerified: activeProfile.isPhoneVerified,
                       ninLast4: activeProfile.ninLast4,
+                      profileImageUrl: activeProfile.profileImageUrl,
                     ),
                     const SizedBox(height: 12),
                   ],
