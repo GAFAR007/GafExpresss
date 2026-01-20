@@ -30,6 +30,7 @@ import 'package:frontend/app/features/auth/data/auth_session_storage.dart';
 import 'package:frontend/app/features/auth/data/profile_api.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
+import 'package:frontend/app/features/home/presentation/address_autocomplete_api.dart';
 
 /// Provides ONE Dio instance for the app.
 ///
@@ -65,6 +66,21 @@ final profileApiProvider = Provider((ref) {
   final dio = ref.read(dioProvider);
   final api = ProfileApi(dio: dio);
   AppDebug.log("PROVIDERS", "profileApiProvider ready");
+  return api;
+});
+
+/// Provides AddressAutocompleteApi using the shared Dio.
+///
+/// WHY:
+/// - Keeps address suggestion networking centralized.
+final addressAutocompleteApiProvider = Provider((ref) {
+  AppDebug.log(
+    "PROVIDERS",
+    "addressAutocompleteApiProvider created -> building AddressAutocompleteApi",
+  );
+  final dio = ref.read(dioProvider);
+  final api = AddressAutocompleteApi(dio: dio);
+  AppDebug.log("PROVIDERS", "addressAutocompleteApiProvider ready");
   return api;
 });
 

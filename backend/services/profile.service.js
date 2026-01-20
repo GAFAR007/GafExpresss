@@ -43,7 +43,6 @@ const PROFILE_FIELDS = [
   "companyName",
   "companyEmail",
   "companyPhone",
-  "companyAddress",
   "companyWebsite",
   "companyRegistration",
 ];
@@ -75,6 +74,75 @@ function normalizeNigerianPhone(value) {
   return null;
 }
 
+// WHY: Normalize structured address input and keep only allowed fields.
+function normalizeAddressInput(input) {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const normalized = {
+    houseNumber: normalizeString(input.houseNumber),
+    street: normalizeString(input.street),
+    city: normalizeString(input.city),
+    state: normalizeString(input.state),
+    postalCode: normalizeString(input.postalCode),
+    lga: normalizeString(input.lga),
+    country: normalizeString(input.country) || "NG",
+    landmark: normalizeString(input.landmark),
+  };
+
+  const hasAny = Object.values(normalized).some(
+    (value) => value != null && value !== ""
+  );
+
+  return hasAny ? normalized : null;
+}
+
+// WHY: Compare address fields to decide if verification should reset.
+function addressHasChanges(existing, next) {
+  if (!next) return false;
+  if (!existing || typeof existing !== "object") return true;
+
+  const fields = [
+    "houseNumber",
+    "street",
+    "city",
+    "state",
+    "postalCode",
+    "lga",
+    "country",
+    "landmark",
+  ];
+
+  return fields.some((field) => {
+    const currentValue = existing[field] || null;
+    const nextValue = next[field] || null;
+    return currentValue !== nextValue;
+  });
+}
+
+// WHY: Reset verification metadata whenever an address changes.
+function mergeAddressWithVerification(existing, next) {
+  if (!next) {
+    return null;
+  }
+
+  if (!addressHasChanges(existing, next)) {
+    return existing;
+  }
+
+  return {
+    ...next,
+    isVerified: false,
+    verifiedAt: null,
+    verificationSource: null,
+    formattedAddress: null,
+    placeId: null,
+    lat: null,
+    lng: null,
+  };
+}
+
 // WHY: Only allow safe profile updates and validate account type.
 function buildProfileUpdatePayload(
   input,
@@ -99,6 +167,28 @@ function buildProfileUpdatePayload(
     const rawValue = input[field];
     payload[field] =
       normalizeString(rawValue);
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      input,
+      "homeAddress"
+    )
+  ) {
+    payload.homeAddress = normalizeAddressInput(
+      input.homeAddress
+    );
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      input,
+      "companyAddress"
+    )
+  ) {
+    payload.companyAddress = normalizeAddressInput(
+      input.companyAddress
+    );
   }
 
   if (inputHasEmail) {
@@ -187,6 +277,39 @@ function buildProfileUpdatePayload(
   return payload;
 }
 
+// WHY: Normalize address output for consistent frontend parsing.
+function shapeAddress(addressValue) {
+  if (!addressValue) {
+    return null;
+  }
+
+  if (typeof addressValue === "string") {
+    return {
+      formattedAddress: addressValue,
+      isVerified: false,
+      country: "NG",
+    };
+  }
+
+  return {
+    houseNumber: addressValue.houseNumber || null,
+    street: addressValue.street || null,
+    city: addressValue.city || null,
+    state: addressValue.state || null,
+    postalCode: addressValue.postalCode || null,
+    lga: addressValue.lga || null,
+    country: addressValue.country || "NG",
+    landmark: addressValue.landmark || null,
+    isVerified: !!addressValue.isVerified,
+    verifiedAt: addressValue.verifiedAt || null,
+    verificationSource: addressValue.verificationSource || null,
+    formattedAddress: addressValue.formattedAddress || null,
+    placeId: addressValue.placeId || null,
+    lat: typeof addressValue.lat === "number" ? addressValue.lat : null,
+    lng: typeof addressValue.lng === "number" ? addressValue.lng : null,
+  };
+}
+
 // WHY: Hide Mongo internal fields and password hash from client responses.
 function shapeProfile(userDoc) {
   return {
@@ -218,8 +341,8 @@ function shapeProfile(userDoc) {
       userDoc.companyEmail || null,
     companyPhone:
       userDoc.companyPhone || null,
-    companyAddress:
-      userDoc.companyAddress || null,
+    homeAddress: shapeAddress(userDoc.homeAddress),
+    companyAddress: shapeAddress(userDoc.companyAddress),
     companyWebsite:
       userDoc.companyWebsite || null,
     companyRegistration:
@@ -336,6 +459,30 @@ async function updateUserProfile(
         "Phone number already in use",
       );
     }
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      payload,
+      "homeAddress"
+    )
+  ) {
+    payload.homeAddress = mergeAddressWithVerification(
+      currentUser.homeAddress,
+      payload.homeAddress
+    );
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      payload,
+      "companyAddress"
+    )
+  ) {
+    payload.companyAddress = mergeAddressWithVerification(
+      currentUser.companyAddress,
+      payload.companyAddress
+    );
   }
 
   const user =

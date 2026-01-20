@@ -14,26 +14,55 @@
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const User = require("../models/User");
+const {
+  verifyAddressPayload,
+} = require("./address_verification.service");
 const debug = require("../utils/debug");
 
 /**
  * Create a new order (checkout)
  * @param {string} userId
  * @param {Array} items - [{productId, quantity}]
+ * @param {Object} deliveryAddress
  * @returns {Object} created order
  */
 async function createOrder(
   userId,
-  items
+  items,
+  deliveryAddress
 ) {
   debug("ORDER SERVICE: createOrder", {
     userId,
-    items,
+    itemsCount: Array.isArray(items)
+      ? items.length
+      : 0,
+    addressSource:
+      deliveryAddress?.source,
   });
 
   if (!items || items.length === 0) {
     throw new Error(
       "Order must have at least one item"
+    );
+  }
+
+  if (!deliveryAddress) {
+    throw new Error(
+      "Delivery address is required"
+    );
+  }
+
+  const addressSource =
+    deliveryAddress.source;
+
+  if (
+    addressSource !== "home" &&
+    addressSource !== "company" &&
+    addressSource !== "custom"
+  ) {
+    throw new Error(
+      "Invalid delivery address source"
     );
   }
 
@@ -44,6 +73,72 @@ async function createOrder(
   try {
     let totalPrice = 0;
     const orderItems = [];
+    let deliveryAddressSnapshot = null;
+
+    if (addressSource === "home" || addressSource === "company") {
+      // WHY: Snapshot verified profile address to keep orders immutable.
+      const user = await User.findById(
+        userId
+      )
+        .select("homeAddress companyAddress")
+        .lean();
+
+      if (!user) {
+        throw new Error(
+          "User not found"
+        );
+      }
+
+      const selected =
+        addressSource === "home"
+          ? user.homeAddress
+          : user.companyAddress;
+
+      if (!selected) {
+        throw new Error(
+          "Selected delivery address is missing"
+        );
+      }
+
+      if (!selected.isVerified) {
+        throw new Error(
+          "Selected delivery address is not verified"
+        );
+      }
+
+      deliveryAddressSnapshot = {
+        source: addressSource,
+        ...selected,
+      };
+    }
+
+    if (addressSource === "custom") {
+      // WHY: Custom addresses must be verified before checkout completes.
+      const { source, placeId, ...rawAddress } = deliveryAddress;
+      const result =
+        await verifyAddressPayload({
+          address: rawAddress,
+          source: "custom",
+          placeId,
+        });
+
+      if (!result.address?.isVerified) {
+        throw new Error(
+          "Delivery address must be verified"
+        );
+      }
+
+      deliveryAddressSnapshot = {
+        source: "custom",
+        ...result.address,
+      };
+    }
+
+    if (!deliveryAddressSnapshot) {
+      throw new Error(
+        "Delivery address snapshot could not be created"
+      );
+    }
 
     for (const item of items) {
       const product =
@@ -97,6 +192,7 @@ async function createOrder(
       user: userId,
       items: orderItems,
       totalPrice,
+      deliveryAddress: deliveryAddressSnapshot,
     });
     await order.save({ session });
 

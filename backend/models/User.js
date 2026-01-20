@@ -31,6 +31,75 @@ const ACCOUNT_TYPES = [
 
 debug('Loading User model...');
 
+// ✅ Structured address payload for verification + delivery.
+const addressSchema = new mongoose.Schema(
+  {
+    houseNumber: {
+      type: String,
+      trim: true,
+    },
+    street: {
+      type: String,
+      trim: true,
+    },
+    city: {
+      type: String,
+      trim: true,
+    },
+    state: {
+      type: String,
+      trim: true,
+    },
+    postalCode: {
+      type: String,
+      trim: true,
+    },
+    lga: {
+      type: String,
+      trim: true,
+    },
+    country: {
+      type: String,
+      trim: true,
+      default: 'NG',
+    },
+    landmark: {
+      type: String,
+      trim: true,
+    },
+    // ✅ Verification metadata (set only by backend verification flow)
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+    verifiedAt: {
+      type: Date,
+      default: null,
+    },
+    verificationSource: {
+      type: String,
+      trim: true,
+    },
+    formattedAddress: {
+      type: String,
+      trim: true,
+    },
+    placeId: {
+      type: String,
+      trim: true,
+    },
+    lat: {
+      type: Number,
+    },
+    lng: {
+      type: Number,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
 const userSchema = new mongoose.Schema(
   {
     // ✅ Name is optional for now (useful for profile later)
@@ -116,9 +185,14 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // ✅ Structured addresses (home + company) with verification data.
+    homeAddress: {
+      type: addressSchema,
+      default: null,
+    },
     companyAddress: {
-      type: String,
-      trim: true,
+      type: addressSchema,
+      default: null,
     },
     companyWebsite: {
       type: String,

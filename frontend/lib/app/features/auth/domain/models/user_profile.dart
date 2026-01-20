@@ -29,10 +29,11 @@ class UserProfile {
   final String? ninLast4;
   final String? phone;
   final String? profileImageUrl;
+  final UserAddress? homeAddress;
   final String? companyName;
   final String? companyEmail;
   final String? companyPhone;
-  final String? companyAddress;
+  final UserAddress? companyAddress;
   final String? companyWebsite;
   final String? companyRegistration;
 
@@ -52,6 +53,7 @@ class UserProfile {
     this.ninLast4,
     this.phone,
     this.profileImageUrl,
+    this.homeAddress,
     this.companyName,
     this.companyEmail,
     this.companyPhone,
@@ -86,10 +88,11 @@ class UserProfile {
       ninLast4: _nullIfEmpty(json['ninLast4']),
       phone: _nullIfEmpty(json['phone']),
       profileImageUrl: _nullIfEmpty(json['profileImageUrl']),
+      homeAddress: UserAddress.fromJson(json['homeAddress']),
       companyName: _nullIfEmpty(json['companyName']),
       companyEmail: _nullIfEmpty(json['companyEmail']),
       companyPhone: _nullIfEmpty(json['companyPhone']),
-      companyAddress: _nullIfEmpty(json['companyAddress']),
+      companyAddress: UserAddress.fromJson(json['companyAddress']),
       companyWebsite: _nullIfEmpty(json['companyWebsite']),
       companyRegistration: _nullIfEmpty(json['companyRegistration']),
     );
@@ -107,11 +110,12 @@ class UserProfile {
       "email": email,
       "phone": phone,
       "profileImageUrl": profileImageUrl,
+      "homeAddress": homeAddress?.toUpdateJson(),
       "accountType": accountType,
       "companyName": companyName,
       "companyEmail": companyEmail,
       "companyPhone": companyPhone,
-      "companyAddress": companyAddress,
+      "companyAddress": companyAddress?.toUpdateJson(),
       "companyWebsite": companyWebsite,
       "companyRegistration": companyRegistration,
     };
@@ -128,6 +132,7 @@ class UserProfile {
     String? dob,
     String? phone,
     String? profileImageUrl,
+    UserAddress? homeAddress,
     String? accountType,
     bool? isEmailVerified,
     bool? isPhoneVerified,
@@ -136,7 +141,7 @@ class UserProfile {
     String? companyName,
     String? companyEmail,
     String? companyPhone,
-    String? companyAddress,
+    UserAddress? companyAddress,
     String? companyWebsite,
     String? companyRegistration,
   }) {
@@ -156,6 +161,7 @@ class UserProfile {
       ninLast4: ninLast4 ?? this.ninLast4,
       phone: phone ?? this.phone,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
+      homeAddress: homeAddress ?? this.homeAddress,
       companyName: companyName ?? this.companyName,
       companyEmail: companyEmail ?? this.companyEmail,
       companyPhone: companyPhone ?? this.companyPhone,
@@ -163,6 +169,100 @@ class UserProfile {
       companyWebsite: companyWebsite ?? this.companyWebsite,
       companyRegistration: companyRegistration ?? this.companyRegistration,
     );
+  }
+
+  /// WHY: Keep optional string handling consistent and clean.
+  static String? _nullIfEmpty(dynamic value) {
+    if (value == null) return null;
+    final trimmed = value.toString().trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+}
+
+/// ------------------------------------------------------
+/// USER ADDRESS MODEL
+/// ------------------------------------------------------
+/// WHAT:
+/// - Structured address used for home/company delivery verification.
+///
+/// WHY:
+/// - Required fields (house/street/city/state) must be validated.
+/// - Keeps verification metadata next to the saved address.
+///
+/// HOW:
+/// - fromJson parses backend objects.
+/// - toUpdateJson only sends editable fields back to backend.
+class UserAddress {
+  final String? houseNumber;
+  final String? street;
+  final String? city;
+  final String? state;
+  final String? postalCode;
+  final String? lga;
+  final String? country;
+  final String? landmark;
+  final bool isVerified;
+  final String? verifiedAt;
+  final String? verificationSource;
+  final String? formattedAddress;
+  final String? placeId;
+  final double? lat;
+  final double? lng;
+
+  const UserAddress({
+    this.houseNumber,
+    this.street,
+    this.city,
+    this.state,
+    this.postalCode,
+    this.lga,
+    this.country,
+    this.landmark,
+    required this.isVerified,
+    this.verifiedAt,
+    this.verificationSource,
+    this.formattedAddress,
+    this.placeId,
+    this.lat,
+    this.lng,
+  });
+
+  factory UserAddress.fromJson(dynamic value) {
+    if (value is! Map<String, dynamic>) {
+      return const UserAddress(isVerified: false);
+    }
+
+    return UserAddress(
+      houseNumber: _nullIfEmpty(value['houseNumber']),
+      street: _nullIfEmpty(value['street']),
+      city: _nullIfEmpty(value['city']),
+      state: _nullIfEmpty(value['state']),
+      postalCode: _nullIfEmpty(value['postalCode']),
+      lga: _nullIfEmpty(value['lga']),
+      country: _nullIfEmpty(value['country']),
+      landmark: _nullIfEmpty(value['landmark']),
+      isVerified: value['isVerified'] == true,
+      verifiedAt: _nullIfEmpty(value['verifiedAt']),
+      verificationSource: _nullIfEmpty(value['verificationSource']),
+      formattedAddress: _nullIfEmpty(value['formattedAddress']),
+      placeId: _nullIfEmpty(value['placeId']),
+      lat: value['lat'] is num ? (value['lat'] as num).toDouble() : null,
+      lng: value['lng'] is num ? (value['lng'] as num).toDouble() : null,
+    );
+  }
+
+  /// WHY: Only send editable fields (backend controls verification metadata).
+  Map<String, dynamic> toUpdateJson() {
+    return {
+      "houseNumber": houseNumber,
+      "street": street,
+      "city": city,
+      "state": state,
+      "postalCode": postalCode,
+      "lga": lga,
+      "country": country,
+      "landmark": landmark,
+    };
   }
 
   /// WHY: Keep optional string handling consistent and clean.

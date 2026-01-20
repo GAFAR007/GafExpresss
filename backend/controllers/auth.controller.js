@@ -30,7 +30,12 @@ const {
   confirmPhoneVerification,
 } = require('../services/verification.service');
 const { verifyNinForUser } = require('../services/nin_verification.service');
+const { verifyUserAddress } = require('../services/address_verification.service');
 const { uploadProfileImage } = require('../services/profile_image.service');
+const {
+  fetchAddressSuggestions,
+  fetchPlaceDetails,
+} = require('../services/address_autocomplete.service');
 
 
 /**
@@ -410,6 +415,117 @@ async function uploadProfileImageController(req, res) {
   }
 }
 
+/* =========================
+   ADDRESS VERIFY (GOOGLE)
+========================= */
+async function verifyAddressController(req, res) {
+  try {
+    debug('================ ADDRESS VERIFY START ================');
+    debug('Address verify request userId:', req.user?.sub);
+
+    const { type, address, placeId } = req.body || {};
+
+    const result = await verifyUserAddress({
+      userId: req.user?.sub,
+      type,
+      address,
+      placeId,
+    });
+
+    const profile = await getUserProfile(req.user?.sub);
+
+    debug('Address verify success', {
+      userId: req.user?.sub,
+      type,
+      status: result.status,
+    });
+    debug('================ ADDRESS VERIFY END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Address verification complete',
+      ...result,
+      profile,
+    });
+  } catch (err) {
+    debug('================ ADDRESS VERIFY END (ERROR) ================');
+    debug('Address verify error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/* =========================
+   ADDRESS AUTOCOMPLETE
+========================= */
+async function addressAutocomplete(req, res) {
+  try {
+    debug('================ ADDRESS AUTOCOMPLETE START ================');
+    debug('Address autocomplete userId:', req.user?.sub);
+
+    const query = (req.query?.query || '').toString().trim();
+    if (query.length < 3) {
+      return res.status(400).json({
+        error: 'Query must be at least 3 characters',
+      });
+    }
+
+    const suggestions = await fetchAddressSuggestions(query);
+
+    debug('Address autocomplete success', {
+      count: suggestions.length,
+    });
+    debug('================ ADDRESS AUTOCOMPLETE END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Address suggestions fetched',
+      suggestions,
+    });
+  } catch (err) {
+    debug('================ ADDRESS AUTOCOMPLETE END (ERROR) ================');
+    debug('Address autocomplete error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/* =========================
+   ADDRESS PLACE DETAILS
+========================= */
+async function addressPlaceDetails(req, res) {
+  try {
+    debug('================ ADDRESS PLACE DETAILS START ================');
+    debug('Address place details userId:', req.user?.sub);
+
+    const placeId = (req.query?.placeId || '').toString().trim();
+    if (!placeId) {
+      return res.status(400).json({
+        error: 'placeId is required',
+      });
+    }
+
+    const address = await fetchPlaceDetails(placeId);
+
+    debug('Address place details success', { hasStreet: !!address?.street });
+    debug('================ ADDRESS PLACE DETAILS END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Place details fetched',
+      address,
+    });
+  } catch (err) {
+    debug('================ ADDRESS PLACE DETAILS END (ERROR) ================');
+    debug('Address place details error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
 module.exports = {
   register,
   login,
@@ -420,5 +536,8 @@ module.exports = {
   requestPhoneVerification: requestPhoneVerificationController,
   confirmPhoneVerification: confirmPhoneVerificationController,
   verifyNin: verifyNinController,
+  verifyAddress: verifyAddressController,
   uploadProfileImage: uploadProfileImageController,
+  addressAutocomplete,
+  addressPlaceDetails,
 };

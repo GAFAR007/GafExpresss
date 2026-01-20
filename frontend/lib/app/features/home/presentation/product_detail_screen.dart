@@ -24,6 +24,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
+import 'package:frontend/app/features/home/presentation/delivery_address_sheet.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
@@ -60,6 +61,38 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
   }
 
+  Future<DeliveryAddressSelection?> _selectDeliveryAddress() async {
+    AppDebug.log("PRODUCT_DETAIL", "Delivery address selection start");
+
+    try {
+      final profile = await ref.read(userProfileProvider.future);
+      if (profile == null) {
+        AppDebug.log("PRODUCT_DETAIL", "Delivery address blocked (no profile)");
+        if (!mounted) return null;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Load your profile first")),
+        );
+        return null;
+      }
+
+      return await DeliveryAddressSheet.open(
+        context: context,
+        profile: profile,
+      );
+    } catch (e) {
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Delivery address selection failed",
+        extra: {"error": e.toString()},
+      );
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to load delivery address options")),
+      );
+      return null;
+    }
+  }
+
   Future<void> _startPaystackCheckout(Product product) async {
     AppDebug.log(
       "PRODUCT_DETAIL",
@@ -91,6 +124,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         throw Exception("Not logged in");
       }
 
+      final selection = await _selectDeliveryAddress();
+      if (selection == null) {
+        AppDebug.log("PRODUCT_DETAIL", "Checkout cancelled (no address selected)");
+        if (mounted) setState(() => _isPaying = false);
+        return;
+      }
+
       final api = ref.read(orderApiProvider);
 
       AppDebug.log(
@@ -102,6 +142,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       final order = await api.createOrder(
         token: session.token,
         items: [CartItem.fromProduct(product, quantity: safeQty)],
+        deliveryAddress: selection.toPayload(),
       );
 
       final callbackUrl = _buildCallbackUrl();

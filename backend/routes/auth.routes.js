@@ -212,6 +212,35 @@ router.post(
 router.post('/nin/verify', requireAuth, authController.verifyNin);
 
 /**
+ * Verify address (Google Address Validation)
+ * POST /auth/address/verify
+ * Protected route - requires valid JWT
+ */
+router.post('/address/verify', requireAuth, authController.verifyAddress);
+
+/**
+ * Address autocomplete (Google Places)
+ * GET /auth/address/autocomplete?query=...
+ * Protected route - requires valid JWT
+ */
+router.get(
+  '/address/autocomplete',
+  requireAuth,
+  authController.addressAutocomplete,
+);
+
+/**
+ * Address place details (Google Places)
+ * GET /auth/address/place-details?placeId=...
+ * Protected route - requires valid JWT
+ */
+router.get(
+  '/address/place-details',
+  requireAuth,
+  authController.addressPlaceDetails,
+);
+
+/**
  * Upload profile image
  * POST /auth/profile-image
  * Protected route - requires valid JWT

@@ -109,6 +109,63 @@ class ProfileApi {
   }
 
   /// ------------------------------------------------------
+  /// ADDRESS VERIFICATION
+  /// ------------------------------------------------------
+  Future<UserProfile> verifyAddress({
+    required String token,
+    required String type,
+    required UserAddress address,
+    String? placeId,
+  }) async {
+    // WHY: Avoid calling the backend with an empty token.
+    if (token.trim().isEmpty) {
+      AppDebug.log("PROFILE_API", "verifyAddress() missing token");
+      throw Exception("Missing auth token");
+    }
+
+    AppDebug.log(
+      "PROFILE_API",
+      "verifyAddress() start",
+      extra: {"type": type},
+    );
+
+    final payload = <String, dynamic>{
+      "type": type,
+      "address": address.toUpdateJson(),
+    };
+
+    if (placeId != null && placeId.trim().isNotEmpty) {
+      payload["placeId"] = placeId.trim();
+    }
+
+    final resp = await _dio.post(
+      "/auth/address/verify",
+      data: payload,
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final profileMap =
+        (data["profile"] ?? data["user"] ?? {}) as Map<String, dynamic>;
+
+    if (profileMap.isEmpty) {
+      throw Exception("Address verify response missing profile");
+    }
+
+    final updated = UserProfile.fromJson(profileMap);
+
+    AppDebug.log(
+      "PROFILE_API",
+      "verifyAddress() success",
+      extra: {"userId": updated.id},
+    );
+
+    return updated;
+  }
+
+  /// ------------------------------------------------------
   /// EMAIL VERIFICATION
   /// ------------------------------------------------------
   Future<Map<String, dynamic>> requestEmailVerification({

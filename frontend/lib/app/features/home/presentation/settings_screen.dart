@@ -26,8 +26,10 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/nin_id_card.dart';
-import 'package:frontend/app/features/home/presentation/settings/widgets/read_only_value.dart';
+import 'package:frontend/app/features/home/presentation/settings/widgets/settings_address_section.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/settings_form_fields.dart';
+import 'package:frontend/app/features/home/presentation/settings/settings_address_actions.dart';
+import 'package:frontend/app/features/home/presentation/settings/settings_address_helpers.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_helpers.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_image_picker.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_verification_actions.dart';
@@ -50,6 +52,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _ninCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  // WHY: Structured address controllers for home/company verification.
+  final _homeHouseNumberCtrl = TextEditingController();
+  final _homeStreetCtrl = TextEditingController();
+  final _homeCityCtrl = TextEditingController();
+  final _homeStateCtrl = TextEditingController();
+  final _homePostalCtrl = TextEditingController();
+  final _homeLgaCtrl = TextEditingController();
+  final _homeLandmarkCtrl = TextEditingController();
+  final _companyHouseNumberCtrl = TextEditingController();
+  final _companyStreetCtrl = TextEditingController();
+  final _companyCityCtrl = TextEditingController();
+  final _companyStateCtrl = TextEditingController();
+  final _companyPostalCtrl = TextEditingController();
+  final _companyLgaCtrl = TextEditingController();
+  final _companyLandmarkCtrl = TextEditingController();
+  // WHY: Store Google place IDs from autocomplete for verified submissions.
+  String? _homePlaceId;
+  String? _companyPlaceId;
 
   // ------------------------------------------------------------
   // UI STATE
@@ -66,6 +86,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _lastPhoneOtp;
   bool _isUploadingImage = false;
   final _verificationActions = const SettingsVerificationActions();
+  final _addressActions = const SettingsAddressActions();
 
   // WHY: Periodically re-fetch profile so verification badges stay fresh.
   static const Duration _autoRefreshInterval = Duration(seconds: 45);
@@ -120,6 +141,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _ninCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
+    _homeHouseNumberCtrl.dispose();
+    _homeStreetCtrl.dispose();
+    _homeCityCtrl.dispose();
+    _homeStateCtrl.dispose();
+    _homePostalCtrl.dispose();
+    _homeLgaCtrl.dispose();
+    _homeLandmarkCtrl.dispose();
+    _companyHouseNumberCtrl.dispose();
+    _companyStreetCtrl.dispose();
+    _companyCityCtrl.dispose();
+    _companyStateCtrl.dispose();
+    _companyPostalCtrl.dispose();
+    _companyLgaCtrl.dispose();
+    _companyLandmarkCtrl.dispose();
     _autoRefreshTimer?.cancel();
     super.dispose();
   }
@@ -200,14 +235,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           profile.middleName != _currentProfile?.middleName ||
           profile.lastName != _currentProfile?.lastName ||
           profile.dob != _currentProfile?.dob;
+      final shouldRefreshAddresses =
+          addressChanged(profile.homeAddress, _currentProfile?.homeAddress) ||
+          addressChanged(profile.companyAddress, _currentProfile?.companyAddress);
 
-      if (!shouldRefreshIdentity) {
+      if (!shouldRefreshIdentity && !shouldRefreshAddresses) {
         // WHY: Keep backend verification status in sync without clobbering edits.
         _currentProfile = _currentProfile?.copyWith(
           isEmailVerified: profile.isEmailVerified,
           isPhoneVerified: profile.isPhoneVerified,
           isNinVerified: profile.isNinVerified,
           ninLast4: profile.ninLast4,
+          homeAddress: profile.homeAddress,
+          companyAddress: profile.companyAddress,
         );
         return;
       }
@@ -224,6 +264,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       _firstNameCtrl.text = profile.firstName ?? '';
       _lastNameCtrl.text = profile.lastName ?? '';
+      applyAddressToControllers(
+        address: profile.homeAddress,
+        houseNumberCtrl: _homeHouseNumberCtrl,
+        streetCtrl: _homeStreetCtrl,
+        cityCtrl: _homeCityCtrl,
+        stateCtrl: _homeStateCtrl,
+        postalCtrl: _homePostalCtrl,
+        lgaCtrl: _homeLgaCtrl,
+        landmarkCtrl: _homeLandmarkCtrl,
+      );
+      _homePlaceId = profile.homeAddress?.placeId;
+      applyAddressToControllers(
+        address: profile.companyAddress,
+        houseNumberCtrl: _companyHouseNumberCtrl,
+        streetCtrl: _companyStreetCtrl,
+        cityCtrl: _companyCityCtrl,
+        stateCtrl: _companyStateCtrl,
+        postalCtrl: _companyPostalCtrl,
+        lgaCtrl: _companyLgaCtrl,
+        landmarkCtrl: _companyLandmarkCtrl,
+      );
+      _companyPlaceId = profile.companyAddress?.placeId;
       return;
     }
 
@@ -249,6 +311,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _phoneCtrl.text = profile.phone == null
         ? ''
         : extractNigerianDigits(profile.phone ?? '', maxDigits: _ngPhoneDigits);
+    applyAddressToControllers(
+      address: profile.homeAddress,
+      houseNumberCtrl: _homeHouseNumberCtrl,
+      streetCtrl: _homeStreetCtrl,
+      cityCtrl: _homeCityCtrl,
+      stateCtrl: _homeStateCtrl,
+      postalCtrl: _homePostalCtrl,
+      lgaCtrl: _homeLgaCtrl,
+      landmarkCtrl: _homeLandmarkCtrl,
+    );
+    _homePlaceId = profile.homeAddress?.placeId;
+    applyAddressToControllers(
+      address: profile.companyAddress,
+      houseNumberCtrl: _companyHouseNumberCtrl,
+      streetCtrl: _companyStreetCtrl,
+      cityCtrl: _companyCityCtrl,
+      stateCtrl: _companyStateCtrl,
+      postalCtrl: _companyPostalCtrl,
+      lgaCtrl: _companyLgaCtrl,
+      landmarkCtrl: _companyLandmarkCtrl,
+    );
+    _companyPlaceId = profile.companyAddress?.placeId;
 
     _didPrefill = true;
 
@@ -540,6 +624,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final latestProfile =
         ref.read(userProfileProvider).value ?? _currentProfile;
     final canEditAccountType = latestProfile?.isNinVerified ?? false;
+    final homeAddress = buildAddressFromControllers(
+      houseNumberCtrl: _homeHouseNumberCtrl,
+      streetCtrl: _homeStreetCtrl,
+      cityCtrl: _homeCityCtrl,
+      stateCtrl: _homeStateCtrl,
+      postalCtrl: _homePostalCtrl,
+      lgaCtrl: _homeLgaCtrl,
+      landmarkCtrl: _homeLandmarkCtrl,
+      existing: latestProfile?.homeAddress,
+    );
+    final companyAddress = buildAddressFromControllers(
+      houseNumberCtrl: _companyHouseNumberCtrl,
+      streetCtrl: _companyStreetCtrl,
+      cityCtrl: _companyCityCtrl,
+      stateCtrl: _companyStateCtrl,
+      postalCtrl: _companyPostalCtrl,
+      lgaCtrl: _companyLgaCtrl,
+      landmarkCtrl: _companyLandmarkCtrl,
+      existing: latestProfile?.companyAddress,
+    );
 
     final profile = UserProfile(
       id: _currentProfile?.id ?? session.user.id,
@@ -567,11 +671,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           latestProfile?.profileImageUrl ?? _currentProfile?.profileImageUrl,
       // WHY: Send normalized +234 numbers to the backend.
       phone: normalizedPhone ?? '',
+      homeAddress: homeAddress ?? latestProfile?.homeAddress,
       // WHY: Preserve stored business fields even though they're hidden.
       companyName: latestProfile?.companyName,
       companyEmail: latestProfile?.companyEmail,
       companyPhone: latestProfile?.companyPhone,
-      companyAddress: latestProfile?.companyAddress,
+      companyAddress: companyAddress ?? latestProfile?.companyAddress,
       companyWebsite: latestProfile?.companyWebsite,
       companyRegistration: latestProfile?.companyRegistration,
     );
@@ -603,6 +708,106 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Future<void> _verifyHomeAddress() async {
+    _logFlow("ADDRESS_VERIFY_TAP", "Verify home address tapped");
+
+    if (!canVerifyAddress(
+      houseNumberCtrl: _homeHouseNumberCtrl,
+      streetCtrl: _homeStreetCtrl,
+      cityCtrl: _homeCityCtrl,
+      stateCtrl: _homeStateCtrl,
+    )) {
+      _logFlow("ADDRESS_VERIFY_BLOCK", "Home address incomplete");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("House number, street, city, and state are required"),
+        ),
+      );
+      return;
+    }
+
+    final address = buildAddressFromControllers(
+      houseNumberCtrl: _homeHouseNumberCtrl,
+      streetCtrl: _homeStreetCtrl,
+      cityCtrl: _homeCityCtrl,
+      stateCtrl: _homeStateCtrl,
+      postalCtrl: _homePostalCtrl,
+      lgaCtrl: _homeLgaCtrl,
+      landmarkCtrl: _homeLandmarkCtrl,
+      existing: _currentProfile?.homeAddress,
+    );
+
+    if (address == null) {
+      _logFlow("ADDRESS_VERIFY_BLOCK", "Home address empty");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter your home address first")),
+      );
+      return;
+    }
+
+    await _addressActions.verifyAddress(
+      context: context,
+      ref: ref,
+      type: "home",
+      address: address,
+      placeId: _homePlaceId,
+      errorMessage: _backendErrorMessage,
+      logFlow: _logFlow,
+    );
+  }
+
+  Future<void> _verifyCompanyAddress() async {
+    _logFlow("ADDRESS_VERIFY_TAP", "Verify company address tapped");
+
+    if (!canVerifyAddress(
+      houseNumberCtrl: _companyHouseNumberCtrl,
+      streetCtrl: _companyStreetCtrl,
+      cityCtrl: _companyCityCtrl,
+      stateCtrl: _companyStateCtrl,
+    )) {
+      _logFlow("ADDRESS_VERIFY_BLOCK", "Company address incomplete");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("House number, street, city, and state are required"),
+        ),
+      );
+      return;
+    }
+
+    final address = buildAddressFromControllers(
+      houseNumberCtrl: _companyHouseNumberCtrl,
+      streetCtrl: _companyStreetCtrl,
+      cityCtrl: _companyCityCtrl,
+      stateCtrl: _companyStateCtrl,
+      postalCtrl: _companyPostalCtrl,
+      lgaCtrl: _companyLgaCtrl,
+      landmarkCtrl: _companyLandmarkCtrl,
+      existing: _currentProfile?.companyAddress,
+    );
+
+    if (address == null) {
+      _logFlow("ADDRESS_VERIFY_BLOCK", "Company address empty");
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter your company address first")),
+      );
+      return;
+    }
+
+    await _addressActions.verifyAddress(
+      context: context,
+      ref: ref,
+      type: "company",
+      address: address,
+      placeId: _companyPlaceId,
+      errorMessage: _backendErrorMessage,
+      logFlow: _logFlow,
+    );
   }
 
   /// ------------------------------------------------------------
@@ -715,6 +920,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     isPhoneVerified: false,
                     isNinVerified: false,
                     ninLast4: null,
+                    homeAddress: null,
+                    companyAddress: null,
                   )
                 : UserProfile(
                     id: session.user.id,
@@ -738,6 +945,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     isPhoneVerified: false,
                     isNinVerified: false,
                     ninLast4: null,
+                    homeAddress: null,
+                    companyAddress: null,
                   );
 
             final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
@@ -837,6 +1046,65 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     const SizedBox(height: 20),
                   ],
+                  SettingsAddressSection(
+                    title: "Home address",
+                    subtitle: "Verify your delivery address for checkout.",
+                    isVerified: activeProfile.homeAddress?.isVerified ?? false,
+                    canVerify: canVerifyAddress(
+                      houseNumberCtrl: _homeHouseNumberCtrl,
+                      streetCtrl: _homeStreetCtrl,
+                      cityCtrl: _homeCityCtrl,
+                      stateCtrl: _homeStateCtrl,
+                    ),
+                    onVerifyTap: _verifyHomeAddress,
+                    sourceTag: "home",
+                    onPlaceSelected: (placeId, _) {
+                      _logFlow(
+                        "ADDRESS_AUTOCOMPLETE_SELECT",
+                        "Home address selected",
+                        extra: {"placeId": placeId},
+                      );
+                      _homePlaceId = placeId;
+                    },
+                    houseNumberCtrl: _homeHouseNumberCtrl,
+                    streetCtrl: _homeStreetCtrl,
+                    cityCtrl: _homeCityCtrl,
+                    stateCtrl: _homeStateCtrl,
+                    postalCodeCtrl: _homePostalCtrl,
+                    lgaCtrl: _homeLgaCtrl,
+                    landmarkCtrl: _homeLandmarkCtrl,
+                  ),
+                  const SizedBox(height: 20),
+                  SettingsAddressSection(
+                    title: "Company address",
+                    subtitle: "Optional business address for invoices.",
+                    isVerified:
+                        activeProfile.companyAddress?.isVerified ?? false,
+                    canVerify: canVerifyAddress(
+                      houseNumberCtrl: _companyHouseNumberCtrl,
+                      streetCtrl: _companyStreetCtrl,
+                      cityCtrl: _companyCityCtrl,
+                      stateCtrl: _companyStateCtrl,
+                    ),
+                    onVerifyTap: _verifyCompanyAddress,
+                    sourceTag: "company",
+                    onPlaceSelected: (placeId, _) {
+                      _logFlow(
+                        "ADDRESS_AUTOCOMPLETE_SELECT",
+                        "Company address selected",
+                        extra: {"placeId": placeId},
+                      );
+                      _companyPlaceId = placeId;
+                    },
+                    houseNumberCtrl: _companyHouseNumberCtrl,
+                    streetCtrl: _companyStreetCtrl,
+                    cityCtrl: _companyCityCtrl,
+                    stateCtrl: _companyStateCtrl,
+                    postalCodeCtrl: _companyPostalCtrl,
+                    lgaCtrl: _companyLgaCtrl,
+                    landmarkCtrl: _companyLandmarkCtrl,
+                  ),
+                  const SizedBox(height: 20),
                   if (canEditAccountType) ...[
                     const SizedBox(height: 12),
                     const SettingsSectionHeader(

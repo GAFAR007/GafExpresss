@@ -15,6 +15,7 @@
 /// ------------------------------------------------------------
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 
 class OrderItem {
   final String productId;
@@ -61,11 +62,29 @@ class OrderItem {
   }
 }
 
+class OrderDeliveryAddress {
+  final String source;
+  final UserAddress address;
+
+  const OrderDeliveryAddress({
+    required this.source,
+    required this.address,
+  });
+
+  factory OrderDeliveryAddress.fromJson(Map<String, dynamic> json) {
+    return OrderDeliveryAddress(
+      source: (json["source"] ?? "").toString(),
+      address: UserAddress.fromJson(json),
+    );
+  }
+}
+
 class Order {
   final String id;
   final String status;
   final int totalPriceCents;
   final List<OrderItem> items;
+  final OrderDeliveryAddress? deliveryAddress;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -74,6 +93,7 @@ class Order {
     required this.status,
     required this.totalPriceCents,
     required this.items,
+    required this.deliveryAddress,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -88,6 +108,11 @@ class Order {
         .map((item) => OrderItem.fromJson(item as Map<String, dynamic>))
         .toList();
 
+    final deliveryMap = json["deliveryAddress"];
+    final deliveryAddress = deliveryMap is Map<String, dynamic>
+        ? OrderDeliveryAddress.fromJson(deliveryMap)
+        : null;
+
     return Order(
       id: id,
       status: (json["status"] ?? "").toString(),
@@ -95,6 +120,7 @@ class Order {
           ? (json["totalPrice"] ?? 0) as int
           : int.tryParse((json["totalPrice"] ?? 0).toString()) ?? 0,
       items: items,
+      deliveryAddress: deliveryAddress,
       createdAt: _parseDate(json["createdAt"]),
       updatedAt: _parseDate(json["updatedAt"]),
     );

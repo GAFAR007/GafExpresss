@@ -57,18 +57,19 @@ class OrderApi {
   Future<Order> createOrder({
     required String? token,
     required List<CartItem> items,
+    required Map<String, dynamic> deliveryAddress,
   }) async {
     AppDebug.log(
       "ORDER_API",
       "createOrder() start",
-      extra: {"items": items.length},
+      extra: {"items": items.length, "source": deliveryAddress["source"]},
     );
 
     final payloadItems = items.map((item) => item.toOrderItemJson()).toList();
 
     final resp = await _dio.post(
       "/orders",
-      data: {"items": payloadItems},
+      data: {"items": payloadItems, "deliveryAddress": deliveryAddress},
       options: _authOptions(token),
     );
 
