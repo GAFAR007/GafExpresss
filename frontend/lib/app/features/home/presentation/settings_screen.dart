@@ -1111,6 +1111,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     : (_companyAddressStatusText == null
                         ? AddressStatusTone.neutral
                         : AddressStatusTone.error));
+            // WHY: Only show company address fields for business account types.
+            final showCompanyAddress = _accountType != 'personal';
 
             return SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -1235,37 +1237,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     landmarkCtrl: _homeLandmarkCtrl,
                   ),
                   const SizedBox(height: 20),
-                  SettingsAddressSection(
-                    title: "Company address",
-                    subtitle: "Optional business address for invoices.",
-                    isVerified: companyVerified,
-                    statusText: companyStatusText,
-                    statusTone: companyStatusTone,
-                    canVerify: !_isVerifyingCompanyAddress &&
-                        canVerifyAddress(
-                          houseNumberCtrl: _companyHouseNumberCtrl,
-                          streetCtrl: _companyStreetCtrl,
-                          cityCtrl: _companyCityCtrl,
-                          stateCtrl: _companyStateCtrl,
-                        ),
-                    onVerifyTap: _verifyCompanyAddress,
-                    sourceTag: "company",
-                    onPlaceSelected: (placeId, _) {
-                      _logFlow(
-                        "ADDRESS_AUTOCOMPLETE_SELECT",
-                        "Company address selected",
-                        extra: {"placeId": placeId},
-                      );
-                      _companyPlaceId = placeId;
-                    },
-                    houseNumberCtrl: _companyHouseNumberCtrl,
-                    streetCtrl: _companyStreetCtrl,
-                    cityCtrl: _companyCityCtrl,
-                    stateCtrl: _companyStateCtrl,
-                    postalCodeCtrl: _companyPostalCtrl,
-                    lgaCtrl: _companyLgaCtrl,
-                    landmarkCtrl: _companyLandmarkCtrl,
-                  ),
+                  if (showCompanyAddress) ...[
+                    SettingsAddressSection(
+                      title: "Company address",
+                      subtitle: "Optional business address for invoices.",
+                      isVerified: companyVerified,
+                      statusText: companyStatusText,
+                      statusTone: companyStatusTone,
+                      canVerify: !_isVerifyingCompanyAddress &&
+                          canVerifyAddress(
+                            houseNumberCtrl: _companyHouseNumberCtrl,
+                            streetCtrl: _companyStreetCtrl,
+                            cityCtrl: _companyCityCtrl,
+                            stateCtrl: _companyStateCtrl,
+                          ),
+                      onVerifyTap: _verifyCompanyAddress,
+                      sourceTag: "company",
+                      onPlaceSelected: (placeId, _) {
+                        _logFlow(
+                          "ADDRESS_AUTOCOMPLETE_SELECT",
+                          "Company address selected",
+                          extra: {"placeId": placeId},
+                        );
+                        _companyPlaceId = placeId;
+                      },
+                      houseNumberCtrl: _companyHouseNumberCtrl,
+                      streetCtrl: _companyStreetCtrl,
+                      cityCtrl: _companyCityCtrl,
+                      stateCtrl: _companyStateCtrl,
+                      postalCodeCtrl: _companyPostalCtrl,
+                      lgaCtrl: _companyLgaCtrl,
+                      landmarkCtrl: _companyLandmarkCtrl,
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   if (canEditAccountType) ...[
                     const SizedBox(height: 12),
