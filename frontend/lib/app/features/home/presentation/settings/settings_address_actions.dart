@@ -26,7 +26,7 @@ typedef ErrorMessageResolver = String Function(Object error);
 class SettingsAddressActions {
   const SettingsAddressActions();
 
-  Future<void> verifyAddress({
+  Future<bool> verifyAddress({
     required BuildContext context,
     required WidgetRef ref,
     required String type,
@@ -46,11 +46,11 @@ class SettingsAddressActions {
     final session = ref.read(authSessionProvider);
     if (session == null) {
       AppDebug.log("SETTINGS", "Address verify blocked (missing session)");
-      if (!context.mounted) return;
+      if (!context.mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Session expired. Please sign in again.")),
       );
-      return;
+      return false;
     }
 
     try {
@@ -66,21 +66,23 @@ class SettingsAddressActions {
 
       ref.invalidate(userProfileProvider);
 
-      if (!context.mounted) return;
+      if (!context.mounted) return true;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("${type.toUpperCase()} address verified")),
       );
+      return true;
     } catch (e) {
       logFlow(
         "ADDRESS_VERIFY_FAIL",
         "Address verification failed",
         extra: {"error": e.toString(), "type": type},
       );
-      if (!context.mounted) return;
+      if (!context.mounted) return false;
       final message = errorMessage(e);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
       );
+      return false;
     }
   }
 }

@@ -23,6 +23,8 @@ class SettingsAddressSection extends StatelessWidget {
   final String subtitle;
   final bool isVerified;
   final bool canVerify;
+  final String? statusText;
+  final AddressStatusTone statusTone;
   final VoidCallback onVerifyTap;
   final String sourceTag;
   final TextEditingController houseNumberCtrl;
@@ -40,6 +42,8 @@ class SettingsAddressSection extends StatelessWidget {
     required this.subtitle,
     required this.isVerified,
     required this.canVerify,
+    this.statusText,
+    this.statusTone = AddressStatusTone.neutral,
     required this.onVerifyTap,
     required this.sourceTag,
     required this.houseNumberCtrl,
@@ -74,6 +78,10 @@ class SettingsAddressSection extends StatelessWidget {
             ),
           ],
         ),
+        if (statusText != null && statusText!.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          _AddressStatusLine(text: statusText!, tone: statusTone),
+        ],
         const SizedBox(height: 12),
         AddressAutocompleteField(
           label: "Search address",
@@ -132,6 +140,35 @@ class SettingsAddressSection extends StatelessWidget {
           hint: "e.g. Near City Mall",
         ),
       ],
+    );
+  }
+}
+
+enum AddressStatusTone { neutral, busy, success, error }
+
+class _AddressStatusLine extends StatelessWidget {
+  final String text;
+  final AddressStatusTone tone;
+
+  const _AddressStatusLine({
+    required this.text,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (tone) {
+      AddressStatusTone.success => Colors.green.shade700,
+      AddressStatusTone.busy => Colors.orange.shade700,
+      AddressStatusTone.error => Colors.red.shade600,
+      AddressStatusTone.neutral => Colors.grey.shade600,
+    };
+
+    return Text(
+      text,
+      style: Theme.of(
+        context,
+      ).textTheme.bodySmall?.copyWith(color: color, fontWeight: FontWeight.w500),
     );
   }
 }

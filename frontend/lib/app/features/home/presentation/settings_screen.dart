@@ -70,6 +70,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // WHY: Store Google place IDs from autocomplete for verified submissions.
   String? _homePlaceId;
   String? _companyPlaceId;
+  // WHY: Provide inline address verification status for users.
+  bool _isVerifyingHomeAddress = false;
+  bool _isVerifyingCompanyAddress = false;
+  String? _homeAddressStatusText;
+  String? _companyAddressStatusText;
 
   // ------------------------------------------------------------
   // UI STATE
@@ -126,16 +131,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     {"value": "incorporated_trustees", "label": "Incorporated Trustees / NGO"},
   ];
 
+  // WHY: Keep grouped controllers for address listeners.
+  late final List<TextEditingController> _homeAddressControllers;
+  late final List<TextEditingController> _companyAddressControllers;
 
   @override
   void initState() {
     super.initState();
+    _setupAddressListeners();
     _startAutoRefresh();
   }
 
   @override
   void dispose() {
     // WHY: Dispose controllers to avoid memory leaks.
+    _removeAddressListeners();
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _ninCtrl.dispose();
@@ -157,6 +167,71 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _companyLandmarkCtrl.dispose();
     _autoRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  /// ------------------------------------------------------------
+  /// ADDRESS LISTENERS
+  /// ------------------------------------------------------------
+  void _setupAddressListeners() {
+    // WHY: Rebuild immediately when address fields change so the Verify button
+    // enables without waiting for an unrelated refresh.
+    _homeAddressControllers = [
+      _homeHouseNumberCtrl,
+      _homeStreetCtrl,
+      _homeCityCtrl,
+      _homeStateCtrl,
+      _homePostalCtrl,
+      _homeLgaCtrl,
+      _homeLandmarkCtrl,
+    ];
+    _companyAddressControllers = [
+      _companyHouseNumberCtrl,
+      _companyStreetCtrl,
+      _companyCityCtrl,
+      _companyStateCtrl,
+      _companyPostalCtrl,
+      _companyLgaCtrl,
+      _companyLandmarkCtrl,
+    ];
+
+    for (final ctrl in _homeAddressControllers) {
+      ctrl.addListener(_onHomeAddressChanged);
+    }
+    for (final ctrl in _companyAddressControllers) {
+      ctrl.addListener(_onCompanyAddressChanged);
+    }
+  }
+
+  void _removeAddressListeners() {
+    // WHY: Remove listeners before disposal to prevent setState after dispose.
+    for (final ctrl in _homeAddressControllers) {
+      ctrl.removeListener(_onHomeAddressChanged);
+    }
+    for (final ctrl in _companyAddressControllers) {
+      ctrl.removeListener(_onCompanyAddressChanged);
+    }
+  }
+
+  void _onHomeAddressChanged() {
+    if (!mounted) return;
+    // WHY: Clear stale failure status when user edits the address.
+    if (!_isVerifyingHomeAddress &&
+        _homeAddressStatusText != null &&
+        _homeAddressStatusText != "Verified") {
+      _homeAddressStatusText = null;
+    }
+    setState(() {});
+  }
+
+  void _onCompanyAddressChanged() {
+    if (!mounted) return;
+    // WHY: Clear stale failure status when user edits the address.
+    if (!_isVerifyingCompanyAddress &&
+        _companyAddressStatusText != null &&
+        _companyAddressStatusText != "Verified") {
+      _companyAddressStatusText = null;
+    }
+    setState(() {});
   }
 
   /// ------------------------------------------------------------
@@ -713,6 +788,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _verifyHomeAddress() async {
     _logFlow("ADDRESS_VERIFY_TAP", "Verify home address tapped");
 
+    if (_isVerifyingHomeAddress) {
+      _logFlow(
+        "ADDRESS_VERIFY_BLOCK",
+        "Home address verification already in progress",
+      );
+      return;
+    }
+
     if (!canVerifyAddress(
       houseNumberCtrl: _homeHouseNumberCtrl,
       streetCtrl: _homeStreetCtrl,
@@ -749,7 +832,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    await _addressActions.verifyAddress(
+    setState(() {
+      _isVerifyingHomeAddress = true;
+      _homeAddressStatusText = "Checking address with Google...";
+    });
+    _logFlow(
+      "ADDRESS_VERIFY_STATUS",
+      "Home address status updated",
+      extra: {"status": _homeAddressStatusText},
+    );
+
+    final isVerified = await _addressActions.verifyAddress(
       context: context,
       ref: ref,
       type: "home",
@@ -758,10 +851,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       errorMessage: _backendErrorMessage,
       logFlow: _logFlow,
     );
+
+    if (!mounted) return;
+    setState(() {
+      _isVerifyingHomeAddress = false;
+      _homeAddressStatusText =
+          isVerified ? "Verified" : "Verification failed. Try again.";
+    });
+    _logFlow(
+      "ADDRESS_VERIFY_STATUS",
+      "Home address status updated",
+      extra: {"status": _homeAddressStatusText, "verified": isVerified},
+    );
   }
 
   Future<void> _verifyCompanyAddress() async {
     _logFlow("ADDRESS_VERIFY_TAP", "Verify company address tapped");
+
+    if (_isVerifyingCompanyAddress) {
+      _logFlow(
+        "ADDRESS_VERIFY_BLOCK",
+        "Company address verification already in progress",
+      );
+      return;
+    }
 
     if (!canVerifyAddress(
       houseNumberCtrl: _companyHouseNumberCtrl,
@@ -799,7 +912,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    await _addressActions.verifyAddress(
+    setState(() {
+      _isVerifyingCompanyAddress = true;
+      _companyAddressStatusText = "Checking address with Google...";
+    });
+    _logFlow(
+      "ADDRESS_VERIFY_STATUS",
+      "Company address status updated",
+      extra: {"status": _companyAddressStatusText},
+    );
+
+    final isVerified = await _addressActions.verifyAddress(
       context: context,
       ref: ref,
       type: "company",
@@ -807,6 +930,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       placeId: _companyPlaceId,
       errorMessage: _backendErrorMessage,
       logFlow: _logFlow,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _isVerifyingCompanyAddress = false;
+      _companyAddressStatusText =
+          isVerified ? "Verified" : "Verification failed. Try again.";
+    });
+    _logFlow(
+      "ADDRESS_VERIFY_STATUS",
+      "Company address status updated",
+      extra: {"status": _companyAddressStatusText, "verified": isVerified},
     );
   }
 
@@ -954,6 +1089,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             final isIdentityLocked = activeProfile.isNinVerified;
             // WHY: Only verified users can change account type.
             final canEditAccountType = activeProfile.isNinVerified;
+            // WHY: Inline address status lines keep users informed during checks.
+            final homeVerified = activeProfile.homeAddress?.isVerified ?? false;
+            final companyVerified =
+                activeProfile.companyAddress?.isVerified ?? false;
+            final homeStatusText =
+                _homeAddressStatusText ?? (homeVerified ? "Verified" : null);
+            final companyStatusText = _companyAddressStatusText ??
+                (companyVerified ? "Verified" : null);
+            final homeStatusTone = _isVerifyingHomeAddress
+                ? AddressStatusTone.busy
+                : (homeVerified
+                    ? AddressStatusTone.success
+                    : (_homeAddressStatusText == null
+                        ? AddressStatusTone.neutral
+                        : AddressStatusTone.error));
+            final companyStatusTone = _isVerifyingCompanyAddress
+                ? AddressStatusTone.busy
+                : (companyVerified
+                    ? AddressStatusTone.success
+                    : (_companyAddressStatusText == null
+                        ? AddressStatusTone.neutral
+                        : AddressStatusTone.error));
 
             return SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -1049,13 +1206,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   SettingsAddressSection(
                     title: "Home address",
                     subtitle: "Verify your delivery address for checkout.",
-                    isVerified: activeProfile.homeAddress?.isVerified ?? false,
-                    canVerify: canVerifyAddress(
-                      houseNumberCtrl: _homeHouseNumberCtrl,
-                      streetCtrl: _homeStreetCtrl,
-                      cityCtrl: _homeCityCtrl,
-                      stateCtrl: _homeStateCtrl,
-                    ),
+                    isVerified: homeVerified,
+                    statusText: homeStatusText,
+                    statusTone: homeStatusTone,
+                    canVerify: !_isVerifyingHomeAddress &&
+                        canVerifyAddress(
+                          houseNumberCtrl: _homeHouseNumberCtrl,
+                          streetCtrl: _homeStreetCtrl,
+                          cityCtrl: _homeCityCtrl,
+                          stateCtrl: _homeStateCtrl,
+                        ),
                     onVerifyTap: _verifyHomeAddress,
                     sourceTag: "home",
                     onPlaceSelected: (placeId, _) {
@@ -1078,14 +1238,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   SettingsAddressSection(
                     title: "Company address",
                     subtitle: "Optional business address for invoices.",
-                    isVerified:
-                        activeProfile.companyAddress?.isVerified ?? false,
-                    canVerify: canVerifyAddress(
-                      houseNumberCtrl: _companyHouseNumberCtrl,
-                      streetCtrl: _companyStreetCtrl,
-                      cityCtrl: _companyCityCtrl,
-                      stateCtrl: _companyStateCtrl,
-                    ),
+                    isVerified: companyVerified,
+                    statusText: companyStatusText,
+                    statusTone: companyStatusTone,
+                    canVerify: !_isVerifyingCompanyAddress &&
+                        canVerifyAddress(
+                          houseNumberCtrl: _companyHouseNumberCtrl,
+                          streetCtrl: _companyStreetCtrl,
+                          cityCtrl: _companyCityCtrl,
+                          stateCtrl: _companyStateCtrl,
+                        ),
                     onVerifyTap: _verifyCompanyAddress,
                     sourceTag: "company",
                     onPlaceSelected: (placeId, _) {
