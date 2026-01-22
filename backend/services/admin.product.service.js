@@ -10,16 +10,37 @@
  */
 
 const Product = require('../models/Product');
+const InventoryEvent = require('../models/InventoryEvent');
+const { writeAuditLog } = require('../utils/audit');
+const { getPagination } = require('../utils/pagination');
+const { getSort } = require('../utils/sort');
 const debug = require('../utils/debug');
 
 /**
  * Create new product
  */
-async function createProduct(data) {
-  debug('ADMIN PRODUCT SERVICE: createProduct', data);
+async function createProduct(data, actor) {
+  debug('ADMIN PRODUCT SERVICE: createProduct', {
+    actorId: actor?.id,
+  });
 
-  const product = new Product(data);
+  const product = new Product({
+    ...data,
+    createdBy: actor?.id,
+    updatedBy: actor?.id,
+  });
   await product.save();
+
+  // WHY: Record creation for audit traceability.
+  await writeAuditLog({
+    businessId: product.businessId || null,
+    actorId: actor?.id,
+    actorRole: actor?.role || 'admin',
+    action: 'product_create',
+    entityType: 'product',
+    entityId: product._id,
+    message: `Product created: ${product.name}`,
+  });
 
   return product;
 }
@@ -93,8 +114,11 @@ async function getProductById(id) {
 /**
  * Update product
  */
-async function updateProduct(id, updates) {
-  debug('ADMIN PRODUCT SERVICE: updateProduct', { id, updates });
+async function updateProduct(id, updates, actor) {
+  debug('ADMIN PRODUCT SERVICE: updateProduct', {
+    id,
+    actorId: actor?.id,
+  });
 
   const allowedFields = [
     'name',
@@ -116,22 +140,74 @@ async function updateProduct(id, updates) {
     throw new Error('No valid fields provided for update');
   }
 
-  const product = await Product.findByIdAndUpdate(id, filteredUpdates, {
-    new: true,
-    runValidators: true,
-  }).select({ __v: 0 });
-
+  const product = await Product.findById(id);
   if (!product) {
     throw new Error('Product not found');
   }
+
+  const beforeStock = product.stock;
+  const beforeSnapshot = {
+    name: product.name,
+    description: product.description,
+    price: product.price,
+    stock: product.stock,
+    imageUrl: product.imageUrl,
+    isActive: product.isActive,
+  };
+
+  Object.assign(product, filteredUpdates);
+  product.updatedBy = actor?.id || product.updatedBy;
+
+  await product.save();
+
+  // WHY: Track stock adjustments for inventory audit.
+  if (filteredUpdates.stock !== undefined && beforeStock !== product.stock) {
+    const delta = product.stock - beforeStock;
+    await InventoryEvent.create({
+      businessId: product.businessId || null,
+      product: product._id,
+      delta,
+      before: beforeStock,
+      after: product.stock,
+      reason: 'admin_product_update',
+      source: 'admin',
+      actor: actor?.id,
+      actorRole: actor?.role || 'admin',
+    });
+  }
+
+  // WHY: Record update changes for compliance.
+  await writeAuditLog({
+    businessId: product.businessId || null,
+    actorId: actor?.id,
+    actorRole: actor?.role || 'admin',
+    action: 'product_update',
+    entityType: 'product',
+    entityId: product._id,
+    message: `Product updated: ${product.name}`,
+    changes: {
+      before: beforeSnapshot,
+      after: {
+        name: product.name,
+        description: product.description,
+        price: product.price,
+        stock: product.stock,
+        imageUrl: product.imageUrl,
+        isActive: product.isActive,
+      },
+    },
+  });
 
   return product;
 }
 /**
  * Restore soft-deleted product (admin only)
  */
-async function restoreProduct(id) {
-  debug('ADMIN PRODUCT SERVICE: restoreProduct', { id });
+async function restoreProduct(id, actor) {
+  debug('ADMIN PRODUCT SERVICE: restoreProduct', {
+    id,
+    actorId: actor?.id,
+  });
 
   const product = await Product.findByIdAndUpdate(
     id,
@@ -139,8 +215,9 @@ async function restoreProduct(id) {
       isActive: true,
       deletedAt: null,
       deletedBy: null,
+      updatedBy: actor?.id,
     },
-    { new: true }
+    { new: true, runValidators: true }
   ).select({ __v: 0 });
 
   if (!product) {
@@ -149,6 +226,16 @@ async function restoreProduct(id) {
 
   debug('ADMIN PRODUCT SERVICE: Product restored');
 
+  await writeAuditLog({
+    businessId: product.businessId || null,
+    actorId: actor?.id,
+    actorRole: actor?.role || 'admin',
+    action: 'product_restore',
+    entityType: 'product',
+    entityId: product._id,
+    message: `Product restored: ${product.name}`,
+  });
+
   return product;
 }
 /**
@@ -156,8 +243,12 @@ async function restoreProduct(id) {
 /**
  * Soft delete product
  */
-async function softDeleteProduct(id, deletedById) {
-  debug('ADMIN PRODUCT SERVICE: softDeleteProduct', { id, deletedById });
+async function softDeleteProduct(id, deletedById, actor) {
+  debug('ADMIN PRODUCT SERVICE: softDeleteProduct', {
+    id,
+    deletedById,
+    actorId: actor?.id,
+  });
 
   const product = await Product.findByIdAndUpdate(
     id,
@@ -165,13 +256,24 @@ async function softDeleteProduct(id, deletedById) {
       isActive: false,
       deletedAt: new Date(),
       deletedBy: deletedById,
+      updatedBy: actor?.id,
     },
-    { new: true }
+    { new: true, runValidators: true }
   ).select({ __v: 0 });
 
   if (!product) {
     throw new Error('Product not found');
   }
+
+  await writeAuditLog({
+    businessId: product.businessId || null,
+    actorId: actor?.id || deletedById,
+    actorRole: actor?.role || 'admin',
+    action: 'product_soft_delete',
+    entityType: 'product',
+    entityId: product._id,
+    message: `Product soft deleted: ${product.name}`,
+  });
 
   return product;
 }

@@ -323,6 +323,9 @@ function shapeProfile(userDoc) {
     dob: userDoc.dob || null,
     email: userDoc.email || "",
     role: userDoc.role || "customer",
+    businessId: userDoc.businessId
+      ? userDoc.businessId.toString()
+      : null,
     accountType:
       userDoc.accountType || "personal",
     isEmailVerified:
@@ -348,6 +351,33 @@ function shapeProfile(userDoc) {
     companyRegistration:
       userDoc.companyRegistration ||
       null,
+    businessVerificationStatus:
+      userDoc.businessVerificationStatus || 'unverified',
+    businessVerificationSource:
+      userDoc.businessVerificationSource || null,
+    businessVerificationRef:
+      userDoc.businessVerificationRef || null,
+    businessVerificationMessage:
+      userDoc.businessVerificationMessage || null,
+    businessVerifiedAt:
+      userDoc.businessVerifiedAt || null,
+    businessRegistrationNumber:
+      userDoc.businessRegistrationNumber || null,
+    businessRegistrationType:
+      userDoc.businessRegistrationType || null,
+    businessIncorporationDate:
+      userDoc.businessIncorporationDate || null,
+    businessIndustry:
+      userDoc.businessIndustry || null,
+    businessTaxId:
+      userDoc.businessTaxId || null,
+    businessRegisteredAddress: shapeAddress(
+      userDoc.businessRegisteredAddress
+    ),
+    businessDirectors:
+      Array.isArray(userDoc.businessDirectors)
+        ? userDoc.businessDirectors
+        : [],
   };
 }
 

@@ -61,6 +61,13 @@ const orderSchema = new mongoose.Schema(
           ref: 'Product',
           required: true,
         },
+        // ✅ Business scope for each line item
+        // WHY: Allows business owners to query orders that contain their products.
+        businessId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          default: null,
+        },
         quantity: {
           type: Number,
           required: true,
@@ -80,6 +87,14 @@ const orderSchema = new mongoose.Schema(
       required: true,
       min: [0, 'Total price cannot be negative'],
     },
+    // ✅ Business scopes for quick queries (one order can contain multiple businesses)
+    // WHY: Lets business dashboards filter orders without heavy item scans.
+    businessIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'User',
+      default: [],
+      index: true,
+    },
 
     // ✅ Delivery address snapshot
     deliveryAddress: {
@@ -93,6 +108,19 @@ const orderSchema = new mongoose.Schema(
       enum: ['pending', 'paid', 'shipped', 'delivered', 'cancelled'],
       default: 'pending',
     },
+    // ✅ Status history for audit trail (who changed what and when)
+    statusHistory: [
+      {
+        status: { type: String, trim: true },
+        changedAt: { type: Date, default: Date.now },
+        changedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        changedByRole: { type: String, trim: true },
+        note: { type: String, trim: true },
+      },
+    ],
 
     // ✅ Soft delete (consistent with other models)
     deletedAt: {
@@ -114,6 +142,8 @@ const orderSchema = new mongoose.Schema(
 orderSchema.index({ user: 1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ createdAt: -1 });
+// WHY: Business dashboards filter orders by business scope.
+orderSchema.index({ businessIds: 1, createdAt: -1 });
 
 const Order = mongoose.model('Order', orderSchema);
 // ✅ FULL-TEXT SEARCH INDEX

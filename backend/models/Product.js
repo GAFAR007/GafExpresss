@@ -16,6 +16,26 @@ debug('Loading Product model...');
 
 const productSchema = new mongoose.Schema(
   {
+    // ✅ Business ownership (tenant scope)
+    // WHY: Keeps product access locked to a single business.
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    // ✅ Creator tracking (audit who created the product)
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    // ✅ Last editor tracking (audit who last updated the product)
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     // ✅ Product name (required)
     name: {
       type: String,
@@ -54,6 +74,23 @@ const productSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    // ✅ Gallery image URLs (multiple images per product)
+    // WHY: Supports product galleries while keeping a primary imageUrl.
+    imageUrls: {
+      type: [String],
+      default: [],
+    },
+    // ✅ Gallery image assets (url + Cloudinary public id)
+    // WHY: Enables safe deletion from Cloudinary while keeping url display.
+    imageAssets: {
+      type: [
+        {
+          url: { type: String, trim: true, required: true },
+          publicId: { type: String, trim: true, default: '' },
+        },
+      ],
+      default: [],
+    },
 
     // ✅ Visibility control
     isActive: {
@@ -79,6 +116,8 @@ const productSchema = new mongoose.Schema(
 
 // Index for faster queries
 productSchema.index({ isActive: 1 });
+// WHY: Scope business product lists efficiently.
+productSchema.index({ businessId: 1, isActive: 1 });
 productSchema.index({ name: 'text', description: 'text' }); // for future search
 
 const Product = mongoose.model('Product', productSchema);

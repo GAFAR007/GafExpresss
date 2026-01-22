@@ -288,10 +288,14 @@ async function softDeleteUser(req, res) {
 async function createProduct(req, res) {
   debug('ADMIN CONTROLLER: createProduct - entry', {
     body: req.body,
+    adminId: req.user?.sub,
   });
 
   try {
-    const product = await adminProductService.createProduct(req.body);
+    const product = await adminProductService.createProduct(req.body, {
+      id: req.user?.sub,
+      role: req.user?.role,
+    });
 
     debug('ADMIN CONTROLLER: createProduct - success');
 
@@ -502,12 +506,17 @@ async function updateProduct(req, res) {
   debug('ADMIN CONTROLLER: updateProduct - entry', {
     id: req.params.id,
     updates: req.body,
+    adminId: req.user?.sub,
   });
 
   try {
     const updatedProduct = await adminProductService.updateProduct(
       req.params.id,
-      req.body
+      req.body,
+      {
+        id: req.user?.sub,
+        role: req.user?.role,
+      }
     );
 
     if (!updatedProduct) {
@@ -535,12 +544,17 @@ async function updateProduct(req, res) {
 async function softDeleteProduct(req, res) {
   debug('ADMIN CONTROLLER: softDeleteProduct - entry', {
     productId: req.params.id,
+    adminId: req.user?.sub,
   });
 
   try {
     const deletedProduct = await adminProductService.softDeleteProduct(
       req.params.id,
-      req.user.sub
+      req.user.sub,
+      {
+        id: req.user?.sub,
+        role: req.user?.role,
+      }
     );
 
     if (!deletedProduct) {
@@ -568,10 +582,14 @@ async function softDeleteProduct(req, res) {
 async function restoreProduct(req, res) {
   debug('ADMIN CONTROLLER: restoreProduct - entry', {
     productId: req.params.id,
+    adminId: req.user?.sub,
   });
 
   try {
-    const product = await adminProductService.restoreProduct(req.params.id);
+    const product = await adminProductService.restoreProduct(req.params.id, {
+      id: req.user?.sub,
+      role: req.user?.role,
+    });
 
     if (!product) {
       return res.status(404).json({
@@ -665,7 +683,10 @@ async function getAllOrders(req, res) {
  * Admin updates order status
  */
 async function updateOrderStatus(req, res) {
-  debug('ADMIN ORDER CONTROLLER: updateOrderStatus - entry');
+  debug('ADMIN ORDER CONTROLLER: updateOrderStatus - entry', {
+    adminId: req.user?.sub,
+    status: req.body?.status,
+  });
 
   try {
     const { id } = req.params;
@@ -679,7 +700,10 @@ async function updateOrderStatus(req, res) {
 
     // FIXED: Use positional arguments (id, status) instead of object.
     // Removed unused adminId.
-    const updatedOrder = await adminOrderService.updateOrderStatus(id, status);
+    const updatedOrder = await adminOrderService.updateOrderStatus(id, status, {
+      id: req.user?.sub,
+      role: req.user?.role,
+    });
 
     return res.status(200).json({
       message: 'Order status updated successfully',

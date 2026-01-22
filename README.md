@@ -178,6 +178,9 @@ Why It's Safe
 📝 TODO (IMPORTANT)
 - When your Termii Sender ID is approved, log in to https://app.termii.com and switch from dev OTP to real SMS delivery.
 - Check the Sender ID status regularly until it flips to Approved.
+- Dojah business verification: keep using simulation mode until Dojah credentials are ready.
+  - Set `DOJAH_SIMULATION_ENABLED=true`.
+  - Configure `BUSINESS_VERIFY_SIM_REG_NUMBER` and optional `BUSINESS_VERIFY_SIM_*` fields for company name, email, phone, address, and director.
 
 🖥 Backend (apps/backend)
 Purpose

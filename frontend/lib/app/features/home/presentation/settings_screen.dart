@@ -1089,6 +1089,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             final isIdentityLocked = activeProfile.isNinVerified;
             // WHY: Only verified users can change account type.
             final canEditAccountType = activeProfile.isNinVerified;
+            // WHY: Show business dashboard entry only for business roles.
+            final isBusinessUser = activeProfile.role == 'business_owner' ||
+                activeProfile.role == 'staff';
             // WHY: Inline address status lines keep users informed during checks.
             final homeVerified = activeProfile.homeAddress?.isVerified ?? false;
             final companyVerified =
@@ -1205,6 +1208,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     const SizedBox(height: 20),
                   ],
+                  if (isBusinessUser) ...[
+                    const SettingsSectionHeader(
+                      title: "Business tools",
+                      subtitle: "Manage products, orders, assets, and team roles.",
+                    ),
+                    const SizedBox(height: 12),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.storefront_outlined),
+                        title: const Text("Open business dashboard"),
+                        subtitle: const Text("For owners and staff only."),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          // WHY: Track entry into business tooling for debugging.
+                          AppDebug.log(
+                            "SETTINGS",
+                            "Navigate -> /business-dashboard",
+                          );
+                          context.go('/business-dashboard');
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
                   SettingsAddressSection(
                     title: "Home address",
                     subtitle: "Verify your delivery address for checkout.",
@@ -1303,6 +1330,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 extra: {"type": value},
                               );
                               setState(() => _accountType = value);
+                              if (value != 'personal') {
+                                // WHY: Send users to the business setup page.
+                                AppDebug.log(
+                                  "SETTINGS",
+                                  "Navigate -> /business-account",
+                                  extra: {"type": value},
+                                );
+                                context.go(
+                                  '/business-account?type=$value',
+                                );
+                              }
                             },
                     ),
                   ],

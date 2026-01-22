@@ -212,6 +212,13 @@ router.post(
 router.post('/nin/verify', requireAuth, authController.verifyNin);
 
 /**
+ * Verify business registration (Dojah)
+ * POST /auth/business/verify
+ * Protected route - requires valid JWT
+ */
+router.post('/business/verify', requireAuth, authController.verifyBusiness);
+
+/**
  * Verify address (Google Address Validation)
  * POST /auth/address/verify
  * Protected route - requires valid JWT

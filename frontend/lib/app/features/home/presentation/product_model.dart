@@ -22,9 +22,15 @@ class Product {
   final int priceCents;
   final int stock;
   final String imageUrl;
+  final List<String> imageUrls;
   final bool isActive;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final DateTime? deletedAt;
+  final String? businessId;
+  final String? createdBy;
+  final String? updatedBy;
+  final String? deletedBy;
 
   const Product({
     required this.id,
@@ -33,9 +39,15 @@ class Product {
     required this.priceCents,
     required this.stock,
     required this.imageUrl,
+    required this.imageUrls,
     required this.isActive,
     required this.createdAt,
     required this.updatedAt,
+    this.deletedAt,
+    this.businessId,
+    this.createdBy,
+    this.updatedBy,
+    this.deletedBy,
   });
 
   factory Product.fromJson(Map<String, dynamic> json) {
@@ -53,14 +65,29 @@ class Product {
           ? (json["stock"] ?? 0) as int
           : int.tryParse((json["stock"] ?? 0).toString()) ?? 0,
       imageUrl: (json["imageUrl"] ?? "").toString(),
+      imageUrls: ((json["imageUrls"] ?? []) as List<dynamic>)
+          .map((item) => item.toString())
+          .toList(),
       isActive: (json["isActive"] ?? true) == true,
       createdAt: _parseDate(json["createdAt"]),
       updatedAt: _parseDate(json["updatedAt"]),
+      deletedAt: _parseDate(json["deletedAt"]),
+      businessId: _parseString(json["businessId"]),
+      createdBy: _parseString(json["createdBy"]),
+      updatedBy: _parseString(json["updatedBy"]),
+      deletedBy: _parseString(json["deletedBy"]),
     );
   }
 
   static DateTime? _parseDate(dynamic value) {
     if (value == null) return null;
     return DateTime.tryParse(value.toString());
+  }
+
+  static String? _parseString(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString();
+    if (text.trim().isEmpty) return null;
+    return text;
   }
 }

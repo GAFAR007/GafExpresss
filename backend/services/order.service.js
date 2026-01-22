@@ -18,6 +18,12 @@ const User = require("../models/User");
 const {
   verifyAddressPayload,
 } = require("./address_verification.service");
+const {
+  writeAuditLog,
+} = require("../utils/audit");
+const {
+  writeAnalyticsEvent,
+} = require("../utils/analytics");
 const debug = require("../utils/debug");
 
 /**
@@ -30,12 +36,13 @@ const debug = require("../utils/debug");
 async function createOrder(
   userId,
   items,
-  deliveryAddress
+  deliveryAddress,
 ) {
   debug("ORDER SERVICE: createOrder", {
     userId,
-    itemsCount: Array.isArray(items)
-      ? items.length
+    itemsCount:
+      Array.isArray(items) ?
+        items.length
       : 0,
     addressSource:
       deliveryAddress?.source,
@@ -43,13 +50,13 @@ async function createOrder(
 
   if (!items || items.length === 0) {
     throw new Error(
-      "Order must have at least one item"
+      "Order must have at least one item",
     );
   }
 
   if (!deliveryAddress) {
     throw new Error(
-      "Delivery address is required"
+      "Delivery address is required",
     );
   }
 
@@ -62,7 +69,7 @@ async function createOrder(
     addressSource !== "custom"
   ) {
     throw new Error(
-      "Invalid delivery address source"
+      "Invalid delivery address source",
     );
   }
 
@@ -74,35 +81,41 @@ async function createOrder(
     let totalPrice = 0;
     const orderItems = [];
     let deliveryAddressSnapshot = null;
+    const businessIds = new Set();
 
-    if (addressSource === "home" || addressSource === "company") {
+    if (
+      addressSource === "home" ||
+      addressSource === "company"
+    ) {
       // WHY: Snapshot verified profile address to keep orders immutable.
       const user = await User.findById(
-        userId
+        userId,
       )
-        .select("homeAddress companyAddress")
+        .select(
+          "homeAddress companyAddress",
+        )
         .lean();
 
       if (!user) {
         throw new Error(
-          "User not found"
+          "User not found",
         );
       }
 
       const selected =
-        addressSource === "home"
-          ? user.homeAddress
-          : user.companyAddress;
+        addressSource === "home" ?
+          user.homeAddress
+        : user.companyAddress;
 
       if (!selected) {
         throw new Error(
-          "Selected delivery address is missing"
+          "Selected delivery address is missing",
         );
       }
 
       if (!selected.isVerified) {
         throw new Error(
-          "Selected delivery address is not verified"
+          "Selected delivery address is not verified",
         );
       }
 
@@ -114,7 +127,11 @@ async function createOrder(
 
     if (addressSource === "custom") {
       // WHY: Custom addresses must be verified before checkout completes.
-      const { source, placeId, ...rawAddress } = deliveryAddress;
+      const {
+        source,
+        placeId,
+        ...rawAddress
+      } = deliveryAddress;
       const result =
         await verifyAddressPayload({
           address: rawAddress,
@@ -124,7 +141,7 @@ async function createOrder(
 
       if (!result.address?.isVerified) {
         throw new Error(
-          "Delivery address must be verified"
+          "Delivery address must be verified",
         );
       }
 
@@ -136,43 +153,43 @@ async function createOrder(
 
     if (!deliveryAddressSnapshot) {
       throw new Error(
-        "Delivery address snapshot could not be created"
+        "Delivery address snapshot could not be created",
       );
     }
 
     for (const item of items) {
       const product =
         await Product.findById(
-          item.productId
+          item.productId,
         ).session(session);
 
       if (!product) {
         throw new Error(
-          `Product not found: ${item.productId}`
+          `Product not found: ${item.productId}`,
         );
       }
 
       // Enhanced checks
       if (product.deletedAt) {
         throw new Error(
-          `Product is deleted: ${item.productId}`
+          `Product is deleted: ${item.productId}`,
         );
       }
       if (!product.isActive) {
         throw new Error(
-          `Product is inactive: ${item.productId}`
+          `Product is inactive: ${item.productId}`,
         );
       }
       if (item.quantity <= 0) {
         throw new Error(
-          `Invalid quantity for product: ${item.productId}`
+          `Invalid quantity for product: ${item.productId}`,
         );
       }
       if (
         product.stock < item.quantity
       ) {
         throw new Error(
-          `Insufficient stock for product: ${item.productId}`
+          `Insufficient stock for product: ${item.productId}`,
         );
       }
 
@@ -183,22 +200,69 @@ async function createOrder(
 
       orderItems.push({
         product: item.productId,
+        businessId:
+          product.businessId || null,
         quantity: item.quantity,
         price: product.price, // per unit snapshot
       });
+
+      // WHY: Collect business scopes for filtering order history.
+      if (product.businessId) {
+        businessIds.add(
+          product.businessId.toString(),
+        );
+      }
     }
 
     const order = new Order({
       user: userId,
       items: orderItems,
       totalPrice,
-      deliveryAddress: deliveryAddressSnapshot,
+      deliveryAddress:
+        deliveryAddressSnapshot,
+      businessIds: Array.from(
+        businessIds,
+      ).map(
+        (id) =>
+          new mongoose.Types.ObjectId(
+            id,
+          ),
+      ),
+      // WHY: Seed status history for audit visibility.
+      statusHistory: [
+        {
+          status: "pending",
+          changedAt: new Date(),
+          changedBy: userId,
+          changedByRole: "customer",
+          note: "order_created",
+        },
+      ],
     });
     await order.save({ session });
 
     await session.commitTransaction();
     debug(
-      "ORDER SERVICE: Order created successfully"
+      "ORDER SERVICE: Order created successfully",
+    );
+
+    // WHY: Record analytics for each business included in the order.
+    await Promise.all(
+      (order.businessIds || []).map((businessId) =>
+        writeAnalyticsEvent({
+          businessId,
+          actorId: userId,
+          actorRole: "customer",
+          eventType: "order_created",
+          entityType: "order",
+          entityId: order._id,
+          metadata: {
+            totalPrice: order.totalPrice,
+            itemCount: order.items?.length || 0,
+            status: order.status,
+          },
+        })
+      )
     );
 
     return order;
@@ -224,11 +288,11 @@ async function createOrder(
  */
 async function getUserOrders(
   userId,
-  query
+  query,
 ) {
   debug(
     "ORDER SERVICE: getUserOrders - entry",
-    { userId, query }
+    { userId, query },
   );
 
   /**
@@ -270,7 +334,7 @@ async function getUserOrders(
 
   debug(
     "ORDER SERVICE: filter built",
-    filter
+    filter,
   );
 
   /**
@@ -283,7 +347,7 @@ async function getUserOrders(
       Order.find(filter)
         .populate(
           "items.product",
-          "name imageUrl"
+          "name imageUrl",
         )
         .select({
           deletedAt: 0,
@@ -305,7 +369,7 @@ async function getUserOrders(
       returned: orders.length,
       page,
       limit,
-    }
+    },
   );
 
   /**
@@ -333,7 +397,7 @@ async function getUserOrders(
  */
 async function cancelOrder(
   orderId,
-  userId
+  userId,
 ) {
   debug("ORDER SERVICE: cancelOrder", {
     orderId,
@@ -345,13 +409,14 @@ async function cancelOrder(
   session.startTransaction();
 
   try {
-    const order = await Order.findById(
-      orderId
-    ).session(session);
+    const order =
+      await Order.findById(
+        orderId,
+      ).session(session);
 
     if (!order) {
       throw new Error(
-        "Order not found"
+        "Order not found",
       );
     }
 
@@ -359,13 +424,13 @@ async function cancelOrder(
       order.user.toString() !== userId
     ) {
       throw new Error(
-        "Not authorized: This is not your order"
+        "Not authorized: This is not your order",
       );
     }
 
     if (order.status !== "pending") {
       throw new Error(
-        "Can only cancel pending orders"
+        "Can only cancel pending orders",
       );
     }
 
@@ -373,18 +438,40 @@ async function cancelOrder(
 
     // Update order status
     order.status = "cancelled";
+    order.statusHistory.push({
+      status: "cancelled",
+      changedAt: new Date(),
+      changedBy: userId,
+      changedByRole: "customer",
+      note: "customer_cancel",
+    });
     await order.save({ session });
 
     // Placeholder for real refund processing
     debug(
       "REFUND PLACEHOLDER: Initiate refund for order",
-      orderId
+      orderId,
     );
 
     await session.commitTransaction();
     debug(
-      "ORDER SERVICE: Order cancelled (no stock change)"
+      "ORDER SERVICE: Order cancelled (no stock change)",
     );
+
+    await writeAuditLog({
+      businessId: null,
+      actorId: userId,
+      actorRole: "customer",
+      action: "order_status_update",
+      entityType: "order",
+      entityId: order._id,
+      message:
+        "Order cancelled by customer",
+      changes: {
+        from: "pending",
+        to: "cancelled",
+      },
+    });
 
     return order;
   } catch (err) {

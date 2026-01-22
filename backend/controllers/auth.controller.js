@@ -31,6 +31,7 @@ const {
 } = require('../services/verification.service');
 const { verifyNinForUser } = require('../services/nin_verification.service');
 const { verifyUserAddress } = require('../services/address_verification.service');
+const { verifyBusinessForUser } = require('../services/business_verification.service');
 const { uploadProfileImage } = require('../services/profile_image.service');
 const {
   fetchAddressSuggestions,
@@ -384,6 +385,42 @@ async function verifyNinController(req, res) {
 }
 
 /* =========================
+   VERIFICATION — BUSINESS (DOJAH)
+========================= */
+async function verifyBusinessController(req, res) {
+  try {
+    debug('================ BUSINESS VERIFY START ================');
+    debug('Business verify request userId:', req.user?.sub);
+
+    const { accountType, registrationNumber, registrationType } = req.body || {};
+    const result = await verifyBusinessForUser({
+      userId: req.user?.sub,
+      accountType,
+      registrationNumber,
+      registrationType,
+    });
+
+    debug('Business verify success', {
+      userId: req.user?.sub,
+      status: result.status,
+    });
+    debug('================ BUSINESS VERIFY END (SUCCESS) ================');
+
+    return res.status(200).json({
+      message: 'Business verified',
+      ...result,
+    });
+  } catch (err) {
+    debug('================ BUSINESS VERIFY END (ERROR) ================');
+    debug('Business verify error message:', err.message);
+
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/* =========================
    PROFILE IMAGE UPLOAD
 ========================= */
 async function uploadProfileImageController(req, res) {
@@ -536,6 +573,7 @@ module.exports = {
   requestPhoneVerification: requestPhoneVerificationController,
   confirmPhoneVerification: confirmPhoneVerificationController,
   verifyNin: verifyNinController,
+  verifyBusiness: verifyBusinessController,
   verifyAddress: verifyAddressController,
   uploadProfileImage: uploadProfileImageController,
   addressAutocomplete,

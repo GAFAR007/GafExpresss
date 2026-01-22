@@ -25,6 +25,16 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
 import 'package:frontend/app/features/home/presentation/cart_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_account_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_assets_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_dashboard_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_orders_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_product_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_products_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_register_help_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_team_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_verified_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_verify_screen.dart';
 import 'package:frontend/app/features/home/presentation/home_screen.dart';
 import 'package:frontend/app/features/home/presentation/my_orders_screen.dart';
 import 'package:frontend/app/features/home/presentation/order_detail_screen.dart';
@@ -38,11 +48,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
   final bool isAuthed = session != null && session.isTokenValid;
 
-  AppDebug.log(
-    "ROUTER",
-    "buildRouter()",
-    extra: {"isAuthed": isAuthed},
-  );
+  AppDebug.log("ROUTER", "buildRouter()", extra: {"isAuthed": isAuthed});
 
   return GoRouter(
     initialLocation: '/login',
@@ -53,6 +59,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       final bool isPaymentSuccess = path == '/payment-success';
       final bool isPublicRoute =
           isAuthRoute || isPublicProduct || isPaymentSuccess;
+      final bool isBusinessProtectedRoute =
+          path.startsWith('/business-dashboard') ||
+          path.startsWith('/business-products') ||
+          path.startsWith('/business-orders') ||
+          path.startsWith('/business-assets') ||
+          path.startsWith('/business-team');
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
@@ -64,6 +76,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (isAuthed && isAuthRoute) {
         AppDebug.log("ROUTER", "redirect -> /home", extra: {"from": path});
         return '/home';
+      }
+
+      // WHY: Only business owners/staff can access the business dashboard.
+      if (isAuthed && isBusinessProtectedRoute) {
+        final role = session.user.role;
+        final isBusinessRole = role == 'business_owner' || role == 'staff';
+
+        if (!isBusinessRole) {
+          AppDebug.log(
+            "ROUTER",
+            "redirect -> /settings (business guard)",
+            extra: {"role": role},
+          );
+          return '/settings';
+        }
       }
 
       return null;
@@ -109,6 +136,93 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /settings");
           return const SettingsScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-account',
+        builder: (context, state) {
+          final type = state.uri.queryParameters['type'] ?? 'business';
+          AppDebug.log("ROUTER", "-> /business-account", extra: {"type": type});
+          return BusinessAccountScreen(accountType: type);
+        },
+      ),
+      GoRoute(
+        path: '/business-dashboard',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-dashboard");
+          return const BusinessDashboardScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-products',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-products");
+          return const BusinessProductsScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-products/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-products/:id",
+            extra: {"id": id},
+          );
+          return BusinessProductDetailScreen(productId: id);
+        },
+      ),
+      GoRoute(
+        path: '/business-orders',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-orders");
+          return const BusinessOrdersScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-assets',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-assets");
+          return const BusinessAssetsScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-team',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-team");
+          return const BusinessTeamScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-verify',
+        builder: (context, state) {
+          final type = state.uri.queryParameters['type'] ?? 'business';
+          AppDebug.log("ROUTER", "-> /business-verify", extra: {"type": type});
+          return BusinessVerifyScreen(accountType: type);
+        },
+      ),
+      GoRoute(
+        path: '/business-verified',
+        builder: (context, state) {
+          final type = state.uri.queryParameters['type'] ?? 'business';
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-verified",
+            extra: {"type": type},
+          );
+          return BusinessVerifiedScreen(accountType: type);
+        },
+      ),
+      GoRoute(
+        path: '/business-register-help',
+        builder: (context, state) {
+          final type = state.uri.queryParameters['type'] ?? 'business';
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-register-help",
+            extra: {"type": type},
+          );
+          return BusinessRegisterHelpScreen(accountType: type);
         },
       ),
       GoRoute(

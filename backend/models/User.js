@@ -18,7 +18,14 @@ const mongoose = require('mongoose');
 const debug = require('../utils/debug');
 
 // ✅ Allowed roles in the system (extend later if needed)
-const USER_ROLES = ['admin', 'staff', 'customer'];
+// WHY: business_owner + tenant support multi-tenant business workflows.
+const USER_ROLES = [
+  'admin',
+  'business_owner',
+  'staff',
+  'tenant',
+  'customer',
+];
 // ✅ Allowed account types for Nigeria-specific registration flows
 const ACCOUNT_TYPES = [
   'personal',
@@ -156,6 +163,14 @@ const userSchema = new mongoose.Schema(
       default: 'customer',
       index: true,
     },
+    // ✅ Business scoping (shared across owner + staff + tenant)
+    // WHY: Enforces tenant isolation for business data access.
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
 
     // ✅ Profile account type (upgrade path for business/firm/org)
     accountType: {
@@ -201,6 +216,64 @@ const userSchema = new mongoose.Schema(
     companyRegistration: {
       type: String,
       trim: true,
+    },
+    // ✅ Business verification metadata (Dojah-based)
+    businessVerificationStatus: {
+      type: String,
+      enum: ['unverified', 'pending', 'verified', 'failed'],
+      default: 'unverified',
+    },
+    businessVerificationSource: {
+      type: String,
+      trim: true,
+    },
+    businessVerificationRef: {
+      type: String,
+      trim: true,
+    },
+    businessVerificationMessage: {
+      type: String,
+      trim: true,
+    },
+    businessVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+    // ✅ Business registration details (full number required by request)
+    businessRegistrationNumber: {
+      type: String,
+      trim: true,
+    },
+    businessRegistrationType: {
+      type: String,
+      trim: true,
+    },
+    businessIncorporationDate: {
+      type: String,
+      trim: true,
+    },
+    businessIndustry: {
+      type: String,
+      trim: true,
+    },
+    businessTaxId: {
+      type: String,
+      trim: true,
+    },
+    businessRegisteredAddress: {
+      type: addressSchema,
+      default: null,
+    },
+    businessDirectors: {
+      type: [
+        {
+          name: { type: String, trim: true },
+          role: { type: String, trim: true },
+          email: { type: String, trim: true, lowercase: true },
+          phone: { type: String, trim: true },
+        },
+      ],
+      default: [],
     },
 
     // ✅ Simple account status control (can expand later)

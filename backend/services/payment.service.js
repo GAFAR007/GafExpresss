@@ -31,6 +31,7 @@ const {
 const {
   adjustOrderStock,
 } = require("../utils/stock");
+const { writeAuditLog } = require("../utils/audit");
 
 /**
  * Extract common Paystack fields safely
@@ -333,13 +334,22 @@ async function processPaystackEvent(
     );
 
     // Stock safety: decrease only on pending -> paid
-    await adjustOrderStock(
-      order,
-      "decrease",
-      session
-    );
+    await adjustOrderStock(order, "decrease", session, {
+      actorId: order.user,
+      actorRole: "system",
+      businessId: null,
+      reason: "payment_success",
+      source: "payment_webhook",
+    });
 
     order.status = "paid";
+    order.statusHistory.push({
+      status: "paid",
+      changedAt: new Date(),
+      changedBy: order.user,
+      changedByRole: "system",
+      note: "payment_webhook",
+    });
     await order.save({ session });
 
     debug(
@@ -354,6 +364,17 @@ async function processPaystackEvent(
     await payment.save({ session });
 
     await session.commitTransaction();
+
+    await writeAuditLog({
+      businessId: null,
+      actorId: order.user,
+      actorRole: "system",
+      action: "order_status_update",
+      entityType: "order",
+      entityId: order._id,
+      message: "Order status changed from pending to paid (payment)",
+      changes: { from: "pending", to: "paid" },
+    });
 
     return { ok: true, applied: true };
   } catch (err) {
