@@ -195,10 +195,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final hasFilters = _hasActiveFilters;
     final isTyping = pendingQuery.isNotEmpty && pendingQuery != activeQuery;
 
+    final colorScheme = Theme.of(context).colorScheme;
     final header = Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
       decoration: BoxDecoration(
-        color: Colors.green.shade600,
+        color: colorScheme.primary,
         borderRadius: const BorderRadius.vertical(
           bottom: Radius.circular(24),
         ),
@@ -247,7 +248,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F7),
+      backgroundColor: Theme.of(context).colorScheme.background,
       bottomNavigationBar: HomeBottomNav(
         currentIndex: 0,
         cartBadgeCount: cartBadgeCount,

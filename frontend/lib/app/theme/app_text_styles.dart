@@ -45,6 +45,7 @@ class AppTextStyles {
   static const TextStyle button = TextStyle(
     fontSize: 16,
     fontWeight: FontWeight.w600,
-    color: Colors.white,
+    // WHY: Keep button text aligned with theme surface tokens.
+    color: AppColors.surface,
   );
 }

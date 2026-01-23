@@ -190,6 +190,8 @@ class _AddressAutocompleteFieldState
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -215,9 +217,9 @@ class _AddressAutocompleteFieldState
           const SizedBox(height: 8),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: scheme.surface,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade200),
+              border: Border.all(color: scheme.outlineVariant),
             ),
             child: ListView.separated(
               shrinkWrap: true,
@@ -225,7 +227,7 @@ class _AddressAutocompleteFieldState
               itemCount: _suggestions.length,
               separatorBuilder: (_, __) => Divider(
                 height: 1,
-                color: Colors.grey.shade200,
+                color: scheme.outlineVariant,
               ),
               itemBuilder: (context, index) {
                 final suggestion = _suggestions[index];

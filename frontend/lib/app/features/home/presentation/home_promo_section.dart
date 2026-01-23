@@ -69,6 +69,8 @@ class _HomePromoSectionState extends State<HomePromoSection> {
       );
     }
 
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -119,8 +121,8 @@ class _HomePromoSectionState extends State<HomePromoSection> {
               height: 6,
               decoration: BoxDecoration(
                 color: _activeIndex == index
-                    ? Colors.green.shade600
-                    : Colors.grey.shade300,
+                    ? colorScheme.primary
+                    : colorScheme.outlineVariant,
                 borderRadius: BorderRadius.circular(8),
               ),
             ),
@@ -139,6 +141,8 @@ class _PromoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: InkWell(
@@ -147,7 +151,7 @@ class _PromoCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            color: Colors.grey.shade200,
+            color: colorScheme.surfaceVariant,
             image: DecorationImage(
               image: NetworkImage(product.imageUrl),
               fit: BoxFit.cover,
@@ -160,8 +164,8 @@ class _PromoCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(16),
               gradient: LinearGradient(
                 colors: [
-                  Colors.black.withOpacity(0.55),
-                  Colors.transparent,
+                  colorScheme.scrim.withOpacity(0.55),
+                  colorScheme.surface.withOpacity(0),
                 ],
                 begin: Alignment.bottomCenter,
                 end: Alignment.center,
@@ -178,12 +182,15 @@ class _PromoCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.5),
+                      color: colorScheme.scrim.withOpacity(0.5),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Text(
+                    child: Text(
                       "Limited offer",
-                      style: TextStyle(color: Colors.white, fontSize: 11),
+                      style: TextStyle(
+                        color: colorScheme.surface,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -191,8 +198,8 @@ class _PromoCard extends StatelessWidget {
                     product.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: colorScheme.surface,
                       fontWeight: FontWeight.w600,
                       fontSize: 16,
                     ),

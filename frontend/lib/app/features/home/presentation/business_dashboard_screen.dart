@@ -18,6 +18,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/theme/theme_mode_toggle.dart';
 
 class BusinessDashboardScreen extends StatelessWidget {
   const BusinessDashboardScreen({super.key});
@@ -106,6 +107,9 @@ class BusinessDashboardScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
+          // WHY: Business owners often switch modes while monitoring analytics.
+          const ThemeModeToggle(source: "business_dashboard"),
+          const SizedBox(height: 20),
           _AnalyticsCard(
             title: "Sales change overtime",
             metric: "110%",
@@ -180,13 +184,18 @@ class _DashboardChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return ChoiceChip(
       label: Text(label),
       selected: isActive,
       onSelected: (_) => onTap(),
-      selectedColor: Colors.green.shade100,
+      // WHY: Theme tokens keep chips readable in classic/dark/business modes.
+      selectedColor: colorScheme.secondaryContainer,
+      backgroundColor: colorScheme.surfaceVariant,
       labelStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: isActive ? Colors.green.shade700 : Colors.grey.shade700,
+            color: isActive
+                ? colorScheme.onSecondaryContainer
+                : colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w600,
           ),
     );
@@ -208,12 +217,14 @@ class _AnalyticsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F4EF),
+        // WHY: Use surface tokens so analytics cards adapt per theme.
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE7E0D6)),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -221,7 +232,7 @@ class _AnalyticsCard extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.grey.shade700,
+                  color: colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
                 ),
           ),
@@ -235,22 +246,22 @@ class _AnalyticsCard extends StatelessWidget {
           Text(
             subtitle,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.grey.shade600,
+                  color: colorScheme.onSurfaceVariant,
                 ),
           ),
           const SizedBox(height: 16),
           Container(
             height: 120,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: colorScheme.surfaceVariant,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE7E0D6)),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Center(
               child: Text(
                 "Chart data coming soon",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade600,
+                      color: colorScheme.onSurfaceVariant,
                     ),
               ),
             ),
@@ -259,8 +270,8 @@ class _AnalyticsCard extends StatelessWidget {
           OutlinedButton(
             onPressed: onDetailsTap,
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.green.shade700,
-              side: BorderSide(color: Colors.green.shade200),
+              foregroundColor: colorScheme.primary,
+              side: BorderSide(color: colorScheme.primary.withOpacity(0.4)),
             ),
             child: const Text("See more insight"),
           ),
@@ -285,6 +296,7 @@ class _ActionStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     // WHY: Keep actions in a single list so we can render a scrollable loop.
     final actions = [
       _ActionItem(
@@ -316,7 +328,7 @@ class _ActionStrip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: colorScheme.surfaceVariant,
         borderRadius: BorderRadius.circular(16),
       ),
       // WHY: Horizontal scrolling keeps the dashboard compact on small screens.
@@ -358,6 +370,7 @@ class _ActionCircle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: action.onTap,
       borderRadius: BorderRadius.circular(999),
@@ -371,18 +384,19 @@ class _ActionCircle extends StatelessWidget {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: colorScheme.surface,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.green.shade100),
+                border: Border.all(color: colorScheme.outlineVariant),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.04),
+                    // WHY: Theme shadow keeps contrast consistent in dark mode.
+                    color: colorScheme.shadow.withOpacity(0.08),
                     blurRadius: 8,
                     offset: const Offset(0, 3),
                   ),
                 ],
               ),
-              child: Icon(action.icon, color: Colors.green.shade700),
+              child: Icon(action.icon, color: colorScheme.primary),
             ),
             const SizedBox(height: 8),
             Text(
@@ -397,7 +411,7 @@ class _ActionCircle extends StatelessWidget {
               action.helper,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade600,
+                    color: colorScheme.onSurfaceVariant,
                     fontSize: 11,
                   ),
             ),

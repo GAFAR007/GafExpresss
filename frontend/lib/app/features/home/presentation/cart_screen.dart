@@ -21,6 +21,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:frontend/app/core/constants/app_constants.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
@@ -203,7 +204,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     AppDebug.log("CART", "build()", extra: {"isPaying": _isPaying});
 
     final cart = ref.watch(cartProvider);
-    final totalText = _formatPrice(cart.totalCents);
+    final totalText = formatNgnFromCents(cart.totalCents);
 
     // WHY: Viewing cart should clear unseen notification badge.
     if (cart.hasUnseenChanges && cart.items.isNotEmpty) {
@@ -338,10 +339,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     );
   }
 
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "NGN $value";
-  }
 }
 
 class _EmptyCart extends StatelessWidget {
@@ -382,7 +379,7 @@ class _CartItemTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lineTotal = _formatPrice(item.lineTotalCents);
+    final lineTotal = formatNgnFromCents(item.lineTotalCents);
 
     return Card(
       child: ListTile(
@@ -426,8 +423,4 @@ class _CartItemTile extends StatelessWidget {
     );
   }
 
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "NGN $value";
-  }
 }

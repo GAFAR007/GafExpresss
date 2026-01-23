@@ -29,6 +29,7 @@ class BusinessTeamScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppDebug.log("BUSINESS_TEAM", "build()");
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -49,7 +50,8 @@ class BusinessTeamScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.badge_outlined, color: Colors.grey.shade500),
+            // WHY: Keep icon contrast consistent across themes.
+            Icon(Icons.badge_outlined, color: colorScheme.onSurfaceVariant),
             const SizedBox(height: 12),
             const Text("Team roles dashboard is coming next."),
             const SizedBox(height: 12),

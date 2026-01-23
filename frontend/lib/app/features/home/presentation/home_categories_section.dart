@@ -93,6 +93,8 @@ class _CategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -100,11 +102,11 @@ class _CategoryCard extends StatelessWidget {
         width: 92,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: colorScheme.shadow.withOpacity(0.08),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -117,10 +119,10 @@ class _CategoryCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: colorScheme.primaryContainer,
                 shape: BoxShape.circle,
               ),
-              child: Icon(item.icon, size: 22, color: Colors.green.shade700),
+              child: Icon(item.icon, size: 22, color: colorScheme.primary),
             ),
             const SizedBox(height: 6),
             Text(

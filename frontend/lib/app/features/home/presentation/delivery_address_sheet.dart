@@ -70,7 +70,8 @@ class DeliveryAddressSheet extends StatefulWidget {
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
-      backgroundColor: Colors.transparent,
+      // WHY: Use theme surface for transparent sheet backing in every mode.
+      backgroundColor: Theme.of(context).colorScheme.surface.withOpacity(0),
       builder: (context) => DeliveryAddressSheet(profile: profile),
     );
   }
@@ -199,13 +200,14 @@ class _DeliveryAddressSheetState extends State<DeliveryAddressSheet> {
   Widget build(BuildContext context) {
     final homeVerified = widget.profile.homeAddress?.isVerified == true;
     final companyVerified = widget.profile.companyAddress?.isVerified == true;
+    final scheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: scheme.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: SingleChildScrollView(

@@ -215,7 +215,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: Colors.transparent,
+      // WHY: Keep sheet backdrop aligned with the current theme.
+      backgroundColor: Theme.of(context).colorScheme.surface.withOpacity(0),
       builder: (sheetContext) {
         // WHY: StatefulBuilder allows the sheet to refresh on loading changes.
         return StatefulBuilder(
@@ -235,6 +236,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     required void Function(void Function()) setModalState,
   }) {
     final theme = Theme.of(sheetContext);
+    final scheme = theme.colorScheme;
     final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
 
     return Padding(
@@ -242,8 +244,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       padding: EdgeInsets.only(bottom: bottomInset),
       child: Container(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: scheme.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: SingleChildScrollView(
@@ -257,7 +259,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
+                    color: scheme.outlineVariant,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -271,7 +273,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               Text(
                 "Guest mode lets you browse only. Sign in to add items and pay.",
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: Colors.grey.shade600,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 20),
@@ -335,11 +337,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// ------------------------------------------------------------
   Widget _buildGuestHeader() {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
       decoration: BoxDecoration(
-        color: Colors.green.shade600,
+        color: scheme.primary,
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
       ),
       child: Row(
@@ -353,7 +356,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   "Office Store",
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: Colors.white,
+                    color: scheme.onPrimary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -361,7 +364,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   "Guest access - Browse products only",
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white70,
+                    color: scheme.onPrimary.withOpacity(0.7),
                   ),
                 ),
               ],
@@ -378,8 +381,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             icon: const Icon(Icons.lock_open, size: 16),
             label: const Text("Sign in"),
             style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white),
+              foregroundColor: scheme.onPrimary,
+              side: BorderSide(color: scheme.onPrimary.withOpacity(0.7)),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
               ),
@@ -395,15 +398,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// ------------------------------------------------------------
   Widget _buildGuestAccessCard() {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: scheme.shadow.withOpacity(0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -415,10 +419,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.orange.shade50,
+              color: scheme.secondaryContainer,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(Icons.lock, color: Colors.orange.shade700, size: 18),
+            child: Icon(
+              Icons.lock,
+              color: scheme.onSecondaryContainer,
+              size: 18,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -430,7 +438,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   "Sign in to add to cart, checkout, and track orders.",
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade600,
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -558,7 +566,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final productsAsync = ref.watch(product_providers.productsProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F7),
+      backgroundColor: Theme.of(context).colorScheme.background,
       body: SafeArea(
         child: Column(
           children: [

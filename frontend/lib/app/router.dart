@@ -29,6 +29,8 @@ import 'package:frontend/app/features/home/presentation/business_account_screen.
 import 'package:frontend/app/features/home/presentation/business_assets_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_dashboard_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_orders_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_order_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_order_model.dart';
 import 'package:frontend/app/features/home/presentation/business_product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_products_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_register_help_screen.dart';
@@ -43,6 +45,7 @@ import 'package:frontend/app/features/home/presentation/payment_success_screen.d
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
+import 'package:frontend/app/theme/business_theme_wrapper.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
@@ -143,21 +146,28 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final type = state.uri.queryParameters['type'] ?? 'business';
           AppDebug.log("ROUTER", "-> /business-account", extra: {"type": type});
-          return BusinessAccountScreen(accountType: type);
+          // WHY: Keep the business palette scoped to business-only routes.
+          return BusinessThemeWrapper(
+            child: BusinessAccountScreen(accountType: type),
+          );
         },
       ),
       GoRoute(
         path: '/business-dashboard',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-dashboard");
-          return const BusinessDashboardScreen();
+          return const BusinessThemeWrapper(
+            child: BusinessDashboardScreen(),
+          );
         },
       ),
       GoRoute(
         path: '/business-products',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-products");
-          return const BusinessProductsScreen();
+          return const BusinessThemeWrapper(
+            child: BusinessProductsScreen(),
+          );
         },
       ),
       GoRoute(
@@ -169,28 +179,56 @@ final routerProvider = Provider<GoRouter>((ref) {
             "-> /business-products/:id",
             extra: {"id": id},
           );
-          return BusinessProductDetailScreen(productId: id);
+          return BusinessThemeWrapper(
+            child: BusinessProductDetailScreen(productId: id),
+          );
         },
       ),
       GoRoute(
         path: '/business-orders',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-orders");
-          return const BusinessOrdersScreen();
+          return const BusinessThemeWrapper(
+            child: BusinessOrdersScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/business-orders/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-orders/:id",
+            extra: {"id": id},
+          );
+          final extra = state.extra;
+          if (extra is BusinessOrder) {
+            return BusinessThemeWrapper(
+              child: BusinessOrderDetailScreen(order: extra),
+            );
+          }
+          return const BusinessThemeWrapper(
+            child: BusinessOrdersScreen(),
+          );
         },
       ),
       GoRoute(
         path: '/business-assets',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-assets");
-          return const BusinessAssetsScreen();
+          return const BusinessThemeWrapper(
+            child: BusinessAssetsScreen(),
+          );
         },
       ),
       GoRoute(
         path: '/business-team',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-team");
-          return const BusinessTeamScreen();
+          return const BusinessThemeWrapper(
+            child: BusinessTeamScreen(),
+          );
         },
       ),
       GoRoute(
@@ -198,7 +236,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final type = state.uri.queryParameters['type'] ?? 'business';
           AppDebug.log("ROUTER", "-> /business-verify", extra: {"type": type});
-          return BusinessVerifyScreen(accountType: type);
+          return BusinessThemeWrapper(
+            child: BusinessVerifyScreen(accountType: type),
+          );
         },
       ),
       GoRoute(
@@ -210,7 +250,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             "-> /business-verified",
             extra: {"type": type},
           );
-          return BusinessVerifiedScreen(accountType: type);
+          return BusinessThemeWrapper(
+            child: BusinessVerifiedScreen(accountType: type),
+          );
         },
       ),
       GoRoute(
@@ -222,7 +264,9 @@ final routerProvider = Provider<GoRouter>((ref) {
             "-> /business-register-help",
             extra: {"type": type},
           );
-          return BusinessRegisterHelpScreen(accountType: type);
+          return BusinessThemeWrapper(
+            child: BusinessRegisterHelpScreen(accountType: type),
+          );
         },
       ),
       GoRoute(

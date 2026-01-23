@@ -31,6 +31,7 @@ class HomeBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppDebug.log("HOME_NAV", "build()", extra: {"index": currentIndex});
+    final colorScheme = Theme.of(context).colorScheme;
 
     return BottomNavigationBar(
       currentIndex: currentIndex,
@@ -58,14 +59,14 @@ class HomeBottomNav extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.redAccent,
+                      color: colorScheme.error,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                     child: Text(
                       cartBadgeCount > 99 ? "99+" : "$cartBadgeCount",
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: colorScheme.onError,
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),

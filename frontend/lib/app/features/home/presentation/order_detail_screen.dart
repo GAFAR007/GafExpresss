@@ -18,9 +18,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class OrderDetailScreen extends ConsumerStatefulWidget {
   final Order order;
@@ -87,13 +89,14 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
   Widget build(BuildContext context) {
     AppDebug.log("ORDER_DETAIL", "build()", extra: {"id": _order.id});
 
-    final totalText = _formatPrice(_order.totalPriceCents);
+    final totalText = formatNgnFromCents(_order.totalPriceCents);
     final isPending = _order.status == "pending";
     final createdText = _formatDate(_order.createdAt);
     final itemCount = _order.items.length;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F7),
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(title: const Text("Receipt")),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -104,11 +107,11 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: colorScheme.surface,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: colorScheme.shadow.withOpacity(0.08),
                     blurRadius: 16,
                     offset: const Offset(0, 8),
                   ),
@@ -149,9 +152,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final item = _order.items[index];
-                      final lineTotal = _formatPrice(item.lineTotalCents);
+                      final lineTotal = formatNgnFromCents(item.lineTotalCents);
                       final unitText =
-                          "${item.quantity} x ${_formatPrice(item.unitPriceCents)}";
+                          "${item.quantity} x ${formatNgnFromCents(item.unitPriceCents)}";
 
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,7 +203,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                   const SizedBox(height: 12),
                   // WHY: Summary row clarifies the final payable amount.
                   _SummaryRow(label: "Subtotal", value: totalText),
-                  _SummaryRow(label: "Tax", value: "NGN 0.00"),
+                  _SummaryRow(label: "Tax", value: formatNgnFromCents(0)),
                   const SizedBox(height: 6),
                   _SummaryRow(
                     label: "Total",
@@ -211,7 +214,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                   Text(
                     "Payments are confirmed by webhook.",
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey.shade600,
+                          color: colorScheme.onSurfaceVariant,
                         ),
                   ),
                 ],
@@ -231,11 +234,6 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         ),
       ),
     );
-  }
-
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "NGN $value";
   }
 
   String _formatDate(DateTime? date) {
@@ -261,35 +259,29 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalized = status.toLowerCase();
-    final Color bg;
-    final Color fg;
-
-    // WHY: Color-coded status improves quick scanning.
-    switch (normalized) {
-      case "paid":
-        bg = Colors.green.shade100;
-        fg = Colors.green.shade800;
-        break;
-      case "cancelled":
-        bg = Colors.grey.shade200;
-        fg = Colors.grey.shade700;
-        break;
-      case "pending":
-      default:
-        bg = Colors.orange.shade100;
-        fg = Colors.orange.shade800;
-    }
+    final theme = Theme.of(context);
+    final badge = AppStatusBadgeColors.fromStatus(
+      theme: theme,
+      status: switch (normalized) {
+        "paid" => AppStatusKind.paid,
+        "shipped" => AppStatusKind.shipped,
+        "delivered" => AppStatusKind.delivered,
+        "cancelled" => AppStatusKind.cancelled,
+        "pending" => AppStatusKind.pending,
+        _ => AppStatusKind.neutral,
+      },
+    );
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: bg,
+        color: badge.background,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         normalized.toUpperCase(),
         style: TextStyle(
-          color: fg,
+          color: badge.foreground,
           fontWeight: FontWeight.w600,
           fontSize: 11,
         ),
@@ -330,6 +322,7 @@ class _DashedDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         // WHY: Dashed line gives a receipt-like feel without images.
@@ -342,7 +335,7 @@ class _DashedDivider extends StatelessWidget {
               width: 4,
               height: 1,
               child: DecoratedBox(
-                decoration: BoxDecoration(color: Colors.grey.shade300),
+                decoration: BoxDecoration(color: scheme.outlineVariant),
               ),
             ),
           ),

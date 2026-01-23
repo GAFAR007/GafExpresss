@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class BusinessVerifiedScreen extends StatelessWidget {
   final String accountType;
@@ -26,6 +27,11 @@ class BusinessVerifiedScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = _labelForType(accountType);
+    final theme = Theme.of(context);
+    final badgeColors = AppStatusBadgeColors.fromTheme(
+      theme: theme,
+      tone: AppStatusTone.success,
+    );
     AppDebug.log(
       "BUSINESS_VERIFIED",
       "build()",
@@ -55,14 +61,13 @@ class BusinessVerifiedScreen extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.verified, color: Colors.green.shade600),
+                Icon(Icons.verified, color: badgeColors.foreground),
                 const SizedBox(width: 8),
                 Text(
                   "Verified",
-                  style: TextStyle(
-                    color: Colors.green.shade700,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: badgeColors.foreground,
                     fontWeight: FontWeight.w600,
-                    fontSize: 16,
                   ),
                 ),
               ],
@@ -70,7 +75,9 @@ class BusinessVerifiedScreen extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               label,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -82,12 +89,13 @@ class BusinessVerifiedScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                // WHY: Keep success banner readable in all theme modes.
+                color: badgeColors.background,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.shield, color: Colors.green.shade700),
+                  Icon(Icons.shield, color: badgeColors.foreground),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(

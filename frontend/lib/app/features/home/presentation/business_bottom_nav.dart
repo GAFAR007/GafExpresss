@@ -61,15 +61,18 @@ class BusinessBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppDebug.log("BUSINESS_NAV", "build()", extra: {"index": currentIndex});
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        // WHY: Use surface tokens so the nav adapts to each theme mode.
+        color: colorScheme.surface,
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            // WHY: Theme shadow keeps elevation subtle in dark mode.
+            color: colorScheme.shadow.withOpacity(0.08),
             blurRadius: 16,
             offset: const Offset(0, -4),
           ),
@@ -116,8 +119,9 @@ class _BusinessNavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = const Color(0xFF0F9D58);
-    final inactiveColor = Colors.grey.shade500;
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeColor = colorScheme.primary;
+    final inactiveColor = colorScheme.onSurfaceVariant;
 
     return InkWell(
       onTap: onTap,
@@ -132,14 +136,15 @@ class _BusinessNavButton extends StatelessWidget {
               color: isActive
                   ? activeColor
                   : isCenter
-                      ? Colors.green.shade50
-                      : Colors.transparent,
+                      ? colorScheme.primaryContainer
+                      // WHY: Keep transparent but tied to theme tokens.
+                      : colorScheme.surface.withOpacity(0),
               shape: BoxShape.circle,
             ),
             child: Icon(
               item.icon,
               size: isCenter ? 22 : 20,
-              color: isActive ? Colors.white : inactiveColor,
+              color: isActive ? colorScheme.onPrimary : inactiveColor,
             ),
           ),
           const SizedBox(height: 6),
@@ -154,7 +159,7 @@ class _BusinessNavButton extends StatelessWidget {
           Text(
             item.helper,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.grey.shade400,
+                  color: colorScheme.onSurfaceVariant.withOpacity(0.7),
                   fontSize: 9,
                 ),
           ),

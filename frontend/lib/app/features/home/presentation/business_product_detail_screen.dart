@@ -173,6 +173,7 @@ class _BusinessProductDetailScreenState
 
   Widget _buildAuditRow(String label, String value) {
     // WHY: Keep audit rows compact and easy to scan.
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -183,7 +184,7 @@ class _BusinessProductDetailScreenState
             child: Text(
               label,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.blueGrey.shade600,
+                    color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
                   ),
             ),
@@ -194,7 +195,7 @@ class _BusinessProductDetailScreenState
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
-                  ?.copyWith(color: Colors.blueGrey.shade800),
+                  ?.copyWith(color: colorScheme.onSurface),
             ),
           ),
         ],
@@ -209,6 +210,7 @@ class _BusinessProductDetailScreenState
       "build()",
       extra: {"productId": widget.productId, "isSaving": _isSaving},
     );
+    final colorScheme = Theme.of(context).colorScheme;
 
     final productAsync =
         ref.watch(businessProductByIdProvider(widget.productId));
@@ -252,7 +254,7 @@ class _BusinessProductDetailScreenState
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: Colors.grey.shade600),
+                      ?.copyWith(color: colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 _buildTextField(
@@ -311,9 +313,10 @@ class _BusinessProductDetailScreenState
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.blueGrey.shade50,
+                    // WHY: Use surface tokens for audit block contrast.
+                    color: colorScheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.blueGrey.shade100),
+                    border: Border.all(color: colorScheme.outlineVariant),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

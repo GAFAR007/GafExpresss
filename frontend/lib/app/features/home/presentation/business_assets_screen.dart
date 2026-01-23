@@ -29,6 +29,7 @@ class BusinessAssetsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppDebug.log("BUSINESS_ASSETS", "build()");
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -49,7 +50,8 @@ class BusinessAssetsScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.warehouse_outlined, color: Colors.grey.shade500),
+            // WHY: Use theme color so the placeholder stays readable in dark mode.
+            Icon(Icons.warehouse_outlined, color: colorScheme.onSurfaceVariant),
             const SizedBox(height: 12),
             const Text("Assets dashboard is coming next."),
             const SizedBox(height: 12),

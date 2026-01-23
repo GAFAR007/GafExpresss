@@ -33,6 +33,7 @@ import 'package:frontend/app/features/home/presentation/settings/settings_addres
 import 'package:frontend/app/features/home/presentation/settings/settings_helpers.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_image_picker.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_verification_actions.dart';
+import 'package:frontend/app/theme/theme_mode_toggle.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -542,15 +543,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
-      backgroundColor: Colors.transparent,
+      // WHY: Keep sheet backdrop aligned with the current theme.
+      backgroundColor: Theme.of(context).colorScheme.surface.withOpacity(0),
       builder: (context) {
         final viewInsets = MediaQuery.of(context).viewInsets;
+        final scheme = Theme.of(context).colorScheme;
         return Padding(
           padding: EdgeInsets.only(bottom: viewInsets.bottom),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            decoration: BoxDecoration(
+              color: scheme.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Column(
@@ -568,7 +571,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   message,
                   style: Theme.of(
                     context,
-                  ).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+                  ).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
                 if (_lastPhoneOtp != null &&
                     _lastPhoneOtp!.isNotEmpty &&
@@ -580,7 +585,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
+                      color: scheme.secondaryContainer,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
@@ -588,7 +593,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         Icon(
                           Icons.bug_report,
                           size: 16,
-                          color: Colors.orange.shade700,
+                          color: scheme.onSecondaryContainer,
                         ),
                         const SizedBox(width: 6),
                         Expanded(
@@ -596,7 +601,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             "DEV OTP: $_lastPhoneOtp",
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
-                                  color: Colors.orange.shade800,
+                                  color: scheme.onSecondaryContainer,
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
@@ -1344,6 +1349,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             },
                     ),
                   ],
+                  const SizedBox(height: 24),
+                  // WHY: Give users a clear place to switch theme modes.
+                  const SettingsSectionHeader(
+                    title: "Appearance",
+                    subtitle: "Choose how the app should look.",
+                  ),
+                  const SizedBox(height: 12),
+                  const ThemeModeToggle(source: "settings"),
                   const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,

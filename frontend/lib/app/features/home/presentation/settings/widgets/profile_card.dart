@@ -38,11 +38,12 @@ class ProfileCard extends StatelessWidget {
     // WHY: Hide the badge when account type editing is disabled in Settings.
     final hasAccountType =
         accountTypeLabel != null && accountTypeLabel!.trim().isNotEmpty;
+    final scheme = Theme.of(context).colorScheme;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.green.shade600,
+        color: scheme.primary,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -51,7 +52,7 @@ class ProfileCard extends StatelessWidget {
             onTap: onAvatarTap,
             child: CircleAvatar(
               radius: 26,
-              backgroundColor: Colors.white.withOpacity(0.2),
+              backgroundColor: scheme.onPrimary.withOpacity(0.18),
               backgroundImage: (profileImageUrl != null &&
                       profileImageUrl!.trim().isNotEmpty)
                   ? NetworkImage(profileImageUrl!)
@@ -61,8 +62,8 @@ class ProfileCard extends StatelessWidget {
                   ? null
                   : Text(
                       initials,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: scheme.onPrimary,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -75,21 +76,26 @@ class ProfileCard extends StatelessWidget {
               children: [
                 Text(
                   displayName.isEmpty ? "Guest user" : displayName,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: scheme.onPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(email, style: const TextStyle(color: Colors.white70)),
+                Text(
+                  email,
+                  style: TextStyle(color: scheme.onPrimary.withOpacity(0.7)),
+                ),
                 if (showUploadButton && onAvatarTap != null) ...[
                   const SizedBox(height: 8),
                   // WHY: Explicit upload control is clearer than relying on avatar tap.
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white70),
+                      foregroundColor: scheme.onPrimary,
+                      side: BorderSide(
+                        color: scheme.onPrimary.withOpacity(0.6),
+                      ),
                     ),
                     onPressed: onAvatarTap,
                     icon: const Icon(Icons.upload, size: 16),
@@ -103,13 +109,13 @@ class ProfileCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: scheme.onPrimary.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 accountTypeLabel!,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: scheme.onPrimary,
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),

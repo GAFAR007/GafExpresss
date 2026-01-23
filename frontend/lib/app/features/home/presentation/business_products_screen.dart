@@ -23,12 +23,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_analytics_models.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/settings_image_picker.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class BusinessProductsScreen extends ConsumerStatefulWidget {
   const BusinessProductsScreen({super.key});
@@ -507,12 +509,14 @@ class _BusinessProductsScreenState
   @override
   Widget build(BuildContext context) {
     AppDebug.log("BUSINESS_PRODUCTS", "build()");
+    final colorScheme = Theme.of(context).colorScheme;
 
     final productsAsync = ref.watch(businessProductsProvider(_buildQuery()));
     final summaryAsync = ref.watch(businessAnalyticsSummaryProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F4EF),
+      // WHY: Use theme surface so the screen adapts to mode changes.
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
         title: const Text("Business products"),
         leading: IconButton(
@@ -574,7 +578,7 @@ class _BusinessProductsScreenState
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: Colors.grey.shade600),
+                      ?.copyWith(color: colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 summaryCard,
@@ -646,9 +650,10 @@ class _BusinessProductsScreenState
 
   Widget _buildProductCard(Product product) {
     // WHY: Prefer the first gallery item so the list reflects latest uploads.
+    final colorScheme = Theme.of(context).colorScheme;
     final primaryImage = _primaryImageUrl(product);
     final galleryUrls = _galleryImageUrls(product, primaryImage);
-    final priceLabel = "NGN ${product.priceCents}";
+    final priceLabel = formatNgnFromCents(product.priceCents);
     final statusLabel = product.isActive ? "Active" : "Archived";
 
     return InkWell(
@@ -658,12 +663,14 @@ class _BusinessProductsScreenState
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          // WHY: Surface tokens keep cards readable in all theme modes.
+          color: colorScheme.surface,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFE7E0D6)),
+          border: Border.all(color: colorScheme.outlineVariant),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              // WHY: Theme shadow avoids hardcoded contrast issues.
+              color: colorScheme.shadow.withOpacity(0.08),
               blurRadius: 12,
               offset: const Offset(0, 6),
             ),
@@ -704,7 +711,9 @@ class _BusinessProductsScreenState
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
-                              ?.copyWith(color: Colors.grey.shade600),
+                              ?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -774,7 +783,7 @@ class _BusinessProductsScreenState
               Text(
                 "Gallery",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade600,
+                      color: colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w600,
                     ),
               ),
@@ -824,13 +833,14 @@ class _BusinessProductsScreenState
 
   Widget _buildProductThumbnail(String? url, {VoidCallback? onDelete}) {
     // WHY: Keep a consistent square frame so the list stays aligned.
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       height: 72,
       width: 72,
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: colorScheme.surfaceVariant,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
@@ -838,14 +848,14 @@ class _BusinessProductsScreenState
           fit: StackFit.expand,
           children: [
             if (url == null)
-              Icon(Icons.image, color: Colors.grey.shade400)
+              Icon(Icons.image, color: colorScheme.onSurfaceVariant)
             else
               Image.network(
                 url,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => Icon(
                   Icons.broken_image,
-                  color: Colors.grey.shade400,
+                  color: colorScheme.onSurfaceVariant,
                 ),
                 loadingBuilder: (context, child, progress) {
                   if (progress == null) return child;
@@ -874,13 +884,15 @@ class _BusinessProductsScreenState
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
+                      // WHY: Scrim keeps the delete icon visible on images.
+                      color: colorScheme.scrim.withOpacity(0.55),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.close,
                       size: 14,
-                      color: Colors.white,
+                      // WHY: Use onSurface for consistent contrast in all modes.
+                      color: colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -893,13 +905,14 @@ class _BusinessProductsScreenState
 
   Widget _buildGalleryThumbnail(String url, {VoidCallback? onDelete}) {
     // WHY: Keep small thumbs for quick scanning without overwhelming the card.
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       height: 48,
       width: 48,
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: colorScheme.surfaceVariant,
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: ClipOval(
         child: Stack(
@@ -910,7 +923,7 @@ class _BusinessProductsScreenState
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => Icon(
                 Icons.broken_image,
-                color: Colors.grey.shade400,
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
             if (onDelete != null)
@@ -923,13 +936,14 @@ class _BusinessProductsScreenState
                   child: Container(
                     padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
+                      color: colorScheme.scrim.withOpacity(0.55),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.close,
                       size: 10,
-                      color: Colors.white,
+                      // WHY: Keep delete icon legible on scrim across themes.
+                      color: colorScheme.onSurface,
                     ),
                   ),
                 ),
@@ -941,28 +955,26 @@ class _BusinessProductsScreenState
   }
 
   Widget _buildMetaChip(String label, {bool? isActive}) {
-    final color = isActive == null
-        ? Colors.blueGrey.shade50
+    final theme = Theme.of(context);
+    final tone = isActive == null
+        ? AppStatusTone.neutral
         : isActive
-            ? Colors.green.shade50
-            : Colors.orange.shade50;
-    final textColor = isActive == null
-        ? Colors.blueGrey.shade700
-        : isActive
-            ? Colors.green.shade700
-            : Colors.orange.shade700;
+            ? AppStatusTone.success
+            : AppStatusTone.warning;
+    // WHY: Use centralized badge colors so chips adapt to theme modes.
+    final badge = AppStatusBadgeColors.fromTheme(theme: theme, tone: tone);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color,
+        color: badge.background,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: textColor,
+              color: badge.foreground,
               fontWeight: FontWeight.w600,
             ),
       ),
@@ -971,20 +983,23 @@ class _BusinessProductsScreenState
 
   Widget _buildStatusPill(bool isActive) {
     final label = isActive ? "Active" : "Archived";
-    final color = isActive ? Colors.green.shade50 : Colors.orange.shade50;
-    final textColor = isActive ? Colors.green.shade700 : Colors.orange.shade700;
+    final theme = Theme.of(context);
+    final badge = AppStatusBadgeColors.fromTheme(
+      theme: theme,
+      tone: isActive ? AppStatusTone.success : AppStatusTone.warning,
+    );
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color,
+        color: badge.background,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: textColor,
+              color: badge.foreground,
               fontWeight: FontWeight.w600,
             ),
       ),
@@ -992,12 +1007,13 @@ class _BusinessProductsScreenState
   }
 
   Widget _buildFilterRow() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE7E0D6)),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -1017,7 +1033,7 @@ class _BusinessProductsScreenState
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: Colors.grey.shade600),
+                      ?.copyWith(color: colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -1042,15 +1058,16 @@ class _BusinessProductsScreenState
     BusinessAnalyticsSummary summary, {
     String? helper,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE7E0D6)),
+        border: Border.all(color: colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: colorScheme.shadow.withOpacity(0.08),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
@@ -1063,7 +1080,7 @@ class _BusinessProductsScreenState
             Text(
               helper,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade600,
+                    color: colorScheme.onSurfaceVariant,
                   ),
             ),
             const SizedBox(height: 10),
@@ -1083,11 +1100,13 @@ class _BusinessProductsScreenState
   }
 
   Widget _buildStatBubble(String label, String value) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF2F6F0),
+          // WHY: Surface variants keep stat bubbles readable in all modes.
+          color: colorScheme.surfaceVariant,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -1096,7 +1115,7 @@ class _BusinessProductsScreenState
             Text(
               label,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.green.shade700,
+                    color: colorScheme.primary,
                     fontWeight: FontWeight.w600,
                   ),
             ),

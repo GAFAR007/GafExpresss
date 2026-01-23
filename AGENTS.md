@@ -61,6 +61,14 @@ No exceptions.
 
 ---
 
+## Theme usage rules (mandatory)
+
+- Always use theme tokens (`Theme.of(context)`, `ColorScheme`, `TextTheme`, `AppColors`) for UI colors.
+- Never hardcode colors in widgets, except for status colors defined in `AppColors`.
+- Status colors must be chosen to work across classic/dark/business themes (no low-contrast or theme-breaking colors).
+
+---
+
 ## Debug logging standard (baseline)
 
 Logs must include:

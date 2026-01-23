@@ -21,6 +21,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:frontend/app/core/constants/app_constants.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
@@ -281,6 +282,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     final cart = ref.watch(cartProvider);
     final cartBadgeCount =
         cart.hasUnseenChanges ? cart.totalItems : 0;
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -318,15 +320,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.redAccent,
+                        color: scheme.error,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       constraints:
                           const BoxConstraints(minWidth: 16, minHeight: 16),
                       child: Text(
                         cartBadgeCount > 99 ? "99+" : "$cartBadgeCount",
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: scheme.onError,
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
                         ),
@@ -393,12 +395,13 @@ class _ProductDetailBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final priceText = _formatPrice(product.priceCents);
+    final priceText = formatNgnFromCents(product.priceCents);
     final stockText = product.stock > 0 ? "In stock" : "Out of stock";
     final canBuy = product.stock > 0;
     final canDecrease = quantity > 1;
     final canIncrease = quantity < product.stock;
-    final totalText = _formatPrice(product.priceCents * quantity);
+    final totalText = formatNgnFromCents(product.priceCents * quantity);
+    final scheme = Theme.of(context).colorScheme;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -416,8 +419,13 @@ class _ProductDetailBody extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) {
                 return Container(
                   height: 220,
-                  color: Colors.grey.shade200,
-                  child: const Center(child: Icon(Icons.image_not_supported)),
+                  color: scheme.surfaceVariant,
+                  child: Center(
+                    child: Icon(
+                      Icons.image_not_supported,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                 );
               },
             ),
@@ -455,7 +463,7 @@ class _ProductDetailBody extends StatelessWidget {
               Text(
                 "Total: $totalText",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade600,
+                      color: scheme.onSurfaceVariant,
                     ),
               ),
               const Spacer(),
@@ -512,10 +520,6 @@ class _ProductDetailBody extends StatelessWidget {
     );
   }
 
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "₦$value";
-  }
 }
 
 class _InfoRow extends StatelessWidget {

@@ -29,6 +29,7 @@ class BusinessAccountScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
     // WHY: Translate the stored value into a user-friendly label.
     final label = _labelForType(accountType);
     // WHY: Pull the latest profile so we can show the verified NIN card.
@@ -74,7 +75,9 @@ class BusinessAccountScreen extends ConsumerWidget {
             // WHY: Clarify that this screen is tied to the chosen account type.
             Text(
               label,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
             const SizedBox(height: 8),
             // WHY: Provide a short placeholder note until the form is designed.
@@ -171,12 +174,13 @@ class BusinessAccountScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blueGrey.shade50,
+                // WHY: Use surface tokens so info blocks adapt to theme.
+                color: colorScheme.surfaceVariant,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.badge, color: Colors.blueGrey.shade700),
+                  Icon(Icons.badge, color: colorScheme.onSurfaceVariant),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(

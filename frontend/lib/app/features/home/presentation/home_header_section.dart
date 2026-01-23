@@ -31,6 +31,7 @@ class HomeHeaderSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppDebug.log("HOME_HEADER", "build()");
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Row(
       children: [
@@ -38,19 +39,23 @@ class HomeHeaderSection extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.25),
+            color: colorScheme.surface.withOpacity(0.25),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Row(
             children: [
-              const Icon(Icons.location_on, size: 16, color: Colors.white),
+              Icon(Icons.location_on, size: 16, color: colorScheme.onPrimary),
               const SizedBox(width: 6),
               Text(
                 locationLabel,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: colorScheme.onPrimary),
               ),
               const SizedBox(width: 4),
-              const Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.white),
+              Icon(
+                Icons.keyboard_arrow_down,
+                size: 16,
+                color: colorScheme.onPrimary,
+              ),
             ],
           ),
         ),
@@ -63,7 +68,7 @@ class HomeHeaderSection extends StatelessWidget {
           },
           icon: Stack(
             children: [
-              const Icon(Icons.notifications, color: Colors.white),
+              Icon(Icons.notifications, color: colorScheme.onPrimary),
               if (notificationCount > 0)
                 Positioned(
                   right: 0,
@@ -73,14 +78,14 @@ class HomeHeaderSection extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.redAccent,
+                      color: colorScheme.error,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                     child: Text(
                       notificationCount > 99 ? "99+" : "$notificationCount",
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: colorScheme.onError,
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),

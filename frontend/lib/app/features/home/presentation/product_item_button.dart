@@ -16,7 +16,10 @@
 /// ------------------------------------------------------------
 
 import 'package:flutter/material.dart';
+
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 /// View model for product UI rendering.
 class ProductItemData {
@@ -51,8 +54,13 @@ class ProductItemButton extends StatelessWidget {
   Widget build(BuildContext context) {
     AppDebug.log("PRODUCT_ITEM", "build()", extra: {"id": item.id});
 
-    final priceText = _formatPrice(item.priceCents);
+    final priceText = formatNgnFromCents(item.priceCents);
     final inStock = item.stock > 0;
+    final scheme = Theme.of(context).colorScheme;
+    final stockBadge = AppStatusBadgeColors.fromTheme(
+      theme: Theme.of(context),
+      tone: inStock ? AppStatusTone.success : AppStatusTone.neutral,
+    );
 
     return Card(
       elevation: 1,
@@ -80,8 +88,11 @@ class ProductItemButton extends StatelessWidget {
                     return Container(
                       width: 64,
                       height: 64,
-                      color: Colors.grey.shade200,
-                      child: const Icon(Icons.image_not_supported),
+                      color: scheme.surfaceVariant,
+                      child: Icon(
+                        Icons.image_not_supported,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     );
                   },
                 ),
@@ -116,17 +127,13 @@ class ProductItemButton extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: inStock
-                                ? Colors.green.shade50
-                                : Colors.grey.shade200,
+                            color: stockBadge.background,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             inStock ? "In stock" : "Out of stock",
                             style: TextStyle(
-                              color: inStock
-                                  ? Colors.green.shade700
-                                  : Colors.grey.shade700,
+                              color: stockBadge.foreground,
                               fontSize: 12,
                             ),
                           ),
@@ -143,9 +150,4 @@ class ProductItemButton extends StatelessWidget {
     );
   }
 
-  /// WHY: Centralizes price formatting for consistent display.
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "₦$value";
-  }
 }

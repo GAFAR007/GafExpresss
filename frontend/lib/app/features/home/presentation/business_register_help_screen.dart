@@ -26,6 +26,7 @@ class BusinessRegisterHelpScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = _labelForType(accountType);
+    final colorScheme = Theme.of(context).colorScheme;
     AppDebug.log(
       "BUSINESS_REGISTER_HELP",
       "build()",
@@ -58,7 +59,9 @@ class BusinessRegisterHelpScreen extends StatelessWidget {
           children: [
             Text(
               label,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -70,12 +73,13 @@ class BusinessRegisterHelpScreen extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blueGrey.shade50,
+                // WHY: Use surface tokens to keep CAC help block on-theme.
+                color: colorScheme.surfaceVariant,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.support_agent, color: Colors.blueGrey.shade700),
+                  Icon(Icons.support_agent, color: colorScheme.onSurfaceVariant),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(

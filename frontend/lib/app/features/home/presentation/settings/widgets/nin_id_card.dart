@@ -14,6 +14,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class NinIdCard extends StatelessWidget {
   final String firstName;
@@ -43,6 +44,12 @@ class NinIdCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final verifiedBadge = AppStatusBadgeColors.fromTheme(
+      theme: Theme.of(context),
+      tone: AppStatusTone.success,
+    );
+
     // WHY: Track rebuilds so verification UI issues are easy to trace.
     AppDebug.log(
       "NIN_ID_CARD",
@@ -64,7 +71,7 @@ class NinIdCard extends StatelessWidget {
     // WHY: Use a compact badge icon instead of verbose "Verified" text.
     final verifiedIcon = Icon(
       Icons.verified,
-      color: Colors.green.shade600,
+      color: verifiedBadge.foreground,
       size: 16,
     );
 
@@ -74,13 +81,13 @@ class NinIdCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         // WHY: White card base keeps the design close to an ID layout.
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.blueGrey.shade100),
+        border: Border.all(color: scheme.outlineVariant),
         boxShadow: [
           // WHY: Soft shadow adds a physical card feel without heavy contrast.
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: scheme.shadow.withOpacity(0.08),
             blurRadius: 12,
             offset: const Offset(0, 6),
           ),
@@ -95,7 +102,7 @@ class NinIdCard extends StatelessWidget {
               Container(
                 height: 18,
                 decoration: BoxDecoration(
-                  color: Colors.indigo.shade400,
+                  color: scheme.primary,
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(18),
                   ),
@@ -108,9 +115,9 @@ class NinIdCard extends StatelessWidget {
                   height: 12,
                   width: 28,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: scheme.surface,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.indigo.shade400, width: 2),
+                    border: Border.all(color: scheme.primary, width: 2),
                   ),
                 ),
               ),
@@ -126,15 +133,15 @@ class NinIdCard extends StatelessWidget {
                   width: 74,
                   height: 74,
                   decoration: BoxDecoration(
-                    color: Colors.blueGrey.shade50,
+                    color: scheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.blueGrey.shade200),
+                    border: Border.all(color: scheme.outlineVariant),
                     image: hasProfileImage
                         ? DecorationImage(
                             image: NetworkImage(profileImageUrl!),
                             fit: BoxFit.cover,
                           )
-                        : null,
+                      : null,
                   ),
                   alignment: Alignment.center,
                   child: hasProfileImage
@@ -142,7 +149,7 @@ class NinIdCard extends StatelessWidget {
                       : Icon(
                           Icons.person,
                           size: 40,
-                          color: Colors.blueGrey.shade300,
+                          color: scheme.onSurfaceVariant.withOpacity(0.5),
                         ),
                 ),
                 const SizedBox(width: 14),
@@ -155,7 +162,7 @@ class NinIdCard extends StatelessWidget {
                         children: [
                           Icon(
                             Icons.verified,
-                            color: Colors.green.shade600,
+                            color: verifiedBadge.foreground,
                             size: 18,
                           ),
                           const SizedBox(width: 6),
@@ -166,7 +173,7 @@ class NinIdCard extends StatelessWidget {
                                 .bodySmall
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.blueGrey.shade700,
+                                  color: scheme.onSurfaceVariant,
                                 ),
                           ),
                         ],
@@ -214,6 +221,8 @@ class _NinRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     // WHY: Keep label/value pairs aligned for fast scanning.
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -226,7 +235,7 @@ class _NinRow extends StatelessWidget {
             child: Text(
               label,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.blueGrey.shade600,
+                    color: scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
                   ),
             ),
@@ -244,7 +253,7 @@ class _NinRow extends StatelessWidget {
                   child: Text(
                     value,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.blueGrey.shade800,
+                          color: scheme.onSurface,
                         ),
                   ),
                 ),

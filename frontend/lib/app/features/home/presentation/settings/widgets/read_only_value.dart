@@ -15,6 +15,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'package:frontend/app/theme/app_theme.dart';
+
 class ReadOnlyValue extends StatelessWidget {
   final String label;
   final String value;
@@ -76,20 +78,25 @@ class VerificationStatusPill extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final badgeColors = AppStatusBadgeColors.fromTheme(
+      theme: Theme.of(context),
+      tone: AppStatusTone.success,
+    );
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.green.shade50,
+        color: badgeColors.background,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         children: [
-          Icon(Icons.check_circle, color: Colors.green.shade600, size: 16),
+          Icon(Icons.check_circle, color: badgeColors.foreground, size: 16),
           const SizedBox(width: 6),
           Text(
             "Verified",
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.green.shade700,
+                  color: badgeColors.foreground,
                   fontWeight: FontWeight.w600,
                 ),
           ),
@@ -104,14 +111,19 @@ class VerifiedBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final badgeColors = AppStatusBadgeColors.fromTheme(
+      theme: Theme.of(context),
+      tone: AppStatusTone.success,
+    );
+
     return Row(
       children: [
-        Icon(Icons.check_circle, color: Colors.green.shade600, size: 18),
+        Icon(Icons.check_circle, color: badgeColors.foreground, size: 18),
         const SizedBox(width: 8),
         Text(
           "Verified",
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.green.shade700,
+                color: badgeColors.foreground,
                 fontWeight: FontWeight.w600,
               ),
         ),

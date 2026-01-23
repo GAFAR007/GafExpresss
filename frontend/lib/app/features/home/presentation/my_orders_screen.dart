@@ -19,8 +19,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class MyOrdersScreen extends ConsumerWidget {
   const MyOrdersScreen({super.key});
@@ -57,7 +59,7 @@ class MyOrdersScreen extends ConsumerWidget {
           ),
         ],
       ),
-      backgroundColor: const Color(0xFFF4F6F7),
+      backgroundColor: Theme.of(context).colorScheme.background,
       body: ordersAsync.when(
         data: (orders) {
           if (orders.isEmpty) {
@@ -106,11 +108,13 @@ class _OrderTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalText = _formatPrice(order.totalPriceCents);
+    final totalText = formatNgnFromCents(order.totalPriceCents);
     final createdText = _formatDate(order.createdAt);
     final itemCount = order.items.length;
-    final firstItemName =
-        order.items.isEmpty ? "Items pending" : order.items.first.name;
+    final firstItemName = order.items.isEmpty
+        ? "Items pending"
+        : order.items.first.name;
+    final scheme = Theme.of(context).colorScheme;
 
     return InkWell(
       onTap: onTap,
@@ -118,11 +122,11 @@ class _OrderTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: scheme.shadow.withOpacity(0.08),
               blurRadius: 12,
               offset: const Offset(0, 8),
             ),
@@ -144,9 +148,9 @@ class _OrderTile extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               "Placed: $createdText",
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey.shade600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 6),
             Text(
@@ -163,10 +167,7 @@ class _OrderTile extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const Spacer(),
-                Text(
-                  totalText,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
+                Text(totalText, style: Theme.of(context).textTheme.titleSmall),
               ],
             ),
             const SizedBox(height: 10),
@@ -175,23 +176,22 @@ class _OrderTile extends StatelessWidget {
               children: [
                 Text(
                   "View receipt",
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.green.shade700,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: scheme.primary),
                 ),
                 const SizedBox(width: 6),
-                Icon(Icons.chevron_right, color: Colors.green.shade700, size: 18),
+                Icon(
+                  Icons.chevron_right,
+                  color: scheme.primary,
+                  size: 18,
+                ),
               ],
             ),
           ],
         ),
       ),
     );
-  }
-
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "NGN $value";
   }
 
   String _formatDate(DateTime? date) {
@@ -217,35 +217,29 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalized = status.toLowerCase();
-    final Color bg;
-    final Color fg;
-
-    // WHY: Color-coded status improves quick scanning.
-    switch (normalized) {
-      case "paid":
-        bg = Colors.green.shade100;
-        fg = Colors.green.shade800;
-        break;
-      case "cancelled":
-        bg = Colors.grey.shade200;
-        fg = Colors.grey.shade700;
-        break;
-      case "pending":
-      default:
-        bg = Colors.orange.shade100;
-        fg = Colors.orange.shade800;
-    }
+    final kind = switch (normalized) {
+      "pending" => AppStatusKind.pending,
+      "paid" => AppStatusKind.paid,
+      "shipped" => AppStatusKind.shipped,
+      "delivered" => AppStatusKind.delivered,
+      "cancelled" => AppStatusKind.cancelled,
+      _ => AppStatusKind.neutral,
+    };
+    final badge = AppStatusBadgeColors.fromStatus(
+      theme: Theme.of(context),
+      status: kind,
+    );
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: bg,
+        color: badge.background,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         normalized.toUpperCase(),
         style: TextStyle(
-          color: fg,
+          color: badge.foreground,
           fontWeight: FontWeight.w600,
           fontSize: 11,
         ),

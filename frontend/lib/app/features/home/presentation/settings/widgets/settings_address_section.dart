@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/address_autocomplete_field.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/settings_form_fields.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class SettingsAddressSection extends StatelessWidget {
   final String title;
@@ -157,18 +158,24 @@ class _AddressStatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (tone) {
-      AddressStatusTone.success => Colors.green.shade700,
-      AddressStatusTone.busy => Colors.orange.shade700,
-      AddressStatusTone.error => Colors.red.shade600,
-      AddressStatusTone.neutral => Colors.grey.shade600,
-    };
+    final theme = Theme.of(context);
+    final toneColors = AppStatusBadgeColors.fromTheme(
+      theme: theme,
+      tone: switch (tone) {
+        AddressStatusTone.success => AppStatusTone.success,
+        AddressStatusTone.busy => AppStatusTone.warning,
+        AddressStatusTone.error => AppStatusTone.danger,
+        AddressStatusTone.neutral => AppStatusTone.neutral,
+      },
+    );
+    final color = toneColors.foreground;
 
     return Text(
       text,
-      style: Theme.of(
-        context,
-      ).textTheme.bodySmall?.copyWith(color: color, fontWeight: FontWeight.w500),
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: color,
+        fontWeight: FontWeight.w500,
+      ),
     );
   }
 }
@@ -187,20 +194,25 @@ class _AddressVerifyButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isVerified) {
+      final badgeColors = AppStatusBadgeColors.fromTheme(
+        theme: Theme.of(context),
+        tone: AppStatusTone.success,
+      );
+
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.green.shade50,
+          color: badgeColors.background,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Icon(Icons.verified, size: 16, color: Colors.green.shade700),
+            Icon(Icons.verified, size: 16, color: badgeColors.foreground),
             const SizedBox(width: 6),
             Text(
               "Verified",
               style: TextStyle(
-                color: Colors.green.shade700,
+                color: badgeColors.foreground,
                 fontWeight: FontWeight.w600,
               ),
             ),

@@ -14,6 +14,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:frontend/app/theme/app_theme.dart';
+
 class SettingsSectionHeader extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -26,6 +28,8 @@ class SettingsSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -34,7 +38,7 @@ class SettingsSectionHeader extends StatelessWidget {
         Text(
           subtitle,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.grey.shade600,
+                color: scheme.onSurfaceVariant,
               ),
         ),
       ],
@@ -149,20 +153,25 @@ class SettingsProfileImageRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // WHY: Avoid showing broken images when no profile image exists.
-    final hasImage = profileImageUrl != null && profileImageUrl!.trim().isNotEmpty;
+    final hasImage =
+        profileImageUrl != null && profileImageUrl!.trim().isNotEmpty;
+    final scheme = Theme.of(context).colorScheme;
 
     return Row(
       children: [
         // WHY: Show the user their current avatar so the upload action is clear.
         CircleAvatar(
           radius: 20,
-          backgroundColor: Colors.green.shade100,
+          backgroundColor: scheme.primaryContainer,
           backgroundImage: hasImage ? NetworkImage(profileImageUrl!) : null,
           child: hasImage
               ? null
               : Text(
                   initials,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onPrimaryContainer,
+                  ),
                 ),
         ),
         const SizedBox(width: 12),
@@ -175,7 +184,7 @@ class SettingsProfileImageRow extends StatelessWidget {
               Text(
                 hasImage ? "Image uploaded" : "Upload a profile photo",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade600,
+                      color: scheme.onSurfaceVariant,
                     ),
               ),
             ],
@@ -212,20 +221,25 @@ class _VerificationButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isVerified) {
+      final badgeColors = AppStatusBadgeColors.fromTheme(
+        theme: Theme.of(context),
+        tone: AppStatusTone.success,
+      );
+
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.green.shade50,
+          color: badgeColors.background,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
-            Icon(Icons.verified, size: 16, color: Colors.green.shade700),
+            Icon(Icons.verified, size: 16, color: badgeColors.foreground),
             const SizedBox(width: 6),
             Text(
               "Verified",
               style: TextStyle(
-                color: Colors.green.shade700,
+                color: badgeColors.foreground,
                 fontWeight: FontWeight.w600,
               ),
             ),

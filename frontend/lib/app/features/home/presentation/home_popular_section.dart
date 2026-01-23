@@ -15,6 +15,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/features/home/presentation/home_section_header.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 
@@ -83,7 +84,8 @@ class _PopularCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final priceText = _formatPrice(product.priceCents);
+    final priceText = formatNgnFromCents(product.priceCents);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return InkWell(
       onTap: onTap,
@@ -91,11 +93,11 @@ class _PopularCard extends StatelessWidget {
       child: Container(
         width: 160,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: colorScheme.shadow.withOpacity(0.08),
               blurRadius: 10,
               offset: const Offset(0, 6),
             ),
@@ -116,8 +118,11 @@ class _PopularCard extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => Container(
                   height: 120,
-                  color: Colors.grey.shade200,
-                  child: const Icon(Icons.image_not_supported),
+                  color: colorScheme.surfaceVariant,
+                  child: Icon(
+                    Icons.image_not_supported,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
@@ -143,10 +148,5 @@ class _PopularCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _formatPrice(int priceCents) {
-    final value = (priceCents / 100).toStringAsFixed(2);
-    return "NGN $value";
   }
 }

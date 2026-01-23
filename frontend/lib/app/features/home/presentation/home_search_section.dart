@@ -36,6 +36,7 @@ class HomeSearchSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppDebug.log("HOME_SEARCH", "build()");
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Row(
       children: [
@@ -48,7 +49,7 @@ class HomeSearchSection extends StatelessWidget {
               hintText: "Search",
               prefixIcon: const Icon(Icons.search),
               filled: true,
-              fillColor: Colors.white,
+              fillColor: colorScheme.surface,
               contentPadding: const EdgeInsets.symmetric(horizontal: 12),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -83,7 +84,7 @@ class HomeSearchSection extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: colorScheme.surface,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(Icons.tune),
@@ -97,7 +98,7 @@ class HomeSearchSection extends StatelessWidget {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: Colors.orange.shade600,
+                      color: colorScheme.secondary,
                       shape: BoxShape.circle,
                     ),
                   ),
