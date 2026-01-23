@@ -26,7 +26,9 @@ import 'package:frontend/app/features/home/presentation/presentation/providers/a
 
 import 'package:frontend/app/features/home/presentation/cart_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_account_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_asset_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_assets_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_dashboard_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_orders_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_order_detail_screen.dart';
@@ -217,6 +219,32 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/business-assets',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-assets");
+          return const BusinessThemeWrapper(
+            child: BusinessAssetsScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/business-assets/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-assets/:id",
+            extra: {"id": id},
+          );
+          final extra = state.extra;
+          if (extra is BusinessAsset) {
+            return BusinessThemeWrapper(
+              child: BusinessAssetDetailScreen(asset: extra),
+            );
+          }
+          // WHY: Avoid a broken detail screen when no asset was passed.
+          AppDebug.log(
+            "ROUTER",
+            "Asset detail missing extra",
+            extra: {"id": id},
+          );
           return const BusinessThemeWrapper(
             child: BusinessAssetsScreen(),
           );
