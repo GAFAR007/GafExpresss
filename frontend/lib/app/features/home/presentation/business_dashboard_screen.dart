@@ -139,6 +139,10 @@ class BusinessDashboardScreen extends StatelessWidget {
               _logTap("team_roles_quick");
               context.go('/business-team');
             },
+            onTenantsTap: () {
+              _logTap("tenants_quick");
+              context.go('/business-tenants');
+            },
           ),
         ],
       ),
@@ -286,12 +290,14 @@ class _ActionStrip extends StatelessWidget {
   final VoidCallback onOrdersTap;
   final VoidCallback onAssetsTap;
   final VoidCallback onTeamTap;
+  final VoidCallback onTenantsTap;
 
   const _ActionStrip({
     required this.onProductsTap,
     required this.onOrdersTap,
     required this.onAssetsTap,
     required this.onTeamTap,
+    required this.onTenantsTap,
   });
 
   @override
@@ -322,6 +328,12 @@ class _ActionStrip extends StatelessWidget {
         label: "Team roles",
         helper: "Staff access",
         onTap: onTeamTap,
+      ),
+      _ActionItem(
+        icon: Icons.home_work_outlined,
+        label: "Tenants",
+        helper: "Review requests",
+        onTap: onTenantsTap,
       ),
     ];
 

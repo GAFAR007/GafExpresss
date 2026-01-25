@@ -23,6 +23,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/business_asset_helpers.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -35,14 +36,6 @@ class BusinessAssetsScreen extends ConsumerStatefulWidget {
   ConsumerState<BusinessAssetsScreen> createState() =>
       _BusinessAssetsScreenState();
 }
-
-// WHY: Provide stable select options that match backend enums.
-const List<Map<String, String>> _assetTypeOptions = [
-  {"value": "vehicle", "label": "Vehicle"},
-  {"value": "equipment", "label": "Equipment"},
-  {"value": "warehouse", "label": "Warehouse"},
-  {"value": "other", "label": "Other"},
-];
 
 const List<Map<String, String>> _statusOptions = [
   {"value": "active", "label": "Active"},
@@ -229,6 +222,39 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
     }
   }
 
+  /// ------------------------------------------------------------
+  /// INPUT PARSERS
+  /// ------------------------------------------------------------
+  /// WHY:
+  /// - Keep form parsing consistent for numeric + date fields.
+  double? _parseDoubleInput(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    return double.tryParse(trimmed);
+  }
+
+  int? _parseIntInput(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    return int.tryParse(trimmed);
+  }
+
+  DateTime? _parseDateInput(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    return DateTime.tryParse(trimmed);
+  }
+
+  String _formatDateInput(DateTime? value) {
+    if (value == null) return '';
+    return value.toIso8601String().split('T').first;
+  }
+
+  String _formatNumberInput(num? value) {
+    if (value == null) return '';
+    return value.toString();
+  }
+
   Future<void> _openAssetSheet(
     BuildContext context, {
     BusinessAsset? asset,
@@ -240,9 +266,97 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
     );
     final serialCtrl = TextEditingController(text: asset?.serialNumber ?? '');
     final locationCtrl = TextEditingController(text: asset?.location ?? '');
+    final purchaseCostCtrl = TextEditingController(
+      text: _formatNumberInput(asset?.purchaseCost),
+    );
+    final purchaseDateCtrl = TextEditingController(
+      text: _formatDateInput(asset?.purchaseDate),
+    );
+    final usefulLifeCtrl = TextEditingController(
+      text: asset?.usefulLifeMonths?.toString() ?? '',
+    );
+    final salvageCtrl = TextEditingController(
+      text: _formatNumberInput(asset?.salvageValue),
+    );
+    final leaseStartCtrl = TextEditingController(
+      text: _formatDateInput(asset?.leaseStart),
+    );
+    final leaseEndCtrl = TextEditingController(
+      text: _formatDateInput(asset?.leaseEnd),
+    );
+    final leaseCostCtrl = TextEditingController(
+      text: _formatNumberInput(asset?.leaseCostAmount),
+    );
+    final lessorCtrl = TextEditingController(text: asset?.lessorName ?? '');
+    final leaseTermsCtrl = TextEditingController(text: asset?.leaseTerms ?? '');
+    final managementFeeCtrl = TextEditingController(
+      text: _formatNumberInput(asset?.managementFeeAmount),
+    );
+    final clientNameCtrl = TextEditingController(text: asset?.clientName ?? '');
+    final serviceTermsCtrl = TextEditingController(
+      text: asset?.serviceTerms ?? '',
+    );
+    final inventoryQtyCtrl = TextEditingController(
+      text: asset?.inventory?.quantity.toString() ?? '',
+    );
+    final inventoryUnitCostCtrl = TextEditingController(
+      text: _formatNumberInput(asset?.inventory?.unitCost),
+    );
+    final inventoryReorderCtrl = TextEditingController(
+      text: asset?.inventory?.reorderLevel.toString() ?? '',
+    );
+    final inventoryUnitCtrl = TextEditingController(
+      text: asset?.inventory?.unitOfMeasure ?? '',
+    );
+    final estateHouseCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.houseNumber ?? '',
+    );
+    final estateStreetCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.street ?? '',
+    );
+    final estateCityCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.city ?? '',
+    );
+    final estateStateCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.state ?? '',
+    );
+    final estatePostalCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.postalCode ?? '',
+    );
+    final estateLgaCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.lga ?? '',
+    );
+    final estateLandmarkCtrl = TextEditingController(
+      text: asset?.estate?.propertyAddress?.landmark ?? '',
+    );
+    final referencesMinCtrl = TextEditingController(
+      text: asset?.estate?.tenantRules.referencesMin.toString() ?? '1',
+    );
+    final referencesMaxCtrl = TextEditingController(
+      text: asset?.estate?.tenantRules.referencesMax.toString() ?? '2',
+    );
+    final guarantorsMinCtrl = TextEditingController(
+      text: asset?.estate?.tenantRules.guarantorsMin.toString() ?? '1',
+    );
+    final guarantorsMaxCtrl = TextEditingController(
+      text: asset?.estate?.tenantRules.guarantorsMax.toString() ?? '2',
+    );
 
     var selectedType = asset?.assetType ?? 'equipment';
+    var selectedOwnership = asset?.ownershipType ?? 'owned';
+    var selectedAssetClass = asset?.assetClass ?? assetClassForType(selectedType);
     var selectedStatus = asset?.status ?? 'active';
+    var selectedLeasePeriod = asset?.leaseCostPeriod ?? 'monthly';
+    var selectedManagementPeriod = asset?.managementFeePeriod ?? 'monthly';
+
+    final unitMixRows = <_UnitMixControllers>[
+      ...?asset?.estate?.unitMix.map((unit) => _UnitMixControllers.fromUnit(unit)),
+    ];
+
+    // WHY: Estate assets require at least one unit definition.
+    if (unitMixRows.isEmpty) {
+      unitMixRows.add(_UnitMixControllers.empty());
+    }
 
     _logTap("asset_form_open", extra: {"mode": asset == null ? "create" : "edit"});
 
@@ -260,116 +374,809 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
               ),
               child: Container(
                 padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      asset == null ? "New asset" : "Edit asset",
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        asset == null ? "New asset" : "Edit asset",
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(labelText: "Asset name"),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedType,
-                      decoration: const InputDecoration(labelText: "Asset type"),
-                      items: _assetTypeOptions
-                          .map(
-                            (option) => DropdownMenuItem(
-                              value: option["value"],
-                              child: Text(option["label"] ?? ''),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setSheetState(() => selectedType = value);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: selectedStatus,
-                      decoration: const InputDecoration(labelText: "Status"),
-                      items: _statusOptions
-                          .map(
-                            (option) => DropdownMenuItem(
-                              value: option["value"],
-                              child: Text(option["label"] ?? ''),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setSheetState(() => selectedStatus = value);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: serialCtrl,
-                      decoration: const InputDecoration(
-                        labelText: "Serial number",
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(labelText: "Asset name"),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: locationCtrl,
-                      decoration: const InputDecoration(labelText: "Location"),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: descriptionCtrl,
-                      maxLines: 2,
-                      decoration: const InputDecoration(
-                        labelText: "Description",
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedType,
+                        decoration: const InputDecoration(labelText: "Asset type"),
+                        items: assetTypeOptions
+                            .map(
+                              (option) => DropdownMenuItem(
+                                value: option["value"],
+                                child: Text(option["label"] ?? ''),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          // WHY: Keep asset class aligned with the selected type.
+                          setSheetState(() {
+                            selectedType = value;
+                            selectedAssetClass = assetClassForType(value);
+                          });
+                        },
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              _logTap("asset_form_cancel");
-                              Navigator.of(context).pop();
-                            },
-                            child: const Text("Cancel"),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedOwnership,
+                        decoration: const InputDecoration(
+                          labelText: "Ownership type",
+                        ),
+                        items: ownershipTypeOptions
+                            .map(
+                              (option) => DropdownMenuItem(
+                                value: option["value"],
+                                child: Text(option["label"] ?? ''),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setSheetState(() => selectedOwnership = value);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedAssetClass,
+                        decoration: const InputDecoration(
+                          labelText: "Asset class",
+                        ),
+                        items: assetClassOptions
+                            .map(
+                              (option) => DropdownMenuItem(
+                                value: option["value"],
+                                child: Text(option["label"] ?? ''),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setSheetState(() => selectedAssetClass = value);
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        "Tip: We suggest '${assetClassForType(selectedType)}' for this type.",
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        value: selectedStatus,
+                        decoration: const InputDecoration(labelText: "Status"),
+                        items: _statusOptions
+                            .map(
+                              (option) => DropdownMenuItem(
+                                value: option["value"],
+                                child: Text(option["label"] ?? ''),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setSheetState(() => selectedStatus = value);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: serialCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Serial number",
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: locationCtrl,
+                        decoration: const InputDecoration(labelText: "Location"),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: descriptionCtrl,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: "Description",
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (requiresPurchaseFields(
+                        selectedAssetClass,
+                        selectedOwnership,
+                      )) ...[
+                        Text(
+                          "Fixed asset details",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () {
-                              final trimmedName = nameCtrl.text.trim();
-                              if (trimmedName.isEmpty) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text("Asset name is required"),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: purchaseCostCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Purchase cost (NGN)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: purchaseDateCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Purchase date (YYYY-MM-DD)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: usefulLifeCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Useful life (months)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: salvageCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Salvage value (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (requiresLeaseFields(selectedOwnership)) ...[
+                        Text(
+                          "Lease details",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: leaseStartCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Lease start (YYYY-MM-DD)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: leaseEndCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Lease end (YYYY-MM-DD)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: leaseCostCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Lease cost amount",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          value: selectedLeasePeriod,
+                          decoration: const InputDecoration(
+                            labelText: "Lease cost period",
+                          ),
+                          items: feePeriodOptions
+                              .map(
+                                (option) => DropdownMenuItem(
+                                  value: option["value"],
+                                  child: Text(option["label"] ?? ''),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setSheetState(() => selectedLeasePeriod = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: lessorCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Lessor name (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: leaseTermsCtrl,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            labelText: "Lease terms (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (requiresManagementFields(selectedOwnership)) ...[
+                        Text(
+                          "Management fees",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: managementFeeCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Management fee amount",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          value: selectedManagementPeriod,
+                          decoration: const InputDecoration(
+                            labelText: "Fee period",
+                          ),
+                          items: feePeriodOptions
+                              .map(
+                                (option) => DropdownMenuItem(
+                                  value: option["value"],
+                                  child: Text(option["label"] ?? ''),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setSheetState(() => selectedManagementPeriod = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: clientNameCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Client name (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: serviceTermsCtrl,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            labelText: "Service terms (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (isInventoryType(selectedType)) ...[
+                        Text(
+                          "Inventory snapshot",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: inventoryQtyCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Quantity",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: inventoryUnitCostCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Unit cost",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: inventoryReorderCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: "Reorder level (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: inventoryUnitCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Unit of measure (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (isEstateType(selectedType)) ...[
+                        Text(
+                          "Estate details",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: estateHouseCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "House number",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estateStreetCtrl,
+                          decoration: const InputDecoration(labelText: "Street"),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estateCityCtrl,
+                          decoration: const InputDecoration(labelText: "City"),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estateStateCtrl,
+                          decoration: const InputDecoration(labelText: "State"),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estatePostalCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Postal code (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estateLgaCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "LGA (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: estateLandmarkCtrl,
+                          decoration: const InputDecoration(
+                            labelText: "Landmark (optional)",
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          "Unit mix",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...unitMixRows.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final row = entry.value;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: row.unitTypeCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: "Unit type",
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        onPressed: unitMixRows.length == 1
+                                            ? null
+                                            : () {
+                                                _logTap(
+                                                  "unit_mix_remove",
+                                                  extra: {"index": index},
+                                                );
+                                                setSheetState(() {
+                                                  unitMixRows.removeAt(index);
+                                                });
+                                              },
+                                        icon: const Icon(Icons.close),
+                                      ),
+                                    ],
                                   ),
-                                );
-                                return;
-                              }
-
-                              Navigator.of(context).pop({
-                                "name": trimmedName,
-                                "assetType": selectedType,
-                                "status": selectedStatus,
-                                "serialNumber": serialCtrl.text.trim(),
-                                "location": locationCtrl.text.trim(),
-                                "description": descriptionCtrl.text.trim(),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: row.countCtrl,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: "Units",
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: row.rentAmountCtrl,
+                                          keyboardType: TextInputType.number,
+                                          decoration: const InputDecoration(
+                                            labelText: "Rent amount",
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  DropdownButtonFormField<String>(
+                                    value: row.rentPeriod,
+                                    decoration: const InputDecoration(
+                                      labelText: "Rent period",
+                                    ),
+                                    items: rentPeriodOptions
+                                        .map(
+                                          (option) => DropdownMenuItem(
+                                            value: option["value"],
+                                            child: Text(option["label"] ?? ''),
+                                          ),
+                                        )
+                                        .toList(),
+                                    onChanged: (value) {
+                                      if (value == null) return;
+                                      setSheetState(() => row.rentPeriod = value);
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              _logTap("unit_mix_add");
+                              setSheetState(() {
+                                unitMixRows.add(_UnitMixControllers.empty());
                               });
                             },
-                            child: Text(asset == null ? "Create" : "Save"),
+                            icon: const Icon(Icons.add),
+                            label: const Text("Add unit"),
                           ),
                         ),
+                        const SizedBox(height: 16),
+                        Text(
+                          "Tenant rules",
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: referencesMinCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: "Min references",
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: referencesMaxCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: "Max references",
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: guarantorsMinCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: "Min guarantors",
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: guarantorsMaxCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: "Max guarantors",
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "Tenants must be NIN verified and sign agreements before payment.",
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
                       ],
-                    ),
-                  ],
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                _logTap("asset_form_cancel");
+                                Navigator.of(context).pop();
+                              },
+                              child: const Text("Cancel"),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () {
+                                final trimmedName = nameCtrl.text.trim();
+                                if (trimmedName.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text("Asset name is required"),
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                // WHY: Enforce required finance fields before submit.
+                                if (requiresPurchaseFields(
+                                  selectedAssetClass,
+                                  selectedOwnership,
+                                )) {
+                                  final cost = _parseDoubleInput(
+                                    purchaseCostCtrl.text,
+                                  );
+                                  final date = _parseDateInput(
+                                    purchaseDateCtrl.text,
+                                  );
+                                  final life = _parseIntInput(
+                                    usefulLifeCtrl.text,
+                                  );
+                                  if (cost == null ||
+                                      date == null ||
+                                      life == null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          "Purchase cost, date, and useful life are required.",
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                }
+
+                                if (requiresLeaseFields(selectedOwnership)) {
+                                  final leaseStart = _parseDateInput(
+                                    leaseStartCtrl.text,
+                                  );
+                                  final leaseEnd = _parseDateInput(
+                                    leaseEndCtrl.text,
+                                  );
+                                  final leaseCost = _parseDoubleInput(
+                                    leaseCostCtrl.text,
+                                  );
+                                  if (leaseStart == null ||
+                                      leaseEnd == null ||
+                                      leaseCost == null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          "Lease start, end, and cost are required.",
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                }
+
+                                if (requiresManagementFields(selectedOwnership)) {
+                                  final fee = _parseDoubleInput(
+                                    managementFeeCtrl.text,
+                                  );
+                                  if (fee == null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          "Management fee amount is required.",
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                }
+
+                                if (isEstateType(selectedType)) {
+                                  if (estateHouseCtrl.text.trim().isEmpty ||
+                                      estateStreetCtrl.text.trim().isEmpty ||
+                                      estateCityCtrl.text.trim().isEmpty ||
+                                      estateStateCtrl.text.trim().isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          "Estate address fields are required.",
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final invalidUnit = unitMixRows.any(
+                                    (row) =>
+                                        row.unitTypeCtrl.text.trim().isEmpty ||
+                                        _parseIntInput(row.countCtrl.text) ==
+                                            null ||
+                                        _parseDoubleInput(
+                                              row.rentAmountCtrl.text,
+                                            ) ==
+                                            null,
+                                  );
+                                  if (invalidUnit) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          "Each unit needs type, count, and rent.",
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                }
+
+                                final payload = <String, dynamic>{
+                                  "name": trimmedName,
+                                  "assetType": selectedType,
+                                  "ownershipType": selectedOwnership,
+                                  "assetClass": selectedAssetClass,
+                                  "status": selectedStatus,
+                                  "serialNumber": serialCtrl.text.trim(),
+                                  "location": locationCtrl.text.trim(),
+                                  "description": descriptionCtrl.text.trim(),
+                                  "purchaseCost": _parseDoubleInput(
+                                    purchaseCostCtrl.text,
+                                  ),
+                                  "purchaseDate": _parseDateInput(
+                                    purchaseDateCtrl.text,
+                                  )?.toIso8601String(),
+                                  "usefulLifeMonths": _parseIntInput(
+                                    usefulLifeCtrl.text,
+                                  ),
+                                  "salvageValue": _parseDoubleInput(
+                                    salvageCtrl.text,
+                                  ),
+                                  "leaseStart": _parseDateInput(
+                                    leaseStartCtrl.text,
+                                  )?.toIso8601String(),
+                                  "leaseEnd": _parseDateInput(
+                                    leaseEndCtrl.text,
+                                  )?.toIso8601String(),
+                                  "leaseCostAmount": _parseDoubleInput(
+                                    leaseCostCtrl.text,
+                                  ),
+                                  "leaseCostPeriod": selectedLeasePeriod,
+                                  "lessorName": lessorCtrl.text.trim(),
+                                  "leaseTerms": leaseTermsCtrl.text.trim(),
+                                  "managementFeeAmount": _parseDoubleInput(
+                                    managementFeeCtrl.text,
+                                  ),
+                                  "managementFeePeriod": selectedManagementPeriod,
+                                  "clientName": clientNameCtrl.text.trim(),
+                                  "serviceTerms": serviceTermsCtrl.text.trim(),
+                                };
+
+                                if (isInventoryType(selectedType)) {
+                                  payload["inventory"] = {
+                                    "quantity": _parseIntInput(
+                                          inventoryQtyCtrl.text,
+                                        ) ??
+                                        0,
+                                    "unitCost": _parseDoubleInput(
+                                          inventoryUnitCostCtrl.text,
+                                        ) ??
+                                        0,
+                                    "reorderLevel": _parseIntInput(
+                                          inventoryReorderCtrl.text,
+                                        ) ??
+                                        0,
+                                    "unitOfMeasure": inventoryUnitCtrl.text.trim(),
+                                  };
+                                }
+
+                                if (isEstateType(selectedType)) {
+                                  payload["estate"] = {
+                                    "propertyAddress": {
+                                      "houseNumber": estateHouseCtrl.text.trim(),
+                                      "street": estateStreetCtrl.text.trim(),
+                                      "city": estateCityCtrl.text.trim(),
+                                      "state": estateStateCtrl.text.trim(),
+                                      "postalCode": estatePostalCtrl.text.trim(),
+                                      "lga": estateLgaCtrl.text.trim(),
+                                      "landmark": estateLandmarkCtrl.text.trim(),
+                                      "country": "Nigeria",
+                                    },
+                                    "unitMix": unitMixRows
+                                        .map(
+                                          (row) => {
+                                            "unitType":
+                                                row.unitTypeCtrl.text.trim(),
+                                            "count": _parseIntInput(
+                                                  row.countCtrl.text,
+                                                ) ??
+                                                0,
+                                            "rentAmount": _parseDoubleInput(
+                                                  row.rentAmountCtrl.text,
+                                                ) ??
+                                                0,
+                                            "rentPeriod": row.rentPeriod,
+                                          },
+                                        )
+                                        .toList(),
+                                    "tenantRules": {
+                                      "referencesMin": _parseIntInput(
+                                            referencesMinCtrl.text,
+                                          ) ??
+                                          1,
+                                      "referencesMax": _parseIntInput(
+                                            referencesMaxCtrl.text,
+                                          ) ??
+                                          2,
+                                      "guarantorsMin": _parseIntInput(
+                                            guarantorsMinCtrl.text,
+                                          ) ??
+                                          1,
+                                      "guarantorsMax": _parseIntInput(
+                                            guarantorsMaxCtrl.text,
+                                          ) ??
+                                          2,
+                                      "requiresNinVerified": true,
+                                      "requiresAgreementSigned": true,
+                                    },
+                                  };
+                                }
+
+                                payload.removeWhere(
+                                  (key, value) =>
+                                      value == null ||
+                                      (value is String && value.trim().isEmpty),
+                                );
+
+                                Navigator.of(context).pop(payload);
+                              },
+                              child: Text(asset == null ? "Create" : "Save"),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -377,6 +1184,46 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
         );
       },
     );
+
+    // WHY: Dispose modal controllers after the sheet closes to avoid leaks.
+    void disposeControllers() {
+      nameCtrl.dispose();
+      descriptionCtrl.dispose();
+      serialCtrl.dispose();
+      locationCtrl.dispose();
+      purchaseCostCtrl.dispose();
+      purchaseDateCtrl.dispose();
+      usefulLifeCtrl.dispose();
+      salvageCtrl.dispose();
+      leaseStartCtrl.dispose();
+      leaseEndCtrl.dispose();
+      leaseCostCtrl.dispose();
+      lessorCtrl.dispose();
+      leaseTermsCtrl.dispose();
+      managementFeeCtrl.dispose();
+      clientNameCtrl.dispose();
+      serviceTermsCtrl.dispose();
+      inventoryQtyCtrl.dispose();
+      inventoryUnitCostCtrl.dispose();
+      inventoryReorderCtrl.dispose();
+      inventoryUnitCtrl.dispose();
+      estateHouseCtrl.dispose();
+      estateStreetCtrl.dispose();
+      estateCityCtrl.dispose();
+      estateStateCtrl.dispose();
+      estatePostalCtrl.dispose();
+      estateLgaCtrl.dispose();
+      estateLandmarkCtrl.dispose();
+      referencesMinCtrl.dispose();
+      referencesMaxCtrl.dispose();
+      guarantorsMinCtrl.dispose();
+      guarantorsMaxCtrl.dispose();
+      for (final row in unitMixRows) {
+        row.dispose();
+      }
+    }
+
+    disposeControllers();
 
     if (payload == null) {
       _logTap("asset_form_dismiss");
@@ -911,7 +1758,7 @@ class _AssetCard extends StatelessWidget {
   }
 
   String _assetTypeLabel(String type) {
-    final option = _assetTypeOptions.firstWhere(
+    final option = assetTypeOptions.firstWhere(
       (item) => item["value"] == type,
       orElse: () => const {"label": "Other"},
     );
@@ -1001,5 +1848,51 @@ class _EmptyState extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// ------------------------------------------------------------
+/// UNIT MIX CONTROLLERS
+/// ------------------------------------------------------------
+/// WHY:
+/// - Keeps unit mix inputs grouped so estate assets can be edited cleanly.
+class _UnitMixControllers {
+  final TextEditingController unitTypeCtrl;
+  final TextEditingController countCtrl;
+  final TextEditingController rentAmountCtrl;
+  String rentPeriod;
+
+  _UnitMixControllers({
+    required this.unitTypeCtrl,
+    required this.countCtrl,
+    required this.rentAmountCtrl,
+    required this.rentPeriod,
+  });
+
+  // WHY: Seed rows from existing estate unit data.
+  factory _UnitMixControllers.fromUnit(BusinessAssetUnitMix unit) {
+    return _UnitMixControllers(
+      unitTypeCtrl: TextEditingController(text: unit.unitType),
+      countCtrl: TextEditingController(text: unit.count.toString()),
+      rentAmountCtrl: TextEditingController(text: unit.rentAmount.toString()),
+      rentPeriod: unit.rentPeriod,
+    );
+  }
+
+  // WHY: Provide a blank row for new estate unit mix entries.
+  factory _UnitMixControllers.empty() {
+    return _UnitMixControllers(
+      unitTypeCtrl: TextEditingController(),
+      countCtrl: TextEditingController(),
+      rentAmountCtrl: TextEditingController(),
+      rentPeriod: 'monthly',
+    );
+  }
+
+  // WHY: Dispose controllers once the sheet closes.
+  void dispose() {
+    unitTypeCtrl.dispose();
+    countCtrl.dispose();
+    rentAmountCtrl.dispose();
   }
 }

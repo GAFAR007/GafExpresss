@@ -13,7 +13,7 @@
 /// 1) Render a home-like header + guest access callout.
 /// 2) Allow search + browse of products (read-only).
 /// 3) Tap "Sign in" to open a bottom sheet with login form.
-/// 4) Login success -> navigate to /home.
+/// 4) Login success -> navigate to /home (or ?next=...).
 ///
 /// DEBUGGING STRATEGY:
 /// - Logs show:
@@ -46,7 +46,13 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  // WHY: Capture optional redirect target for invite links or deep links.
+  final String? redirectTo;
+
+  const LoginScreen({
+    super.key,
+    this.redirectTo,
+  });
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -185,13 +191,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
       if (!context.mounted) return;
 
-      // ✅ Navigate to home after successful login
-      AppDebug.log("LOGIN", "Navigate -> /home");
+      // WHY: Respect invite/deep-link target if provided.
+      final redirectTarget =
+          widget.redirectTo == null || widget.redirectTo!.trim().isEmpty
+              ? null
+              : Uri.decodeComponent(widget.redirectTo!.trim());
+
+      // ✅ Navigate to home or redirect target after successful login
+      AppDebug.log(
+        "LOGIN",
+        "Navigate after login",
+        extra: {"target": redirectTarget ?? "/home"},
+      );
       if (Navigator.of(context).canPop()) {
         // WHY: Close the sheet before switching routes.
         Navigator.of(context).pop();
       }
-      context.go('/home');
+      context.go(redirectTarget ?? '/home');
     } catch (e) {
       AppDebug.log("LOGIN", "Login failed", extra: {"error": e.toString()});
 

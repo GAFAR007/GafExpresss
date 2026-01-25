@@ -37,6 +37,9 @@ import 'package:frontend/app/features/home/presentation/business_product_detail_
 import 'package:frontend/app/features/home/presentation/business_products_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_register_help_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_team_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_tenant_applications_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_tenant_review_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_invite_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_verified_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_verify_screen.dart';
 import 'package:frontend/app/features/home/presentation/home_screen.dart';
@@ -47,6 +50,7 @@ import 'package:frontend/app/features/home/presentation/payment_success_screen.d
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
+import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
 import 'package:frontend/app/theme/business_theme_wrapper.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -62,14 +66,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       final bool isAuthRoute = path == '/login' || path == '/register';
       final bool isPublicProduct = path.startsWith('/product/');
       final bool isPaymentSuccess = path == '/payment-success';
+      final bool isBusinessInvite = path.startsWith('/business-invite');
+      final bool isTenantVerification = path == '/tenant-verification';
       final bool isPublicRoute =
-          isAuthRoute || isPublicProduct || isPaymentSuccess;
+          isAuthRoute ||
+          isPublicProduct ||
+          isPaymentSuccess ||
+          isBusinessInvite;
       final bool isBusinessProtectedRoute =
           path.startsWith('/business-dashboard') ||
           path.startsWith('/business-products') ||
           path.startsWith('/business-orders') ||
           path.startsWith('/business-assets') ||
-          path.startsWith('/business-team');
+          path.startsWith('/business-team') ||
+          path.startsWith('/business-tenants') ||
+          path.startsWith('/tenant-review');
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
@@ -79,8 +90,21 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // WHY: If logged in, keep user out of auth screens.
       if (isAuthed && isAuthRoute) {
-        AppDebug.log("ROUTER", "redirect -> /home", extra: {"from": path});
-        return '/home';
+        final nextParam = state.uri.queryParameters['next'];
+        final decodedNext = nextParam == null || nextParam.trim().isEmpty
+            ? null
+            : Uri.decodeComponent(nextParam.trim());
+        final nextTarget =
+            decodedNext != null && decodedNext.startsWith('/')
+                ? decodedNext
+                : '/home';
+
+        AppDebug.log(
+          "ROUTER",
+          "redirect after auth",
+          extra: {"from": path, "to": nextTarget},
+        );
+        return nextTarget;
       }
 
       // WHY: Only business owners/staff can access the business dashboard.
@@ -98,14 +122,29 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
       }
 
+      // WHY: Tenant verification can be reviewed by tenant/staff/owners.
+      if (isAuthed && isTenantVerification) {
+        final role = session.user.role;
+        final allowedRoles = ['tenant', 'business_owner', 'staff'];
+        if (!allowedRoles.contains(role)) {
+          AppDebug.log(
+            "ROUTER",
+            "redirect -> /settings (tenant guard)",
+            extra: {"role": role, "allowed": allowedRoles},
+          );
+          return '/settings';
+        }
+      }
+
       return null;
     },
     routes: [
       GoRoute(
         path: '/login',
         builder: (context, state) {
+          final redirectTo = state.uri.queryParameters['next'];
           AppDebug.log("ROUTER", "-> /login");
-          return const LoginScreen();
+          return LoginScreen(redirectTo: redirectTo);
         },
       ),
       GoRoute(
@@ -141,6 +180,29 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /settings");
           return const SettingsScreen();
+        },
+      ),
+      GoRoute(
+        path: '/business-invite',
+        builder: (context, state) {
+          final token = state.uri.queryParameters['token'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-invite",
+            extra: {"hasToken": token.isNotEmpty},
+          );
+          // WHY: Allow invite links to open without auth so users see instructions.
+          return BusinessInviteScreen(token: token);
+        },
+      ),
+      GoRoute(
+        path: '/tenant-verification',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /tenant-verification");
+          // WHY: Tenant onboarding should inherit business theme styles.
+          return const BusinessThemeWrapper(
+            child: TenantVerificationScreen(),
+          );
         },
       ),
       GoRoute(
@@ -256,6 +318,38 @@ final routerProvider = Provider<GoRouter>((ref) {
           AppDebug.log("ROUTER", "-> /business-team");
           return const BusinessThemeWrapper(
             child: BusinessTeamScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/business-tenants',
+        builder: (context, state) {
+          final estateAssetId = state.uri.queryParameters['estateAssetId'];
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-tenants",
+            extra: {
+              "hasEstate": estateAssetId != null && estateAssetId.isNotEmpty,
+            },
+          );
+          return BusinessThemeWrapper(
+            child: BusinessTenantApplicationsScreen(
+              estateAssetId: estateAssetId,
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/tenant-review/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /tenant-review/:id",
+            extra: {"id": id},
+          );
+          return BusinessThemeWrapper(
+            child: BusinessTenantReviewScreen(applicationId: id),
           );
         },
       ),

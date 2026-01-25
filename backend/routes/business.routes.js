@@ -193,6 +193,77 @@ router.patch(
   businessController.updateUserRole,
 );
 
+router.post(
+  "/invites",
+  requireAuth,
+  requireRole("business_owner"),
+  businessController.createInvite,
+);
+
+router.post(
+  "/invites/accept",
+  requireAuth,
+  businessController.acceptInvite,
+);
+
+/**
+ * TENANT VERIFICATION (ESTATE-ONLY)
+ */
+router.get(
+  "/tenant/applications",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.listTenantApplications,
+);
+
+router.get(
+  "/tenant/applications/:id",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getTenantApplicationDetail,
+);
+
+router.get(
+  "/tenant/estate",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  businessController.getTenantEstate,
+);
+
+router.post(
+  "/tenant/verify",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  businessController.submitTenantVerification,
+);
+
+router.get(
+  "/tenant/application",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  businessController.getTenantApplication,
+);
+
+router.patch(
+  "/tenant/application",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  businessController.updateTenantApplication,
+);
+
+router.get(
+  "/users/lookup",
+  requireAuth,
+  requireRole("business_owner"),
+  businessController.lookupUser,
+);
+
 /**
  * ANALYTICS
  */

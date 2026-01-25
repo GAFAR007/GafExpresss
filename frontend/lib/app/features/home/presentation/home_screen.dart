@@ -247,11 +247,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
 
+    final session = ref.watch(authSessionProvider);
+    final isTenant = session?.user.role == 'tenant';
+
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       bottomNavigationBar: HomeBottomNav(
         currentIndex: 0,
         cartBadgeCount: cartBadgeCount,
+        showTenantTab: isTenant,
         onTap: (index) {
           // WHY: Keep navigation centralized in one handler.
           if (index == 0) {
@@ -269,7 +273,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             context.go('/orders');
             return;
           }
-          if (index == 3) {
+          if (isTenant && index == 3) {
+            AppDebug.log("HOME", "Nav -> Tenant");
+            context.go('/tenant-verification');
+            return;
+          }
+          if (index == (isTenant ? 4 : 3)) {
             AppDebug.log("HOME", "Nav -> Settings");
             context.go('/settings');
           }

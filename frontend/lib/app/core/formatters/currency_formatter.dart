@@ -24,3 +24,16 @@ String formatNgnFromCents(int priceCents) {
   final decimals = parts.length > 1 ? parts[1] : "00";
   return "NGN $whole.$decimals";
 }
+
+/// WHY: Some modules (estate rent, asset costs) store amounts in NGN directly.
+String formatNgn(num amount) {
+  final value = amount.toDouble().toStringAsFixed(2);
+  final parts = value.split(".");
+  // WHY: Insert commas for readability on large values.
+  final whole = parts[0].replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (match) => ",",
+  );
+  final decimals = parts.length > 1 ? parts[1] : "00";
+  return "NGN $whole.$decimals";
+}

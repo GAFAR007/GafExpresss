@@ -171,6 +171,14 @@ const userSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // ✅ Estate-scoped access (optional, for estate staff/tenant users)
+    // WHY: Restricts certain roles to a single estate asset.
+    estateAssetId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BusinessAsset',
+      default: null,
+      index: true,
+    },
 
     // ✅ Profile account type (upgrade path for business/firm/org)
     accountType: {
