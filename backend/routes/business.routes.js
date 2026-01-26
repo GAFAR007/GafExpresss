@@ -22,6 +22,7 @@ const {
   requireRole,
 } = require("../middlewares/requireRole.middleware");
 const businessController = require("../controllers/business.controller");
+const paystackService = require("../services/paystack.service");
 
 const router = express.Router();
 
@@ -229,6 +230,16 @@ router.get(
   businessController.getTenantApplicationDetail,
 );
 
+router.post(
+  "/tenant/applications/:id/verify-contact",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.verifyTenantContact,
+);
+
 router.get(
   "/tenant/estate",
   requireAuth,
@@ -285,6 +296,91 @@ router.get(
     "staff",
   ]),
   businessController.getAnalyticsEvents,
+);
+
+/**
+ * APPROVAL
+ */
+router.post(
+  "/tenant/applications/:id/approve",
+  requireAuth,
+  requireAnyRole(["owner", "staff"]),
+  businessController.approveTenantApplication,
+);
+
+/**
+ * PAYMENT TOGGLE
+ */
+router.post(
+  "/tenant/applications/:id/toggle-payment",
+  requireAuth,
+  requireAnyRole(["owner", "staff"]),
+  businessController.togglePaymentStatus,
+);
+
+/**
+ * VERIFY CONTACT
+ */
+router.post(
+  "/tenants/:tenantId/verify-contact",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.verifyContact,
+);
+
+/**
+ * APPROVE TENANT
+ */
+router.post(
+  "/tenants/:tenantId/approve",
+  requireAuth,
+  requireRole("business_owner"),
+  businessController.approveTenantApplication,
+);
+
+/**
+ * CREATE PAYMENT INTENT
+ */
+router.post(
+  "/tenants/:tenantId/payment-intent",
+  requireAuth,
+  requireAnyRole(["owner", "staff"]),
+  businessController.createPaymentIntent,
+);
+
+/**
+ * PAYSTACK WEBHOOK
+ */
+router.post(
+  "/payments/paystack/webhook",
+  express.json({
+    verify:
+      paystackService.rawBodyParser,
+  }),
+  businessController.handlePaystackWebhook,
+);
+
+/**
+ * DEV-ONLY PAY TOGGLE
+ */
+router.post(
+  "/dev/payments/:paymentId/mark-succeeded",
+  requireAuth,
+  requireRole("business_owner"),
+  businessController.devMarkPaymentSucceeded,
+);
+
+/**
+ * TENANT APPLICATIONS
+ */
+router.get(
+  "/tenants",
+  requireAuth,
+  requireAnyRole(["business_owner", "staff"]),
+  businessController.getTenants
 );
 
 module.exports = router;

@@ -1671,6 +1671,106 @@ async function getTenantApplicationDetail(
 }
 
 /**
+ * POST /business/tenant/applications/:id/verify-contact
+ * Owner/staff: verify a reference or guarantor on a tenant application.
+ */
+async function verifyTenantContact(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: verifyTenantContact - entry",
+    {
+      actorId: req.user?.sub,
+      applicationId: req.params?.id,
+      type: req.body?.type,
+      status: req.body?.status,
+      index: req.body?.index,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const applicationId =
+      req.params?.id?.toString().trim();
+    if (!applicationId) {
+      return res.status(400).json({
+        error: "Application id is required",
+      });
+    }
+
+    // WHY: Estate-scoped staff can only verify contacts for their estate.
+    const application =
+      await businessTenantService.getTenantApplicationDetail(
+        {
+          businessId,
+          applicationId,
+        },
+      );
+
+    if (isEstateScopedStaff(actor)) {
+      const estateId =
+        application?.estateAssetId?._id ||
+        application?.estateAssetId;
+      if (
+        estateId &&
+        estateId.toString() !==
+          actor.estateAssetId.toString()
+      ) {
+        return res.status(403).json({
+          error:
+            "Estate-scoped staff can only verify contacts for their assigned estate",
+        });
+      }
+    }
+
+    const updated =
+      await businessTenantService.verifyTenantContact(
+        {
+          businessId,
+          applicationId,
+          actorId: actor._id,
+          type: req.body?.type?.toString().trim(),
+          status: req.body?.status
+            ?.toString()
+            .trim(),
+          index: req.body?.index,
+          note: req.body?.note
+            ?.toString()
+            .trim(),
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: verifyTenantContact - success",
+      {
+        applicationId: updated._id,
+        type: req.body?.type,
+        status: req.body?.status,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        "Tenant contact verified successfully",
+      application: updated,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: verifyTenantContact - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
  * GET /business/users/lookup?userId=... or ?email=... or ?phone=...
  * Business-owner only: find a user by id/email/phone for role assignment.
  */
@@ -1851,6 +1951,210 @@ async function getAnalyticsEvents(
   }
 }
 
+async function approveTenantApplication(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: approveTenantApplication - entry",
+    {
+      actorId: req.user?.sub,
+      applicationId: req.params?.id,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const applicationId =
+      req.params?.id?.toString().trim();
+    if (!applicationId) {
+      return res.status(400).json({
+        error: "Application id is required",
+      });
+    }
+
+    // WHY: Estate-scoped staff can only approve for their estate.
+    const application =
+      await businessTenantService.getTenantApplicationDetail(
+        {
+          businessId,
+          applicationId,
+        },
+      );
+
+    if (isEstateScopedStaff(actor)) {
+      const estateId =
+        application?.estateAssetId?._id ||
+        application?.estateAssetId;
+      if (
+        estateId &&
+        estateId.toString() !==
+          actor.estateAssetId.toString()
+      ) {
+        return res.status(403).json({
+          error:
+            "Estate-scoped staff can only approve applications for their assigned estate",
+        });
+      }
+    }
+
+    const updatedApplication =
+      await businessTenantService.approveTenantApplication(
+        {
+          businessId,
+          applicationId,
+          actorId: actor._id,
+          actorRole: actor.role,
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: approveTenantApplication - success",
+      {
+        applicationId: updatedApplication._id,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        "Tenant application approved successfully",
+      application: updatedApplication,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: approveTenantApplication - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * PAYMENT TOGGLE
+ */
+async function togglePaymentStatus(
+  req,
+  res,
+) {
+  // TODO: Implement togglePaymentStatus
+  debug(
+    "BUSINESS CONTROLLER: togglePaymentStatus - entry",
+    {
+      actorId: req.user?.sub,
+      applicationId: req.params?.id,
+    },
+  );
+  return res.status(501).json({
+    message: "Not Implemented",
+  });
+}
+
+/**
+ * VERIFY CONTACT
+ */
+async function verifyContact(
+  req,
+  res,
+) {
+  // TODO: This route seems redundant with verifyTenantContact
+  debug(
+    "BUSINESS CONTROLLER: verifyContact - entry",
+    {
+      actorId: req.user?.sub,
+      tenantId: req.params?.tenantId,
+    },
+  );
+  return res.status(501).json({
+    message: "Not Implemented",
+  });
+}
+
+
+
+/**
+ * CREATE PAYMENT INTENT
+ */
+async function createPaymentIntent(
+  req,
+  res,
+) {
+  // TODO: Implement createPaymentIntent
+  debug(
+    "BUSINESS CONTROLLER: createPaymentIntent - entry",
+    {
+      actorId: req.user?.sub,
+      tenantId: req.params?.tenantId,
+    },
+  );
+  return res.status(501).json({
+    message: "Not Implemented",
+  });
+}
+
+/**
+ * PAYSTACK WEBHOOK
+ */
+async function handlePaystackWebhook(
+  req,
+  res,
+) {
+  // TODO: Implement handlePaystackWebhook
+  debug(
+    "BUSINESS CONTROLLER: handlePaystackWebhook - entry",
+    {
+      actorId: req.user?.sub,
+    },
+  );
+  return res.status(501).json({
+    message: "Not Implemented",
+  });
+}
+
+/**
+ * DEV-ONLY PAY TOGGLE
+ */
+async function devMarkPaymentSucceeded(
+  req,
+  res,
+) {
+  // TODO: Implement devMarkPaymentSucceeded
+  debug(
+    "BUSINESS CONTROLLER: devMarkPaymentSucceeded - entry",
+    {
+      actorId: req.user?.sub,
+      paymentId: req.params?.paymentId,
+    },
+  );
+  return res.status(501).json({
+    message: "Not Implemented",
+  });
+}
+
+/**
+ * TENANT APPLICATIONS
+ */
+async function getTenants(
+  req,
+  res,
+) {
+  // TODO: Implement getTenants
+  debug(
+    "BUSINESS CONTROLLER: getTenants - entry",
+    {
+      actorId: req.user?.sub,
+    },
+  );
+  return res.status(501).json({
+    message: "Not Implemented",
+  });
+}
+
 module.exports = {
   createProduct,
   getAllProducts,
@@ -1874,8 +2178,17 @@ module.exports = {
   getTenantApplication,
   listTenantApplications,
   getTenantApplicationDetail,
+  verifyTenantContact,
   updateTenantApplication,
   updateUserRole,
+  approveTenantApplication,
+  togglePaymentStatus,
+  verifyContact,
+  approveTenant,
+  createPaymentIntent,
+  handlePaystackWebhook,
+  devMarkPaymentSucceeded,
+  getTenants,
   getAnalyticsSummary,
   getAnalyticsEvents,
 };

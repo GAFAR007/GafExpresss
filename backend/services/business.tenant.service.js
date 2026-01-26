@@ -813,6 +813,362 @@ async function getTenantApplicationDetail({
   );
 }
 
+async function verifyTenantContact({
+  businessId,
+  applicationId,
+  actorId,
+  type,
+  index,
+  status,
+  note,
+}) {
+  debug(
+    "BUSINESS TENANT SERVICE: verifyTenantContact - entry",
+    {
+      businessId,
+      applicationId,
+      actorId,
+      type,
+      index,
+      status,
+    },
+  );
+
+  if (!businessId || !applicationId) {
+    throw new Error(
+      "Application id is required",
+    );
+  }
+
+  const normalizedType =
+    (type || "").toString().trim().toLowerCase();
+  const normalizedStatus =
+    (status || "").toString().trim().toLowerCase();
+
+  if (
+    normalizedType !== "reference" &&
+    normalizedType !== "guarantor"
+  ) {
+    throw new Error(
+      "Contact type must be reference or guarantor",
+    );
+  }
+
+  if (
+    normalizedStatus !== "verified" &&
+    normalizedStatus !== "rejected"
+  ) {
+    throw new Error(
+      "Contact status must be verified or rejected",
+    );
+  }
+
+  const safeIndex = Number(index);
+  if (
+    Number.isNaN(safeIndex) ||
+    safeIndex < 0
+  ) {
+    throw new Error(
+      "Contact index must be a valid number",
+    );
+  }
+
+  const application =
+    await BusinessTenantApplication.findOne(
+      {
+        _id: applicationId,
+        businessId,
+      },
+    );
+
+  if (!application) {
+    throw new Error(
+      "Tenant application not found",
+    );
+  }
+
+  if (application.status !== "pending") {
+    throw new Error(
+      "Only pending applications can be verified",
+    );
+  }
+
+  const listKey =
+    normalizedType === "reference"
+      ? "references"
+      : "guarantors";
+  const contacts = clampList(
+    application[listKey],
+  );
+
+  if (safeIndex >= contacts.length) {
+    throw new Error(
+      "Contact index is out of range",
+    );
+  }
+
+  const contact =
+    contacts[safeIndex];
+  const isVerified =
+    normalizedStatus === "verified";
+
+  contact.status = normalizedStatus;
+  contact.isVerified = isVerified;
+  contact.verifiedAt = new Date();
+  contact.verifiedBy = actorId;
+  contact.note =
+    note?.toString().trim() || null;
+
+  application[listKey] = contacts;
+
+  await application.save();
+
+  const actionLabel =
+    normalizedType === "reference"
+      ? "reference_verified"
+      : "guarantor_verified";
+  const eventType =
+    normalizedType === "reference"
+      ? "REFERENCE_VERIFIED"
+      : "GUARANTOR_VERIFIED";
+
+  await writeAuditLog({
+    action: actionLabel,
+    entityType: "tenant_application",
+    entityId: application._id,
+    actorId,
+    metadata: {
+      contactType: normalizedType,
+      index: safeIndex,
+      status: normalizedStatus,
+    },
+  });
+
+  await writeAnalyticsEvent({
+    eventType,
+    entityType: "tenant_application",
+    entityId: application._id,
+    actorId,
+    metadata: {
+      contactType: normalizedType,
+      status: normalizedStatus,
+    },
+  });
+
+  const rules =
+    application.tenantRulesSnapshot || {};
+  const referencesMin = Math.max(
+    1,
+    Number(rules.referencesMin) || 1,
+  );
+  const guarantorsMin = Math.max(
+    0,
+    Number(rules.guarantorsMin) || 0,
+  );
+
+  const references = clampList(
+    application.references,
+  );
+  const guarantors = clampList(
+    application.guarantors,
+  );
+
+  const hasEnoughReferences =
+    references.length >= referencesMin;
+  const hasEnoughGuarantors =
+    guarantors.length >= guarantorsMin;
+
+  const allReferencesVerified =
+    references.every(
+      (ref) => ref?.isVerified,
+    );
+  const allGuarantorsVerified =
+    guarantors.every(
+      (guarantor) =>
+        guarantor?.isVerified,
+    );
+
+  const canApprove =
+    hasEnoughReferences &&
+    hasEnoughGuarantors &&
+    allReferencesVerified &&
+    allGuarantorsVerified;
+
+  if (canApprove) {
+    application.status = "approved";
+    application.reviewedAt =
+      new Date();
+    application.reviewedBy = actorId;
+    application.reviewNotes =
+      "auto_approved_after_contact_verification";
+
+    await application.save();
+
+    await writeAuditLog({
+      action: "tenant_approved",
+      entityType: "tenant_application",
+      entityId: application._id,
+      actorId,
+      metadata: {
+        source:
+          "contact_verification",
+      },
+    });
+
+    await writeAnalyticsEvent({
+      eventType: "TENANT_APPROVED",
+      entityType: "tenant_application",
+      entityId: application._id,
+      actorId,
+    });
+  }
+
+  return resolveTenantSnapshot(
+    application.toObject(),
+  );
+}
+
+
+async function approveTenantApplication({
+  businessId,
+  applicationId,
+  actorId,
+  actorRole,
+}) {
+  debug(
+    "BUSINESS TENANT SERVICE: approveTenantApplication - entry",
+    {
+      businessId,
+      applicationId,
+      actorId,
+      actorRole,
+    },
+  );
+
+  if (!businessId || !applicationId) {
+    throw new Error(
+      "Application ID and business ID are required",
+    );
+  }
+
+  const application =
+    await BusinessTenantApplication.findOne({
+      _id: applicationId,
+      businessId,
+    })
+      .populate(
+        "estateAssetId",
+        "name estate.unitMix estate.tenantRules",
+      )
+      .populate(
+        "tenantUserId",
+        "name firstName middleName lastName email phone ninLast4 role isEmailVerified isPhoneVerified isNinVerified",
+      );
+
+  if (!application) {
+    throw new Error(
+      "Tenant application not found",
+    );
+  }
+
+  // WHY: Application must be pending or have all contacts verified.
+  if (application.status === "approved") {
+    throw new Error(
+      "Tenant application is already approved",
+    );
+  }
+  if (application.status === "rejected") {
+    throw new Error(
+      "Tenant application is rejected. Cannot approve.",
+    );
+  }
+
+  const rules =
+    application.tenantRulesSnapshot || {};
+  const referencesMin = Math.max(
+    0,
+    Number(rules.referencesMin) || 0,
+  );
+  const guarantorsMin = Math.max(
+    0,
+    Number(rules.guarantorsMin) || 0,
+  );
+
+  const references = clampList(
+    application.references,
+  );
+  const guarantors = clampList(
+    application.guarantors,
+  );
+
+  const allReferencesVerified =
+    references.length >= referencesMin &&
+    references.every(
+      (ref) => ref?.isVerified,
+    );
+  const allGuarantorsVerified =
+    guarantors.length >= guarantorsMin &&
+    guarantors.every(
+      (guarantor) =>
+        guarantor?.isVerified,
+    );
+
+  if (
+    !allReferencesVerified ||
+    !allGuarantorsVerified
+  ) {
+    throw new Error(
+      "All required references and guarantors must be verified before approval",
+    );
+  }
+
+  application.status = "approved";
+  application.reviewedAt = new Date();
+  application.reviewedBy = actorId;
+  application.reviewNotes =
+    "approved_by_business_staff";
+
+  await application.save();
+
+  // Update the user's role to 'tenant' if they are not already.
+  // This is a safety check; usually handled by invite acceptance.
+  const tenantUser =
+    application.tenantUserId;
+  if (tenantUser && tenantUser.role !== "tenant") {
+    tenantUser.role = "tenant";
+    tenantUser.businessId = businessId;
+    tenantUser.estateAssetId = application.estateAssetId;
+    await tenantUser.save();
+  }
+
+  await writeAuditLog({
+    businessId,
+    actorId,
+    actorRole,
+    action: "tenant_approved",
+    entityType: "tenant_application",
+    entityId: application._id,
+    message: "Tenant application approved",
+    changes: { status: "approved" },
+  });
+
+  await writeAnalyticsEvent({
+    businessId,
+    actorId,
+    actorRole,
+    eventType: "TENANT_APPROVED",
+    entityType: "tenant_application",
+    entityId: application._id,
+    metadata: {
+      estateAssetId: application.estateAssetId,
+    },
+  });
+
+  return resolveTenantSnapshot(
+    application.toObject(),
+  );
+}
+
 module.exports = {
   getTenantEstate,
   getTenantApplicationForTenant,
@@ -820,4 +1176,6 @@ module.exports = {
   updateTenantApplicationForTenant,
   listTenantApplications,
   getTenantApplicationDetail,
+  verifyTenantContact,
+  approveTenantApplication,
 };

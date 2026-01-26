@@ -21,8 +21,11 @@ debug('Loading BusinessTenantApplication model...');
 // WHY: Reuse the same rent period values as estate unit mix.
 const RENT_PERIODS = ['monthly', 'quarterly', 'yearly'];
 
-// WHY: Keep application status explicit for review workflows.
-const APPLICATION_STATUSES = ['pending', 'approved', 'rejected'];
+// WHY: Keep application status explicit for review + activation workflows.
+const APPLICATION_STATUSES = ['pending', 'approved', 'active', 'rejected'];
+
+// WHY: Track rent payment separately from approval status.
+const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
 const contactSchema = new mongoose.Schema(
   {
@@ -32,6 +35,39 @@ const contactSchema = new mongoose.Schema(
       required: true,
     },
     phone: {
+      type: String,
+      trim: true,
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    relationship: {
+      type: String,
+      trim: true,
+    },
+    // WHY: Owners must verify each contact before approval.
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+    // WHY: Keep a status for audit + rejection history (not just boolean).
+    status: {
+      type: String,
+      enum: ['pending', 'verified', 'rejected'],
+      default: 'pending',
+    },
+    verifiedAt: {
+      type: Date,
+      default: null,
+    },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    note: {
       type: String,
       trim: true,
     },
@@ -129,6 +165,16 @@ const tenantApplicationSchema = new mongoose.Schema(
       enum: APPLICATION_STATUSES,
       default: 'pending',
       index: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: PAYMENT_STATUSES,
+      default: 'unpaid',
+      index: true,
+    },
+    paidAt: {
+      type: Date,
+      default: null,
     },
     reviewedAt: {
       type: Date,
