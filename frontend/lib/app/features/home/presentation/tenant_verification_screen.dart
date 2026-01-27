@@ -34,6 +34,7 @@ import 'package:frontend/app/features/home/presentation/business_tenant_model.da
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_model.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_providers.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 class TenantVerificationScreen extends ConsumerStatefulWidget {
   const TenantVerificationScreen({super.key});
@@ -430,8 +431,14 @@ class _TenantVerificationScreenState
               const SizedBox(height: 12),
             ],
             applicationAsync.when(
-              data: (application) =>
+              data: (application) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   _buildTenantStatusCard(application: application),
+                  const SizedBox(height: 12),
+                  _buildMiniTimeline(application),
+                ],
+              ),
               loading: () =>
                   const _InlineLoader(label: "Loading tenant status..."),
               error: (error, _) =>
@@ -455,7 +462,7 @@ class _TenantVerificationScreenState
                 final rules = estate.tenantRules;
                 _syncContactLists(rules);
 
-                final status = application?.status ?? "";
+                final status = (application?.status ?? "").toLowerCase();
                 final showForm = application == null ||
                     status == "pending" ||
                     status == "rejected";
@@ -477,9 +484,10 @@ class _TenantVerificationScreenState
                 return _buildEstateForm(estate, rules);
               },
               loading: () => const _InlineLoader(label: "Loading estate..."),
-              error: (error, _) =>
-                  Text("Estate error: ${_extractErrorMessage(error)}"),
-            ),
+            error: (error, _) =>
+                Text("Estate error: ${_extractErrorMessage(error)}"),
+          ),
+            const _HelpFooter(),
           ],
         ),
       ),
@@ -506,11 +514,12 @@ class _TenantVerificationScreenState
       );
     }
 
-    final status = application.status;
-    final paymentStatus = application.paymentStatus;
+    final status = application.status.toLowerCase();
+    final paymentStatus = application.paymentStatus.toLowerCase();
     final isApproved = status == "approved";
     final isActive = status == "active";
     final isRejected = status == "rejected";
+    final isPaid = paymentStatus == "paid";
 
     final title = isActive
         ? "Tenant active"
@@ -565,7 +574,7 @@ class _TenantVerificationScreenState
                 ? "Not set"
                 : _formatDate(application.moveInDate!),
           ),
-          if (isApproved && paymentStatus != "paid") ...[
+          if (isApproved && !isPaid) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -583,7 +592,79 @@ class _TenantVerificationScreenState
               ),
             ),
           ],
+          if (isPaid) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () {
+                  _log("view_receipt", extra: {"applicationId": application.id});
+                  // TODO: wire to receipts page when available.
+                },
+                icon: const Icon(Icons.receipt_long),
+                label: const Text("View payment receipt"),
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildMiniTimeline(
+      business_tenant.BusinessTenantApplication? application) {
+    final theme = Theme.of(context);
+    if (application == null) return const SizedBox.shrink();
+    final steps = [
+      _TimelineStep(label: "Submitted", done: application.createdAt != null),
+      _TimelineStep(
+        label: "Approved",
+        done: application.status.toLowerCase() == "approved" ||
+            application.status.toLowerCase() == "active",
+      ),
+      _TimelineStep(
+        label: "Paid",
+        done: application.paymentStatus.toLowerCase() == "paid",
+      ),
+      _TimelineStep(
+        label: "Active",
+        done: application.status.toLowerCase() == "active",
+      ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: steps
+            .map(
+              (s) => Column(
+                children: [
+                  Icon(
+                    s.done ? Icons.check_circle : Icons.radio_button_unchecked,
+                    color: s.done
+                        ? AppStatusBadgeColors.fromTheme(
+                                theme: theme, tone: AppStatusTone.success)
+                            .foreground
+                        : theme.colorScheme.onSurfaceVariant,
+                    size: 18,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    s.label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            )
+            .toList(),
       ),
     );
   }
@@ -648,43 +729,51 @@ class _TenantVerificationScreenState
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text("Tenant profile", style: textTheme.titleMedium),
-        const SizedBox(height: 6),
-        Text(
-          "Your verified identity is locked for tenancy checks.",
-          style: textTheme.bodySmall?.copyWith(
-            color: colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 12),
-        _ReadOnlyRow(label: "Name", value: _displayName(profile)),
-        _ReadOnlyRow(label: "Email", value: profile.email),
-        _ReadOnlyRow(
-          label: "Phone",
-          value: profile.phone?.isNotEmpty == true
-              ? profile.phone!
-              : "Not provided",
-        ),
-        _ReadOnlyRow(
-          label: "NIN",
-          value: profile.ninLast4 == null
-              ? "Not verified"
-              : "**** ${profile.ninLast4}",
-        ),
-        if (!profile.isNinVerified) ...[
-          const SizedBox(height: 8),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Tenant profile", style: textTheme.titleMedium),
+          const SizedBox(height: 6),
           Text(
-            "NIN verification is required before submission.",
+            "Your verified identity is locked for tenancy checks.",
             style: textTheme.bodySmall?.copyWith(
-              color: colorScheme.error,
-              fontWeight: FontWeight.w600,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: 12),
+          _ReadOnlyRow(label: "Name", value: _displayName(profile)),
+          _ReadOnlyRow(label: "Email", value: profile.email),
+          _ReadOnlyRow(
+            label: "Phone",
+            value: profile.phone?.isNotEmpty == true
+                ? profile.phone!
+                : "Not provided",
+          ),
+          _ReadOnlyRow(
+            label: "NIN",
+            value: profile.ninLast4 == null
+                ? "Not verified"
+                : "**** ${profile.ninLast4}",
+          ),
+          if (!profile.isNinVerified) ...[
+            const SizedBox(height: 8),
+            Text(
+              "NIN verification is required before submission.",
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -933,6 +1022,51 @@ class _AdminViewNote extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineStep {
+  final String label;
+  final bool done;
+
+  const _TimelineStep({required this.label, required this.done});
+}
+
+class _HelpFooter extends StatelessWidget {
+  const _HelpFooter();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.help_outline, color: theme.colorScheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Need help with your tenancy? Contact support.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              // Placeholder: add deep link to support when available.
+            },
+            child: const Text("Get help"),
           ),
         ],
       ),

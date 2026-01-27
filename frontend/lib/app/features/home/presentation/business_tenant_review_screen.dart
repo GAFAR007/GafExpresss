@@ -290,6 +290,9 @@ class _BusinessTenantReviewScreenState
             final canApproveNow = meetsReferenceRequirement &&
                 meetsGuarantorRequirement &&
                 application.status.toLowerCase() == 'pending';
+            final isAlreadyApproved =
+                application.status.toLowerCase() == 'approved' ||
+                    application.status.toLowerCase() == 'active';
 
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -310,6 +313,31 @@ class _BusinessTenantReviewScreenState
                   unitLabel: unitLabel,
                   rentLabel: rentLabel,
                   moveInDate: _formatDate(application.moveInDate),
+                  referencesProgress:
+                      "$verifiedReferences / $requiredReferences refs",
+                  guarantorsProgress:
+                      "$verifiedGuarantors / $requiredGuarantors guar",
+                  paymentStatus: application.paymentStatus,
+                ),
+                const SizedBox(height: 16),
+                _PaymentStatusCard(
+                  paymentStatus: application.paymentStatus,
+                  paidAt: application.paidAt,
+                  amountLabel: rentLabel,
+                ),
+                const SizedBox(height: 16),
+                _ReviewTimeline(
+                  createdAt: application.createdAt,
+                  reviewedAt: application.reviewedAt,
+                  paidAt: application.paidAt,
+                  status: application.status,
+                  paymentStatus: application.paymentStatus,
+                ),
+                const SizedBox(height: 16),
+                _VerificationChecklist(
+                  refs: application.references,
+                  guar: application.guarantors,
+                  rules: rules,
                 ),
                 const SizedBox(height: 16),
                 _SectionTitle(title: "Tenant identity"),
@@ -445,7 +473,7 @@ class _BusinessTenantReviewScreenState
                       ? "No notes"
                       : application.reviewNotes!,
                 ),
-                if (canApprove) ...[
+                if (canApprove && !isAlreadyApproved) ...[
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
@@ -505,6 +533,9 @@ class _StatusHeaderCard extends StatelessWidget {
   final String unitLabel;
   final String rentLabel;
   final String moveInDate;
+  final String referencesProgress;
+  final String guarantorsProgress;
+  final String paymentStatus;
 
   const _StatusHeaderCard({
     required this.badge,
@@ -513,6 +544,9 @@ class _StatusHeaderCard extends StatelessWidget {
     required this.unitLabel,
     required this.rentLabel,
     required this.moveInDate,
+    required this.referencesProgress,
+    required this.guarantorsProgress,
+    required this.paymentStatus,
   });
 
   @override
@@ -579,6 +613,16 @@ class _StatusHeaderCard extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              _Pill(text: referencesProgress),
+              _Pill(text: guarantorsProgress),
+              _Pill(text: "Payment: ${paymentStatus.toUpperCase()}"),
+            ],
+          ),
         ],
       ),
     );
@@ -627,6 +671,349 @@ class _RulesRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PaymentStatusCard extends StatelessWidget {
+  final String paymentStatus;
+  final DateTime? paidAt;
+  final String amountLabel;
+
+  const _PaymentStatusCard({
+    required this.paymentStatus,
+    required this.paidAt,
+    required this.amountLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tone = paymentStatus.toLowerCase() == 'paid'
+        ? AppStatusTone.success
+        : AppStatusTone.info;
+    final colors = AppStatusBadgeColors.fromTheme(theme: theme, tone: tone);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                "Payment status",
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: colors.background,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  paymentStatus.toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colors.foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Amount: $amountLabel",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            paidAt == null
+                ? "No payment recorded yet"
+                : "Paid at: ${paidAt!.toLocal()}",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  final String text;
+
+  const _Pill({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Text(
+        text,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _VerificationChecklist extends StatelessWidget {
+  final List<TenantContact> refs;
+  final List<TenantContact> guar;
+  final TenantRulesSnapshot rules;
+
+  const _VerificationChecklist({
+    required this.refs,
+    required this.guar,
+    required this.rules,
+  });
+
+  int _verified(List<TenantContact> list) {
+    return list
+        .where(
+          (c) => c.isVerified || c.status.toLowerCase() == 'verified',
+        )
+        .length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final refsVerified = _verified(refs);
+    final guarVerified = _verified(guar);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Verification checklist",
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _ChecklistRow(
+            label: "References",
+            progress: "$refsVerified / ${rules.referencesMin}",
+            isDone: refsVerified >= rules.referencesMin,
+          ),
+          const SizedBox(height: 8),
+          _ChecklistRow(
+            label: "Guarantors",
+            progress: "$guarVerified / ${rules.guarantorsMin}",
+            isDone: guarVerified >= rules.guarantorsMin,
+          ),
+          const SizedBox(height: 8),
+          _ChecklistRow(
+            label: "Agreement",
+            progress: rules.requiresAgreementSigned ? "Required" : "Not required",
+            isDone: rules.requiresAgreementSigned ? false : true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChecklistRow extends StatelessWidget {
+  final String label;
+  final String progress;
+  final bool isDone;
+
+  const _ChecklistRow({
+    required this.label,
+    required this.progress,
+    required this.isDone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Icon(
+          isDone ? Icons.check_circle : Icons.radio_button_unchecked,
+          color: isDone
+              ? AppStatusBadgeColors.fromTheme(
+                      theme: theme, tone: AppStatusTone.success)
+                  .foreground
+              : theme.colorScheme.onSurfaceVariant,
+          size: 18,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Text(
+          progress,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReviewTimeline extends StatelessWidget {
+  final DateTime? createdAt;
+  final DateTime? reviewedAt;
+  final DateTime? paidAt;
+  final String status;
+  final String paymentStatus;
+
+  const _ReviewTimeline({
+    required this.createdAt,
+    required this.reviewedAt,
+    required this.paidAt,
+    required this.status,
+    required this.paymentStatus,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final steps = [
+      _TimelineItem(
+        label: "Submitted",
+        date: createdAt,
+        done: createdAt != null,
+      ),
+      _TimelineItem(
+        label: "Approved",
+        date: reviewedAt,
+        done: status.toLowerCase() == "approved" ||
+            status.toLowerCase() == "active",
+      ),
+      _TimelineItem(
+        label: "Payment",
+        date: paidAt,
+        done: paymentStatus.toLowerCase() == "paid",
+      ),
+      _TimelineItem(
+        label: "Active",
+        date: status.toLowerCase() == "active" ? paidAt ?? reviewedAt : null,
+        done: status.toLowerCase() == "active",
+      ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Timeline",
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Column(
+            children: steps
+                .map(
+                  (s) => _TimelineRow(
+                    item: s,
+                    doneColor: AppStatusBadgeColors.fromTheme(
+                      theme: theme,
+                      tone: AppStatusTone.success,
+                    ).foreground,
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineItem {
+  final String label;
+  final DateTime? date;
+  final bool done;
+
+  const _TimelineItem({
+    required this.label,
+    required this.date,
+    required this.done,
+  });
+}
+
+class _TimelineRow extends StatelessWidget {
+  final _TimelineItem item;
+  final Color doneColor;
+
+  const _TimelineRow({required this.item, required this.doneColor});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dateText =
+        item.date == null ? "" : "${item.date!.year}-${item.date!.month}-${item.date!.day}";
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(
+            item.done ? Icons.check_circle : Icons.radio_button_unchecked,
+            color: item.done ? doneColor : theme.colorScheme.onSurfaceVariant,
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              item.label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            dateText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

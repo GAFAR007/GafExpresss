@@ -2308,7 +2308,8 @@ async function handlePaystackWebhook(
         },
       );
       return res.status(400).json({
-        error: "Webhook body is required",
+        error:
+          "Webhook body is required",
         errorCode:
           "PAYSTACK_WEBHOOK_BODY_MISSING",
       });
@@ -2365,7 +2366,8 @@ async function handlePaystackWebhook(
     debug(
       "BUSINESS CONTROLLER: handlePaystackWebhook - success",
       {
-        applied: result?.applied ?? false,
+        applied:
+          result?.applied ?? false,
         idempotent:
           result?.idempotent ?? false,
       },

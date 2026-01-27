@@ -60,7 +60,7 @@ class _BusinessTenantApplicationsScreenState
   }
 
   Map<String, int> _countByStatus(List<BusinessTenantApplication> apps) {
-    final counts = {"pending": 0, "approved": 0, "rejected": 0};
+    final counts = {"pending": 0, "approved": 0, "rejected": 0, "active": 0};
     for (final app in apps) {
       final key = app.status.toLowerCase();
       if (counts.containsKey(key)) {
@@ -70,8 +70,50 @@ class _BusinessTenantApplicationsScreenState
     return counts;
   }
 
+  int _readyToApproveCount(List<BusinessTenantApplication> apps) {
+    // WHY: "Ready" = pending status with all required contacts verified.
+    return apps.where((app) {
+      if (app.status.toLowerCase() != 'pending') return false;
+      final refsVerified = app.references
+          .where((c) => c.isVerified || c.status.toLowerCase() == 'verified')
+          .length;
+      final guarantorsVerified = app.guarantors
+          .where((c) => c.isVerified || c.status.toLowerCase() == 'verified')
+          .length;
+      final rules = app.tenantRulesSnapshot;
+      final refsOk = refsVerified >= rules.referencesMin;
+      final guarantorsOk = guarantorsVerified >= rules.guarantorsMin;
+      return refsOk && guarantorsOk;
+    }).length;
+  }
+
+  int _activeCount(List<BusinessTenantApplication> apps) {
+    return apps.where((app) => app.status.toLowerCase() == 'active').length;
+  }
+
+  List<BusinessTenantApplication> _recentlyUpdated(
+    List<BusinessTenantApplication> apps,
+  ) {
+    // WHY: Show the latest movements without an event feed yet.
+    final sorted = [...apps]
+      ..sort((a, b) {
+        final aDate =
+            a.updatedAt ??
+            a.createdAt ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final bDate =
+            b.updatedAt ??
+            b.createdAt ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        return bDate.compareTo(aDate);
+      });
+    return sorted.take(4).toList();
+  }
+
   AppStatusTone _toneForStatus(String status) {
     switch (status.toLowerCase()) {
+      case "active":
+        return AppStatusTone.success;
       case "approved":
         return AppStatusTone.success;
       case "rejected":
@@ -84,6 +126,8 @@ class _BusinessTenantApplicationsScreenState
 
   String _statusLabel(String status) {
     switch (status.toLowerCase()) {
+      case "active":
+        return "Active";
       case "approved":
         return "Approved";
       case "rejected":
@@ -139,12 +183,15 @@ class _BusinessTenantApplicationsScreenState
           data: (result) {
             final apps = result.applications;
             final counts = _countByStatus(apps);
+            final readyCount = _readyToApproveCount(apps);
+            final activeCount = _activeCount(apps);
             final estateName = apps
                 .map((app) => app.estate?.name)
                 .firstWhere(
                   (name) => name != null && name.isNotEmpty,
                   orElse: () => null,
                 );
+            final recent = _recentlyUpdated(apps);
 
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -153,6 +200,17 @@ class _BusinessTenantApplicationsScreenState
                 if (isEstateScoped) ...[
                   _EstateScopeBanner(name: estateName),
                   const SizedBox(height: 16),
+                ],
+                _KpiRow(
+                  pending: counts["pending"] ?? 0,
+                  ready: readyCount,
+                  approved: counts["approved"] ?? 0,
+                  active: activeCount,
+                ),
+                const SizedBox(height: 12),
+                if (recent.isNotEmpty) ...[
+                  _RecentActivityStrip(apps: recent),
+                  const SizedBox(height: 12),
                 ],
                 _StatusFilterRow(
                   selected: _statusFilter,
@@ -300,6 +358,11 @@ class _StatusFilterRow extends StatelessWidget {
         value: "rejected",
         count: counts["rejected"],
       ),
+      _FilterChipData(
+        label: "Active",
+        value: "active",
+        count: counts["active"],
+      ),
     ];
 
     return Wrap(
@@ -379,6 +442,12 @@ class _TenantApplicationCard extends StatelessWidget {
     );
     final rentLabel = formatNgn(application.rentAmount);
     final unitLabel = "${application.unitCount} x ${application.unitType}";
+    final refs = application.references;
+    final refsVerified = refs
+        .where((c) => c.isVerified || c.status.toLowerCase() == 'verified')
+        .length;
+    final refsNeeded = application.tenantRulesSnapshot.referencesMin;
+    final refsText = "Refs $refsVerified/$refsNeeded";
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -437,6 +506,7 @@ class _TenantApplicationCard extends StatelessWidget {
                 label: "Period",
                 value: application.rentPeriod.toUpperCase(),
               ),
+              _MetaChip(label: refsText, value: ""),
             ],
           ),
           const SizedBox(height: 12),
@@ -470,7 +540,7 @@ class _MetaChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
-        "$label: $value",
+        value.isEmpty ? label : "$label: $value",
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
           fontWeight: FontWeight.w600,
@@ -493,7 +563,213 @@ class _EmptyState extends StatelessWidget {
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Center(child: Text(text)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.people_outline,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            size: 32,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KpiRow extends StatelessWidget {
+  final int pending;
+  final int ready;
+  final int approved;
+  final int active;
+
+  const _KpiRow({
+    required this.pending,
+    required this.ready,
+    required this.approved,
+    required this.active,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = [
+      _KpiCard(label: "Pending", value: pending, tone: AppStatusTone.warning),
+      _KpiCard(label: "Ready", value: ready, tone: AppStatusTone.info),
+      _KpiCard(label: "Approved", value: approved, tone: AppStatusTone.success),
+      _KpiCard(label: "Active", value: active, tone: AppStatusTone.success),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 600;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: items
+              .map(
+                (item) => SizedBox(
+                  width: isNarrow ? (constraints.maxWidth) : 160,
+                  child: item,
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _KpiCard extends StatelessWidget {
+  final String label;
+  final int value;
+  final AppStatusTone tone;
+
+  const _KpiCard({
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = AppStatusBadgeColors.fromTheme(theme: theme, tone: tone);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "$value",
+            style: theme.textTheme.headlineSmall?.copyWith(
+              color: colors.foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecentActivityStrip extends StatelessWidget {
+  final List<BusinessTenantApplication> apps;
+
+  const _RecentActivityStrip({required this.apps});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "Recent activity",
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: apps.map((app) {
+              final statusTone = AppStatusTone.info;
+              final badgeColors = AppStatusBadgeColors.fromTheme(
+                theme: theme,
+                tone: statusTone,
+              );
+              final date = app.updatedAt ?? app.createdAt;
+              final dateLabel = date == null
+                  ? ''
+                  : "${date.year}-${date.month}-${date.day}";
+              return Container(
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                ),
+                width: 220,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            app.tenantSnapshot.name,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: badgeColors.background,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            app.status,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: badgeColors.foreground,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      app.tenantSnapshot.email,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      dateLabel,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 }
