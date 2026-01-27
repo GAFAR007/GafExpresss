@@ -59,9 +59,9 @@ class BusinessRegisterHelpScreen extends StatelessWidget {
           children: [
             Text(
               label,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Text(
@@ -74,12 +74,15 @@ class BusinessRegisterHelpScreen extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 // WHY: Use surface tokens to keep CAC help block on-theme.
-                color: colorScheme.surfaceVariant,
+                color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.support_agent, color: colorScheme.onSurfaceVariant),
+                  Icon(
+                    Icons.support_agent,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(

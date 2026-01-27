@@ -1312,7 +1312,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _accountType,
+                      initialValue: _accountType,
                       decoration: const InputDecoration(
                         labelText: "Account type",
                       ),

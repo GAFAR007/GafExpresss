@@ -11,6 +11,7 @@
 /// - Renders a BottomNavigationBar with existing app routes.
 /// - Parent handles actual navigation to keep routing centralized.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

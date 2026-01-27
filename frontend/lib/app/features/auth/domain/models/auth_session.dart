@@ -25,6 +25,7 @@
 /// - We log ONLY safe info (never log token/password).
 /// - We log token validation outcome (safe only).
 /// ------------------------------------------------------
+library;
 
 import 'dart:convert';
 
@@ -135,10 +136,7 @@ class AuthSession {
   /// - Token is stored via secure storage layer (not logged).
   /// ------------------------------------------------------
   Map<String, dynamic> toJson() {
-    return {
-      "token": token,
-      "user": user.toJson(),
-    };
+    return {"token": token, "user": user.toJson()};
   }
 
   /// ------------------------------------------------------

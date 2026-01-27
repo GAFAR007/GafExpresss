@@ -12,6 +12,7 @@
 /// - Parent can hook into submit/tap for later search behavior.
 /// - Optional controller keeps text stable across rebuilds.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

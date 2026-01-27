@@ -13,6 +13,7 @@
 /// DEBUGGING:
 /// - Logs parsing with order id (safe only).
 /// ------------------------------------------------------------
+library;
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';

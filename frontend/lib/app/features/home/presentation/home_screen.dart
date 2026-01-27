@@ -112,10 +112,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       builder: (context) {
         // WHY: Pass current selections so users can tweak filters.
         return HomeFilterSheet(
-          initial: HomeFilterOptions(
-            inStockOnly: _inStockOnly,
-            sort: _sort,
-          ),
+          initial: HomeFilterOptions(inStockOnly: _inStockOnly, sort: _sort),
         );
       },
     );
@@ -135,10 +132,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     AppDebug.log(
       "HOME",
       "Filters applied",
-      extra: {
-        "inStockOnly": result.inStockOnly,
-        "sort": result.sort.name,
-      },
+      extra: {"inStockOnly": result.inStockOnly, "sort": result.sort.name},
     );
     setState(() {
       _inStockOnly = result.inStockOnly;
@@ -200,9 +194,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
       decoration: BoxDecoration(
         color: colorScheme.primary,
-        borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(24),
-        ),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
       ),
       child: Column(
         children: [
@@ -219,9 +211,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
               // WHY: Use snackbar to confirm the tap without extra screens.
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("No new notifications yet"),
-                ),
+                const SnackBar(content: Text("No new notifications yet")),
               );
             },
           ),
@@ -235,11 +225,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             controller: _searchController,
             onSearchChanged: _updateQuery,
             onSearchSubmitted: (query) {
-              AppDebug.log(
-                "HOME",
-                "Search submitted",
-                extra: {"q": query},
-              );
+              AppDebug.log("HOME", "Search submitted", extra: {"q": query});
               _updateQuery(query);
             },
           ),
@@ -251,7 +237,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isTenant = session?.user.role == 'tenant';
 
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       bottomNavigationBar: HomeBottomNav(
         currentIndex: 0,
         cartBadgeCount: cartBadgeCount,
@@ -367,8 +353,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   Text(
                     hasQuery
                         ? (isTyping
-                            ? "Searching..."
-                            : "No results for \"$pendingQuery\"")
+                              ? "Searching..."
+                              : "No results for \"$pendingQuery\"")
                         : "No items match your filters",
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
@@ -409,10 +395,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   isAdminAsync.when(
                     data: (isAdmin) {
                       if (!isAdmin) {
-                        AppDebug.log(
-                          "HOME",
-                          "Categories hidden (not admin)",
-                        );
+                        AppDebug.log("HOME", "Categories hidden (not admin)");
                         return const SizedBox.shrink();
                       }
 
@@ -420,10 +403,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         children: [
                           HomeCategoriesSection(
                             onSeeAllTap: () {
-                              AppDebug.log(
-                                "HOME",
-                                "Categories see all tapped",
-                              );
+                              AppDebug.log("HOME", "Categories see all tapped");
                             },
                             onCategoryTap: (label) {
                               AppDebug.log(

@@ -195,7 +195,7 @@ class _DashboardChip extends StatelessWidget {
       onSelected: (_) => onTap(),
       // WHY: Theme tokens keep chips readable in classic/dark/business modes.
       selectedColor: colorScheme.secondaryContainer,
-      backgroundColor: colorScheme.surfaceVariant,
+      backgroundColor: colorScheme.surfaceContainerHighest,
       labelStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: isActive
                 ? colorScheme.onSecondaryContainer
@@ -257,7 +257,7 @@ class _AnalyticsCard extends StatelessWidget {
           Container(
             height: 120,
             decoration: BoxDecoration(
-              color: colorScheme.surfaceVariant,
+              color: colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: colorScheme.outlineVariant),
             ),
@@ -340,7 +340,7 @@ class _ActionStrip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceVariant,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
       // WHY: Horizontal scrolling keeps the dashboard compact on small screens.

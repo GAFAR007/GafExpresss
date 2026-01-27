@@ -31,6 +31,7 @@
 /// - NEVER log password
 /// - Always check context.mounted after await before using context
 /// ------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -143,9 +144,9 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     if (password != confirmPassword) {
       AppDebug.log("REGISTER", "Validation failed (password mismatch)");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Passwords do not match")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
       return;
     }
 

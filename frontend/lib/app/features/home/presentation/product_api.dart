@@ -13,6 +13,7 @@
 /// DEBUGGING:
 /// - Logs request start/end and count (safe only).
 /// ------------------------------------------------------------
+library;
 
 import 'package:dio/dio.dart';
 

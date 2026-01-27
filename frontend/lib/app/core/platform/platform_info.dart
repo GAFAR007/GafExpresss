@@ -15,7 +15,7 @@
 ///
 /// DEBUGGING:
 /// - We print what platform we think we are on (safe info only).
-library platform_info;
+library;
 
 import 'platform_info_stub.dart'
     if (dart.library.html) 'platform_info_web.dart'

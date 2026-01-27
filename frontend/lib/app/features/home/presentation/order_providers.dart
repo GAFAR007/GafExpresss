@@ -14,6 +14,7 @@
 /// DEBUGGING:
 /// - Logs provider creation and fetch execution.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

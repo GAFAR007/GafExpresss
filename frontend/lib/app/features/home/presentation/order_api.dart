@@ -15,6 +15,7 @@
 /// - Logs request start/end (safe only).
 /// - Never logs tokens.
 /// ------------------------------------------------------------
+library;
 
 import 'package:dio/dio.dart';
 

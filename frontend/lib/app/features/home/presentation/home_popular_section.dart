@@ -11,6 +11,7 @@
 /// - Renders a horizontal list of product cards.
 /// - Parent provides tap handler for navigation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 
@@ -118,7 +119,7 @@ class _PopularCard extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => Container(
                   height: 120,
-                  color: colorScheme.surfaceVariant,
+                  color: colorScheme.surfaceContainerHighest,
                   child: Icon(
                     Icons.image_not_supported,
                     color: colorScheme.onSurfaceVariant,

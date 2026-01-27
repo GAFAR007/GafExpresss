@@ -14,6 +14,7 @@
 /// DEBUGGING:
 /// - Logs item creation (safe fields only).
 /// ------------------------------------------------------------
+library;
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'product_model.dart';

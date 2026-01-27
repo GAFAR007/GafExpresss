@@ -13,6 +13,7 @@
 /// DEBUGGING:
 /// - Logs build, taps, API start/end, and navigation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -419,7 +420,7 @@ class _ProductDetailBody extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) {
                 return Container(
                   height: 220,
-                  color: scheme.surfaceVariant,
+                  color: scheme.surfaceContainerHighest,
                   child: Center(
                     child: Icon(
                       Icons.image_not_supported,
@@ -543,8 +544,8 @@ class _InfoRow extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
             flex: 2,
+            child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
           ),
         ],
       ),

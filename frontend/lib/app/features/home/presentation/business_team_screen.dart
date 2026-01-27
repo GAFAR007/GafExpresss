@@ -227,7 +227,7 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: role,
+                      initialValue: role,
                       decoration: const InputDecoration(
                         labelText: "Role",
                       ),
@@ -256,7 +256,7 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
                     if (role == "tenant") ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: estateAssetId,
+                        initialValue: estateAssetId,
                         decoration: const InputDecoration(
                           labelText: "Estate asset",
                         ),
@@ -661,7 +661,7 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
         if (_selectedRole == "tenant" || _scopeToEstate) ...[
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
-            value: _selectedEstateId,
+            initialValue: _selectedEstateId,
             decoration: const InputDecoration(
               labelText: "Estate asset",
             ),

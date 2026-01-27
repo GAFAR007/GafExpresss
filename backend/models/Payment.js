@@ -74,6 +74,27 @@ const paymentSchema = new mongoose.Schema(
       default: null,
     },
 
+    // WHY: Tenant rent payments link back to the tenant application for audits.
+    tenantApplication: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessTenantApplication",
+      default: null,
+    },
+
+    // WHY: Business context is needed for tenant rent + staff audit trails.
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    // WHY: Distinguish order vs tenant rent flows in analytics/filters.
+    purpose: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     // When we have fully applied effects (mark order paid, stock adjusted, etc.)
     processedAt: {
       type: Date,

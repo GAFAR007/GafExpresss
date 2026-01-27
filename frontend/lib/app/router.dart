@@ -14,6 +14,7 @@
 /// DEBUGGING:
 /// - Logs whenever router builds.
 /// - Logs every route builder call so you can trace navigation.
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

@@ -460,7 +460,7 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: scheme.surfaceVariant,
+        color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -492,7 +492,7 @@ class _AnalyticsHeader extends StatelessWidget {
             gradient: LinearGradient(
               colors: [
                 scheme.surface,
-                scheme.surfaceVariant,
+                scheme.surfaceContainerHighest,
               ],
             ),
           ),
@@ -535,7 +535,7 @@ class _AnalyticsHeader extends StatelessWidget {
         return Container(
           height: 140,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(22),
           ),
         );
@@ -544,7 +544,7 @@ class _AnalyticsHeader extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(22),
           ),
           child: Text(
@@ -688,7 +688,7 @@ class _StatusBadgesRow extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: isActive
                               ? scheme.onPrimary.withOpacity(0.2)
-                              : scheme.surfaceVariant,
+                              : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
@@ -711,7 +711,7 @@ class _StatusBadgesRow extends StatelessWidget {
         return Container(
           height: 46,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceVariant,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(999),
           ),
         );

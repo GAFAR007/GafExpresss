@@ -22,7 +22,9 @@ const {
   requireRole,
 } = require("../middlewares/requireRole.middleware");
 const businessController = require("../controllers/business.controller");
-const paystackService = require("../services/paystack.service");
+const {
+  verifyPaystackSignature,
+} = require("../middlewares/paystackWebhook.middleware");
 
 const router = express.Router();
 
@@ -304,7 +306,10 @@ router.get(
 router.post(
   "/tenant/applications/:id/approve",
   requireAuth,
-  requireAnyRole(["owner", "staff"]),
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
   businessController.approveTenantApplication,
 );
 
@@ -314,7 +319,7 @@ router.post(
 router.post(
   "/tenant/applications/:id/toggle-payment",
   requireAuth,
-  requireAnyRole(["owner", "staff"]),
+  requireRole("business_owner"),
   businessController.togglePaymentStatus,
 );
 
@@ -347,20 +352,8 @@ router.post(
 router.post(
   "/tenants/:tenantId/payment-intent",
   requireAuth,
-  requireAnyRole(["owner", "staff"]),
+  requireRole("tenant"),
   businessController.createPaymentIntent,
-);
-
-/**
- * PAYSTACK WEBHOOK
- */
-router.post(
-  "/payments/paystack/webhook",
-  express.json({
-    verify:
-      paystackService.rawBodyParser,
-  }),
-  businessController.handlePaystackWebhook,
 );
 
 /**
@@ -379,8 +372,11 @@ router.post(
 router.get(
   "/tenants",
   requireAuth,
-  requireAnyRole(["business_owner", "staff"]),
-  businessController.getTenants
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getTenants,
 );
 
 module.exports = router;

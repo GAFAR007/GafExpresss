@@ -18,6 +18,7 @@
 /// PLATFORM SAFETY:
 /// - Works on Web, Android, iOS (no dart:io used here).
 /// ---------------------------------------------------------------------------
+library;
 
 import 'dart:async';
 
@@ -62,7 +63,10 @@ final authApiProvider = Provider((ref) {
 /// WHY:
 /// - Profile calls should reuse the same Dio config.
 final profileApiProvider = Provider((ref) {
-  AppDebug.log("PROVIDERS", "profileApiProvider created -> building ProfileApi");
+  AppDebug.log(
+    "PROVIDERS",
+    "profileApiProvider created -> building ProfileApi",
+  );
   final dio = ref.read(dioProvider);
   final api = ProfileApi(dio: dio);
   AppDebug.log("PROVIDERS", "profileApiProvider ready");
@@ -149,7 +153,11 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
 
   /// Save session after login.
   Future<void> setSession(AuthSession session) async {
-    AppDebug.log("AUTH_SESSION", "setSession()", extra: {"userId": session.user.id});
+    AppDebug.log(
+      "AUTH_SESSION",
+      "setSession()",
+      extra: {"userId": session.user.id},
+    );
     state = session;
     _scheduleAutoLogout(session);
     await _storage.saveSession(session);

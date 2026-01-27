@@ -14,6 +14,7 @@
 /// DEBUGGING:
 /// - Logs provider creation and every cart mutation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

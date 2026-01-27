@@ -23,6 +23,7 @@ const businessAnalyticsService = require("../services/business.analytics.service
 const productImageService = require("../services/product_image.service");
 const businessInviteService = require("../services/business_invite.service");
 const businessTenantService = require("../services/business.tenant.service");
+const paymentService = require("../services/payment.service");
 const {
   writeAuditLog,
 } = require("../utils/audit");
@@ -76,7 +77,8 @@ function blockEstateScopedStaff(
     `BUSINESS CONTROLLER: ${action} - blocked`,
     {
       actorId: actor._id,
-      estateAssetId: actor.estateAssetId,
+      estateAssetId:
+        actor.estateAssetId,
     },
   );
 
@@ -95,9 +97,12 @@ async function resolveEstateAsset({
     return null;
   }
 
-  const asset = await BusinessAsset.findById(
-    estateAssetId,
-  ).select("assetType businessId name");
+  const asset =
+    await BusinessAsset.findById(
+      estateAssetId,
+    ).select(
+      "assetType businessId name",
+    );
 
   if (!asset) {
     throw new Error(
@@ -347,11 +352,9 @@ async function getProductById(
       );
 
     if (!product) {
-      return res
-        .status(404)
-        .json({
-          error: "Product not found",
-        });
+      return res.status(404).json({
+        error: "Product not found",
+      });
     }
 
     return res.status(200).json({
@@ -663,11 +666,9 @@ async function updateOrderStatus(
     const { status } = req.body;
 
     if (!status) {
-      return res
-        .status(400)
-        .json({
-          error: "Status is required",
-        });
+      return res.status(400).json({
+        error: "Status is required",
+      });
     }
 
     const order =
@@ -759,9 +760,9 @@ async function getAssets(req, res) {
         {
           businessId,
           assetId:
-            isEstateScopedStaff(actor)
-              ? actor.estateAssetId
-              : null,
+            isEstateScopedStaff(actor) ?
+              actor.estateAssetId
+            : null,
           query: req.query,
         },
       );
@@ -894,22 +895,18 @@ async function updateUserRole(
       );
 
     if (!targetUser) {
-      return res
-        .status(404)
-        .json({
-          error: "User not found",
-        });
+      return res.status(404).json({
+        error: "User not found",
+      });
     }
 
     if (
       actor.role !== "business_owner"
     ) {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Only business owners can update roles",
-        });
+      return res.status(403).json({
+        error:
+          "Only business owners can update roles",
+      });
     }
 
     const allowedRoles = [
@@ -956,19 +953,25 @@ async function updateUserRole(
     }
 
     const estateAssetId =
-      req.body?.estateAssetId?.toString().trim() || null;
+      req.body?.estateAssetId
+        ?.toString()
+        .trim() || null;
 
-    if (req.body.role === "tenant" && !estateAssetId) {
+    if (
+      req.body.role === "tenant" &&
+      !estateAssetId
+    ) {
       return res.status(400).json({
         error:
           "Estate asset is required for tenant assignment",
       });
     }
 
-    const estateAsset = await resolveEstateAsset({
-      estateAssetId,
-      businessId,
-    });
+    const estateAsset =
+      await resolveEstateAsset({
+        estateAssetId,
+        businessId,
+      });
 
     targetUser.role = req.body.role;
     targetUser.businessId = businessId;
@@ -1011,17 +1014,18 @@ async function updateUserRole(
  * POST /business/invites
  * Business-owner only: send a role invite via email.
  */
-async function createInvite(
-  req,
-  res,
-) {
+async function createInvite(req, res) {
   debug(
     "BUSINESS CONTROLLER: createInvite - entry",
     {
       actorId: req.user?.sub,
       role: req.body?.role,
-      hasEmail: Boolean(req.body?.email),
-      hasEstate: Boolean(req.body?.estateAssetId),
+      hasEmail: Boolean(
+        req.body?.email,
+      ),
+      hasEstate: Boolean(
+        req.body?.estateAssetId,
+      ),
     },
   );
 
@@ -1031,24 +1035,35 @@ async function createInvite(
         req.user.sub,
       );
 
-    if (actor.role !== "business_owner") {
+    if (
+      actor.role !== "business_owner"
+    ) {
       return res.status(403).json({
-        error: "Only business owners can send invites",
+        error:
+          "Only business owners can send invites",
       });
     }
 
     const inviteEmail =
-      req.body?.email?.toString().trim().toLowerCase() || "";
+      req.body?.email
+        ?.toString()
+        .trim()
+        .toLowerCase() || "";
 
     const role =
-      req.body?.role?.toString().trim() || "";
+      req.body?.role
+        ?.toString()
+        .trim() || "";
 
     const estateAssetId =
-      req.body?.estateAssetId?.toString().trim() || null;
+      req.body?.estateAssetId
+        ?.toString()
+        .trim() || null;
 
     if (!inviteEmail) {
       return res.status(400).json({
-        error: "Invite email is required",
+        error:
+          "Invite email is required",
       });
     }
 
@@ -1059,13 +1074,15 @@ async function createInvite(
     });
 
     const { invite, inviteLink } =
-      await businessInviteService.createInvite({
-        businessId,
-        inviterId: actor._id,
-        inviteeEmail: inviteEmail,
-        role,
-        estateAssetId,
-      });
+      await businessInviteService.createInvite(
+        {
+          businessId,
+          inviterId: actor._id,
+          inviteeEmail: inviteEmail,
+          role,
+          estateAssetId,
+        },
+      );
 
     debug(
       "BUSINESS CONTROLLER: createInvite - success",
@@ -1076,14 +1093,17 @@ async function createInvite(
     );
 
     return res.status(201).json({
-      message: "Invite sent successfully",
+      message:
+        "Invite sent successfully",
       invite: {
         id: invite._id,
         email: invite.inviteeEmail,
         role: invite.role,
         status: invite.status,
-        expiresAt: invite.tokenExpiresAt,
-        estateAssetId: invite.estateAssetId,
+        expiresAt:
+          invite.tokenExpiresAt,
+        estateAssetId:
+          invite.estateAssetId,
       },
       // WHY: Useful for QA in non-prod flows.
       inviteLink,
@@ -1103,25 +1123,27 @@ async function createInvite(
  * POST /business/invites/accept
  * Authenticated customer accepts an invite link.
  */
-async function acceptInvite(
-  req,
-  res,
-) {
+async function acceptInvite(req, res) {
   debug(
     "BUSINESS CONTROLLER: acceptInvite - entry",
     {
       actorId: req.user?.sub,
-      hasToken: Boolean(req.body?.token),
+      hasToken: Boolean(
+        req.body?.token,
+      ),
     },
   );
 
   try {
     const token =
-      req.body?.token?.toString().trim() || "";
+      req.body?.token
+        ?.toString()
+        .trim() || "";
 
     if (!token) {
       return res.status(400).json({
-        error: "Invite token is required",
+        error:
+          "Invite token is required",
       });
     }
 
@@ -1130,8 +1152,9 @@ async function acceptInvite(
         token,
       );
 
-    const user =
-      await User.findById(req.user.sub);
+    const user = await User.findById(
+      req.user.sub,
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -1175,29 +1198,37 @@ async function acceptInvite(
     }
 
     const estateAssetId =
-      invite.estateAssetId?.toString() || null;
+      invite.estateAssetId?.toString() ||
+      null;
 
-    if (invite.role === "tenant" && !estateAssetId) {
+    if (
+      invite.role === "tenant" &&
+      !estateAssetId
+    ) {
       return res.status(400).json({
         error:
           "Estate asset is required for tenant assignment",
       });
     }
 
-    const estateAsset = await resolveEstateAsset({
-      estateAssetId,
-      businessId: invite.businessId,
-    });
+    const estateAsset =
+      await resolveEstateAsset({
+        estateAssetId,
+        businessId: invite.businessId,
+      });
 
     user.role = invite.role;
     user.businessId = invite.businessId;
-    user.estateAssetId = estateAsset?._id || null;
+    user.estateAssetId =
+      estateAsset?._id || null;
     await user.save();
 
-    await businessInviteService.markInviteAccepted({
-      invite,
-      acceptedBy: user._id,
-    });
+    await businessInviteService.markInviteAccepted(
+      {
+        invite,
+        acceptedBy: user._id,
+      },
+    );
 
     await writeAuditLog({
       businessId: invite.businessId,
@@ -1206,10 +1237,12 @@ async function acceptInvite(
       action: "business_invite_accept",
       entityType: "user",
       entityId: user._id,
-      message: "User accepted business invite",
+      message:
+        "User accepted business invite",
       changes: {
         role: user.role,
-        estateAssetId: user.estateAssetId,
+        estateAssetId:
+          user.estateAssetId,
       },
     });
 
@@ -1222,7 +1255,8 @@ async function acceptInvite(
     );
 
     return res.status(200).json({
-      message: "Invite accepted successfully",
+      message:
+        "Invite accepted successfully",
       user,
       role: user.role,
       estateAssetId: user.estateAssetId,
@@ -1268,26 +1302,32 @@ async function getTenantEstate(
 
     if (!actor.estateAssetId) {
       return res.status(400).json({
-        error: "Tenant is not assigned to an estate asset",
+        error:
+          "Tenant is not assigned to an estate asset",
       });
     }
 
     const estate =
-      await businessTenantService.getTenantEstate({
-        businessId,
-        estateAssetId: actor.estateAssetId,
-      });
+      await businessTenantService.getTenantEstate(
+        {
+          businessId,
+          estateAssetId:
+            actor.estateAssetId,
+        },
+      );
 
     debug(
       "BUSINESS CONTROLLER: getTenantEstate - success",
       {
         actorId: actor._id,
-        estateAssetId: actor.estateAssetId,
+        estateAssetId:
+          actor.estateAssetId,
       },
     );
 
     return res.status(200).json({
-      message: "Estate fetched successfully",
+      message:
+        "Estate fetched successfully",
       estate,
     });
   } catch (err) {
@@ -1330,23 +1370,28 @@ async function submitTenantVerification(
 
     if (!actor.isNinVerified) {
       return res.status(400).json({
-        error: "Tenant must be NIN verified",
+        error:
+          "Tenant must be NIN verified",
       });
     }
 
     if (!actor.estateAssetId) {
       return res.status(400).json({
-        error: "Tenant is not assigned to an estate asset",
+        error:
+          "Tenant is not assigned to an estate asset",
       });
     }
 
     const application =
-      await businessTenantService.createTenantApplication({
-        businessId,
-        estateAssetId: actor.estateAssetId,
-        actor,
-        payload: req.body,
-      });
+      await businessTenantService.createTenantApplication(
+        {
+          businessId,
+          estateAssetId:
+            actor.estateAssetId,
+          actor,
+          payload: req.body,
+        },
+      );
 
     debug(
       "BUSINESS CONTROLLER: submitTenantVerification - success",
@@ -1357,7 +1402,8 @@ async function submitTenantVerification(
     );
 
     return res.status(201).json({
-      message: "Tenant verification submitted successfully",
+      message:
+        "Tenant verification submitted successfully",
       application,
     });
   } catch (err) {
@@ -1400,7 +1446,8 @@ async function getTenantApplication(
 
     if (!actor.estateAssetId) {
       return res.status(400).json({
-        error: "Tenant is not assigned to an estate asset",
+        error:
+          "Tenant is not assigned to an estate asset",
       });
     }
 
@@ -1408,7 +1455,8 @@ async function getTenantApplication(
       await businessTenantService.getTenantApplicationForTenant(
         {
           businessId,
-          estateAssetId: actor.estateAssetId,
+          estateAssetId:
+            actor.estateAssetId,
           tenantUserId: actor._id,
         },
       );
@@ -1417,13 +1465,16 @@ async function getTenantApplication(
       "BUSINESS CONTROLLER: getTenantApplication - success",
       {
         actorId: actor._id,
-        hasApplication: Boolean(application),
+        hasApplication: Boolean(
+          application,
+        ),
       },
     );
 
     return res.status(200).json({
-      message: application
-        ? "Tenant application fetched successfully"
+      message:
+        application ?
+          "Tenant application fetched successfully"
         : "No tenant application found",
       application,
     });
@@ -1467,13 +1518,15 @@ async function updateTenantApplication(
 
     if (!actor.isNinVerified) {
       return res.status(400).json({
-        error: "Tenant must be NIN verified",
+        error:
+          "Tenant must be NIN verified",
       });
     }
 
     if (!actor.estateAssetId) {
       return res.status(400).json({
-        error: "Tenant is not assigned to an estate asset",
+        error:
+          "Tenant is not assigned to an estate asset",
       });
     }
 
@@ -1481,7 +1534,8 @@ async function updateTenantApplication(
       await businessTenantService.updateTenantApplicationForTenant(
         {
           businessId,
-          estateAssetId: actor.estateAssetId,
+          estateAssetId:
+            actor.estateAssetId,
           tenantUserId: actor._id,
           actor,
           payload: req.body,
@@ -1497,7 +1551,8 @@ async function updateTenantApplication(
     );
 
     return res.status(200).json({
-      message: "Tenant application updated successfully",
+      message:
+        "Tenant application updated successfully",
       application,
     });
   } catch (err) {
@@ -1523,8 +1578,12 @@ async function listTenantApplications(
     "BUSINESS CONTROLLER: listTenantApplications - entry",
     {
       actorId: req.user?.sub,
-      hasEstate: Boolean(req.query?.estateAssetId),
-      hasStatus: Boolean(req.query?.status),
+      hasEstate: Boolean(
+        req.query?.estateAssetId,
+      ),
+      hasStatus: Boolean(
+        req.query?.status,
+      ),
     },
   );
 
@@ -1535,10 +1594,13 @@ async function listTenantApplications(
       );
 
     const requestedEstate =
-      req.query?.estateAssetId?.toString().trim() ||
-      null;
+      req.query?.estateAssetId
+        ?.toString()
+        .trim() || null;
     const requestedStatus =
-      req.query?.status?.toString().trim() || null;
+      req.query?.status
+        ?.toString()
+        .trim() || null;
 
     let estateAssetId = requestedEstate;
 
@@ -1554,7 +1616,8 @@ async function listTenantApplications(
             "Estate-scoped staff can only view their assigned estate applications",
         });
       }
-      estateAssetId = actor.estateAssetId;
+      estateAssetId =
+        actor.estateAssetId;
     }
 
     const result =
@@ -1571,7 +1634,8 @@ async function listTenantApplications(
     debug(
       "BUSINESS CONTROLLER: listTenantApplications - success",
       {
-        count: result.applications.length,
+        count:
+          result.applications.length,
         total: result.total,
       },
     );
@@ -1614,11 +1678,13 @@ async function getTenantApplicationDetail(
         req.user.sub,
       );
 
-    const applicationId =
-      req.params?.id?.toString().trim();
+    const applicationId = req.params?.id
+      ?.toString()
+      .trim();
     if (!applicationId) {
       return res.status(400).json({
-        error: "Application id is required",
+        error:
+          "Application id is required",
       });
     }
 
@@ -1633,7 +1699,8 @@ async function getTenantApplicationDetail(
     if (isEstateScopedStaff(actor)) {
       // WHY: Estate-scoped staff can only review their estate.
       const estateId =
-        application?.estateAssetId?._id ||
+        application?.estateAssetId
+          ?._id ||
         application?.estateAssetId;
       if (
         estateId &&
@@ -1695,11 +1762,13 @@ async function verifyTenantContact(
         req.user.sub,
       );
 
-    const applicationId =
-      req.params?.id?.toString().trim();
+    const applicationId = req.params?.id
+      ?.toString()
+      .trim();
     if (!applicationId) {
       return res.status(400).json({
-        error: "Application id is required",
+        error:
+          "Application id is required",
       });
     }
 
@@ -1714,7 +1783,8 @@ async function verifyTenantContact(
 
     if (isEstateScopedStaff(actor)) {
       const estateId =
-        application?.estateAssetId?._id ||
+        application?.estateAssetId
+          ?._id ||
         application?.estateAssetId;
       if (
         estateId &&
@@ -1734,7 +1804,9 @@ async function verifyTenantContact(
           businessId,
           applicationId,
           actorId: actor._id,
-          type: req.body?.type?.toString().trim(),
+          type: req.body?.type
+            ?.toString()
+            .trim(),
           status: req.body?.status
             ?.toString()
             .trim(),
@@ -1774,42 +1846,58 @@ async function verifyTenantContact(
  * GET /business/users/lookup?userId=... or ?email=... or ?phone=...
  * Business-owner only: find a user by id/email/phone for role assignment.
  */
-async function lookupUser(
-  req,
-  res,
-) {
+async function lookupUser(req, res) {
   debug(
     "BUSINESS CONTROLLER: lookupUser - entry",
     {
       actorId: req.user?.sub,
-      hasId: Boolean(req.query?.id || req.query?.userId),
-      hasEmail: Boolean(req.query?.email),
-      hasPhone: Boolean(req.query?.phone),
+      hasId: Boolean(
+        req.query?.id ||
+        req.query?.userId,
+      ),
+      hasEmail: Boolean(
+        req.query?.email,
+      ),
+      hasPhone: Boolean(
+        req.query?.phone,
+      ),
     },
   );
 
   try {
     const rawId =
-      req.query?.id?.toString().trim() ||
-      req.query?.userId?.toString().trim() ||
+      req.query?.id
+        ?.toString()
+        .trim() ||
+      req.query?.userId
+        ?.toString()
+        .trim() ||
       null;
     const email =
-      req.query?.email?.toString().trim().toLowerCase() ||
-      null;
+      req.query?.email
+        ?.toString()
+        .trim()
+        .toLowerCase() || null;
     const phone =
-      req.query?.phone?.toString().trim() ||
-      null;
+      req.query?.phone
+        ?.toString()
+        .trim() || null;
 
     if (!rawId && !email && !phone) {
       return res.status(400).json({
-        error: "Provide userId, email, or phone to lookup a user",
+        error:
+          "Provide userId, email, or phone to lookup a user",
       });
     }
 
     // WHY: Prefer id lookup when supplied for deterministic matches.
     let user = null;
     if (rawId) {
-      if (!mongoose.Types.ObjectId.isValid(rawId)) {
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          rawId,
+        )
+      ) {
         return res.status(400).json({
           error: "Invalid user id",
         });
@@ -1846,7 +1934,8 @@ async function lookupUser(
       {
         userId: user._id,
         role: user.role,
-        isNinVerified: user.isNinVerified,
+        isNinVerified:
+          user.isNinVerified,
       },
     );
 
@@ -1969,11 +2058,13 @@ async function approveTenantApplication(
         req.user.sub,
       );
 
-    const applicationId =
-      req.params?.id?.toString().trim();
+    const applicationId = req.params?.id
+      ?.toString()
+      .trim();
     if (!applicationId) {
       return res.status(400).json({
-        error: "Application id is required",
+        error:
+          "Application id is required",
       });
     }
 
@@ -1988,7 +2079,8 @@ async function approveTenantApplication(
 
     if (isEstateScopedStaff(actor)) {
       const estateId =
-        application?.estateAssetId?._id ||
+        application?.estateAssetId
+          ?._id ||
         application?.estateAssetId;
       if (
         estateId &&
@@ -2015,7 +2107,8 @@ async function approveTenantApplication(
     debug(
       "BUSINESS CONTROLLER: approveTenantApplication - success",
       {
-        applicationId: updatedApplication._id,
+        applicationId:
+          updatedApplication._id,
       },
     );
 
@@ -2058,10 +2151,7 @@ async function togglePaymentStatus(
 /**
  * VERIFY CONTACT
  */
-async function verifyContact(
-  req,
-  res,
-) {
+async function verifyContact(req, res) {
   // TODO: This route seems redundant with verifyTenantContact
   debug(
     "BUSINESS CONTROLLER: verifyContact - entry",
@@ -2075,8 +2165,6 @@ async function verifyContact(
   });
 }
 
-
-
 /**
  * CREATE PAYMENT INTENT
  */
@@ -2084,7 +2172,6 @@ async function createPaymentIntent(
   req,
   res,
 ) {
-  // TODO: Implement createPaymentIntent
   debug(
     "BUSINESS CONTROLLER: createPaymentIntent - entry",
     {
@@ -2092,9 +2179,105 @@ async function createPaymentIntent(
       tenantId: req.params?.tenantId,
     },
   );
-  return res.status(501).json({
-    message: "Not Implemented",
-  });
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    if (actor.role !== "tenant") {
+      return res.status(403).json({
+        error: "Tenant access required",
+      });
+    }
+
+    const tenantId =
+      req.params?.tenantId
+        ?.toString()
+        .trim();
+    if (!tenantId) {
+      return res.status(400).json({
+        error: "Tenant id is required",
+      });
+    }
+
+    // WHY: Tenants can only create payment intents for themselves.
+    if (
+      tenantId !== actor._id.toString()
+    ) {
+      return res.status(403).json({
+        error: "Tenant mismatch",
+      });
+    }
+
+    if (!actor.estateAssetId) {
+      return res.status(400).json({
+        error:
+          "Tenant is not assigned to an estate asset",
+      });
+    }
+
+    const application =
+      await businessTenantService.getTenantApplicationForTenant(
+        {
+          businessId,
+          estateAssetId:
+            actor.estateAssetId,
+          tenantUserId: actor._id,
+        },
+      );
+
+    if (!application) {
+      return res.status(400).json({
+        error:
+          "Tenant application not found",
+      });
+    }
+
+    const intent =
+      await paymentService.createTenantPaymentIntent(
+        {
+          businessId,
+          applicationId:
+            application._id,
+          tenantUserId: actor._id,
+          actorId: actor._id,
+          actorRole: actor.role,
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: createPaymentIntent - success",
+      {
+        actorId: actor._id,
+        paymentId: intent?.payment?._id,
+      },
+    );
+
+    return res.status(201).json({
+      message:
+        "Tenant payment intent created successfully",
+      payment: intent?.payment,
+      authorizationUrl:
+        intent?.authorizationUrl,
+      reference: intent?.reference,
+      accessCode: intent?.accessCode,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: createPaymentIntent - error",
+      {
+        actorId: req.user?.sub,
+        tenantId: req.params?.tenantId,
+        reason: err.message,
+        next: "Ensure tenant is approved and unpaid before requesting payment",
+      },
+    );
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
 }
 
 /**
@@ -2104,16 +2287,117 @@ async function handlePaystackWebhook(
   req,
   res,
 ) {
-  // TODO: Implement handlePaystackWebhook
   debug(
     "BUSINESS CONTROLLER: handlePaystackWebhook - entry",
+    { hasBody: Boolean(req.body) },
+  );
+
+  let event;
+  try {
+    if (!req.body) {
+      debug(
+        "BUSINESS CONTROLLER: handlePaystackWebhook - missing body",
+        {
+          classification:
+            "MISSING_REQUIRED_FIELD",
+          error_code:
+            "PAYSTACK_WEBHOOK_BODY_MISSING",
+          step: "VALIDATION_FAIL",
+          resolution_hint:
+            "Ensure the webhook is sent with a JSON body and raw parser.",
+        },
+      );
+      return res.status(400).json({
+        error: "Webhook body is required",
+        errorCode:
+          "PAYSTACK_WEBHOOK_BODY_MISSING",
+      });
+    }
+
+    // WHY: Paystack signature verification requires raw body; parse manually.
+    if (Buffer.isBuffer(req.body)) {
+      event = JSON.parse(
+        req.body.toString("utf8"),
+      );
+    } else {
+      event = req.body;
+    }
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: handlePaystackWebhook - invalid JSON",
+      {
+        classification:
+          "PROVIDER_REJECTED_FORMAT",
+        error_code:
+          "PAYSTACK_WEBHOOK_INVALID_JSON",
+        step: "PARSE_FAIL",
+        resolution_hint:
+          "Confirm raw body parsing and valid JSON payload from Paystack.",
+      },
+    );
+    return res.status(400).json({
+      error:
+        "Invalid Paystack webhook payload",
+      errorCode:
+        "PAYSTACK_WEBHOOK_INVALID_JSON",
+    });
+  }
+
+  const reference =
+    event?.data?.reference || "";
+  debug(
+    "BUSINESS CONTROLLER: handlePaystackWebhook - payload parsed",
     {
-      actorId: req.user?.sub,
+      eventType: event?.event,
+      referenceSuffix:
+        reference ?
+          reference.slice(-6)
+        : null,
     },
   );
-  return res.status(501).json({
-    message: "Not Implemented",
-  });
+
+  try {
+    const result =
+      await paymentService.processPaystackEvent(
+        event,
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: handlePaystackWebhook - success",
+      {
+        applied: result?.applied ?? false,
+        idempotent:
+          result?.idempotent ?? false,
+      },
+    );
+
+    return res.status(200).json({
+      message: "Webhook processed",
+      applied: result?.applied ?? false,
+      idempotent:
+        result?.idempotent ?? false,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: handlePaystackWebhook - processing failed",
+      {
+        classification:
+          "UNKNOWN_PROVIDER_ERROR",
+        error_code:
+          "PAYSTACK_WEBHOOK_PROCESSING_FAILED",
+        step: "SERVICE_FAIL",
+        resolution_hint:
+          "Check payment logs and Paystack event payload.",
+        message: err?.message,
+      },
+    );
+    return res.status(500).json({
+      error:
+        "Webhook processing failed",
+      errorCode:
+        "PAYSTACK_WEBHOOK_PROCESSING_FAILED",
+    });
+  }
 }
 
 /**
@@ -2123,26 +2407,179 @@ async function devMarkPaymentSucceeded(
   req,
   res,
 ) {
-  // TODO: Implement devMarkPaymentSucceeded
   debug(
     "BUSINESS CONTROLLER: devMarkPaymentSucceeded - entry",
     {
       actorId: req.user?.sub,
       paymentId: req.params?.paymentId,
+      devGateEnabled:
+        process.env
+          .DEV_MARK_RENT_PAID ===
+        "true",
     },
   );
-  return res.status(501).json({
-    message: "Not Implemented",
-  });
+
+  try {
+    if (
+      process.env.NODE_ENV ===
+      "production"
+    ) {
+      debug(
+        "BUSINESS CONTROLLER: devMarkPaymentSucceeded - blocked",
+        {
+          step: "DEV_GATE_CHECK",
+          errorCode:
+            "DEV_PAY_TOGGLE_FORBIDDEN_IN_PRODUCTION",
+          classification:
+            "AUTHENTICATION_ERROR",
+          reason:
+            "Dev pay toggle disabled in production",
+          resolution_hint:
+            "Use Paystack verification in production",
+        },
+      );
+      return res.status(403).json({
+        error:
+          "Dev pay toggle is disabled in production",
+        errorCode:
+          "DEV_PAY_TOGGLE_FORBIDDEN_IN_PRODUCTION",
+      });
+    }
+
+    if (
+      process.env.DEV_MARK_RENT_PAID !==
+      "true"
+    ) {
+      debug(
+        "BUSINESS CONTROLLER: devMarkPaymentSucceeded - blocked",
+        {
+          step: "DEV_GATE_CHECK",
+          errorCode:
+            "DEV_PAY_TOGGLE_DISABLED",
+          classification:
+            "MISSING_REQUIRED_FIELD",
+          reason:
+            "DEV_MARK_RENT_PAID is not enabled",
+          resolution_hint:
+            "Set DEV_MARK_RENT_PAID=true and restart server",
+        },
+      );
+      return res.status(403).json({
+        error:
+          "Dev pay toggle is disabled",
+        errorCode:
+          "DEV_PAY_TOGGLE_DISABLED",
+      });
+    }
+
+    const expectedSecret =
+      process.env.DEV_PAYMENT_SECRET?.trim();
+    const providedSecret = req.headers[
+      "x-dev-secret"
+    ]
+      ?.toString()
+      .trim();
+    if (
+      !expectedSecret ||
+      providedSecret !== expectedSecret
+    ) {
+      debug(
+        "BUSINESS CONTROLLER: devMarkPaymentSucceeded - blocked",
+        {
+          step: "DEV_GATE_CHECK",
+          errorCode:
+            "DEV_PAY_TOGGLE_INVALID_SECRET",
+          classification:
+            "AUTHENTICATION_ERROR",
+          reason:
+            "DEV_PAYMENT_SECRET mismatch or missing",
+          resolution_hint:
+            "Set DEV_PAYMENT_SECRET and send x-dev-secret header",
+        },
+      );
+      return res.status(403).json({
+        error:
+          "Dev pay toggle secret is invalid",
+        errorCode:
+          "DEV_PAY_TOGGLE_INVALID_SECRET",
+      });
+    }
+
+    const { actor } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    if (
+      actor.role !== "business_owner"
+    ) {
+      return res.status(403).json({
+        error:
+          "Business owner access required",
+      });
+    }
+
+    const paymentId =
+      req.params?.paymentId
+        ?.toString()
+        .trim();
+    if (!paymentId) {
+      return res.status(400).json({
+        error: "Payment id is required",
+      });
+    }
+
+    // WHY: Dev-only flow simulates Paystack success safely via backend.
+    const result =
+      await paymentService.devMarkTenantPaymentSucceeded(
+        {
+          paymentId,
+          actorId: actor._id,
+          actorRole: actor.role,
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: devMarkPaymentSucceeded - success",
+      {
+        actorId: actor._id,
+        paymentId: result.payment?._id,
+        applicationId:
+          result.application?._id,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        "Payment marked as succeeded (dev gate)",
+      devGateEnabled:
+        process.env
+          .DEV_MARK_RENT_PAID ===
+        "true",
+      payment: result.payment,
+      application: result.application,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: devMarkPaymentSucceeded - error",
+      {
+        actorId: req.user?.sub,
+        paymentId:
+          req.params?.paymentId,
+        reason: err.message,
+        next: "Ensure DEV_MARK_RENT_PAID=true and payment is pending for an approved tenant",
+      },
+    );
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
 }
 
 /**
  * TENANT APPLICATIONS
  */
-async function getTenants(
-  req,
-  res,
-) {
+async function getTenants(req, res) {
   // TODO: Implement getTenants
   debug(
     "BUSINESS CONTROLLER: getTenants - entry",
@@ -2184,7 +2621,6 @@ module.exports = {
   approveTenantApplication,
   togglePaymentStatus,
   verifyContact,
-  approveTenant,
   createPaymentIntent,
   handlePaystackWebhook,
   devMarkPaymentSucceeded,

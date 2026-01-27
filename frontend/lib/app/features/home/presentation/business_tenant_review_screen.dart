@@ -47,6 +47,152 @@ class _BusinessTenantReviewScreenState
     );
   }
 
+  bool _isContactVerified(TenantContact contact) {
+    // WHY: Contacts can be marked verified via status or boolean flag.
+    return contact.isVerified ||
+        contact.status.toLowerCase() == 'verified';
+  }
+
+  Future<String?> _openNoteDialog({
+    required String title,
+  }) async {
+    // WHY: Capture optional verification notes for audit.
+    String noteValue = '';
+
+    return showDialog<String?>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: TextField(
+            autofocus: true,
+            maxLines: 2,
+            onChanged: (value) {
+              noteValue = value;
+            },
+            decoration: const InputDecoration(
+              labelText: "Note (optional)",
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _logTap("note_cancel");
+                Navigator.of(context).pop();
+              },
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop(noteValue.trim());
+              },
+              child: const Text("Confirm"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _verifyContact({
+    required String applicationId,
+    required String type,
+    required int index,
+    required String label,
+  }) async {
+    _logTap(
+      "verify_contact",
+      extra: {"type": type, "index": index},
+    );
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      _logTap("verify_contact_block", extra: {"reason": "no_session"});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    final note = await _openNoteDialog(
+      title: "Verify $label",
+    );
+    if (note == null) {
+      _logTap("verify_contact_cancel");
+      return;
+    }
+
+    try {
+      final api = ref.read(businessTenantApiProvider);
+      await api.verifyTenantContact(
+        token: session.token,
+        applicationId: applicationId,
+        type: type,
+        index: index,
+        status: "verified",
+        note: note,
+      );
+
+      ref.invalidate(businessTenantByIdProvider(applicationId));
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("$label verified")),
+      );
+    } catch (error) {
+      _logTap(
+        "verify_contact_fail",
+        extra: {"error": error.toString()},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Verification failed. ${error.toString()}")),
+      );
+    }
+  }
+
+  Future<void> _approveTenant({
+    required String applicationId,
+  }) async {
+    _logTap("approve_tenant", extra: {"applicationId": applicationId});
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      _logTap("approve_tenant_block", extra: {"reason": "no_session"});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    try {
+      final api = ref.read(businessTenantApiProvider);
+      await api.approveTenantApplication(
+        token: session.token,
+        applicationId: applicationId,
+      );
+
+      ref.invalidate(businessTenantByIdProvider(applicationId));
+      ref.invalidate(businessTenantApplicationsProvider);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Tenant approved successfully")),
+      );
+    } catch (error) {
+      _logTap(
+        "approve_tenant_fail",
+        extra: {"error": error.toString()},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Approval failed. ${error.toString()}")),
+      );
+    }
+  }
+
   AppStatusTone _toneForStatus(String status) {
     // WHY: Keep status colors consistent with other business surfaces.
     switch (status.toLowerCase()) {
@@ -77,6 +223,8 @@ class _BusinessTenantReviewScreenState
     final session = ref.watch(authSessionProvider);
     final role = session?.user.role ?? 'unknown';
     final isAdminView = role != 'tenant';
+    final canVerify = role == 'business_owner' || role == 'staff';
+    final canApprove = role == 'business_owner';
 
     final detailAsync = ref.watch(
       businessTenantByIdProvider(widget.applicationId),
@@ -125,6 +273,23 @@ class _BusinessTenantReviewScreenState
             final rules = application.tenantRulesSnapshot;
             final estate = application.estate;
             final userStatus = application.tenantUserStatus;
+            final requiredReferences = rules.referencesMin;
+            final requiredGuarantors = rules.guarantorsMin;
+            final verifiedReferences = application.references
+                .where(_isContactVerified)
+                .length;
+            final verifiedGuarantors = application.guarantors
+                .where(_isContactVerified)
+                .length;
+            final meetsReferenceRequirement =
+                verifiedReferences >= requiredReferences &&
+                    application.references.length >= requiredReferences;
+            final meetsGuarantorRequirement =
+                verifiedGuarantors >= requiredGuarantors &&
+                    application.guarantors.length >= requiredGuarantors;
+            final canApproveNow = meetsReferenceRequirement &&
+                meetsGuarantorRequirement &&
+                application.status.toLowerCase() == 'pending';
 
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -188,10 +353,7 @@ class _BusinessTenantReviewScreenState
                   value: estate?.name ?? "Unknown estate",
                 ),
                 const SizedBox(height: 12),
-                ReadOnlyValue(
-                  label: "Requested unit",
-                  value: unitLabel,
-                ),
+                ReadOnlyValue(label: "Requested unit", value: unitLabel),
                 const SizedBox(height: 12),
                 ReadOnlyValue(
                   label: "Rent schedule",
@@ -229,6 +391,16 @@ class _BusinessTenantReviewScreenState
                 _ContactList(
                   contacts: application.references,
                   emptyText: "No references submitted.",
+                  canVerify: canVerify,
+                  onVerify: (index) {
+                    _verifyContact(
+                      applicationId: application.id,
+                      type: "reference",
+                      index: index,
+                      label: "Reference",
+                    );
+                  },
+                  isVerified: _isContactVerified,
                 ),
                 const SizedBox(height: 16),
                 _SectionTitle(title: "Guarantors"),
@@ -236,6 +408,16 @@ class _BusinessTenantReviewScreenState
                 _ContactList(
                   contacts: application.guarantors,
                   emptyText: "No guarantors submitted.",
+                  canVerify: canVerify,
+                  onVerify: (index) {
+                    _verifyContact(
+                      applicationId: application.id,
+                      type: "guarantor",
+                      index: index,
+                      label: "Guarantor",
+                    );
+                  },
+                  isVerified: _isContactVerified,
                 ),
                 const SizedBox(height: 20),
                 _SectionTitle(title: "Review metadata"),
@@ -263,6 +445,25 @@ class _BusinessTenantReviewScreenState
                       ? "No notes"
                       : application.reviewNotes!,
                 ),
+                if (canApprove) ...[
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: canApproveNow
+                          ? () => _approveTenant(
+                                applicationId: application.id,
+                              )
+                          : null,
+                      icon: const Icon(Icons.verified_user),
+                      label: Text(
+                        canApproveNow
+                            ? "Approve tenant"
+                            : "Verify contacts to approve",
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 OutlinedButton.icon(
                   onPressed: () {
@@ -320,7 +521,7 @@ class _StatusHeaderCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
@@ -330,7 +531,10 @@ class _StatusHeaderCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: badge.background,
                   borderRadius: BorderRadius.circular(999),
@@ -390,9 +594,9 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+      style: Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
     );
   }
 }
@@ -430,10 +634,16 @@ class _RulesRow extends StatelessWidget {
 class _ContactList extends StatelessWidget {
   final List<TenantContact> contacts;
   final String emptyText;
+  final bool canVerify;
+  final void Function(int index)? onVerify;
+  final bool Function(TenantContact contact)? isVerified;
 
   const _ContactList({
     required this.contacts,
     required this.emptyText,
+    required this.canVerify,
+    required this.onVerify,
+    required this.isVerified,
   });
 
   @override
@@ -450,7 +660,14 @@ class _ContactList extends StatelessWidget {
     }
 
     return Column(
-      children: contacts.map((contact) {
+      children: contacts.asMap().entries.map((entry) {
+        final index = entry.key;
+        final contact = entry.value;
+        final contactVerified = isVerified?.call(contact) ?? false;
+        final statusLabel = contact.status.isEmpty
+            ? (contactVerified ? "verified" : "pending")
+            : contact.status;
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Container(
@@ -483,9 +700,24 @@ class _ContactList extends StatelessWidget {
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      const SizedBox(height: 4),
+                      Text(
+                        statusLabel.toUpperCase(),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: contactVerified
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   ),
                 ),
+                if (canVerify && !contactVerified && onVerify != null)
+                  TextButton(
+                    onPressed: () => onVerify?.call(index),
+                    child: const Text("Verify"),
+                  ),
               ],
             ),
           ),

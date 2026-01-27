@@ -11,6 +11,7 @@
 /// - Renders a header + vertical list of ProductItemButton cards.
 /// - Parent handles navigation via onProductTap.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

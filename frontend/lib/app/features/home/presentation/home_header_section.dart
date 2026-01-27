@@ -11,6 +11,7 @@
 /// - Shows a location pill on the left and a bell button on the right.
 /// - Parent provides tap callbacks for logging/navigation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

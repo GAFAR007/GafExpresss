@@ -20,22 +20,21 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData light() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: AppColors.primary,
-      brightness: Brightness.light,
-    ).copyWith(
-      primary: AppColors.primary,
-      secondary: AppColors.primaryDark,
-      background: AppColors.background,
-      surface: AppColors.surface,
-      onPrimary: AppColors.surface,
-      onSecondary: AppColors.surface,
-      onBackground: AppColors.textPrimary,
-      onSurface: AppColors.textPrimary,
-      outline: AppColors.border,
-      surfaceVariant: AppColors.background,
-      onSurfaceVariant: AppColors.textSecondary,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.primary,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: AppColors.primary,
+          secondary: AppColors.primaryDark,
+          surface: AppColors.surface,
+          onPrimary: AppColors.surface,
+          onSecondary: AppColors.surface,
+          onSurface: AppColors.textPrimary,
+          outline: AppColors.border,
+          surfaceContainerHighest: AppColors.background,
+          onSurfaceVariant: AppColors.textSecondary,
+        );
 
     return ThemeData(
       useMaterial3: true,
@@ -84,22 +83,21 @@ class AppTheme {
   }
 
   static ThemeData dark() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: AppColors.primary,
-      brightness: Brightness.dark,
-    ).copyWith(
-      primary: AppColors.primary,
-      secondary: AppColors.primaryDark,
-      background: AppColors.darkBackground,
-      surface: AppColors.darkSurface,
-      onPrimary: AppColors.darkTextPrimary,
-      onSecondary: AppColors.darkTextPrimary,
-      onBackground: AppColors.darkTextPrimary,
-      onSurface: AppColors.darkTextPrimary,
-      outline: AppColors.darkBorder,
-      surfaceVariant: AppColors.darkSurface,
-      onSurfaceVariant: AppColors.darkTextSecondary,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.primary,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: AppColors.primary,
+          secondary: AppColors.primaryDark,
+          surface: AppColors.darkSurface,
+          onPrimary: AppColors.darkTextPrimary,
+          onSecondary: AppColors.darkTextPrimary,
+          onSurface: AppColors.darkTextPrimary,
+          outline: AppColors.darkBorder,
+          surfaceContainerHighest: AppColors.darkSurface,
+          onSurfaceVariant: AppColors.darkTextSecondary,
+        );
 
     return ThemeData(
       useMaterial3: true,
@@ -144,22 +142,21 @@ class AppTheme {
   }
 
   static ThemeData business() {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: AppColors.businessPrimary,
-      brightness: Brightness.light,
-    ).copyWith(
-      primary: AppColors.businessPrimary,
-      secondary: AppColors.businessAccent,
-      background: AppColors.businessBackground,
-      surface: AppColors.businessSurface,
-      onPrimary: AppColors.businessSurface,
-      onSecondary: AppColors.businessSurface,
-      onBackground: AppColors.businessTextPrimary,
-      onSurface: AppColors.businessTextPrimary,
-      outline: AppColors.businessBorder,
-      surfaceVariant: AppColors.businessCard,
-      onSurfaceVariant: AppColors.businessTextSecondary,
-    );
+    final scheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.businessPrimary,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: AppColors.businessPrimary,
+          secondary: AppColors.businessAccent,
+          surface: AppColors.businessSurface,
+          onPrimary: AppColors.businessSurface,
+          onSecondary: AppColors.businessSurface,
+          onSurface: AppColors.businessTextPrimary,
+          outline: AppColors.businessBorder,
+          surfaceContainerHighest: AppColors.businessCard,
+          onSurfaceVariant: AppColors.businessTextSecondary,
+        );
 
     return ThemeData(
       useMaterial3: true,
@@ -210,6 +207,7 @@ class AppTheme {
 
 /// WHY: Centralize status badge colors so they adapt to each theme mode.
 enum AppStatusTone { success, info, warning, danger, neutral }
+
 enum AppStatusKind { pending, paid, shipped, delivered, cancelled, neutral }
 
 /// WHY: Keep badge colors consistent and readable across themes.
@@ -240,7 +238,7 @@ class AppStatusBadgeColors {
 
     if (tone == AppStatusTone.neutral) {
       return AppStatusBadgeColors(
-        background: theme.colorScheme.surfaceVariant,
+        background: theme.colorScheme.surfaceContainerHighest,
         foreground: theme.colorScheme.onSurfaceVariant,
       );
     }
@@ -269,7 +267,7 @@ class AppStatusBadgeColors {
 
     if (status == AppStatusKind.neutral) {
       return AppStatusBadgeColors(
-        background: theme.colorScheme.surfaceVariant,
+        background: theme.colorScheme.surfaceContainerHighest,
         foreground: theme.colorScheme.onSurfaceVariant,
       );
     }

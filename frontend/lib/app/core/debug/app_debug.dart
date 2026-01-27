@@ -14,6 +14,7 @@
 ///
 /// NOTE:
 /// - We NEVER log passwords or tokens here.
+library;
 
 import 'package:flutter/foundation.dart';
 

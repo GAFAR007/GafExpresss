@@ -63,6 +63,13 @@ async function handlePaystackWebhook(req) {
     event: event?.event,
     reference: event?.data?.reference,
   });
+  debug("WEBHOOK SERVICE: Dispatching to payment service", {
+    source: "paystack_webhook",
+    eventType: event?.event,
+    referenceSuffix: event?.data?.reference
+      ? event.data.reference.slice(-6)
+      : null,
+  });
 
   // 3️⃣ Delegate ALL business logic
   await paymentService.processPaystackEvent(event);

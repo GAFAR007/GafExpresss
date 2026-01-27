@@ -62,4 +62,30 @@ router.post(
   paymentsController.initPaystack
 );
 
+/**
+ * @swagger
+ * /payments/paystack/verify:
+ *   get:
+ *     operationId: verifyPaystack
+ *     summary: Verify Paystack reference (server-side)
+ *     tags: [Payments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: reference
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Paystack verification processed
+ */
+router.get(
+  "/paystack/verify",
+  requireAuth,
+  // WHY: Verification must be server-side and scoped to the payment owner.
+  paymentsController.verifyPaystack
+);
+
 module.exports = router;

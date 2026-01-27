@@ -13,6 +13,7 @@
 /// DEBUGGING:
 /// - Logs build, button taps, API start/end, and navigation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

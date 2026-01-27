@@ -486,7 +486,7 @@ class _BusinessAssetDetailScreenState
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceVariant,
+              color: theme.colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
@@ -530,7 +530,7 @@ class _BusinessAssetDetailScreenState
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _assetType,
+            initialValue: _assetType,
             decoration: const InputDecoration(labelText: "Asset type"),
             items: assetTypeOptions
                 .map(
@@ -560,7 +560,7 @@ class _BusinessAssetDetailScreenState
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _ownershipType,
+            initialValue: _ownershipType,
             decoration: const InputDecoration(labelText: "Ownership type"),
             items: ownershipTypeOptions
                 .map(
@@ -584,7 +584,7 @@ class _BusinessAssetDetailScreenState
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _assetClass,
+            initialValue: _assetClass,
             decoration: const InputDecoration(labelText: "Asset class"),
             items: assetClassOptions
                 .map(
@@ -615,7 +615,7 @@ class _BusinessAssetDetailScreenState
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _status,
+            initialValue: _status,
             decoration: const InputDecoration(labelText: "Status"),
             items: _statusOptions
                 .map(
@@ -719,7 +719,7 @@ class _BusinessAssetDetailScreenState
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _leasePeriod,
+              initialValue: _leasePeriod,
               decoration: const InputDecoration(labelText: "Lease cost period"),
               items: feePeriodOptions
                   .map(
@@ -769,7 +769,7 @@ class _BusinessAssetDetailScreenState
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _managementPeriod,
+              initialValue: _managementPeriod,
               decoration: const InputDecoration(labelText: "Fee period"),
               items: feePeriodOptions
                   .map(
@@ -972,7 +972,7 @@ class _BusinessAssetDetailScreenState
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: row.rentPeriod,
+                        initialValue: row.rentPeriod,
                         decoration: const InputDecoration(labelText: "Rent period"),
                         items: rentPeriodOptions
                             .map(

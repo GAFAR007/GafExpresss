@@ -9,6 +9,7 @@
 ///
 /// DEBUGGING:
 /// - fromJson prints when parsing (safe, no secrets).
+library;
 
 import 'package:flutter/foundation.dart';
 
@@ -46,11 +47,6 @@ class AuthUser {
   /// - Never store passwords or tokens here.
   /// ------------------------------------------------------
   Map<String, dynamic> toJson() {
-    return {
-      "id": id,
-      "name": name,
-      "email": email,
-      "role": role,
-    };
+    return {"id": id, "name": name, "email": email, "role": role};
   }
 }

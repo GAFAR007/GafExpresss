@@ -9,6 +9,7 @@
 ///
 /// DEBUGGING:
 /// - Provider creation is logged so you can see it in console.
+library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';

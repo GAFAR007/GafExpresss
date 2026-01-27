@@ -49,10 +49,7 @@ class LoginScreen extends ConsumerStatefulWidget {
   // WHY: Capture optional redirect target for invite links or deep links.
   final String? redirectTo;
 
-  const LoginScreen({
-    super.key,
-    this.redirectTo,
-  });
+  const LoginScreen({super.key, this.redirectTo});
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -194,8 +191,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // WHY: Respect invite/deep-link target if provided.
       final redirectTarget =
           widget.redirectTo == null || widget.redirectTo!.trim().isEmpty
-              ? null
-              : Uri.decodeComponent(widget.redirectTo!.trim());
+          ? null
+          : Uri.decodeComponent(widget.redirectTo!.trim());
 
       // ✅ Navigate to home or redirect target after successful login
       AppDebug.log(
@@ -582,7 +579,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final productsAsync = ref.watch(product_providers.productsProvider);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: SafeArea(
         child: Column(
           children: [

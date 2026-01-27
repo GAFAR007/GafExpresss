@@ -11,6 +11,7 @@
 /// - Uses a PageView to render promo cards from product data.
 /// - Displays a simple dot indicator for page position.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 
@@ -89,7 +90,11 @@ class _HomePromoSectionState extends State<HomePromoSection> {
             controller: _controller,
             itemCount: promoItems.length,
             onPageChanged: (index) {
-              AppDebug.log("HOME_PROMO", "Page changed", extra: {"index": index});
+              AppDebug.log(
+                "HOME_PROMO",
+                "Page changed",
+                extra: {"index": index},
+              );
               setState(() => _activeIndex = index);
             },
             itemBuilder: (context, index) {
@@ -151,7 +156,7 @@ class _PromoCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            color: colorScheme.surfaceVariant,
+            color: colorScheme.surfaceContainerHighest,
             image: DecorationImage(
               image: NetworkImage(product.imageUrl),
               fit: BoxFit.cover,
@@ -180,7 +185,10 @@ class _PromoCard extends StatelessWidget {
                 children: [
                   // WHY: Tag reinforces the promo style.
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: colorScheme.scrim.withOpacity(0.5),
                       borderRadius: BorderRadius.circular(8),

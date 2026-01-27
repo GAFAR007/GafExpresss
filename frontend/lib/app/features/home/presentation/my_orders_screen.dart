@@ -13,6 +13,7 @@
 /// DEBUGGING:
 /// - Logs build, refresh, and item taps.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,7 +60,7 @@ class MyOrdersScreen extends ConsumerWidget {
           ),
         ],
       ),
-      backgroundColor: Theme.of(context).colorScheme.background,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: ordersAsync.when(
         data: (orders) {
           if (orders.isEmpty) {

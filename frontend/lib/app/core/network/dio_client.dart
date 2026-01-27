@@ -16,6 +16,7 @@
 /// DEBUGGING:
 /// - Logs every request method/url and response status.
 /// - DOES NOT log passwords or tokens.
+library;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';

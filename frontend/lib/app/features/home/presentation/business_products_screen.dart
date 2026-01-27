@@ -568,17 +568,16 @@ class _BusinessProductsScreenState
               children: [
                 Text(
                   "Inventory overview",
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   "Track items, stock, and updates across your catalog.",
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: colorScheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 summaryCard,
@@ -681,132 +680,130 @@ class _BusinessProductsScreenState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildProductThumbnail(
-                  primaryImage,
-                  onDelete: primaryImage == null
-                      ? null
-                      : () => _deleteProductImage(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildProductThumbnail(
+                    primaryImage,
+                    onDelete: primaryImage == null
+                        ? null
+                        : () => _deleteProductImage(
                             product: product,
                             imageUrl: primaryImage,
                           ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        product.name,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      if (product.description.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          product.description,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                          product.name,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
-                      ],
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          _buildMetaChip(priceLabel),
-                          _buildMetaChip("Stock ${product.stock}"),
-                          _buildMetaChip(
-                            statusLabel,
-                            isActive: product.isActive,
+                        if (product.description.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            product.description,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
-                      ),
-                    ],
-                  ),
-                ),
-                Column(
-                  children: [
-                    PopupMenuButton<String>(
-                      onSelected: (value) {
-                        if (value == "edit") {
-                          _openProductForm(product: product);
-                          return;
-                        }
-                        if (value == "upload") {
-                          _uploadProductImage(product);
-                          return;
-                        }
-                        if (value == "archive") {
-                          _softDeleteProduct(product.id);
-                          return;
-                        }
-                        if (value == "restore") {
-                          _restoreProduct(product.id);
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(value: "edit", child: Text("Edit")),
-                        const PopupMenuItem(
-                          value: "upload",
-                          child: Text("Upload image"),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _buildMetaChip(priceLabel),
+                            _buildMetaChip("Stock ${product.stock}"),
+                            _buildMetaChip(
+                              statusLabel,
+                              isActive: product.isActive,
+                            ),
+                          ],
                         ),
-                        if (product.isActive)
-                          const PopupMenuItem(
-                            value: "archive",
-                            child: Text("Archive"),
-                          )
-                        else
-                          const PopupMenuItem(
-                            value: "restore",
-                            child: Text("Restore"),
-                          ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    _buildStatusPill(product.isActive),
-                  ],
+                  ),
+                  Column(
+                    children: [
+                      PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == "edit") {
+                            _openProductForm(product: product);
+                            return;
+                          }
+                          if (value == "upload") {
+                            _uploadProductImage(product);
+                            return;
+                          }
+                          if (value == "archive") {
+                            _softDeleteProduct(product.id);
+                            return;
+                          }
+                          if (value == "restore") {
+                            _restoreProduct(product.id);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: "edit",
+                            child: Text("Edit"),
+                          ),
+                          const PopupMenuItem(
+                            value: "upload",
+                            child: Text("Upload image"),
+                          ),
+                          if (product.isActive)
+                            const PopupMenuItem(
+                              value: "archive",
+                              child: Text("Archive"),
+                            )
+                          else
+                            const PopupMenuItem(
+                              value: "restore",
+                              child: Text("Restore"),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      _buildStatusPill(product.isActive),
+                    ],
+                  ),
+                ],
+              ),
+              if (galleryUrls.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  "Gallery",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 52,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: galleryUrls.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (context, index) {
+                      final url = galleryUrls[index];
+                      return _buildGalleryThumbnail(
+                        url,
+                        onDelete: () => _deleteProductImage(
+                          product: product,
+                          imageUrl: url,
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
-            ),
-            if (galleryUrls.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                "Gallery",
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 52,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: galleryUrls.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final url = galleryUrls[index];
-                    return _buildGalleryThumbnail(
-                      url,
-                      onDelete: () => _deleteProductImage(
-                        product: product,
-                        imageUrl: url,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
             ],
           ),
         ),
@@ -838,7 +835,7 @@ class _BusinessProductsScreenState
       height: 72,
       width: 72,
       decoration: BoxDecoration(
-        color: colorScheme.surfaceVariant,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
@@ -868,7 +865,7 @@ class _BusinessProductsScreenState
                         value: progress.expectedTotalBytes == null
                             ? null
                             : progress.cumulativeBytesLoaded /
-                                progress.expectedTotalBytes!,
+                                  progress.expectedTotalBytes!,
                       ),
                     ),
                   );
@@ -910,7 +907,7 @@ class _BusinessProductsScreenState
       height: 48,
       width: 48,
       decoration: BoxDecoration(
-        color: colorScheme.surfaceVariant,
+        color: colorScheme.surfaceContainerHighest,
         shape: BoxShape.circle,
         border: Border.all(color: colorScheme.outlineVariant),
       ),
@@ -921,10 +918,8 @@ class _BusinessProductsScreenState
             Image.network(
               url,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Icon(
-                Icons.broken_image,
-                color: colorScheme.onSurfaceVariant,
-              ),
+              errorBuilder: (_, __, ___) =>
+                  Icon(Icons.broken_image, color: colorScheme.onSurfaceVariant),
             ),
             if (onDelete != null)
               Positioned(
@@ -959,8 +954,8 @@ class _BusinessProductsScreenState
     final tone = isActive == null
         ? AppStatusTone.neutral
         : isActive
-            ? AppStatusTone.success
-            : AppStatusTone.warning;
+        ? AppStatusTone.success
+        : AppStatusTone.warning;
     // WHY: Use centralized badge colors so chips adapt to theme modes.
     final badge = AppStatusBadgeColors.fromTheme(theme: theme, tone: tone);
 
@@ -974,9 +969,9 @@ class _BusinessProductsScreenState
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: badge.foreground,
-              fontWeight: FontWeight.w600,
-            ),
+          color: badge.foreground,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -999,9 +994,9 @@ class _BusinessProductsScreenState
       child: Text(
         label,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: badge.foreground,
-              fontWeight: FontWeight.w600,
-            ),
+          color: badge.foreground,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -1023,17 +1018,16 @@ class _BusinessProductsScreenState
               children: [
                 Text(
                   "Archived view",
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   "Show inactive items only",
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: colorScheme.onSurfaceVariant),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -1054,10 +1048,7 @@ class _BusinessProductsScreenState
     );
   }
 
-  Widget _buildSummaryCard(
-    BusinessAnalyticsSummary summary, {
-    String? helper,
-  }) {
+  Widget _buildSummaryCard(BusinessAnalyticsSummary summary, {String? helper}) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1080,8 +1071,8 @@ class _BusinessProductsScreenState
             Text(
               helper,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 10),
           ],
@@ -1106,7 +1097,7 @@ class _BusinessProductsScreenState
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           // WHY: Surface variants keep stat bubbles readable in all modes.
-          color: colorScheme.surfaceVariant,
+          color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -1115,16 +1106,16 @@ class _BusinessProductsScreenState
             Text(
               label,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 6),
             Text(
               value,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
           ],
         ),

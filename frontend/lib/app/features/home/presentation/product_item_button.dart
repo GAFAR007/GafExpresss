@@ -14,6 +14,7 @@
 /// DEBUGGING:
 /// - Logs build and tap with product id (safe only).
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 
@@ -88,7 +89,7 @@ class ProductItemButton extends StatelessWidget {
                     return Container(
                       width: 64,
                       height: 64,
-                      color: scheme.surfaceVariant,
+                      color: scheme.surfaceContainerHighest,
                       child: Icon(
                         Icons.image_not_supported,
                         color: scheme.onSurfaceVariant,

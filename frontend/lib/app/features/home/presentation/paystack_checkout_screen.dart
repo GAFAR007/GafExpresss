@@ -14,6 +14,7 @@
 /// DEBUGGING:
 /// - Logs build, page start/finish, navigation, errors, and button taps.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';

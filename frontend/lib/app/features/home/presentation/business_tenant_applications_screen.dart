@@ -39,7 +39,7 @@ class _BusinessTenantApplicationsScreenState
     extends ConsumerState<BusinessTenantApplicationsScreen> {
   // WHY: Filters live in state so list refreshes when a chip is tapped.
   String _statusFilter = 'all';
-  int _page = 1;
+  final int _page = 1;
   static const int _limit = 10;
 
   void _logTap(String action, {Map<String, dynamic>? extra}) {
@@ -60,11 +60,7 @@ class _BusinessTenantApplicationsScreenState
   }
 
   Map<String, int> _countByStatus(List<BusinessTenantApplication> apps) {
-    final counts = {
-      "pending": 0,
-      "approved": 0,
-      "rejected": 0,
-    };
+    final counts = {"pending": 0, "approved": 0, "rejected": 0};
     for (final app in apps) {
       final key = app.status.toLowerCase();
       if (counts.containsKey(key)) {
@@ -119,7 +115,9 @@ class _BusinessTenantApplicationsScreenState
               return;
             }
             // WHY: Scoped lists usually come from assets; otherwise go dashboard.
-            context.go(isEstateScoped ? '/business-assets' : '/business-dashboard');
+            context.go(
+              isEstateScoped ? '/business-assets' : '/business-dashboard',
+            );
           },
         ),
         actions: [
@@ -143,8 +141,10 @@ class _BusinessTenantApplicationsScreenState
             final counts = _countByStatus(apps);
             final estateName = apps
                 .map((app) => app.estate?.name)
-                .firstWhere((name) => name != null && name.isNotEmpty,
-                    orElse: () => null);
+                .firstWhere(
+                  (name) => name != null && name.isNotEmpty,
+                  orElse: () => null,
+                );
 
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -163,10 +163,7 @@ class _BusinessTenantApplicationsScreenState
                   },
                 ),
                 const SizedBox(height: 12),
-                _ResultsMeta(
-                  showing: apps.length,
-                  total: result.total,
-                ),
+                _ResultsMeta(showing: apps.length, total: result.total),
                 const SizedBox(height: 16),
                 if (apps.isEmpty)
                   const _EmptyState(text: "No tenant applications yet")
@@ -247,7 +244,7 @@ class _EstateScopeBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
@@ -317,7 +314,7 @@ class _StatusFilterRow extends StatelessWidget {
           ),
           onSelected: (_) => onSelected(chip.value),
           selectedColor: theme.colorScheme.secondaryContainer,
-          backgroundColor: theme.colorScheme.surfaceVariant,
+          backgroundColor: theme.colorScheme.surfaceContainerHighest,
           labelStyle: theme.textTheme.bodySmall?.copyWith(
             color: isActive
                 ? theme.colorScheme.onSecondaryContainer
@@ -376,8 +373,10 @@ class _TenantApplicationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final badgeColors =
-        AppStatusBadgeColors.fromTheme(theme: theme, tone: statusTone);
+    final badgeColors = AppStatusBadgeColors.fromTheme(
+      theme: theme,
+      tone: statusTone,
+    );
     final rentLabel = formatNgn(application.rentAmount);
     final unitLabel = "${application.unitCount} x ${application.unitType}";
 
@@ -402,8 +401,10 @@ class _TenantApplicationCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: badgeColors.background,
                   borderRadius: BorderRadius.circular(999),
@@ -465,7 +466,7 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -489,7 +490,7 @@ class _EmptyState extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Center(child: Text(text)),

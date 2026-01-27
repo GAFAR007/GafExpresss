@@ -8,6 +8,7 @@
 ///
 /// HOW:
 /// - Uses Platform.isAndroid / Platform.isIOS.
+library;
 import 'dart:io' show Platform;
 
 const bool platformIsWeb = false;

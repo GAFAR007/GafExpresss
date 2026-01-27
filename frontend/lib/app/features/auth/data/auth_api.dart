@@ -18,6 +18,7 @@
 /// DEBUGGING:
 /// - Logs start/end for each call.
 /// - Never logs passwords or tokens.
+library;
 
 import 'package:dio/dio.dart';
 
@@ -124,9 +125,7 @@ class AuthApi {
     try {
       final resp = await _dio.get(
         "/auth/admin-test",
-        options: Options(
-          headers: {"Authorization": "Bearer $token"},
-        ),
+        options: Options(headers: {"Authorization": "Bearer $token"}),
       );
 
       final isAdmin = resp.statusCode == 200;

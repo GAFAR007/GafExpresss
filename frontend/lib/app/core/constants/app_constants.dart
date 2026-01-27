@@ -15,6 +15,7 @@
 ///
 /// DEBUGGING:
 /// - We will print the chosen baseUrl on app boot so you ALWAYS know what it is.
+library;
 
 import 'package:frontend/app/core/platform/platform_info.dart';
 

@@ -11,6 +11,7 @@
 /// - Renders a title on the left and an action button on the right.
 /// - Parent provides the tap handler for logging/navigation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

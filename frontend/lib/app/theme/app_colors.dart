@@ -11,6 +11,7 @@
 /// HOW IT WORKS:
 /// - AppTheme reads these constants to build ThemeData.
 /// - Widgets never hardcode colors; they reference AppColors.
+library;
 
 import 'package:flutter/material.dart';
 

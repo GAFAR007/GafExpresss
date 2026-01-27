@@ -291,7 +291,7 @@ STOP immediately if:
 
 - folder renames are required
 - file placement is unclear
-- more than 50 lines are about to be written
+- more than 500 lines are about to be written
 - behaviour is ambiguous
 
 Ask for clarification instead of guessing.

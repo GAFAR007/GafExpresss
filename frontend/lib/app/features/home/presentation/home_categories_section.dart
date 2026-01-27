@@ -11,6 +11,7 @@
 /// - Uses a horizontal list of category pills with icons.
 /// - Parent provides tap handling for logging/navigation.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

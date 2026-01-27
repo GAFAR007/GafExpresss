@@ -133,7 +133,7 @@ class NinIdCard extends StatelessWidget {
                   width: 74,
                   height: 74,
                   decoration: BoxDecoration(
-                    color: scheme.surfaceVariant,
+                    color: scheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: scheme.outlineVariant),
                     image: hasProfileImage

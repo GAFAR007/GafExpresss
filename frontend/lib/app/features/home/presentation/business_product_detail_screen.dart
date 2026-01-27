@@ -314,7 +314,7 @@ class _BusinessProductDetailScreenState
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     // WHY: Use surface tokens for audit block contrast.
-                    color: colorScheme.surfaceVariant,
+                    color: colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: colorScheme.outlineVariant),
                   ),

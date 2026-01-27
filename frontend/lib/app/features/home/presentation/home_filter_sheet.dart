@@ -11,6 +11,7 @@
 /// - Holds local state for switches and radios.
 /// - Returns HomeFilterOptions on Apply.
 /// ------------------------------------------------------------
+library;
 
 import 'package:flutter/material.dart';
 

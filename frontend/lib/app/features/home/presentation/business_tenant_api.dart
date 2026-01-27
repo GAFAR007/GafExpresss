@@ -143,6 +143,84 @@ class BusinessTenantApi {
     return application;
   }
 
+  /// ------------------------------------------------------
+  /// VERIFY CONTACT (REFERENCE/GUARANTOR)
+  /// ------------------------------------------------------
+  Future<BusinessTenantApplication> verifyTenantContact({
+    required String? token,
+    required String applicationId,
+    required String type,
+    required int index,
+    required String status,
+    String? note,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "verifyTenantContact() start",
+      extra: {
+        "applicationId": applicationId,
+        "type": type,
+        "index": index,
+        "status": status,
+        "hasNote": note != null && note.trim().isNotEmpty,
+      },
+    );
+
+    final resp = await _dio.post(
+      "/business/tenant/applications/$applicationId/verify-contact",
+      data: {
+        "type": type,
+        "index": index,
+        "status": status,
+        if (note != null && note.trim().isNotEmpty) "note": note.trim(),
+      },
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final appMap = (data["application"] ?? {}) as Map<String, dynamic>;
+    final application = BusinessTenantApplication.fromJson(appMap);
+
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "verifyTenantContact() success",
+      extra: {"applicationId": application.id},
+    );
+
+    return application;
+  }
+
+  /// ------------------------------------------------------
+  /// APPROVE TENANT APPLICATION
+  /// ------------------------------------------------------
+  Future<BusinessTenantApplication> approveTenantApplication({
+    required String? token,
+    required String applicationId,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "approveTenantApplication() start",
+      extra: {"applicationId": applicationId},
+    );
+
+    final resp = await _dio.post(
+      "/business/tenant/applications/$applicationId/approve",
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final appMap = (data["application"] ?? {}) as Map<String, dynamic>;
+    final application = BusinessTenantApplication.fromJson(appMap);
+
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "approveTenantApplication() success",
+      extra: {"applicationId": application.id},
+    );
+
+    return application;
+  }
+
   int _parseInt(dynamic value, {required int fallback}) {
     if (value == null) return fallback;
     if (value is int) return value;

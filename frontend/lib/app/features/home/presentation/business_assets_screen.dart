@@ -60,11 +60,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
     AppDebug.log("BUSINESS_ASSETS", "build()");
 
     final statusFilter = ref.watch(businessAssetStatusFilterProvider);
-    final query = BusinessAssetsQuery(
-      status: statusFilter,
-      page: 1,
-      limit: 20,
-    );
+    final query = BusinessAssetsQuery(status: statusFilter, page: 1, limit: 20);
     final assetsAsync = ref.watch(businessAssetsProvider(query));
     final summaryAsync = ref.watch(businessAssetSummaryProvider);
 
@@ -122,9 +118,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                   onTap: (value) {
                     _logTap("filter_change", extra: {"status": value});
                     final next = value == "all" ? null : value;
-                    ref
-                        .read(businessAssetStatusFilterProvider.notifier)
-                        .state = next;
+                    ref.read(businessAssetStatusFilterProvider.notifier).state =
+                        next;
                   },
                 ),
                 const SizedBox(height: 12),
@@ -202,7 +197,11 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
   }
 
   void _handleNavTap(BuildContext context, int index) {
-    AppDebug.log("BUSINESS_ASSETS", "Bottom nav tapped", extra: {"index": index});
+    AppDebug.log(
+      "BUSINESS_ASSETS",
+      "Bottom nav tapped",
+      extra: {"index": index},
+    );
     switch (index) {
       case 0:
         context.go('/home');
@@ -344,13 +343,16 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
 
     var selectedType = asset?.assetType ?? 'equipment';
     var selectedOwnership = asset?.ownershipType ?? 'owned';
-    var selectedAssetClass = asset?.assetClass ?? assetClassForType(selectedType);
+    var selectedAssetClass =
+        asset?.assetClass ?? assetClassForType(selectedType);
     var selectedStatus = asset?.status ?? 'active';
     var selectedLeasePeriod = asset?.leaseCostPeriod ?? 'monthly';
     var selectedManagementPeriod = asset?.managementFeePeriod ?? 'monthly';
 
     final unitMixRows = <_UnitMixControllers>[
-      ...?asset?.estate?.unitMix.map((unit) => _UnitMixControllers.fromUnit(unit)),
+      ...?asset?.estate?.unitMix.map(
+        (unit) => _UnitMixControllers.fromUnit(unit),
+      ),
     ];
 
     // WHY: Estate assets require at least one unit definition.
@@ -358,7 +360,10 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
       unitMixRows.add(_UnitMixControllers.empty());
     }
 
-    _logTap("asset_form_open", extra: {"mode": asset == null ? "create" : "edit"});
+    _logTap(
+      "asset_form_open",
+      extra: {"mode": asset == null ? "create" : "edit"},
+    );
 
     final payload = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
@@ -381,19 +386,22 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                     children: [
                       Text(
                         asset == null ? "New asset" : "Edit asset",
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: nameCtrl,
-                        decoration: const InputDecoration(labelText: "Asset name"),
+                        decoration: const InputDecoration(
+                          labelText: "Asset name",
+                        ),
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: selectedType,
-                        decoration: const InputDecoration(labelText: "Asset type"),
+                        initialValue: selectedType,
+                        decoration: const InputDecoration(
+                          labelText: "Asset type",
+                        ),
                         items: assetTypeOptions
                             .map(
                               (option) => DropdownMenuItem(
@@ -413,7 +421,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: selectedOwnership,
+                        initialValue: selectedOwnership,
                         decoration: const InputDecoration(
                           labelText: "Ownership type",
                         ),
@@ -432,7 +440,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: selectedAssetClass,
+                        initialValue: selectedAssetClass,
                         decoration: const InputDecoration(
                           labelText: "Asset class",
                         ),
@@ -458,7 +466,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: selectedStatus,
+                        initialValue: selectedStatus,
                         decoration: const InputDecoration(labelText: "Status"),
                         items: _statusOptions
                             .map(
@@ -483,7 +491,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       const SizedBox(height: 12),
                       TextField(
                         controller: locationCtrl,
-                        decoration: const InputDecoration(labelText: "Location"),
+                        decoration: const InputDecoration(
+                          labelText: "Location",
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
@@ -500,9 +510,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       )) ...[
                         Text(
                           "Fixed asset details",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         TextField(
@@ -540,9 +549,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       if (requiresLeaseFields(selectedOwnership)) ...[
                         Text(
                           "Lease details",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         TextField(
@@ -568,7 +576,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
-                          value: selectedLeasePeriod,
+                          initialValue: selectedLeasePeriod,
                           decoration: const InputDecoration(
                             labelText: "Lease cost period",
                           ),
@@ -605,9 +613,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       if (requiresManagementFields(selectedOwnership)) ...[
                         Text(
                           "Management fees",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         TextField(
@@ -619,7 +626,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
-                          value: selectedManagementPeriod,
+                          initialValue: selectedManagementPeriod,
                           decoration: const InputDecoration(
                             labelText: "Fee period",
                           ),
@@ -633,7 +640,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                               .toList(),
                           onChanged: (value) {
                             if (value == null) return;
-                            setSheetState(() => selectedManagementPeriod = value);
+                            setSheetState(
+                              () => selectedManagementPeriod = value,
+                            );
                           },
                         ),
                         const SizedBox(height: 12),
@@ -656,9 +665,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       if (isInventoryType(selectedType)) ...[
                         Text(
                           "Inventory snapshot",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         TextField(
@@ -696,9 +704,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                       if (isEstateType(selectedType)) ...[
                         Text(
                           "Estate details",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         TextField(
@@ -710,7 +717,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: estateStreetCtrl,
-                          decoration: const InputDecoration(labelText: "Street"),
+                          decoration: const InputDecoration(
+                            labelText: "Street",
+                          ),
                         ),
                         const SizedBox(height: 12),
                         TextField(
@@ -746,9 +755,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 16),
                         Text(
                           "Unit mix",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         ...unitMixRows.asMap().entries.map((entry) {
@@ -762,9 +770,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                 color: Theme.of(context).colorScheme.surface,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.outlineVariant,
                                 ),
                               ),
                               child: Column(
@@ -822,7 +830,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                   ),
                                   const SizedBox(height: 12),
                                   DropdownButtonFormField<String>(
-                                    value: row.rentPeriod,
+                                    initialValue: row.rentPeriod,
                                     decoration: const InputDecoration(
                                       labelText: "Rent period",
                                     ),
@@ -836,7 +844,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                         .toList(),
                                     onChanged: (value) {
                                       if (value == null) return;
-                                      setSheetState(() => row.rentPeriod = value);
+                                      setSheetState(
+                                        () => row.rentPeriod = value,
+                                      );
                                     },
                                   ),
                                 ],
@@ -860,9 +870,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 16),
                         Text(
                           "Tenant rules",
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -915,9 +924,12 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 8),
                         Text(
                           "Tenants must be NIN verified and sign agreements before payment.",
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
                         ),
                         const SizedBox(height: 16),
                       ],
@@ -998,7 +1010,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                   }
                                 }
 
-                                if (requiresManagementFields(selectedOwnership)) {
+                                if (requiresManagementFields(
+                                  selectedOwnership,
+                                )) {
                                   final fee = _parseDoubleInput(
                                     managementFeeCtrl.text,
                                   );
@@ -1087,51 +1101,59 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                   "managementFeeAmount": _parseDoubleInput(
                                     managementFeeCtrl.text,
                                   ),
-                                  "managementFeePeriod": selectedManagementPeriod,
+                                  "managementFeePeriod":
+                                      selectedManagementPeriod,
                                   "clientName": clientNameCtrl.text.trim(),
                                   "serviceTerms": serviceTermsCtrl.text.trim(),
                                 };
 
                                 if (isInventoryType(selectedType)) {
                                   payload["inventory"] = {
-                                    "quantity": _parseIntInput(
-                                          inventoryQtyCtrl.text,
-                                        ) ??
+                                    "quantity":
+                                        _parseIntInput(inventoryQtyCtrl.text) ??
                                         0,
-                                    "unitCost": _parseDoubleInput(
+                                    "unitCost":
+                                        _parseDoubleInput(
                                           inventoryUnitCostCtrl.text,
                                         ) ??
                                         0,
-                                    "reorderLevel": _parseIntInput(
+                                    "reorderLevel":
+                                        _parseIntInput(
                                           inventoryReorderCtrl.text,
                                         ) ??
                                         0,
-                                    "unitOfMeasure": inventoryUnitCtrl.text.trim(),
+                                    "unitOfMeasure": inventoryUnitCtrl.text
+                                        .trim(),
                                   };
                                 }
 
                                 if (isEstateType(selectedType)) {
                                   payload["estate"] = {
                                     "propertyAddress": {
-                                      "houseNumber": estateHouseCtrl.text.trim(),
+                                      "houseNumber": estateHouseCtrl.text
+                                          .trim(),
                                       "street": estateStreetCtrl.text.trim(),
                                       "city": estateCityCtrl.text.trim(),
                                       "state": estateStateCtrl.text.trim(),
-                                      "postalCode": estatePostalCtrl.text.trim(),
+                                      "postalCode": estatePostalCtrl.text
+                                          .trim(),
                                       "lga": estateLgaCtrl.text.trim(),
-                                      "landmark": estateLandmarkCtrl.text.trim(),
+                                      "landmark": estateLandmarkCtrl.text
+                                          .trim(),
                                       "country": "Nigeria",
                                     },
                                     "unitMix": unitMixRows
                                         .map(
                                           (row) => {
-                                            "unitType":
-                                                row.unitTypeCtrl.text.trim(),
-                                            "count": _parseIntInput(
+                                            "unitType": row.unitTypeCtrl.text
+                                                .trim(),
+                                            "count":
+                                                _parseIntInput(
                                                   row.countCtrl.text,
                                                 ) ??
                                                 0,
-                                            "rentAmount": _parseDoubleInput(
+                                            "rentAmount":
+                                                _parseDoubleInput(
                                                   row.rentAmountCtrl.text,
                                                 ) ??
                                                 0,
@@ -1140,19 +1162,23 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                         )
                                         .toList(),
                                     "tenantRules": {
-                                      "referencesMin": _parseIntInput(
+                                      "referencesMin":
+                                          _parseIntInput(
                                             referencesMinCtrl.text,
                                           ) ??
                                           1,
-                                      "referencesMax": _parseIntInput(
+                                      "referencesMax":
+                                          _parseIntInput(
                                             referencesMaxCtrl.text,
                                           ) ??
                                           2,
-                                      "guarantorsMin": _parseIntInput(
+                                      "guarantorsMin":
+                                          _parseIntInput(
                                             guarantorsMinCtrl.text,
                                           ) ??
                                           1,
-                                      "guarantorsMax": _parseIntInput(
+                                      "guarantorsMax":
+                                          _parseIntInput(
                                             guarantorsMaxCtrl.text,
                                           ) ??
                                           2,
@@ -1273,9 +1299,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
         extra: {"error": e.toString()},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Unable to save asset")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Unable to save asset")));
     } finally {
       if (mounted) {
         setState(() {
@@ -1333,9 +1359,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
       ref.invalidate(businessAssetSummaryProvider);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Asset archived")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Asset archived")));
     } catch (e) {
       AppDebug.log(
         "BUSINESS_ASSETS",
@@ -1343,9 +1369,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
         extra: {"error": e.toString()},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Unable to archive asset")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Unable to archive asset")));
     } finally {
       if (mounted) {
         setState(() {
@@ -1372,7 +1398,7 @@ class _AssetsSummaryHeader extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
-          colors: [scheme.surface, scheme.surfaceVariant],
+          colors: [scheme.surface, scheme.surfaceContainerHighest],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -1400,14 +1426,8 @@ class _AssetsSummaryHeader extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               children: [
-                _MetricChip(
-                  label: "Total",
-                  value: summary.total.toString(),
-                ),
-                _MetricChip(
-                  label: "Active",
-                  value: summary.active.toString(),
-                ),
+                _MetricChip(label: "Total", value: summary.total.toString()),
+                _MetricChip(label: "Active", value: summary.active.toString()),
                 _MetricChip(
                   label: "Maintenance",
                   value: summary.maintenance.toString(),
@@ -1522,14 +1542,10 @@ class _StatusFilterRow extends StatelessWidget {
           ),
         ],
       ),
-      loading: () => Text(
-        "Loading status filters...",
-        style: theme.textTheme.bodySmall,
-      ),
-      error: (_, __) => Text(
-        "Unable to load filters",
-        style: theme.textTheme.bodySmall,
-      ),
+      loading: () =>
+          Text("Loading status filters...", style: theme.textTheme.bodySmall),
+      error: (_, __) =>
+          Text("Unable to load filters", style: theme.textTheme.bodySmall),
     );
   }
 }
@@ -1691,14 +1707,14 @@ class _AssetCard extends StatelessWidget {
                             asset.serialNumber!.isNotEmpty)
                           _Pill(
                             label: "SN ${asset.serialNumber}",
-                            background: scheme.surfaceVariant,
+                            background: scheme.surfaceContainerHighest,
                             foreground: scheme.onSurfaceVariant,
                           ),
                         if (asset.location != null &&
                             asset.location!.isNotEmpty)
                           _Pill(
                             label: asset.location!,
-                            background: scheme.surfaceVariant,
+                            background: scheme.surfaceContainerHighest,
                             foreground: scheme.onSurfaceVariant,
                           ),
                       ],
