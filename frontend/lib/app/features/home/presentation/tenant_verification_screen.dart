@@ -21,11 +21,17 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/constants/app_constants.dart';
+import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
+import 'package:frontend/app/features/home/presentation/business_tenant_model.dart'
+    as business_tenant;
+import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_model.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_providers.dart';
 
@@ -48,6 +54,7 @@ class _TenantVerificationScreenState
 
   bool _agreementSigned = false;
   bool _isSubmitting = false;
+  bool _isPaying = false;
   String? _selectedUnitType;
   String? _selectedRentPeriod;
   String? _lastRulesKey;
@@ -245,6 +252,111 @@ class _TenantVerificationScreenState
     }
   }
 
+  Future<void> _startTenantPayment({
+    required business_tenant.BusinessTenantApplication application,
+  }) async {
+    if (_isPaying) {
+      _log("pay_skip_busy");
+      return;
+    }
+
+    _log("pay_tap", extra: {"status": application.status});
+
+    final session = ref.read(authSessionProvider);
+    if (session == null) {
+      _log("pay_block_missing_session");
+      _showMessage("Session expired. Please sign in again.");
+      return;
+    }
+
+    setState(() => _isPaying = true);
+
+    try {
+      final api = ref.read(tenantVerificationApiProvider);
+      _log(
+        "pay_intent_request",
+        extra: {"tenantId": session.user.id},
+      );
+
+      final data = await api.createTenantPaymentIntent(
+        token: session.token,
+        tenantId: session.user.id,
+      );
+
+      final authorizationUrl =
+          data["authorizationUrl"]?.toString().trim() ?? "";
+      final reference = data["reference"]?.toString().trim() ?? "";
+
+      if (authorizationUrl.isEmpty) {
+        throw Exception("Payment authorization URL missing");
+      }
+
+      final callbackUrl = _buildCallbackUrl();
+      if (callbackUrl == null || callbackUrl.isEmpty) {
+        throw Exception("Paystack callback URL not configured");
+      }
+
+      await _openPaystack(
+        authorizationUrl: authorizationUrl,
+        callbackUrl: callbackUrl,
+      );
+
+      _log(
+        "pay_intent_opened",
+        extra: {"hasReference": reference.isNotEmpty},
+      );
+    } catch (error) {
+      final message = _extractErrorMessage(error);
+      _log("pay_intent_fail", extra: {"error": message});
+      _showMessage(message);
+    } finally {
+      if (mounted) setState(() => _isPaying = false);
+    }
+  }
+
+  Future<void> _openPaystack({
+    required String authorizationUrl,
+    required String callbackUrl,
+  }) async {
+    if (PlatformInfo.isWeb) {
+      final uri = Uri.parse(authorizationUrl);
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.platformDefault,
+        webOnlyWindowName: "_self",
+      );
+
+      if (!launched) {
+        throw Exception("Failed to open Paystack");
+      }
+
+      return;
+    }
+
+    _log("paystack_nav");
+
+    if (!mounted) return;
+    await context.push(
+      "/paystack",
+      extra: PaystackCheckoutArgs(
+        authorizationUrl: authorizationUrl,
+        callbackUrl: callbackUrl,
+      ),
+    );
+  }
+
+  String? _buildCallbackUrl() {
+    if (PlatformInfo.isWeb) {
+      return "${Uri.base.origin}/payment-success";
+    }
+
+    if (AppConstants.paystackCallbackBaseUrl.isEmpty) {
+      return null;
+    }
+
+    return "${AppConstants.paystackCallbackBaseUrl}/payment-success";
+  }
+
   String _extractErrorMessage(Object error) {
     if (error is DioException) {
       final data = error.response?.data;
@@ -285,6 +397,8 @@ class _TenantVerificationScreenState
 
     final profileAsync = ref.watch(userProfileProvider);
     final estateAsync = ref.watch(tenantEstateProvider);
+    final applicationAsync = ref.watch(tenantApplicationProvider);
+    final application = applicationAsync.asData?.value;
 
     return Scaffold(
       appBar: AppBar(
@@ -306,6 +420,7 @@ class _TenantVerificationScreenState
           _log("refresh_tap");
           ref.invalidate(tenantEstateProvider);
           ref.invalidate(userProfileProvider);
+          ref.invalidate(tenantApplicationProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -314,6 +429,15 @@ class _TenantVerificationScreenState
               _AdminViewNote(role: role),
               const SizedBox(height: 12),
             ],
+            applicationAsync.when(
+              data: (application) =>
+                  _buildTenantStatusCard(application: application),
+              loading: () =>
+                  const _InlineLoader(label: "Loading tenant status..."),
+              error: (error, _) =>
+                  Text("Status error: ${_extractErrorMessage(error)}"),
+            ),
+            const SizedBox(height: 16),
             profileAsync.when(
               data: (profile) {
                 if (profile == null) {
@@ -331,12 +455,24 @@ class _TenantVerificationScreenState
                 final rules = estate.tenantRules;
                 _syncContactLists(rules);
 
+                final status = application?.status ?? "";
+                final showForm = application == null ||
+                    status == "pending" ||
+                    status == "rejected";
+
                 _selectedUnitType ??= estate.unitMix.isNotEmpty
                     ? estate.unitMix.first.unitType
                     : null;
                 _selectedRentPeriod ??= estate.unitMix.isNotEmpty
                     ? estate.unitMix.first.rentPeriod
                     : null;
+
+                if (!showForm) {
+                  return _buildEstateSummary(
+                    estate: estate,
+                    application: application,
+                  );
+                }
 
                 return _buildEstateForm(estate, rules);
               },
@@ -347,6 +483,164 @@ class _TenantVerificationScreenState
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTenantStatusCard({
+    required business_tenant.BusinessTenantApplication? application,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    if (application == null) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(
+          "No tenant application yet. Complete the form below.",
+          style: textTheme.bodyMedium,
+        ),
+      );
+    }
+
+    final status = application.status;
+    final paymentStatus = application.paymentStatus;
+    final isApproved = status == "approved";
+    final isActive = status == "active";
+    final isRejected = status == "rejected";
+
+    final title = isActive
+        ? "Tenant active"
+        : isApproved
+        ? "Approved — payment required"
+        : isRejected
+        ? "Application rejected"
+        : "Application pending";
+
+    final subtitle = isActive
+        ? "Your rent payment is confirmed."
+        : isApproved
+        ? "Pay the rent to activate your tenancy."
+        : isRejected
+        ? "You can submit a new application."
+        : "We are reviewing your references and guarantors.";
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _StatusChip(status: status),
+              const SizedBox(width: 8),
+              Text(title, style: textTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ReadOnlyRow(label: "Unit", value: application.unitType),
+          _ReadOnlyRow(
+            label: "Rent",
+            value:
+                "${_formatRent(application.rentAmount)} / ${application.rentPeriod}",
+          ),
+          _ReadOnlyRow(
+            label: "Move-in",
+            value: application.moveInDate == null
+                ? "Not set"
+                : _formatDate(application.moveInDate!),
+          ),
+          if (isApproved && paymentStatus != "paid") ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isPaying
+                    ? null
+                    : () => _startTenantPayment(application: application),
+                child: _isPaying
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text("Pay rent"),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEstateSummary({
+    required TenantEstate estate,
+    required business_tenant.BusinessTenantApplication? application,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text("Estate details", style: textTheme.titleMedium),
+        const SizedBox(height: 6),
+        Text(
+          estate.name.isEmpty ? "Assigned estate" : estate.name,
+          style: textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 12),
+        _ReadOnlyRow(
+          label: "Unit mix",
+          value: estate.unitMix.isEmpty
+              ? "No units configured"
+              : "${estate.unitMix.length} types",
+        ),
+        if (application != null) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("Your selection", style: textTheme.titleSmall),
+                const SizedBox(height: 8),
+                _ReadOnlyRow(label: "Unit", value: application.unitType),
+                _ReadOnlyRow(
+                  label: "Rent",
+                  value:
+                      "${_formatRent(application.rentAmount)} / ${application.rentPeriod}",
+                ),
+                _ReadOnlyRow(
+                  label: "Move-in",
+                  value: application.moveInDate == null
+                      ? "Not set"
+                      : _formatDate(application.moveInDate!),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -436,7 +730,7 @@ class _TenantVerificationScreenState
         Text("Select unit", style: textTheme.titleSmall),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _selectedUnitType,
+          initialValue: _selectedUnitType,
           decoration: const InputDecoration(labelText: "Unit type"),
           items: unitMix
               .map(
@@ -466,7 +760,7 @@ class _TenantVerificationScreenState
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
-          value: _selectedRentPeriod,
+          initialValue: _selectedRentPeriod,
           decoration: const InputDecoration(labelText: "Rent period"),
           items: rentPeriods
               .map(
@@ -712,6 +1006,37 @@ class _ContactRow extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final String status;
+
+  const _StatusChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    final label = status.isEmpty
+        ? "unknown"
+        : status.replaceAll('_', ' ').toUpperCase();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: textTheme.labelSmall?.copyWith(
+          color: colorScheme.onSecondaryContainer,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

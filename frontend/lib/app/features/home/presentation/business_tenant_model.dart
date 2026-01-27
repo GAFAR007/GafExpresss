@@ -18,14 +18,35 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 class TenantContact {
   final String name;
   final String? phone;
+  final String status;
+  final bool isVerified;
+  final DateTime? verifiedAt;
+  final String? note;
 
-  const TenantContact({required this.name, required this.phone});
+  const TenantContact({
+    required this.name,
+    required this.phone,
+    required this.status,
+    required this.isVerified,
+    required this.verifiedAt,
+    required this.note,
+  });
 
   factory TenantContact.fromJson(Map<String, dynamic> json) {
     return TenantContact(
       name: (json['name'] ?? '').toString(),
       phone: (json['phone'] ?? '').toString(),
+      status: (json['status'] ?? 'pending').toString(),
+      isVerified: (json['isVerified'] ?? false) as bool,
+      verifiedAt: _toDate(json['verifiedAt']),
+      note: (json['note'] ?? '').toString(),
     );
+  }
+
+  static DateTime? _toDate(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    return DateTime.tryParse(value.toString());
   }
 }
 
@@ -205,6 +226,8 @@ class BusinessTenantApplication {
   final List<TenantContact> guarantors;
   final bool agreementSigned;
   final TenantRulesSnapshot tenantRulesSnapshot;
+  final String paymentStatus;
+  final DateTime? paidAt;
   final DateTime? reviewedAt;
   final String? reviewedBy;
   final String? reviewNotes;
@@ -226,6 +249,8 @@ class BusinessTenantApplication {
     required this.guarantors,
     required this.agreementSigned,
     required this.tenantRulesSnapshot,
+    required this.paymentStatus,
+    required this.paidAt,
     required this.reviewedAt,
     required this.reviewedBy,
     required this.reviewNotes,
@@ -290,6 +315,8 @@ class BusinessTenantApplication {
       guarantors: guarantors,
       agreementSigned: (json['agreementSigned'] ?? false) as bool,
       tenantRulesSnapshot: tenantRulesSnapshot,
+      paymentStatus: (json['paymentStatus'] ?? 'unpaid').toString(),
+      paidAt: _parseDate(json['paidAt']),
       reviewedAt: _parseDate(json['reviewedAt']),
       reviewedBy: (json['reviewedBy'] ?? '').toString(),
       reviewNotes: (json['reviewNotes'] ?? '').toString(),

@@ -202,4 +202,36 @@ class TenantVerificationApi {
 
     return data;
   }
+
+  /// ------------------------------------------------------
+  /// CREATE TENANT PAYMENT INTENT
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> createTenantPaymentIntent({
+    required String? token,
+    required String tenantId,
+  }) async {
+    AppDebug.log(
+      "TENANT_API",
+      "createTenantPaymentIntent() start",
+      extra: {"tenantId": tenantId},
+    );
+
+    final resp = await _dio.post(
+      "/business/tenants/$tenantId/payment-intent",
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    AppDebug.log(
+      "TENANT_API",
+      "createTenantPaymentIntent() success",
+      extra: {
+        "tenantId": tenantId,
+        "hasAuthUrl": data["authorizationUrl"] != null,
+        "hasReference": data["reference"] != null,
+      },
+    );
+
+    return data;
+  }
 }
