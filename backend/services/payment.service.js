@@ -20,6 +20,7 @@
  */
 
 const mongoose = require("mongoose");
+const dayjs = require("dayjs");
 const debug = require("../utils/debug");
 
 const Payment = require("../models/Payment");
@@ -27,6 +28,12 @@ const Order = require("../models/Order");
 const User = require("../models/User");
 const BusinessTenantApplication = require("../models/BusinessTenantApplication");
 const paystackService = require("./paystack.service");
+const {
+  monthsPerPeriod,
+  computeCoversTo,
+  computeMaxPeriodsWithin36Months,
+  periodCountFromYears,
+} = require("../utils/rentCoverage");
 
 // WHY: Keep payment purpose/event strings centralized for audit consistency.
 const PAYMENT_PURPOSES = {
@@ -176,7 +183,8 @@ async function processPaystackEvent(
         debug(
           "PAYMENT SERVICE: Tenant payment missing local record",
           {
-            classification: "MISSING_REQUIRED_FIELD",
+            classification:
+              "MISSING_REQUIRED_FIELD",
             error_code:
               "TENANT_PAYMENT_RECORD_NOT_FOUND",
             step: "VALIDATION_FAIL",
@@ -248,14 +256,15 @@ async function processPaystackEvent(
       }
     }
 
-  // 2) Only apply business effects for success
+    // 2) Only apply business effects for success
     if (!isSuccess) {
       debug(
         "PAYMENT SERVICE: Not a success event, no order updates",
       );
       // WHY: Pending events should not block a later success webhook/verify.
       if (isFailed) {
-        payment.processedAt = new Date();
+        payment.processedAt =
+          new Date();
       }
       await payment.save({ session });
 
@@ -276,9 +285,13 @@ async function processPaystackEvent(
         payment.tenantApplication ||
         tenantApplicationId;
       const resolvedBusinessId =
-        payment.businessId || businessId;
+        payment.businessId ||
+        businessId;
 
-      if (!resolvedApplicationId || !resolvedBusinessId) {
+      if (
+        !resolvedApplicationId ||
+        !resolvedBusinessId
+      ) {
         debug(
           "PAYMENT SERVICE: Tenant payment missing scope metadata",
           {
@@ -293,7 +306,8 @@ async function processPaystackEvent(
               reference.slice(-6),
           },
         );
-        payment.processedAt = new Date();
+        payment.processedAt =
+          new Date();
         await payment.save({ session });
         await session.commitTransaction();
         return {
@@ -308,10 +322,11 @@ async function processPaystackEvent(
         await BusinessTenantApplication.findOne(
           {
             _id: resolvedApplicationId,
-            businessId: resolvedBusinessId,
-            ...(tenantUserId
-              ? { tenantUserId }
-              : {}),
+            businessId:
+              resolvedBusinessId,
+            ...(tenantUserId ?
+              { tenantUserId }
+            : {}),
           },
         ).session(session);
 
@@ -330,7 +345,8 @@ async function processPaystackEvent(
               reference.slice(-6),
           },
         );
-        payment.processedAt = new Date();
+        payment.processedAt =
+          new Date();
         await payment.save({ session });
         await session.commitTransaction();
         return {
@@ -341,11 +357,17 @@ async function processPaystackEvent(
         };
       }
 
-      if (application.status !== "approved") {
+      // WHY: Active tenants can extend coverage; approved tenants can make first payment.
+      if (
+        application.status !==
+          "approved" &&
+        application.status !== "active"
+      ) {
         debug(
           "PAYMENT SERVICE: Tenant not approved for payment",
           {
-            classification: "INVALID_INPUT",
+            classification:
+              "INVALID_INPUT",
             error_code:
               "TENANT_PAYMENT_NOT_APPROVED",
             step: "VALIDATION_FAIL",
@@ -356,26 +378,30 @@ async function processPaystackEvent(
             status: application.status,
           },
         );
-        payment.processedAt = new Date();
+        payment.processedAt =
+          new Date();
         await payment.save({ session });
         await session.commitTransaction();
         return {
           ok: true,
           applied: false,
-          reason:
-            "Tenant not approved",
+          reason: "Tenant not approved",
         };
       }
 
       const expectedCurrency = "NGN";
+      // WHY: Compare against the intent amount stored on the Payment, not the base rent,
+      // because multi-period payments may exceed a single rentAmount.
       const expectedAmount = Number(
-        application.rentAmount || 0,
+        payment.amount || 0,
       );
       const paidAmount = Number(
         amount || 0,
       );
 
-      if (currency !== expectedCurrency) {
+      if (
+        currency !== expectedCurrency
+      ) {
         debug(
           "PAYMENT SERVICE: Tenant payment currency mismatch",
           {
@@ -392,7 +418,8 @@ async function processPaystackEvent(
               application._id,
           },
         );
-        payment.processedAt = new Date();
+        payment.processedAt =
+          new Date();
         await payment.save({ session });
         await session.commitTransaction();
         return {
@@ -403,7 +430,9 @@ async function processPaystackEvent(
         };
       }
 
-      if (paidAmount !== expectedAmount) {
+      if (
+        paidAmount !== expectedAmount
+      ) {
         debug(
           "PAYMENT SERVICE: Tenant payment amount mismatch",
           {
@@ -420,7 +449,8 @@ async function processPaystackEvent(
               application._id,
           },
         );
-        payment.processedAt = new Date();
+        payment.processedAt =
+          new Date();
         await payment.save({ session });
         await session.commitTransaction();
         return {
@@ -442,21 +472,84 @@ async function processPaystackEvent(
       payment.businessId =
         resolvedBusinessId;
 
-      application.paymentStatus = "paid";
-      application.paidAt = new Date();
-      application.status = "active";
+      // WHY: Update rent coverage and promote tenant if this is the first payment.
+      const now = new Date();
+      // Fallback coverage if intent did not store it (safety net).
+      const coverageStart =
+        payment.coversFrom ||
+        (application.paidThroughDate ?
+          dayjs(
+            application.paidThroughDate,
+          )
+            .add(1, "day")
+            .toDate()
+        : application.moveInDate);
+      const coverageEnd =
+        payment.coversTo ||
+        computeCoversTo(
+          coverageStart,
+          payment.periodCount || 1,
+          payment.rentPeriod ||
+            application.rentPeriod,
+        );
+      payment.coversFrom =
+        coverageStart;
+      payment.coversTo = coverageEnd;
+      payment.rentPeriod =
+        payment.rentPeriod ||
+        application.rentPeriod;
+      payment.periodCount =
+        payment.periodCount || 1;
 
-      await application.save({ session });
+      application.paymentStatus =
+        "paid";
+      application.paidAt = now;
+      application.lastRentPaymentAt =
+        now;
+      application.paidThroughDate =
+        coverageEnd ||
+        application.paidThroughDate;
+      if (coverageEnd) {
+        application.nextDueDate = dayjs(
+          coverageEnd,
+        )
+          .add(1, "day")
+          .toDate();
+      }
+      if (
+        application.status ===
+        "approved"
+      ) {
+        application.status = "active";
+      }
+      // WHY: Payment success should finalize agreement status for active tenants.
+      if (application.agreementStatus !== "approved") {
+        application.agreementStatus = "approved";
+        if (!application.agreementAcceptedAt) {
+          // WHY: Preserve a reasonable approval timestamp for audit clarity.
+          application.agreementAcceptedAt = now;
+        }
+        debug(
+          "PAYMENT SERVICE: Agreement auto-approved after payment",
+          { applicationId: application._id },
+        );
+      }
+
+      await application.save({
+        session,
+      });
       await payment.save({ session });
 
       await session.commitTransaction();
 
       await writeAuditLog({
         businessId: resolvedBusinessId,
-        actorId: application.tenantUserId,
+        actorId:
+          application.tenantUserId,
         actorRole: "tenant",
         action: "payment_recorded",
-        entityType: "tenant_application",
+        entityType:
+          "tenant_application",
         entityId: application._id,
         message:
           "Tenant rent payment recorded",
@@ -467,19 +560,23 @@ async function processPaystackEvent(
 
       await writeAnalyticsEvent({
         businessId: resolvedBusinessId,
-        actorId: application.tenantUserId,
+        actorId:
+          application.tenantUserId,
         actorRole: "tenant",
         eventType: "PAYMENT_RECORDED",
-        entityType: "tenant_application",
+        entityType:
+          "tenant_application",
         entityId: application._id,
       });
 
       await writeAuditLog({
         businessId: resolvedBusinessId,
-        actorId: application.tenantUserId,
+        actorId:
+          application.tenantUserId,
         actorRole: "tenant",
         action: "tenant_activated",
-        entityType: "tenant_application",
+        entityType:
+          "tenant_application",
         entityId: application._id,
         message:
           "Tenant activated after rent payment",
@@ -488,10 +585,12 @@ async function processPaystackEvent(
 
       await writeAnalyticsEvent({
         businessId: resolvedBusinessId,
-        actorId: application.tenantUserId,
+        actorId:
+          application.tenantUserId,
         actorRole: "tenant",
         eventType: "TENANT_ACTIVATED",
-        entityType: "tenant_application",
+        entityType:
+          "tenant_application",
         entityId: application._id,
       });
 
@@ -504,7 +603,10 @@ async function processPaystackEvent(
         },
       );
 
-      return { ok: true, applied: true };
+      return {
+        ok: true,
+        applied: true,
+      };
     }
 
     // 3) If no orderId, we cannot safely mark anything paid
@@ -726,6 +828,8 @@ async function createTenantPaymentIntent({
   tenantUserId,
   actorId,
   actorRole,
+  yearsToPay = 1,
+  callbackUrl,
 }) {
   debug(
     "PAYMENT SERVICE: createTenantPaymentIntent - entry",
@@ -735,6 +839,8 @@ async function createTenantPaymentIntent({
       tenantUserId,
       actorId,
       actorRole,
+      yearsToPay,
+      hasCallbackUrl: Boolean(callbackUrl),
     },
   );
 
@@ -763,19 +869,13 @@ async function createTenantPaymentIntent({
     );
   }
 
-  // WHY: Payment is only allowed after business approval.
+  // WHY: First payment requires approval; active tenants can extend coverage.
   if (
-    application.status !== "approved"
+    application.status !== "approved" &&
+    application.status !== "active"
   ) {
     throw new Error(
-      "Tenant must be approved before payment",
-    );
-  }
-  if (
-    application.paymentStatus === "paid"
-  ) {
-    throw new Error(
-      "Tenant rent already paid",
+      "Tenant must be approved or active before payment",
     );
   }
 
@@ -792,6 +892,7 @@ async function createTenantPaymentIntent({
     );
   }
 
+  // WHY: Rent amounts are stored in kobo; Paystack expects minor units.
   const amountMinor = Number(
     application.rentAmount || 0,
   );
@@ -799,10 +900,88 @@ async function createTenantPaymentIntent({
     !Number.isInteger(amountMinor) ||
     amountMinor <= 0
   ) {
+    debug(
+      "PAYMENT SERVICE: Invalid tenant rent amount (expected kobo)",
+      {
+        rentAmount: application.rentAmount,
+        hint: "Normalize rent amounts to kobo before payment.",
+      },
+    );
     throw new Error(
       "Rent amount must be an integer minor unit",
     );
   }
+
+  // WHY: Enforce max 3 successful rent payments per calendar year.
+  const startOfYear = dayjs()
+    .startOf("year")
+    .toDate();
+  const endOfYear = dayjs()
+    .endOf("year")
+    .toDate();
+  const yearlyPaymentsCount =
+    await Payment.countDocuments({
+      purpose:
+        PAYMENT_PURPOSES.TENANT_RENT,
+      tenantApplication:
+        application._id,
+      status: "success",
+      processedAt: {
+        $gte: startOfYear,
+        $lte: endOfYear,
+      },
+    });
+
+  if (yearlyPaymentsCount >= 3) {
+    throw new Error(
+      "Max rent payments reached for this year",
+    );
+  }
+
+  // WHY: Compute coverage start and apply 36-month cap.
+  const coversFrom =
+    application.paidThroughDate ?
+      dayjs(application.paidThroughDate)
+        .add(1, "day")
+        .toDate()
+    : application.moveInDate;
+
+  if (!coversFrom) {
+    throw new Error(
+      "Move-in date or paidThroughDate is required for coverage",
+    );
+  }
+
+  const requestedPeriodCount =
+    periodCountFromYears(
+      application.rentPeriod,
+      yearsToPay,
+    );
+
+  const maxAllowedPeriodCount =
+    computeMaxPeriodsWithin36Months(
+      coversFrom,
+      application.rentPeriod,
+    );
+
+  const approvedPeriodCount = Math.min(
+    requestedPeriodCount || 0,
+    maxAllowedPeriodCount,
+  );
+
+  if (approvedPeriodCount <= 0) {
+    throw new Error(
+      "Maximum prepaid coverage reached",
+    );
+  }
+
+  const approvedAmount =
+    amountMinor * approvedPeriodCount;
+  const coversTo = computeCoversTo(
+    coversFrom,
+    approvedPeriodCount,
+    application.rentPeriod,
+  );
 
   const reference = `tenant_rent_${application._id}_${Date.now()}`;
   const payment = await Payment.create({
@@ -810,18 +989,25 @@ async function createTenantPaymentIntent({
     reference,
     event: PAYMENT_EVENTS.TENANT_INTENT,
     status: "pending",
-    amount: Number(
-      application.rentAmount || 0,
-    ),
+    amount: approvedAmount,
     currency: "NGN",
     user: tenantUserId,
     tenantApplication: application._id,
     businessId,
     purpose:
       PAYMENT_PURPOSES.TENANT_RENT,
+    coversFrom,
+    coversTo,
+    rentPeriod: application.rentPeriod,
+    periodCount: approvedPeriodCount,
     rawEvent: {
       source:
         PAYMENT_EVENTS.TENANT_INTENT,
+      requestedYearsToPay: yearsToPay,
+      approvedPeriodCount,
+      autoReduced:
+        approvedPeriodCount !==
+        requestedPeriodCount,
     },
   });
 
@@ -839,7 +1025,15 @@ async function createTenantPaymentIntent({
           tenantUserId,
           businessId,
           paymentId: payment._id,
+          rentPeriod:
+            application.rentPeriod,
+          periodCount:
+            approvedPeriodCount,
+          coversFrom,
+          coversTo,
         },
+        callbackUrl:
+          callbackUrl || undefined,
       },
     );
 
@@ -927,9 +1121,14 @@ async function devMarkTenantPaymentSucceeded({
   if (
     application.status !== "approved"
   ) {
-    throw new Error(
-      "Tenant must be approved before activation",
-    );
+    // Active tenants can extend coverage.
+    if (
+      application.status !== "active"
+    ) {
+      throw new Error(
+        "Tenant must be approved before activation",
+      );
+    }
   }
 
   payment.status = "success";
@@ -942,9 +1141,61 @@ async function devMarkTenantPaymentSucceeded({
     actorId,
   };
 
+  // Apply coverage from the intent.
+  const now = new Date();
+  const coverageStart =
+    payment.coversFrom ||
+    (application.paidThroughDate ?
+      dayjs(application.paidThroughDate)
+        .add(1, "day")
+        .toDate()
+    : application.moveInDate);
+  const coverageEnd =
+    payment.coversTo ||
+    computeCoversTo(
+      coverageStart,
+      payment.periodCount || 1,
+      payment.rentPeriod ||
+        application.rentPeriod,
+    );
+  payment.coversFrom = coverageStart;
+  payment.coversTo = coverageEnd;
+  payment.rentPeriod =
+    payment.rentPeriod ||
+    application.rentPeriod;
+  payment.periodCount =
+    payment.periodCount || 1;
+
   application.paymentStatus = "paid";
-  application.paidAt = new Date();
-  application.status = "active";
+  application.paidAt = now;
+  application.lastRentPaymentAt = now;
+  application.paidThroughDate =
+    coverageEnd ||
+    application.paidThroughDate;
+  if (coverageEnd) {
+    application.nextDueDate = dayjs(
+      coverageEnd,
+    )
+      .add(1, "day")
+      .toDate();
+  }
+  if (
+    application.status === "approved"
+  ) {
+    application.status = "active";
+  }
+  // WHY: Keep agreement status aligned with successful tenant payment.
+  if (application.agreementStatus !== "approved") {
+    application.agreementStatus = "approved";
+    if (!application.agreementAcceptedAt) {
+      // WHY: Ensure approval timestamp is captured for reporting.
+      application.agreementAcceptedAt = now;
+    }
+    debug(
+      "PAYMENT SERVICE: Agreement auto-approved after payment (dev)",
+      { applicationId: application._id },
+    );
+  }
 
   await application.save();
   await payment.save();

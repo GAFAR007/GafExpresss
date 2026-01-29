@@ -132,6 +132,7 @@ class BusinessTeamApi {
     required String email,
     required String role,
     String? estateAssetId,
+    String? agreementText,
   }) async {
     AppDebug.log(
       "BUSINESS_TEAM_API",
@@ -149,6 +150,8 @@ class BusinessTeamApi {
         "role": role,
         if (estateAssetId != null && estateAssetId.trim().isNotEmpty)
           "estateAssetId": estateAssetId.trim(),
+        if (agreementText != null && agreementText.trim().isNotEmpty)
+          "agreementText": agreementText.trim(),
       },
       options: _authOptions(token),
     );

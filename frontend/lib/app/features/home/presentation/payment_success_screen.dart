@@ -21,18 +21,52 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 
-class PaymentSuccessScreen extends StatelessWidget {
+class PaymentSuccessScreen extends StatefulWidget {
   final String reference;
+  final String? nextRoute;
 
-  const PaymentSuccessScreen({super.key, required this.reference});
+  const PaymentSuccessScreen({
+    super.key,
+    required this.reference,
+    this.nextRoute,
+  });
+
+  @override
+  State<PaymentSuccessScreen> createState() => _PaymentSuccessScreenState();
+}
+
+class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
+  bool _redirectHandled = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    final next = widget.nextRoute?.trim() ?? "";
+    if (next.isEmpty) return;
+
+    // WHY: Auto-redirect tenants to their dashboard after successful payment.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _redirectHandled) return;
+      _redirectHandled = true;
+      AppDebug.log(
+        "PAYMENT_SUCCESS",
+        "Auto-redirect to next route",
+        extra: {"next": next},
+      );
+      context.go(next);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     AppDebug.log(
       "PAYMENT_SUCCESS",
       "build()",
-      extra: {"reference": reference},
+      extra: {"hasReference": widget.reference.isNotEmpty},
     );
+
+    final next = widget.nextRoute?.trim() ?? "";
 
     return Scaffold(
       appBar: AppBar(title: const Text("Payment Received")),
@@ -50,9 +84,9 @@ class PaymentSuccessScreen extends StatelessWidget {
               "We will confirm your order once the Paystack webhook arrives.",
             ),
             const SizedBox(height: 12),
-            if (reference.isNotEmpty)
+            if (widget.reference.isNotEmpty)
               Text(
-                "Reference: $reference",
+                "Reference: ${widget.reference}",
                 style: const TextStyle(fontSize: 13),
               ),
             const SizedBox(height: 24),
@@ -68,10 +102,14 @@ class PaymentSuccessScreen extends StatelessWidget {
                 const SizedBox(width: 12),
                 OutlinedButton(
                   onPressed: () {
-                    AppDebug.log("PAYMENT_SUCCESS", "View Orders tapped");
-                    context.go("/orders");
+                    AppDebug.log(
+                      "PAYMENT_SUCCESS",
+                      "View next tapped",
+                      extra: {"next": next.isEmpty ? "/orders" : next},
+                    );
+                    context.go(next.isEmpty ? "/orders" : next);
                   },
-                  child: const Text("View Orders"),
+                  child: Text(next.isEmpty ? "View Orders" : "Continue"),
                 ),
               ],
             ),

@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -238,12 +239,8 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
   }
 
   String _formatDate(DateTime? date) {
-    if (date == null) return "N/A";
-
-    final local = date.toLocal();
-    final month = local.month.toString().padLeft(2, "0");
-    final day = local.day.toString().padLeft(2, "0");
-    return "${local.year}-$month-$day";
+    // WHY: Keep order timestamps consistent across screens.
+    return formatDateLabel(date);
   }
 
   String _shortId(String id) {

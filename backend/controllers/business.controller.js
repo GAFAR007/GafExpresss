@@ -23,7 +23,9 @@ const businessAnalyticsService = require("../services/business.analytics.service
 const productImageService = require("../services/product_image.service");
 const businessInviteService = require("../services/business_invite.service");
 const businessTenantService = require("../services/business.tenant.service");
+const tenantContactDocumentService = require("../services/tenant_contact_document.service");
 const paymentService = require("../services/payment.service");
+const Payment = require("../models/Payment");
 const {
   writeAuditLog,
 } = require("../utils/audit");
@@ -245,6 +247,114 @@ async function createProduct(req, res) {
     return res
       .status(400)
       .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/tenant/applications/:id/approve-agreement
+ * Owner-only: mark tenancy agreement as approved after payment + signature.
+ */
+async function approveAgreement(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: approveAgreement - entry",
+    {
+      actorId: req.user?.sub,
+      applicationId: req.params?.id,
+    },
+  );
+
+  try {
+    const { actor, businessId } = await getBusinessContext(req.user.sub);
+
+    if (actor.role !== "business_owner") {
+      return res.status(403).json({
+        error: "Only business owners can approve agreements",
+      });
+    }
+
+    const applicationId = req.params?.id?.toString().trim();
+    if (!applicationId) {
+      return res.status(400).json({ error: "Application id is required" });
+    }
+
+    const updated = await businessTenantService.approveAgreement({
+      businessId,
+      applicationId,
+      actorId: actor._id,
+    });
+
+    debug(
+      "BUSINESS CONTROLLER: approveAgreement - success",
+      { applicationId: updated._id },
+    );
+
+    return res.status(200).json({
+      message: "Agreement approved",
+      application: updated,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: approveAgreement - error",
+      err.message,
+    );
+    return res.status(400).json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/tenant/applications/:id/agreement
+ * Owner/Staff: attach agreement text and mark it pending review.
+ */
+async function setAgreementText(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: setAgreementText - entry",
+    {
+      actorId: req.user?.sub,
+      applicationId: req.params?.id,
+    },
+  );
+
+  try {
+    const { actor, businessId } = await getBusinessContext(req.user.sub);
+
+    if (actor.role !== "business_owner" && actor.role !== "staff") {
+      return res.status(403).json({
+        error: "Only business owners or staff can attach agreements",
+      });
+    }
+
+    const applicationId = req.params?.id?.toString().trim();
+    if (!applicationId) {
+      return res.status(400).json({ error: "Application id is required" });
+    }
+
+    const agreementText = (req.body?.agreementText || "").toString().trim();
+    if (!agreementText) {
+      return res.status(400).json({ error: "Agreement text is required" });
+    }
+
+    const updated = await businessTenantService.setAgreementText({
+      businessId,
+      applicationId,
+      actorId: actor._id,
+      agreementText,
+    });
+
+    debug(
+      "BUSINESS CONTROLLER: setAgreementText - success",
+      { applicationId: updated._id },
+    );
+
+    return res.status(200).json({
+      message: "Agreement attached",
+      application: updated,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: setAgreementText - error",
+      err.message,
+    );
+    return res.status(400).json({ error: err.message });
   }
 }
 
@@ -1055,6 +1165,11 @@ async function createInvite(req, res) {
         ?.toString()
         .trim() || "";
 
+    const agreementText =
+      req.body?.agreementText
+        ?.toString()
+        .trim() || "";
+
     const estateAssetId =
       req.body?.estateAssetId
         ?.toString()
@@ -1064,6 +1179,15 @@ async function createInvite(req, res) {
       return res.status(400).json({
         error:
           "Invite email is required",
+      });
+    }
+    if (
+      role === "tenant" &&
+      (!agreementText || agreementText.length === 0)
+    ) {
+      return res.status(400).json({
+        error:
+          "Agreement text is required for tenant invites",
       });
     }
 
@@ -1081,6 +1205,7 @@ async function createInvite(req, res) {
           inviteeEmail: inviteEmail,
           role,
           estateAssetId,
+          agreementText,
         },
       );
 
@@ -1261,6 +1386,8 @@ async function acceptInvite(req, res) {
       role: user.role,
       estateAssetId: user.estateAssetId,
       businessId: user.businessId,
+      agreementText:
+        invite.agreementText || "",
     });
   } catch (err) {
     debug(
@@ -1307,6 +1434,48 @@ async function getTenantEstate(
       });
     }
 
+    let latestInvite =
+      await businessInviteService.getLatestAcceptedInviteForUser(
+        {
+          businessId,
+          userId: actor._id,
+        },
+      );
+    // WHY: Decide if we need a secondary lookup for agreement text.
+    const hasAgreement = Boolean(
+      latestInvite?.agreementText &&
+        latestInvite.agreementText
+          .toString()
+          .trim()
+          .length > 0,
+    );
+    if (!hasAgreement) {
+      // WHY: Fallback to email-based lookup for legacy invites without acceptedBy.
+      const fallbackInvite =
+        await businessInviteService.getLatestInviteForEmail(
+          {
+            businessId,
+            email: actor.email,
+          },
+        );
+      if (
+        fallbackInvite?.agreementText &&
+        fallbackInvite.agreementText
+          .toString()
+          .trim()
+          .length > 0
+      ) {
+        latestInvite = fallbackInvite;
+        debug(
+          "BUSINESS CONTROLLER: getTenantEstate - agreement fallback",
+          {
+            actorId: actor._id,
+            usedFallback: true,
+          },
+        );
+      }
+    }
+
     const estate =
       await businessTenantService.getTenantEstate(
         {
@@ -1329,10 +1498,86 @@ async function getTenantEstate(
       message:
         "Estate fetched successfully",
       estate,
+      agreementText:
+        latestInvite?.agreementText || "",
     });
   } catch (err) {
     debug(
       "BUSINESS CONTROLLER: getTenantEstate - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/tenant/contact-document
+ * Tenant-only: upload a reference/guarantor supporting document.
+ */
+async function uploadTenantContactDocument(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: uploadTenantContactDocument - entry",
+    {
+      actorId: req.user?.sub,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    if (actor.role !== "tenant") {
+      return res.status(403).json({
+        error: "Tenant access required",
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: "Document file is required",
+      });
+    }
+
+    const uploadResult =
+      await tenantContactDocumentService.uploadTenantContactDocument(
+        {
+          businessId,
+          actor: {
+            id: actor._id,
+            role: actor.role,
+          },
+          file: req.file,
+          source: "tenant_verification",
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: uploadTenantContactDocument - success",
+      {
+        actorId: actor._id,
+        hasUrl: Boolean(
+          uploadResult?.url,
+        ),
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        "Document uploaded successfully",
+      documentUrl: uploadResult.url,
+      documentPublicId:
+        uploadResult.publicId,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: uploadTenantContactDocument - error",
       err.message,
     );
     return res
@@ -1451,6 +1696,48 @@ async function getTenantApplication(
       });
     }
 
+    let latestInvite =
+      await businessInviteService.getLatestAcceptedInviteForUser(
+        {
+          businessId,
+          userId: actor._id,
+        },
+      );
+    // WHY: Decide if we need a secondary lookup for agreement text.
+    const hasAgreement = Boolean(
+      latestInvite?.agreementText &&
+        latestInvite.agreementText
+          .toString()
+          .trim()
+          .length > 0,
+    );
+    if (!hasAgreement) {
+      // WHY: Ensure tenant sees agreement even if accepted invite metadata is missing.
+      const fallbackInvite =
+        await businessInviteService.getLatestInviteForEmail(
+          {
+            businessId,
+            email: actor.email,
+          },
+        );
+      if (
+        fallbackInvite?.agreementText &&
+        fallbackInvite.agreementText
+          .toString()
+          .trim()
+          .length > 0
+      ) {
+        latestInvite = fallbackInvite;
+        debug(
+          "BUSINESS CONTROLLER: getTenantApplication - agreement fallback",
+          {
+            actorId: actor._id,
+            usedFallback: true,
+          },
+        );
+      }
+    }
+
     const application =
       await businessTenantService.getTenantApplicationForTenant(
         {
@@ -1477,6 +1764,10 @@ async function getTenantApplication(
           "Tenant application fetched successfully"
         : "No tenant application found",
       application,
+      agreementText:
+        application?.agreementText ||
+        latestInvite?.agreementText ||
+        "",
     });
   } catch (err) {
     debug(
@@ -1486,6 +1777,166 @@ async function getTenantApplication(
     return res
       .status(400)
       .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /tenant/summary
+ *
+ * WHAT:
+ * - Returns the current tenant application summary + coverage fields.
+ *
+ * WHY:
+ * - Lets the tenant dashboard show status, paidThrough, and nextDue without
+ *   another verify call.
+ */
+async function getTenantSummary(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: getTenantSummary - entry",
+    { actorId: req.user?.sub },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    if (!actor.estateAssetId) {
+      return res.status(400).json({
+        error:
+          "Tenant is not assigned to an estate asset",
+      });
+    }
+
+    const application =
+      await businessTenantService.getTenantApplicationForTenant(
+        {
+          businessId,
+          estateAssetId:
+            actor.estateAssetId,
+          tenantUserId: actor._id,
+        },
+      );
+
+    if (!application) {
+      return res.status(404).json({
+        error:
+          "Tenant application not found",
+      });
+    }
+
+  const summary = {
+    applicationId:
+      application._id,
+    status: application.status,
+    agreementStatus:
+      application.agreementStatus,
+    agreementSigned:
+      application.agreementSigned,
+    agreementText:
+      application.agreementText,
+    agreementAcceptedAt:
+      application.agreementAcceptedAt,
+    paymentStatus:
+      application.paymentStatus,
+    paidThroughDate:
+      application.paidThroughDate,
+    nextDueDate:
+        application.nextDueDate,
+      lastRentPaymentAt:
+        application.lastRentPaymentAt,
+      moveInDate: application.moveInDate,
+      rentAmount: application.rentAmount,
+      rentPeriod: application.rentPeriod,
+      unitType: application.unitType,
+      unitCount: application.unitCount,
+      estateAssetId:
+        application.estateAssetId,
+      coverage: {
+        paidThroughDate:
+          application.paidThroughDate,
+        nextDueDate:
+          application.nextDueDate,
+      },
+      paymentsSummary: {
+        totalPaidKoboYtd: 0,
+        totalPaidKoboAllTime: 0,
+        paymentsThisYear: 0,
+        lastPaidAt: application.lastRentPaymentAt,
+      },
+    };
+
+    // WHY: Summarize tenant rent payments for quick dashboard chips.
+    const startOfYear = new Date(
+      new Date().getFullYear(),
+      0,
+      1,
+    );
+    const payments = await Payment.find({
+      businessId,
+      tenantApplication: application._id,
+      purpose: "tenant_rent",
+      status: "success",
+    })
+      .select("amount processedAt")
+      .lean();
+
+    let totalPaidAll = 0;
+    let totalPaidYtd = 0;
+    let paymentsThisYear = 0;
+    let lastPaidAt = application.lastRentPaymentAt;
+
+    payments.forEach((p) => {
+      totalPaidAll += p.amount || 0;
+      if (p.processedAt && p.processedAt >= startOfYear) {
+        totalPaidYtd += p.amount || 0;
+        paymentsThisYear += 1;
+      }
+      if (
+        p.processedAt &&
+        (!lastPaidAt || p.processedAt > lastPaidAt)
+      ) {
+        lastPaidAt = p.processedAt;
+      }
+    });
+
+    summary.paymentsSummary = {
+      totalPaidKoboYtd: totalPaidYtd,
+      totalPaidKoboAllTime: totalPaidAll,
+      paymentsThisYear,
+      lastPaidAt,
+    };
+
+    debug(
+      "BUSINESS CONTROLLER: getTenantSummary - success",
+      {
+        applicationId:
+          application._id,
+        status: application.status,
+        paymentStatus:
+          application.paymentStatus,
+        paymentsThisYear,
+        totalPaidKoboYtd: totalPaidYtd,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        "Tenant summary fetched",
+      summary,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: getTenantSummary - error",
+      err.message,
+    );
+    return res.status(400).json({
+      error: err.message,
+    });
   }
 }
 
@@ -2040,6 +2491,49 @@ async function getAnalyticsEvents(
   }
 }
 
+/**
+ * GET /business/analytics/estate/:estateAssetId
+ *
+ * WHAT:
+ * - Estate-level KPIs (tenants + collections) for owner/staff dashboards.
+ */
+async function getEstateAnalytics(req, res) {
+  const { estateAssetId } = req.params;
+  debug(
+    "BUSINESS CONTROLLER: getEstateAnalytics - entry",
+    { actorId: req.user?.sub, estateAssetId },
+  );
+
+  try {
+    const { businessId } = await getBusinessContext(req.user.sub);
+    const analytics =
+      await businessAnalyticsService.getEstateAnalytics({
+        businessId,
+        estateAssetId,
+      });
+
+    debug(
+      "BUSINESS CONTROLLER: getEstateAnalytics - success",
+      {
+        estateAssetId,
+        active: analytics?.tenants?.active,
+      },
+    );
+
+    return res.status(200).json({
+      message: "Estate analytics fetched successfully",
+      analytics,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: getEstateAnalytics - error",
+      err.message,
+    );
+    return res.status(400).json({ error: err.message });
+  }
+}
+
 async function approveTenantApplication(
   req,
   res,
@@ -2235,6 +2729,14 @@ async function createPaymentIntent(
       });
     }
 
+    const yearsToPay = Number(
+      req.body?.yearsToPay || 1,
+    );
+
+    const callbackUrl =
+      req.body?.callbackUrl?.toString().trim() ||
+      "";
+
     const intent =
       await paymentService.createTenantPaymentIntent(
         {
@@ -2244,6 +2746,8 @@ async function createPaymentIntent(
           tenantUserId: actor._id,
           actorId: actor._id,
           actorRole: actor.role,
+          yearsToPay,
+          callbackUrl,
         },
       );
 
@@ -2263,6 +2767,16 @@ async function createPaymentIntent(
         intent?.authorizationUrl,
       reference: intent?.reference,
       accessCode: intent?.accessCode,
+      coverage: {
+        coversFrom: intent?.payment?.coversFrom,
+        coversTo: intent?.payment?.coversTo,
+        rentPeriod: intent?.payment?.rentPeriod,
+        periodCount: intent?.payment?.periodCount,
+        requestedYearsToPay: yearsToPay,
+        autoReduced:
+          intent?.payment?.rawEvent?.autoReduced ||
+          false,
+      },
     });
   } catch (err) {
     debug(
@@ -2613,11 +3127,15 @@ module.exports = {
   createInvite,
   acceptInvite,
   getTenantEstate,
+  uploadTenantContactDocument,
   submitTenantVerification,
   getTenantApplication,
   listTenantApplications,
   getTenantApplicationDetail,
+  getTenantSummary,
   verifyTenantContact,
+  approveAgreement,
+  setAgreementText,
   updateTenantApplication,
   updateUserRole,
   approveTenantApplication,
@@ -2629,4 +3147,5 @@ module.exports = {
   getTenants,
   getAnalyticsSummary,
   getAnalyticsEvents,
+  getEstateAnalytics,
 };

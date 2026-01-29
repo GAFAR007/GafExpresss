@@ -221,6 +221,107 @@ class BusinessTenantApi {
     return application;
   }
 
+  /// ------------------------------------------------------
+  /// APPROVE AGREEMENT (OWNER ONLY)
+  /// ------------------------------------------------------
+  Future<BusinessTenantApplication> approveAgreement({
+    required String? token,
+    required String applicationId,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "approveAgreement() start",
+      extra: {"applicationId": applicationId},
+    );
+
+    final resp = await _dio.post(
+      "/business/tenant/applications/$applicationId/approve-agreement",
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final appMap = (data["application"] ?? {}) as Map<String, dynamic>;
+    final application = BusinessTenantApplication.fromJson(appMap);
+
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "approveAgreement() success",
+      extra: {"applicationId": application.id},
+    );
+
+    return application;
+  }
+
+  /// ------------------------------------------------------
+  /// SET AGREEMENT TEXT (OWNER/STAFF)
+  /// ------------------------------------------------------
+  Future<BusinessTenantApplication> setAgreementText({
+    required String? token,
+    required String applicationId,
+    required String agreementText,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "setAgreementText() start",
+      extra: {
+        "applicationId": applicationId,
+        "hasText": agreementText.isNotEmpty,
+      },
+    );
+
+    final resp = await _dio.post(
+      "/business/tenant/applications/$applicationId/agreement",
+      data: {"agreementText": agreementText},
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final appMap = (data["application"] ?? {}) as Map<String, dynamic>;
+    final application = BusinessTenantApplication.fromJson(appMap);
+
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "setAgreementText() success",
+      extra: {"applicationId": application.id},
+    );
+
+    return application;
+  }
+
+  /// ------------------------------------------------------
+  /// ESTATE ANALYTICS
+  /// ------------------------------------------------------
+  Future<EstateAnalytics> fetchEstateAnalytics({
+    required String? token,
+    required String estateAssetId,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "fetchEstateAnalytics() start",
+      extra: {"estateAssetId": estateAssetId},
+    );
+
+    final resp = await _dio.get(
+      "/business/analytics/estate/$estateAssetId",
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final analyticsMap =
+        (data["analytics"] ?? {}) as Map<String, dynamic>;
+    final analytics = EstateAnalytics.fromJson(analyticsMap);
+
+    AppDebug.log(
+      "BUSINESS_TENANT_API",
+      "fetchEstateAnalytics() success",
+      extra: {
+        "estateAssetId": estateAssetId,
+        "active": analytics.tenants.active,
+      },
+    );
+    return analytics;
+  }
+
   int _parseInt(dynamic value, {required int fallback}) {
     if (value == null) return fallback;
     if (value is int) return value;

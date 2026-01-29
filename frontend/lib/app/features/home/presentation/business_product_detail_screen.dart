@@ -18,10 +18,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -72,7 +75,8 @@ class _BusinessProductDetailScreenState
 
     _nameCtrl.text = product.name;
     _descCtrl.text = product.description;
-    _priceCtrl.text = product.priceCents.toString();
+    // WHY: Display product price in NGN while storing minor units.
+    _priceCtrl.text = formatNgnInputFromKobo(product.priceCents);
     _stockCtrl.text = product.stock.toString();
     _isActive = product.isActive;
 
@@ -100,7 +104,7 @@ class _BusinessProductDetailScreenState
     final payload = <String, dynamic>{};
     final name = _nameCtrl.text.trim();
     final description = _descCtrl.text.trim();
-    final price = _parseInt(_priceCtrl.text);
+    final price = parseNgnToKobo(_priceCtrl.text);
     final stock = _parseInt(_stockCtrl.text);
 
     if (name.isNotEmpty && name != product.name) payload["name"] = name;
@@ -149,8 +153,8 @@ class _BusinessProductDetailScreenState
   }
 
   String _formatDate(DateTime? value) {
-    if (value == null) return "—";
-    return "${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}";
+    // WHY: Keep audit date labels consistent across detail screens.
+    return formatDateLabel(value, fallback: kDateFallbackDash);
   }
 
   void _showSnack(String message) {
@@ -163,10 +167,12 @@ class _BusinessProductDetailScreenState
     required String label,
     String? hint,
     TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(labelText: label, hintText: hint),
     );
   }
@@ -273,7 +279,12 @@ class _BusinessProductDetailScreenState
                   controller: _priceCtrl,
                   label: "Price (NGN)",
                   hint: "129000",
-                  keyboardType: TextInputType.number,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  // WHY: Auto-format NGN values as the user types.
+                  inputFormatters: const [
+                    NgnInputFormatter(),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 _buildTextField(

@@ -18,6 +18,9 @@ const debug = require("../utils/debug");
 
 debug("Loading Payment model...");
 
+// WHY: Rent payments share the same period values as estate units.
+const RENT_PERIODS = ["monthly", "quarterly", "yearly"];
+
 const paymentSchema = new mongoose.Schema(
   {
     provider: {
@@ -92,6 +95,25 @@ const paymentSchema = new mongoose.Schema(
     purpose: {
       type: String,
       trim: true,
+      default: null,
+    },
+    // WHY: Tenant rent coverage period (used only for tenant_rent payments).
+    coversFrom: {
+      type: Date,
+      default: null,
+    },
+    coversTo: {
+      type: Date,
+      default: null,
+    },
+    rentPeriod: {
+      type: String,
+      enum: RENT_PERIODS,
+      default: null,
+    },
+    periodCount: {
+      type: Number,
+      min: 1,
       default: null,
     },
 

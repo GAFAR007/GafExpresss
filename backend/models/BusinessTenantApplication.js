@@ -27,21 +27,52 @@ const APPLICATION_STATUSES = ['pending', 'approved', 'active', 'rejected'];
 // WHY: Track rent payment separately from approval status.
 const PAYMENT_STATUSES = ['unpaid', 'paid'];
 
+// WHY: Track agreement workflow distinctly from contact verification.
+const AGREEMENT_STATUSES = ['pending', 'approved', 'rejected'];
+
 const contactSchema = new mongoose.Schema(
   {
+    // WHY: Store split names for verification checks + consistent review display.
+    firstName: {
+      type: String,
+      trim: true,
+    },
+    // WHY: Keep middle name optional for compatibility with legacy data.
+    middleName: {
+      type: String,
+      trim: true,
+    },
+    // WHY: Require last name for identity checks and audit clarity.
+    lastName: {
+      type: String,
+      trim: true,
+    },
+    // WHY: Preserve legacy full name for backward compatibility.
     name: {
       type: String,
       trim: true,
       required: true,
     },
+    // WHY: Contact phone stays available for verification calls.
     phone: {
       type: String,
       trim: true,
     },
+    // WHY: Email is required for verifications and future contact flows.
     email: {
       type: String,
       trim: true,
       lowercase: true,
+    },
+    // WHY: Keep optional supporting document URL per contact.
+    documentUrl: {
+      type: String,
+      trim: true,
+    },
+    // WHY: Track Cloudinary public id for possible cleanup later.
+    documentPublicId: {
+      type: String,
+      trim: true,
     },
     relationship: {
       type: String,
@@ -134,6 +165,13 @@ const tenantApplicationSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       required: true,
+      // WHY: Rent is stored in kobo; enforce integer to keep math safe.
+      validate: {
+        validator(value) {
+          return Number.isInteger(value);
+        },
+        message: 'Rent amount must be an integer (kobo)',
+      },
     },
     rentPeriod: {
       type: String,
@@ -156,13 +194,26 @@ const tenantApplicationSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    agreementText: {
+      type: String,
+      trim: true,
+    },
+    agreementAcceptedAt: {
+      type: Date,
+      default: null,
+    },
     tenantRulesSnapshot: {
       type: tenantRulesSnapshotSchema,
       default: () => ({}),
     },
-    status: {
-      type: String,
-      enum: APPLICATION_STATUSES,
+  agreementStatus: {
+    type: String,
+    enum: AGREEMENT_STATUSES,
+    default: 'pending',
+  },
+  status: {
+    type: String,
+    enum: APPLICATION_STATUSES,
       default: 'pending',
       index: true,
     },
@@ -171,6 +222,18 @@ const tenantApplicationSchema = new mongoose.Schema(
       enum: PAYMENT_STATUSES,
       default: 'unpaid',
       index: true,
+    },
+    paidThroughDate: {
+      type: Date,
+      default: null,
+    },
+    nextDueDate: {
+      type: Date,
+      default: null,
+    },
+    lastRentPaymentAt: {
+      type: Date,
+      default: null,
     },
     paidAt: {
       type: Date,

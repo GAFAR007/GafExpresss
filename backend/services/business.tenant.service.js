@@ -137,16 +137,112 @@ function resolveTenantSnapshot(
 
 function toContactList(list) {
   return clampList(list)
-    .map((item) => ({
-      name: item?.name
-        ?.toString()
-        .trim(),
-      phone:
-        item?.phone
+    .map((item) => {
+      const firstName =
+        item?.firstName
           ?.toString()
-          .trim() || null,
-    }))
+          .trim() || "";
+      const middleName =
+        item?.middleName
+          ?.toString()
+          .trim() || "";
+      const lastName =
+        item?.lastName
+          ?.toString()
+          .trim() || "";
+      const legacyName =
+        item?.name
+          ?.toString()
+          .trim() || "";
+      const combinedName =
+        [
+          firstName,
+          middleName,
+          lastName,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+
+      return {
+        // WHY: Preserve legacy name field while storing split names.
+        name: combinedName || legacyName,
+        firstName: firstName || null,
+        middleName:
+          middleName || null,
+        lastName: lastName || null,
+        email:
+          item?.email
+            ?.toString()
+            .trim()
+            .toLowerCase() || null,
+        phone:
+          item?.phone
+            ?.toString()
+            .trim() || null,
+        documentUrl:
+          item?.documentUrl
+            ?.toString()
+            .trim() || null,
+        documentPublicId:
+          item?.documentPublicId
+            ?.toString()
+            .trim() || null,
+      };
+    })
+    // WHY: Keep only entries that at least include a name for legacy payloads.
     .filter((item) => item.name);
+}
+
+function validateContactRequirements(
+  list,
+  label,
+  { allowLegacyName = false } = {},
+) {
+  // WHY: Enforce required fields before saving tenant contacts.
+  clampList(list).forEach(
+    (contact, index) => {
+      const firstName =
+        contact?.firstName
+          ?.toString()
+          .trim() || "";
+      const lastName =
+        contact?.lastName
+          ?.toString()
+          .trim() || "";
+      const email =
+        contact?.email
+          ?.toString()
+          .trim() || "";
+      const phone =
+        contact?.phone
+          ?.toString()
+          .trim() || "";
+      const legacyName =
+        contact?.name
+          ?.toString()
+          .trim() || "";
+
+      if (
+        allowLegacyName &&
+        legacyName &&
+        (!firstName || !lastName)
+      ) {
+        return;
+      }
+
+      if (
+        !firstName ||
+        !lastName ||
+        !email ||
+        !phone
+      ) {
+        throw new Error(
+          `${label} ${index + 1} requires first name, last name, email, and phone`,
+        );
+      }
+    },
+  );
 }
 
 async function findLatestTenantApplication({
@@ -343,6 +439,15 @@ async function createTenantApplication({
   );
   const guarantors = toContactList(
     payload?.guarantors,
+  );
+  // WHY: Enforce required fields before applying rule limits.
+  validateContactRequirements(
+    references,
+    "Reference",
+  );
+  validateContactRequirements(
+    guarantors,
+    "Guarantor",
   );
 
   const rules =
@@ -568,15 +673,36 @@ async function updateTenantApplicationForTenant({
     );
   }
 
+  const referencesFromPayload =
+    payload?.references !== undefined;
+  const guarantorsFromPayload =
+    payload?.guarantors !== undefined;
+
   const references =
-    payload?.references !== undefined ?
+    referencesFromPayload ?
       toContactList(payload?.references)
     : application.references || [];
 
   const guarantors =
-    payload?.guarantors !== undefined ?
+    guarantorsFromPayload ?
       toContactList(payload?.guarantors)
     : application.guarantors || [];
+  // WHY: Ensure updated contacts still include required fields.
+  validateContactRequirements(
+    references,
+    "Reference",
+    { allowLegacyName: !referencesFromPayload },
+  );
+  validateContactRequirements(
+    guarantors,
+    "Guarantor",
+    { allowLegacyName: !guarantorsFromPayload },
+  );
+
+  const agreementText =
+    payload?.agreementText !== undefined ?
+      (payload.agreementText || "").toString().trim()
+    : application.agreementText || "";
 
   const rules =
     estate.estate?.tenantRules || {};
@@ -638,6 +764,11 @@ async function updateTenantApplicationForTenant({
   application.guarantors = guarantors;
   application.agreementSigned =
     agreementSigned;
+  if (agreementText) {
+    application.agreementText = agreementText;
+    application.agreementStatus = "pending";
+    application.agreementAcceptedAt = new Date();
+  }
   application.tenantRulesSnapshot = {
     referencesMin,
     referencesMax,
@@ -1028,6 +1159,103 @@ async function verifyTenantContact({
   );
 }
 
+async function approveAgreement({
+  businessId,
+  applicationId,
+  actorId,
+}) {
+  debug(
+    "BUSINESS TENANT SERVICE: approveAgreement - entry",
+    { businessId, applicationId, actorId },
+  );
+
+  if (!businessId || !applicationId) {
+    throw new Error("Application id is required");
+  }
+
+  const application = await BusinessTenantApplication.findOne({
+    _id: applicationId,
+    businessId,
+  });
+
+  if (!application) {
+    throw new Error("Tenant application not found");
+  }
+
+  application.agreementStatus = "approved";
+  application.reviewedAt = new Date();
+  application.reviewedBy = actorId;
+  application.reviewNotes = "agreement_approved";
+
+  await application.save();
+
+  await writeAuditLog({
+    action: "agreement_approved",
+    entityType: "tenant_application",
+    entityId: application._id,
+    actorId,
+  });
+
+  await writeAnalyticsEvent({
+    eventType: "AGREEMENT_APPROVED",
+    entityType: "tenant_application",
+    entityId: application._id,
+    actorId,
+  });
+
+  return resolveTenantSnapshot(application.toObject());
+}
+
+async function setAgreementText({
+  businessId,
+  applicationId,
+  actorId,
+  agreementText,
+}) {
+  debug(
+    "BUSINESS TENANT SERVICE: setAgreementText - entry",
+    { businessId, applicationId, actorId },
+  );
+
+  if (!businessId || !applicationId) {
+    throw new Error("Application id is required");
+  }
+
+  const application = await BusinessTenantApplication.findOne({
+    _id: applicationId,
+    businessId,
+  });
+
+  if (!application) {
+    throw new Error("Tenant application not found");
+  }
+
+  application.agreementText = (agreementText || "").toString().trim();
+  application.agreementStatus = "pending";
+  application.agreementAcceptedAt = new Date();
+
+  await application.save();
+
+  await writeAuditLog({
+    action: "agreement_uploaded",
+    entityType: "tenant_application",
+    entityId: application._id,
+    actorId,
+    metadata: {
+      hasText: Boolean(application.agreementText),
+    },
+  });
+
+  await writeAnalyticsEvent({
+    eventType: "AGREEMENT_UPLOADED",
+    entityType: "tenant_application",
+    entityId: application._id,
+    actorId,
+  });
+
+  return resolveTenantSnapshot(application.toObject());
+}
+
 
 async function approveTenantApplication({
   businessId,
@@ -1177,5 +1405,7 @@ module.exports = {
   listTenantApplications,
   getTenantApplicationDetail,
   verifyTenantContact,
+  approveAgreement,
   approveTenantApplication,
+  setAgreementText,
 };

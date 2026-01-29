@@ -271,6 +271,16 @@ async function verifyPaystack(
         reference,
       );
 
+    const updatedPayment =
+      await Payment.findOne({
+        provider: "paystack",
+        reference,
+      })
+        .select(
+          "coversFrom coversTo rentPeriod periodCount status processedAt tenantApplication businessId amount currency",
+        )
+        .lean();
+
     debug(
       "PAYMENTS CONTROLLER: verifyPaystack success",
       {
@@ -292,6 +302,18 @@ async function verifyPaystack(
       idempotent:
         result?.result?.idempotent ??
         false,
+      coverage: updatedPayment
+        ? {
+            coversFrom:
+              updatedPayment.coversFrom,
+            coversTo:
+              updatedPayment.coversTo,
+            rentPeriod:
+              updatedPayment.rentPeriod,
+            periodCount:
+              updatedPayment.periodCount,
+          }
+        : null,
     });
   } catch (err) {
     debug(

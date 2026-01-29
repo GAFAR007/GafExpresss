@@ -21,6 +21,9 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
+import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
+import 'package:frontend/app/features/home/presentation/business_team_lookup_invite_cards.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/theme/app_theme.dart';
@@ -41,6 +44,10 @@ class _BusinessTenantApplicationsScreenState
   String _statusFilter = 'all';
   final int _page = 1;
   static const int _limit = 10;
+  // WHY: Pull enough estate assets for invite selection without paging.
+  static const int _estateAssetsLimit = 50;
+  // WHY: Keep estate lookup consistent with active inventory.
+  static const String _estateStatusActive = "active";
 
   void _logTap(String action, {Map<String, dynamic>? extra}) {
     AppDebug.log(
@@ -89,6 +96,11 @@ class _BusinessTenantApplicationsScreenState
 
   int _activeCount(List<BusinessTenantApplication> apps) {
     return apps.where((app) => app.status.toLowerCase() == 'active').length;
+  }
+
+  String _extractError(Object error) {
+    if (error is Exception) return error.toString();
+    return "$error";
   }
 
   List<BusinessTenantApplication> _recentlyUpdated(
@@ -146,6 +158,25 @@ class _BusinessTenantApplicationsScreenState
     final tenantsAsync = ref.watch(businessTenantApplicationsProvider(query));
     final isEstateScoped =
         widget.estateAssetId != null && widget.estateAssetId!.isNotEmpty;
+    final estateAnalyticsAsync = isEstateScoped
+        ? ref.watch(estateAnalyticsProvider(widget.estateAssetId!))
+        : null;
+    // WHY: Load active estate assets so tenant invites can be scoped correctly.
+    final estateAssetsAsync = ref.watch(
+      businessAssetsProvider(
+        const BusinessAssetsQuery(
+          status: _estateStatusActive,
+          page: 1,
+          limit: _estateAssetsLimit,
+        ),
+      ),
+    );
+    final estateAssets = estateAssetsAsync.maybeWhen(
+      data: (result) => result.assets
+          .where((asset) => asset.assetType == "estate")
+          .toList(),
+      orElse: () => <BusinessAsset>[],
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -178,6 +209,9 @@ class _BusinessTenantApplicationsScreenState
         onRefresh: () async {
           _logTap("pull_to_refresh");
           ref.invalidate(businessTenantApplicationsProvider(query));
+          if (isEstateScoped && estateAnalyticsAsync != null) {
+            ref.invalidate(estateAnalyticsProvider(widget.estateAssetId!));
+          }
         },
         child: tenantsAsync.when(
           data: (result) {
@@ -197,8 +231,43 @@ class _BusinessTenantApplicationsScreenState
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               children: [
+                // WHY: Keep lookup/invite ahead of KPIs while allowing collapse.
+                BusinessUserLookupCard(
+                  source: "BUSINESS_TENANTS",
+                  isCollapsible: true,
+                  initiallyExpanded: false,
+                ),
+                const SizedBox(height: 12),
+                // WHY: Separate invite form keeps new tenant flow obvious.
+                BusinessInviteFormCard(
+                  source: "BUSINESS_TENANTS",
+                  estateAssets: estateAssets,
+                  estateAssetsLoading: estateAssetsAsync.isLoading,
+                  isCollapsible: true,
+                  initiallyExpanded: false,
+                ),
+                const SizedBox(height: 16),
+                if (!isEstateScoped) ...[
+                  _NoEstateScopeHint(
+                    onViewEstates: () {
+                      _logTap("scope_select_estate");
+                      context.go('/business-assets');
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (isEstateScoped) ...[
                   _EstateScopeBanner(name: estateName),
+                  const SizedBox(height: 12),
+                  estateAnalyticsAsync?.when(
+                        data: (analytics) =>
+                            _EstateAnalyticsKpis(analytics: analytics),
+                        loading: () =>
+                            _InlineLoader(label: "Loading estate KPIs..."),
+                        error: (error, _) =>
+                            Text("Analytics error: ${_extractError(error)}"),
+                      ) ??
+                      const SizedBox.shrink(),
                   const SizedBox(height: 16),
                 ],
                 _KpiRow(
@@ -327,6 +396,44 @@ class _EstateScopeBanner extends StatelessWidget {
   }
 }
 
+class _NoEstateScopeHint extends StatelessWidget {
+  final VoidCallback onViewEstates;
+  const _NoEstateScopeHint({required this.onViewEstates});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.analytics, color: colorScheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Scope to an estate to see occupancy and rent KPIs.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: onViewEstates,
+            child: const Text("View estates"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StatusFilterRow extends StatelessWidget {
   final String selected;
   final Map<String, int> counts;
@@ -440,7 +547,9 @@ class _TenantApplicationCard extends StatelessWidget {
       theme: theme,
       tone: statusTone,
     );
-    final rentLabel = formatNgn(application.rentAmount);
+    // WHY: Tenant rent amounts are stored in kobo; format to NGN for display.
+    final rentLabel =
+        formatNgnFromCents(application.rentAmount.round());
     final unitLabel = "${application.unitCount} x ${application.unitType}";
     final refs = application.references;
     final refsVerified = refs
@@ -599,7 +708,7 @@ class _KpiRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    Theme.of(context);
     final items = [
       _KpiCard(label: "Pending", value: pending, tone: AppStatusTone.warning),
       _KpiCard(label: "Ready", value: ready, tone: AppStatusTone.info),
@@ -623,6 +732,145 @@ class _KpiRow extends StatelessWidget {
               .toList(),
         );
       },
+    );
+  }
+}
+
+class _EstateAnalyticsKpis extends StatelessWidget {
+  final EstateAnalytics analytics;
+  const _EstateAnalyticsKpis({required this.analytics});
+
+  String _fmtMoney(int kobo) {
+    // WHY: Keep money formatting centralized and consistent.
+    return formatNgnFromCents(kobo);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        _SmallKpi(
+          label: "Active tenants",
+          value: analytics.tenants.active.toString(),
+          color: AppStatusBadgeColors.fromTheme(
+            theme: theme,
+            tone: AppStatusTone.success,
+          ).foreground,
+        ),
+        _SmallKpi(
+          label: "Pending",
+          value: analytics.tenants.pending.toString(),
+          color: AppStatusBadgeColors.fromTheme(
+            theme: theme,
+            tone: AppStatusTone.warning,
+          ).foreground,
+        ),
+        _SmallKpi(
+          label: "Due soon",
+          value: analytics.tenants.dueSoon.toString(),
+          color: colorScheme.primary,
+        ),
+        _SmallKpi(
+          label: "Overdue",
+          value: analytics.tenants.overdue.toString(),
+          color: AppStatusBadgeColors.fromTheme(
+            theme: theme,
+            tone: AppStatusTone.danger,
+          ).foreground,
+        ),
+        _SmallKpi(
+          label: "Collected (month)",
+          value: _fmtMoney(analytics.collections.monthKobo),
+          color: colorScheme.primary,
+        ),
+        _SmallKpi(
+          label: "Collected (YTD)",
+          value: _fmtMoney(analytics.collections.ytdKobo),
+          color: colorScheme.primary,
+        ),
+        _SmallKpi(
+          label: "Potential annual",
+          value: _fmtMoney(analytics.estate.potentialAnnualKobo),
+          color: colorScheme.onSurface,
+        ),
+      ],
+    );
+  }
+}
+
+class _SmallKpi extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+
+  const _SmallKpi({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineLoader extends StatelessWidget {
+  final String label;
+  const _InlineLoader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        const SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -773,3 +1021,15 @@ class _RecentActivityStrip extends StatelessWidget {
     );
   }
 }
+
+// Status against the plan you approved:
+
+// Slice 1 (schema/validation): DONE. RentPeriod default yearly; rentAmount integer; Payment + TenantApplication have coverage fields (paidThroughDate, nextDueDate, lastRentPaymentAt, coversFrom/To, rentPeriod, periodCount).
+// Slice 2 (coverage utils): DONE. utils/rentCoverage.js added with month math + 36‑month cap helpers.
+// Slice 3 (payment intent rules): DONE. yearsToPay, max 3 payments/year, auto-reduce to 36‑month cap, coverage fields on Payment, richer response.
+// Slice 4 (webhook/verify success): DONE. Uses Payment.amount, allows approved/active, updates paidThrough/nextDue/lastRentPaymentAt, dev mark mirrors webhook, verify returns coverage.
+// Tenant summary endpoint + frontend wiring: DONE. Tenant dashboard route + screen, verification CTA now points there.
+// Slice 5 (rent summary math fix): NOT done yet.
+// Slice 6 (estate analytics endpoint): NOT started.
+// Slice 7 (tenant UI polish beyond current state): PARTIAL. Dashboard + verification improved; receipt link still TODO; timeline on review optional.
+// Slice 8 (owner/staff analytics UI): NOT started.

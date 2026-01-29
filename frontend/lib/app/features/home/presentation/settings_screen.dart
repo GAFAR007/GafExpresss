@@ -23,6 +23,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/phone_formatter.dart'
+    as phone_formatter;
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/nin_id_card.dart';
@@ -104,7 +106,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   // WHY: Normalize pasted values and keep digits-only input consistent.
   static final List<TextInputFormatter> _ngPhoneInputFormatters = [
-    _NigerianPhoneDigitsFormatter(maxDigits: _ngPhoneDigits),
+    phone_formatter.NigerianPhoneDigitsFormatter(maxDigits: _ngPhoneDigits),
   ];
   static final List<TextInputFormatter> _ninInputFormatters = [
     FilteringTextInputFormatter.digitsOnly,
@@ -1216,7 +1218,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   if (isBusinessUser) ...[
                     const SettingsSectionHeader(
                       title: "Business tools",
-                      subtitle: "Manage products, orders, assets, and team roles.",
+                      subtitle: "Manage products, orders, and assets.",
                     ),
                     const SizedBox(height: 12),
                     Card(
@@ -1425,44 +1427,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           },
         ),
       ),
-    );
-  }
-}
-
-/// ------------------------------------------------------------
-/// PHONE INPUT FORMATTER
-/// ------------------------------------------------------------
-/// WHY:
-/// - Keep phone fields digits-only while supporting pasted +234/0 prefixes.
-class _NigerianPhoneDigitsFormatter extends TextInputFormatter {
-  final int maxDigits;
-
-  const _NigerianPhoneDigitsFormatter({required this.maxDigits});
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    // WHY: Strip non-digit characters so the UI only stores numbers.
-    final rawDigits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
-    var digits = rawDigits;
-
-    // WHY: Remove common Nigerian prefixes when pasted.
-    if (digits.startsWith('234')) {
-      digits = digits.substring(3);
-    } else if (digits.startsWith('0') && digits.length == maxDigits + 1) {
-      digits = digits.substring(1);
-    }
-
-    if (digits.length > maxDigits) {
-      digits = digits.substring(0, maxDigits);
-    }
-
-    // WHY: Keep cursor at the end for predictable input with +234 prefix.
-    return TextEditingValue(
-      text: digits,
-      selection: TextSelection.collapsed(offset: digits.length),
     );
   }
 }

@@ -91,6 +91,28 @@ final businessTenantApplicationsProvider = FutureProvider.family<
   );
 });
 
+/// Estate analytics (owner/staff) for a specific estate asset.
+final estateAnalyticsProvider =
+    FutureProvider.family<EstateAnalytics, String>((ref, estateAssetId) async {
+  AppDebug.log(
+    "PROVIDERS",
+    "estateAnalyticsProvider fetch start",
+    extra: {"estateAssetId": estateAssetId},
+  );
+
+  final session = ref.watch(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    AppDebug.log("PROVIDERS", "estateAnalyticsProvider no session");
+    throw Exception("Session expired. Please sign in again.");
+  }
+
+  final api = ref.read(businessTenantApiProvider);
+  return api.fetchEstateAnalytics(
+    token: session.token,
+    estateAssetId: estateAssetId,
+  );
+});
+
 final businessTenantByIdProvider =
     FutureProvider.family<BusinessTenantApplication, String>((ref, id) async {
   AppDebug.log(

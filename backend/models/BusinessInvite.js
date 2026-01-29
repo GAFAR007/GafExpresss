@@ -71,6 +71,13 @@ const businessInviteSchema = new mongoose.Schema(
       default: 'pending',
       index: true,
     },
+    // WHY: Let owners attach tenancy agreements at invite time so tenants see
+    // the same text when accepting and during verification.
+    agreementText: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     acceptedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

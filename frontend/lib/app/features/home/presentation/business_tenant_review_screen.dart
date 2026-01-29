@@ -20,6 +20,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/formatters/phone_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -38,6 +40,9 @@ class BusinessTenantReviewScreen extends ConsumerStatefulWidget {
 
 class _BusinessTenantReviewScreenState
     extends ConsumerState<BusinessTenantReviewScreen> {
+  // WHY: Prevent double-tap approvals and show loading state.
+  bool _isApprovingAgreement = false;
+
   void _logTap(String action, {Map<String, dynamic>? extra}) {
     // WHY: Track review actions for audit and debugging.
     AppDebug.log(
@@ -49,13 +54,10 @@ class _BusinessTenantReviewScreenState
 
   bool _isContactVerified(TenantContact contact) {
     // WHY: Contacts can be marked verified via status or boolean flag.
-    return contact.isVerified ||
-        contact.status.toLowerCase() == 'verified';
+    return contact.isVerified || contact.status.toLowerCase() == 'verified';
   }
 
-  Future<String?> _openNoteDialog({
-    required String title,
-  }) async {
+  Future<String?> _openNoteDialog({required String title}) async {
     // WHY: Capture optional verification notes for audit.
     String noteValue = '';
 
@@ -70,9 +72,7 @@ class _BusinessTenantReviewScreenState
             onChanged: (value) {
               noteValue = value;
             },
-            decoration: const InputDecoration(
-              labelText: "Note (optional)",
-            ),
+            decoration: const InputDecoration(labelText: "Note (optional)"),
           ),
           actions: [
             TextButton(
@@ -99,11 +99,9 @@ class _BusinessTenantReviewScreenState
     required String type,
     required int index,
     required String label,
+    required String status,
   }) async {
-    _logTap(
-      "verify_contact",
-      extra: {"type": type, "index": index},
-    );
+    _logTap("verify_contact", extra: {"type": type, "index": index});
 
     final session = ref.read(authSessionProvider);
     if (session == null || !session.isTokenValid) {
@@ -116,7 +114,7 @@ class _BusinessTenantReviewScreenState
     }
 
     final note = await _openNoteDialog(
-      title: "Verify $label",
+      title: status == 'verified' ? "Verify $label" : "Reject $label",
     );
     if (note == null) {
       _logTap("verify_contact_cancel");
@@ -130,7 +128,7 @@ class _BusinessTenantReviewScreenState
         applicationId: applicationId,
         type: type,
         index: index,
-        status: "verified",
+        status: status,
         note: note,
       );
 
@@ -138,13 +136,14 @@ class _BusinessTenantReviewScreenState
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("$label verified")),
+        SnackBar(
+          content: Text(
+            "$label ${status == 'verified' ? 'verified' : 'rejected'}",
+          ),
+        ),
       );
     } catch (error) {
-      _logTap(
-        "verify_contact_fail",
-        extra: {"error": error.toString()},
-      );
+      _logTap("verify_contact_fail", extra: {"error": error.toString()});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Verification failed. ${error.toString()}")),
@@ -152,9 +151,7 @@ class _BusinessTenantReviewScreenState
     }
   }
 
-  Future<void> _approveTenant({
-    required String applicationId,
-  }) async {
+  Future<void> _approveTenant({required String applicationId}) async {
     _logTap("approve_tenant", extra: {"applicationId": applicationId});
 
     final session = ref.read(authSessionProvider);
@@ -182,14 +179,55 @@ class _BusinessTenantReviewScreenState
         const SnackBar(content: Text("Tenant approved successfully")),
       );
     } catch (error) {
-      _logTap(
-        "approve_tenant_fail",
-        extra: {"error": error.toString()},
-      );
+      _logTap("approve_tenant_fail", extra: {"error": error.toString()});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Approval failed. ${error.toString()}")),
       );
+    }
+  }
+
+  Future<void> _approveAgreement({required String applicationId}) async {
+    if (_isApprovingAgreement) {
+      _logTap("approve_agreement_skip_busy");
+      return;
+    }
+
+    _logTap("approve_agreement", extra: {"applicationId": applicationId});
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      _logTap("approve_agreement_block", extra: {"reason": "no_session"});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    setState(() => _isApprovingAgreement = true);
+
+    try {
+      final api = ref.read(businessTenantApiProvider);
+      await api.approveAgreement(
+        token: session.token,
+        applicationId: applicationId,
+      );
+
+      ref.invalidate(businessTenantByIdProvider(applicationId));
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Agreement approved")));
+    } catch (error) {
+      _logTap("approve_agreement_fail", extra: {"error": error.toString()});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Approval failed. ${error.toString()}")),
+      );
+    } finally {
+      if (mounted) setState(() => _isApprovingAgreement = false);
     }
   }
 
@@ -207,9 +245,8 @@ class _BusinessTenantReviewScreenState
   }
 
   String _formatDate(DateTime? date) {
-    // WHY: Avoid intl dependency for a simple ISO date display.
-    if (date == null) return "Not provided";
-    return date.toIso8601String().split('T').first;
+    // WHY: Keep tenant review dates consistent across screens.
+    return formatDateLabel(date, fallback: "Not provided");
   }
 
   @override
@@ -267,7 +304,10 @@ class _BusinessTenantReviewScreenState
               theme: theme,
               tone: tone,
             );
-            final rentLabel = formatNgn(application.rentAmount);
+            // WHY: Tenant rent amounts are stored in kobo; format to NGN.
+            final rentLabel = formatNgnFromCents(
+              application.rentAmount.round(),
+            );
             final unitLabel =
                 "${application.unitCount} x ${application.unitType}";
             final rules = application.tenantRulesSnapshot;
@@ -283,16 +323,26 @@ class _BusinessTenantReviewScreenState
                 .length;
             final meetsReferenceRequirement =
                 verifiedReferences >= requiredReferences &&
-                    application.references.length >= requiredReferences;
+                application.references.length >= requiredReferences;
             final meetsGuarantorRequirement =
                 verifiedGuarantors >= requiredGuarantors &&
-                    application.guarantors.length >= requiredGuarantors;
-            final canApproveNow = meetsReferenceRequirement &&
+                application.guarantors.length >= requiredGuarantors;
+            final canApproveNow =
+                meetsReferenceRequirement &&
                 meetsGuarantorRequirement &&
                 application.status.toLowerCase() == 'pending';
             final isAlreadyApproved =
                 application.status.toLowerCase() == 'approved' ||
-                    application.status.toLowerCase() == 'active';
+                application.status.toLowerCase() == 'active';
+            // WHY: Agreement status controls the approval banner state.
+            final agreementApproved =
+                application.agreementStatus.toLowerCase() == 'approved' ||
+                application.agreementSigned;
+            // WHY: Once approved/active, do not allow further verification edits in UI.
+            final canVerifyNow =
+                canVerify &&
+                application.status.toLowerCase() == 'pending' &&
+                !isAlreadyApproved;
 
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -338,7 +388,9 @@ class _BusinessTenantReviewScreenState
                   refs: application.references,
                   guar: application.guarantors,
                   rules: rules,
+                  agreementApproved: agreementApproved,
                 ),
+
                 const SizedBox(height: 16),
                 _SectionTitle(title: "Tenant identity"),
                 const SizedBox(height: 8),
@@ -392,10 +444,12 @@ class _BusinessTenantReviewScreenState
                   label: "Move-in date",
                   value: _formatDate(application.moveInDate),
                 ),
+
                 if (estate != null && estate.unitMix.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   _UnitMixCard(unitMix: estate.unitMix),
                 ],
+
                 const SizedBox(height: 20),
                 _SectionTitle(title: "Tenant rules"),
                 const SizedBox(height: 8),
@@ -413,43 +467,156 @@ class _BusinessTenantReviewScreenState
                   label: "Agreement required",
                   value: rules.requiresAgreementSigned ? "Yes" : "No",
                 ),
+
+                // =========================
+                // Agreement approval (Owner action)
+                // =========================
+                const SizedBox(height: 20),
+                _SectionTitle(title: "Agreement"),
+                const SizedBox(height: 8),
+                if (rules.requiresAgreementSigned) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.description_outlined,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                agreementApproved
+                                    ? "Agreement approved"
+                                    : "Agreement requires approval",
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                agreementApproved
+                                    ? "The tenant’s agreement has been approved."
+                                    : "Approve the tenant’s agreement before progressing.",
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (canApprove && !isAlreadyApproved && !agreementApproved)
+                          ElevatedButton.icon(
+                            onPressed: _isApprovingAgreement
+                                ? null
+                                : () => _approveAgreement(
+                                    applicationId: application.id,
+                                  ),
+                            icon: _isApprovingAgreement
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.check_circle_outline),
+                            label: Text(
+                              _isApprovingAgreement
+                                  ? "Approving..."
+                                  : "Approve",
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Text(
+                    "Agreement is not required for this application.",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+
+                // =========================
+                // References
+                // =========================
                 const SizedBox(height: 20),
                 _SectionTitle(title: "References"),
                 const SizedBox(height: 8),
                 _ContactList(
                   contacts: application.references,
                   emptyText: "No references submitted.",
-                  canVerify: canVerify,
+                  canVerify: canVerifyNow,
                   onVerify: (index) {
                     _verifyContact(
                       applicationId: application.id,
                       type: "reference",
                       index: index,
                       label: "Reference",
+                      status: "verified",
+                    );
+                  },
+                  onReject: (index) {
+                    _verifyContact(
+                      applicationId: application.id,
+                      type: "reference",
+                      index: index,
+                      label: "Reference",
+                      status: "rejected",
                     );
                   },
                   isVerified: _isContactVerified,
                 ),
+
+                // =========================
+                // Guarantors
+                // =========================
                 const SizedBox(height: 16),
                 _SectionTitle(title: "Guarantors"),
                 const SizedBox(height: 8),
                 _ContactList(
                   contacts: application.guarantors,
                   emptyText: "No guarantors submitted.",
-                  canVerify: canVerify,
+                  canVerify: canVerifyNow,
                   onVerify: (index) {
                     _verifyContact(
                       applicationId: application.id,
                       type: "guarantor",
                       index: index,
                       label: "Guarantor",
+                      status: "verified",
+                    );
+                  },
+                  onReject: (index) {
+                    _verifyContact(
+                      applicationId: application.id,
+                      type: "guarantor",
+                      index: index,
+                      label: "Guarantor",
+                      status: "rejected",
                     );
                   },
                   isVerified: _isContactVerified,
                 ),
+
+                // =========================
+                // Review metadata (continues your code)
+                // =========================
                 const SizedBox(height: 20),
                 _SectionTitle(title: "Review metadata"),
-                const SizedBox(height: 8),
                 ReadOnlyValue(
                   label: "Status",
                   value: application.status.toUpperCase(),
@@ -479,9 +646,7 @@ class _BusinessTenantReviewScreenState
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       onPressed: canApproveNow
-                          ? () => _approveTenant(
-                                applicationId: application.id,
-                              )
+                          ? () => _approveTenant(applicationId: application.id)
                           : null,
                       icon: const Icon(Icons.verified_user),
                       label: Text(
@@ -492,6 +657,7 @@ class _BusinessTenantReviewScreenState
                     ),
                   ),
                 ],
+
                 const SizedBox(height: 24),
                 OutlinedButton.icon(
                   onPressed: () {
@@ -713,8 +879,10 @@ class _PaymentStatusCard extends StatelessWidget {
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: colors.background,
                   borderRadius: BorderRadius.circular(999),
@@ -740,7 +908,7 @@ class _PaymentStatusCard extends StatelessWidget {
           Text(
             paidAt == null
                 ? "No payment recorded yet"
-                : "Paid at: ${paidAt!.toLocal()}",
+                : "Paid at: ${formatDateTimeLabel(paidAt)}",
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -781,18 +949,18 @@ class _VerificationChecklist extends StatelessWidget {
   final List<TenantContact> refs;
   final List<TenantContact> guar;
   final TenantRulesSnapshot rules;
+  final bool agreementApproved;
 
   const _VerificationChecklist({
     required this.refs,
     required this.guar,
     required this.rules,
+    required this.agreementApproved,
   });
 
   int _verified(List<TenantContact> list) {
     return list
-        .where(
-          (c) => c.isVerified || c.status.toLowerCase() == 'verified',
-        )
+        .where((c) => c.isVerified || c.status.toLowerCase() == 'verified')
         .length;
   }
 
@@ -801,6 +969,10 @@ class _VerificationChecklist extends StatelessWidget {
     final theme = Theme.of(context);
     final refsVerified = _verified(refs);
     final guarVerified = _verified(guar);
+
+    // WHY: Agreement is done only when approved (or not required).
+    final agreementDone =
+        !rules.requiresAgreementSigned || agreementApproved;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -833,8 +1005,10 @@ class _VerificationChecklist extends StatelessWidget {
           const SizedBox(height: 8),
           _ChecklistRow(
             label: "Agreement",
-            progress: rules.requiresAgreementSigned ? "Required" : "Not required",
-            isDone: rules.requiresAgreementSigned ? false : true,
+            progress: rules.requiresAgreementSigned
+                ? (agreementDone ? "Approved" : "Required")
+                : "Not required",
+            isDone: agreementDone,
           ),
         ],
       ),
@@ -862,8 +1036,9 @@ class _ChecklistRow extends StatelessWidget {
           isDone ? Icons.check_circle : Icons.radio_button_unchecked,
           color: isDone
               ? AppStatusBadgeColors.fromTheme(
-                      theme: theme, tone: AppStatusTone.success)
-                  .foreground
+                  theme: theme,
+                  tone: AppStatusTone.success,
+                ).foreground
               : theme.colorScheme.onSurfaceVariant,
           size: 18,
         ),
@@ -914,7 +1089,8 @@ class _ReviewTimeline extends StatelessWidget {
       _TimelineItem(
         label: "Approved",
         date: reviewedAt,
-        done: status.toLowerCase() == "approved" ||
+        done:
+            status.toLowerCase() == "approved" ||
             status.toLowerCase() == "active",
       ),
       _TimelineItem(
@@ -986,8 +1162,9 @@ class _TimelineRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dateText =
-        item.date == null ? "" : "${item.date!.year}-${item.date!.month}-${item.date!.day}";
+    final dateText = item.date == null
+        ? ""
+        : "${item.date!.year}-${item.date!.month}-${item.date!.day}";
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -1023,6 +1200,7 @@ class _ContactList extends StatelessWidget {
   final String emptyText;
   final bool canVerify;
   final void Function(int index)? onVerify;
+  final void Function(int index)? onReject;
   final bool Function(TenantContact contact)? isVerified;
 
   const _ContactList({
@@ -1030,8 +1208,37 @@ class _ContactList extends StatelessWidget {
     required this.emptyText,
     required this.canVerify,
     required this.onVerify,
+    required this.onReject,
     required this.isVerified,
   });
+
+  // WHY: Keep phone display consistent with the tenant verification form.
+  static const String _ngPhonePrefix = "+234";
+  static const int _ngPhoneDigits = 10;
+  // WHY: Keep fallback labels centralized for consistent review UI.
+  static const String _emailMissing = "Email not provided";
+  static const String _phoneMissing = "Phone not provided";
+  static const String _docAttached = "Document attached";
+
+  String _displayName(TenantContact contact) {
+    // WHY: Prefer split names, fallback to legacy name.
+    final parts = [
+      contact.firstName.trim(),
+      contact.middleName?.trim() ?? "",
+      contact.lastName.trim(),
+    ].where((part) => part.isNotEmpty).toList();
+    if (parts.isNotEmpty) return parts.join(" ");
+    return contact.name;
+  }
+
+  String _displayPhone(TenantContact contact) {
+    // WHY: Normalize phone formatting for reviewers.
+    return formatPhoneDisplay(
+      contact.phone,
+      prefix: _ngPhonePrefix,
+      maxDigits: _ngPhoneDigits,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1073,20 +1280,39 @@ class _ContactList extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        contact.name,
+                        _displayName(contact),
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        contact.phone?.isNotEmpty == true
-                            ? contact.phone!
-                            : "Phone not provided",
+                        contact.email.isNotEmpty
+                            ? contact.email
+                            : _emailMissing,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _displayPhone(contact).isNotEmpty
+                            ? _displayPhone(contact)
+                            : _phoneMissing,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if (contact.documentUrl?.isNotEmpty == true) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _docAttached,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Text(
                         statusLabel.toUpperCase(),
@@ -1100,10 +1326,20 @@ class _ContactList extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (canVerify && !contactVerified && onVerify != null)
-                  TextButton(
-                    onPressed: () => onVerify?.call(index),
-                    child: const Text("Verify"),
+                if (canVerify && onVerify != null && onReject != null)
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      if (!contactVerified)
+                        TextButton(
+                          onPressed: () => onVerify?.call(index),
+                          child: const Text("Verify"),
+                        ),
+                      TextButton(
+                        onPressed: () => onReject?.call(index),
+                        child: const Text("Reject"),
+                      ),
+                    ],
                   ),
               ],
             ),
@@ -1141,7 +1377,8 @@ class _UnitMixCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           ...unitMix.map((unit) {
-            final rentLabel = formatNgn(unit.rentAmount);
+            // WHY: Estate unit rents are stored in kobo; format to NGN.
+            final rentLabel = formatNgnFromCents(unit.rentAmount.round());
             return Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(

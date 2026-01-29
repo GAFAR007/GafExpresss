@@ -17,7 +17,20 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 
 class TenantContact {
   final String name;
-  final String? phone;
+  // WHY: Store split names for clearer review displays.
+  final String firstName;
+  // WHY: Middle name is optional for legacy records.
+  final String? middleName;
+  // WHY: Last name is required for identity checks.
+  final String lastName;
+  // WHY: Email is required for verification contact details.
+  final String email;
+  // WHY: Phone is required for verification contact details.
+  final String phone;
+  // WHY: Optional supporting document URL for audits.
+  final String? documentUrl;
+  // WHY: Cloudinary id for future document cleanup.
+  final String? documentPublicId;
   final String status;
   final bool isVerified;
   final DateTime? verifiedAt;
@@ -25,7 +38,13 @@ class TenantContact {
 
   const TenantContact({
     required this.name,
+    required this.firstName,
+    required this.middleName,
+    required this.lastName,
+    required this.email,
     required this.phone,
+    required this.documentUrl,
+    required this.documentPublicId,
     required this.status,
     required this.isVerified,
     required this.verifiedAt,
@@ -35,7 +54,13 @@ class TenantContact {
   factory TenantContact.fromJson(Map<String, dynamic> json) {
     return TenantContact(
       name: (json['name'] ?? '').toString(),
+      firstName: (json['firstName'] ?? '').toString(),
+      middleName: _optionalString(json['middleName']),
+      lastName: (json['lastName'] ?? '').toString(),
+      email: (json['email'] ?? '').toString(),
       phone: (json['phone'] ?? '').toString(),
+      documentUrl: _optionalString(json['documentUrl']),
+      documentPublicId: _optionalString(json['documentPublicId']),
       status: (json['status'] ?? 'pending').toString(),
       isVerified: (json['isVerified'] ?? false) as bool,
       verifiedAt: _toDate(json['verifiedAt']),
@@ -47,6 +72,12 @@ class TenantContact {
     if (value == null) return null;
     if (value is DateTime) return value;
     return DateTime.tryParse(value.toString());
+  }
+
+  static String? _optionalString(dynamic value) {
+    if (value == null) return null;
+    final trimmed = value.toString().trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 }
 
@@ -141,6 +172,113 @@ class TenantUserStatus {
   }
 }
 
+class TenantSummary {
+  final String applicationId;
+  final String status;
+  final String paymentStatus;
+  final String agreementStatus;
+  final bool agreementSigned;
+  final String agreementText;
+  final DateTime? agreementAcceptedAt;
+  final DateTime? paidThroughDate;
+  final DateTime? nextDueDate;
+  final DateTime? lastRentPaymentAt;
+  final DateTime? moveInDate;
+  final double rentAmount;
+  final String rentPeriod;
+  final String unitType;
+  final int unitCount;
+  final String estateAssetId;
+  final TenantPaymentsSummary? paymentsSummary;
+
+  const TenantSummary({
+    required this.applicationId,
+    required this.status,
+    required this.paymentStatus,
+    required this.agreementStatus,
+    required this.agreementSigned,
+    required this.agreementText,
+    required this.agreementAcceptedAt,
+    required this.paidThroughDate,
+    required this.nextDueDate,
+    required this.lastRentPaymentAt,
+    required this.moveInDate,
+    required this.rentAmount,
+    required this.rentPeriod,
+    required this.unitType,
+    required this.unitCount,
+    required this.estateAssetId,
+    required this.paymentsSummary,
+  });
+
+  factory TenantSummary.fromJson(Map<String, dynamic> json) {
+    DateTime? toDate(dynamic value) =>
+        value == null ? null : DateTime.tryParse(value.toString());
+    double toDouble(dynamic value) {
+      if (value == null) return 0;
+      if (value is num) return value.toDouble();
+      return double.tryParse(value.toString()) ?? 0;
+    }
+
+    return TenantSummary(
+      applicationId: (json['applicationId'] ?? '').toString(),
+      status: (json['status'] ?? '').toString(),
+      paymentStatus: (json['paymentStatus'] ?? '').toString(),
+      agreementStatus: (json['agreementStatus'] ?? '').toString(),
+      agreementSigned: (json['agreementSigned'] ?? false) as bool,
+      agreementText: (json['agreementText'] ?? '').toString(),
+      agreementAcceptedAt: toDate(json['agreementAcceptedAt']),
+      paidThroughDate: toDate(json['paidThroughDate']),
+      nextDueDate: toDate(json['nextDueDate']),
+      lastRentPaymentAt: toDate(json['lastRentPaymentAt']),
+      moveInDate: toDate(json['moveInDate']),
+      rentAmount: toDouble(json['rentAmount']),
+      rentPeriod: (json['rentPeriod'] ?? '').toString(),
+      unitType: (json['unitType'] ?? '').toString(),
+      unitCount: (json['unitCount'] is int)
+          ? json['unitCount'] as int
+          : int.tryParse(json['unitCount']?.toString() ?? '') ?? 0,
+      estateAssetId: (json['estateAssetId'] ?? '').toString(),
+      paymentsSummary: json['paymentsSummary'] == null
+          ? null
+          : TenantPaymentsSummary.fromJson(
+              json['paymentsSummary'] as Map<String, dynamic>,
+            ),
+    );
+  }
+}
+
+class TenantPaymentsSummary {
+  final int totalPaidKoboYtd;
+  final int totalPaidKoboAllTime;
+  final int paymentsThisYear;
+  final DateTime? lastPaidAt;
+
+  const TenantPaymentsSummary({
+    required this.totalPaidKoboYtd,
+    required this.totalPaidKoboAllTime,
+    required this.paymentsThisYear,
+    required this.lastPaidAt,
+  });
+
+  factory TenantPaymentsSummary.fromJson(Map<String, dynamic> json) {
+    DateTime? toDate(dynamic value) =>
+        value == null ? null : DateTime.tryParse(value.toString());
+    int toInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      return int.tryParse(value.toString()) ?? 0;
+    }
+
+    return TenantPaymentsSummary(
+      totalPaidKoboYtd: toInt(json['totalPaidKoboYtd']),
+      totalPaidKoboAllTime: toInt(json['totalPaidKoboAllTime']),
+      paymentsThisYear: toInt(json['paymentsThisYear']),
+      lastPaidAt: toDate(json['lastPaidAt']),
+    );
+  }
+}
+
 class EstateUnitMix {
   final String unitType;
   final int count;
@@ -176,6 +314,119 @@ class EstateUnitMix {
   }
 }
 
+class EstateAnalytics {
+  final EstateAnalyticsEstate estate;
+  final EstateAnalyticsTenants tenants;
+  final EstateAnalyticsCollections collections;
+
+  const EstateAnalytics({
+    required this.estate,
+    required this.tenants,
+    required this.collections,
+  });
+
+  factory EstateAnalytics.fromJson(Map<String, dynamic> json) {
+    return EstateAnalytics(
+      estate: EstateAnalyticsEstate.fromJson(
+        (json['estate'] ?? {}) as Map<String, dynamic>,
+      ),
+      tenants: EstateAnalyticsTenants.fromJson(
+        (json['tenants'] ?? {}) as Map<String, dynamic>,
+      ),
+      collections: EstateAnalyticsCollections.fromJson(
+        (json['collections'] ?? {}) as Map<String, dynamic>,
+      ),
+    );
+  }
+}
+
+class EstateAnalyticsEstate {
+  final String id;
+  final String name;
+  final int totalUnits;
+  final int potentialAnnualKobo;
+
+  const EstateAnalyticsEstate({
+    required this.id,
+    required this.name,
+    required this.totalUnits,
+    required this.potentialAnnualKobo,
+  });
+
+  factory EstateAnalyticsEstate.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      return int.tryParse(value.toString()) ?? 0;
+    }
+
+    return EstateAnalyticsEstate(
+      id: (json['id'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      totalUnits: toInt(json['totalUnits']),
+      potentialAnnualKobo: toInt(json['potentialAnnualKobo']),
+    );
+  }
+}
+
+class EstateAnalyticsTenants {
+  final int active;
+  final int approved;
+  final int pending;
+  final int dueSoon;
+  final int overdue;
+
+  const EstateAnalyticsTenants({
+    required this.active,
+    required this.approved,
+    required this.pending,
+    required this.dueSoon,
+    required this.overdue,
+  });
+
+  factory EstateAnalyticsTenants.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      return int.tryParse(value.toString()) ?? 0;
+    }
+
+    return EstateAnalyticsTenants(
+      active: toInt(json['active']),
+      approved: toInt(json['approved']),
+      pending: toInt(json['pending']),
+      dueSoon: toInt(json['dueSoon']),
+      overdue: toInt(json['overdue']),
+    );
+  }
+}
+
+class EstateAnalyticsCollections {
+  final int monthKobo;
+  final int ytdKobo;
+  final int allTimeKobo;
+
+  const EstateAnalyticsCollections({
+    required this.monthKobo,
+    required this.ytdKobo,
+    required this.allTimeKobo,
+  });
+
+  factory EstateAnalyticsCollections.fromJson(Map<String, dynamic> json) {
+    int toInt(dynamic value) {
+      if (value == null) return 0;
+      if (value is int) return value;
+      return int.tryParse(value.toString()) ?? 0;
+    }
+
+    return EstateAnalyticsCollections(
+      monthKobo: toInt(json['monthKobo']),
+      ytdKobo: toInt(json['ytdKobo']),
+      allTimeKobo: toInt(json['allTimeKobo']),
+    );
+  }
+}
+
 class TenantEstateSummary {
   final String id;
   final String name;
@@ -190,8 +441,8 @@ class TenantEstateSummary {
   });
 
   factory TenantEstateSummary.fromJson(Map<String, dynamic> json) {
-    final rawUnitMix = (json['estate']?['unitMix'] ?? json['unitMix'] ?? [])
-        as List<dynamic>;
+    final rawUnitMix =
+        (json['estate']?['unitMix'] ?? json['unitMix'] ?? []) as List<dynamic>;
     final unitMix = rawUnitMix
         .whereType<Map<String, dynamic>>()
         .map(EstateUnitMix.fromJson)
@@ -224,7 +475,10 @@ class BusinessTenantApplication {
   final DateTime? moveInDate;
   final List<TenantContact> references;
   final List<TenantContact> guarantors;
+  final String agreementStatus;
   final bool agreementSigned;
+  final String agreementText;
+  final DateTime? agreementAcceptedAt;
   final TenantRulesSnapshot tenantRulesSnapshot;
   final String paymentStatus;
   final DateTime? paidAt;
@@ -247,7 +501,10 @@ class BusinessTenantApplication {
     required this.moveInDate,
     required this.references,
     required this.guarantors,
+    required this.agreementStatus,
     required this.agreementSigned,
+    required this.agreementText,
+    required this.agreementAcceptedAt,
     required this.tenantRulesSnapshot,
     required this.paymentStatus,
     required this.paidAt,
@@ -313,7 +570,10 @@ class BusinessTenantApplication {
       moveInDate: _parseDate(json['moveInDate']),
       references: references,
       guarantors: guarantors,
+      agreementStatus: (json['agreementStatus'] ?? '').toString(),
       agreementSigned: (json['agreementSigned'] ?? false) as bool,
+      agreementText: (json['agreementText'] ?? '').toString(),
+      agreementAcceptedAt: _parseDate(json['agreementAcceptedAt']),
       tenantRulesSnapshot: tenantRulesSnapshot,
       paymentStatus: (json['paymentStatus'] ?? 'unpaid').toString(),
       paidAt: _parseDate(json['paidAt']),

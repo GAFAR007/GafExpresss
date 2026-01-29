@@ -135,10 +135,6 @@ class BusinessDashboardScreen extends StatelessWidget {
               _logTap("assets_quick");
               context.go('/business-assets');
             },
-            onTeamTap: () {
-              _logTap("team_roles_quick");
-              context.go('/business-team');
-            },
             onTenantsTap: () {
               _logTap("tenants_quick");
               context.go('/business-tenants');
@@ -289,14 +285,12 @@ class _ActionStrip extends StatelessWidget {
   final VoidCallback onProductsTap;
   final VoidCallback onOrdersTap;
   final VoidCallback onAssetsTap;
-  final VoidCallback onTeamTap;
   final VoidCallback onTenantsTap;
 
   const _ActionStrip({
     required this.onProductsTap,
     required this.onOrdersTap,
     required this.onAssetsTap,
-    required this.onTeamTap,
     required this.onTenantsTap,
   });
 
@@ -322,12 +316,6 @@ class _ActionStrip extends StatelessWidget {
         label: "Assets",
         helper: "Manage equipment",
         onTap: onAssetsTap,
-      ),
-      _ActionItem(
-        icon: Icons.badge_outlined,
-        label: "Team roles",
-        helper: "Staff access",
-        onTap: onTeamTap,
       ),
       _ActionItem(
         icon: Icons.home_work_outlined,

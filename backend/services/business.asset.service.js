@@ -23,6 +23,46 @@ const {
 } = require("../utils/pagination");
 const debug = require("../utils/debug");
 
+// WHY: Rent amounts should be stored in kobo (minor units).
+const NAIRA_TO_KOBO = 100;
+
+// WHY: Ensure estate unit mix rent amounts are saved in kobo consistently.
+function normalizeEstateUnitMix(payload) {
+  // WHY: Guard against null payloads to keep updates safe.
+  if (!payload) {
+    return {};
+  }
+  if (!payload?.estate?.unitMix) {
+    return payload;
+  }
+
+  const unitMix = Array.isArray(payload.estate.unitMix)
+    ? payload.estate.unitMix
+    : [];
+  let convertedCount = 0;
+
+  for (const unit of unitMix) {
+    // WHY: UI supplies naira; we persist kobo for payment safety.
+    const rawRent = Number(unit?.rentAmount ?? 0);
+    if (!Number.isFinite(rawRent) || rawRent <= 0) {
+      continue;
+    }
+    unit.rentAmount = Math.round(
+      rawRent * NAIRA_TO_KOBO,
+    );
+    convertedCount += 1;
+  }
+
+  if (convertedCount > 0) {
+    debug(
+      "BUSINESS ASSET SERVICE: normalized unit mix rent amounts",
+      { convertedCount },
+    );
+  }
+
+  return payload;
+}
+
 async function createAsset({
   businessId,
   actor,
@@ -42,8 +82,13 @@ async function createAsset({
     );
   }
 
+  // WHY: Normalize rent amounts before persisting estate assets.
+  const normalizedPayload = normalizeEstateUnitMix(
+    payload,
+  );
+
   const asset = new BusinessAsset({
-    ...payload,
+    ...normalizedPayload,
     businessId,
     createdBy: actor?.id,
     updatedBy: actor?.id,
@@ -168,7 +213,12 @@ async function updateAsset({
     status: asset.status,
   };
 
-  Object.assign(asset, payload);
+  // WHY: Normalize rent amounts before updating estate assets.
+  const normalizedPayload = normalizeEstateUnitMix(
+    payload,
+  );
+
+  Object.assign(asset, normalizedPayload);
   asset.updatedBy =
     actor?.id || asset.updatedBy;
   await asset.save();

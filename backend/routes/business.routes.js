@@ -39,6 +39,7 @@ const upload = multer({
 /**
  * PRODUCTS
  */
+// WHY: Allow tenants to upload reference/guarantor documents before submission.
 router.post(
   "/products",
   requireAuth,
@@ -242,11 +243,38 @@ router.post(
   businessController.verifyTenantContact,
 );
 
+router.post(
+  "/tenant/applications/:id/approve-agreement",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+  ]),
+  businessController.approveAgreement,
+);
+
+router.post(
+  "/tenant/applications/:id/agreement",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.setAgreementText,
+);
+
 router.get(
   "/tenant/estate",
   requireAuth,
   requireAnyRole(["tenant"]),
   businessController.getTenantEstate,
+);
+
+router.post(
+  "/tenant/contact-document",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  upload.single("document"),
+  businessController.uploadTenantContactDocument,
 );
 
 router.post(
@@ -261,6 +289,13 @@ router.get(
   requireAuth,
   requireAnyRole(["tenant"]),
   businessController.getTenantApplication,
+);
+
+router.get(
+  "/tenant/summary",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  businessController.getTenantSummary,
 );
 
 router.patch(
@@ -298,6 +333,16 @@ router.get(
     "staff",
   ]),
   businessController.getAnalyticsEvents,
+);
+
+router.get(
+  "/analytics/estate/:estateAssetId",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getEstateAnalytics,
 );
 
 /**

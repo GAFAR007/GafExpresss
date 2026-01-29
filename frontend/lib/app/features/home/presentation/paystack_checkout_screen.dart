@@ -27,10 +27,12 @@ import 'package:frontend/app/core/platform/platform_info.dart';
 class PaystackCheckoutArgs {
   final String authorizationUrl;
   final String callbackUrl;
+  final String? successRedirect;
 
   const PaystackCheckoutArgs({
     required this.authorizationUrl,
     required this.callbackUrl,
+    this.successRedirect,
   });
 }
 
@@ -138,6 +140,7 @@ class _PaystackCheckoutScreenState extends State<PaystackCheckoutScreen> {
 
     final callbackUri = Uri.parse(url);
     final reference = callbackUri.queryParameters["reference"] ?? "";
+    final successRedirect = widget.args.successRedirect?.trim();
 
     AppDebug.log(
       "PAYSTACK_WEBVIEW",
@@ -148,13 +151,31 @@ class _PaystackCheckoutScreenState extends State<PaystackCheckoutScreen> {
     // WHY: Route back into the app with reference (if any).
     if (!mounted) return;
 
+    // WHY: Allow tenant payments to override the post-success destination.
     final route = reference.isNotEmpty
-        ? "/payment-success?reference=$reference"
-        : "/payment-success";
+        ? Uri(
+            path: "/payment-success",
+            queryParameters: {
+              "reference": reference,
+              if (successRedirect != null && successRedirect.isNotEmpty)
+                "next": successRedirect,
+            },
+          ).toString()
+        : Uri(
+            path: "/payment-success",
+            queryParameters: {
+              if (successRedirect != null && successRedirect.isNotEmpty)
+                "next": successRedirect,
+            },
+          ).toString();
 
     AppDebug.log(
       "PAYSTACK_WEBVIEW",
-      "Navigate -> $route",
+      "Navigate -> payment_success",
+      extra: {
+        "hasReference": reference.isNotEmpty,
+        "hasNext": successRedirect != null && successRedirect.isNotEmpty,
+      },
     );
 
     context.go(route);

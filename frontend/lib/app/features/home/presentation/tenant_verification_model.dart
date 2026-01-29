@@ -19,11 +19,13 @@ class TenantEstate {
   final String id;
   final String name;
   final BusinessAssetEstate? estate;
+  final String agreementText;
 
   const TenantEstate({
     required this.id,
     required this.name,
     required this.estate,
+    required this.agreementText,
   });
 
   factory TenantEstate.fromJson(Map<String, dynamic> json) {
@@ -33,6 +35,7 @@ class TenantEstate {
       estate: BusinessAssetEstate.fromJson(
         json["estate"] as Map<String, dynamic>?,
       ),
+      agreementText: (json["agreementText"] ?? "").toString(),
     );
   }
 
@@ -54,17 +57,42 @@ class TenantEstate {
 
 class TenantContact {
   final String name;
-  final String? phone;
+  // WHY: Split names support cleaner verification and review display.
+  final String firstName;
+  // WHY: Middle name stays optional for legacy and usability.
+  final String? middleName;
+  // WHY: Last name is required for contact verification.
+  final String lastName;
+  // WHY: Email is required for contact verification workflows.
+  final String email;
+  // WHY: Phone is required for contact verification workflows.
+  final String phone;
+  // WHY: Optional document evidence for references/guarantors.
+  final String? documentUrl;
+  // WHY: Cloudinary id enables future clean-up if needed.
+  final String? documentPublicId;
 
   const TenantContact({
     required this.name,
-    this.phone,
+    required this.firstName,
+    required this.middleName,
+    required this.lastName,
+    required this.email,
+    required this.phone,
+    required this.documentUrl,
+    required this.documentPublicId,
   });
 
   Map<String, dynamic> toJson() {
     return {
       "name": name,
+      "firstName": firstName,
+      "middleName": middleName,
+      "lastName": lastName,
+      "email": email,
       "phone": phone,
+      "documentUrl": documentUrl,
+      "documentPublicId": documentPublicId,
     };
   }
 }

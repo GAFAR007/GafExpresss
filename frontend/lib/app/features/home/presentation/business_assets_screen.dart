@@ -12,7 +12,7 @@
 /// - Uses businessAssetSummaryProvider for status counts.
 /// - Creates/updates/archives assets via BusinessAssetApi.
 ///
-/// DEBUGGING:
+/// DEBUGGING: 
 /// - Logs build, taps, and API flows for traceability.
 /// ----------------------------------------------------------------
 library;
@@ -22,6 +22,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_helpers.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
@@ -227,9 +229,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
   /// WHY:
   /// - Keep form parsing consistent for numeric + date fields.
   double? _parseDoubleInput(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) return null;
-    return double.tryParse(trimmed);
+    // WHY: Allow formatted NGN values with commas/prefixes.
+    return parseNgnInput(value);
   }
 
   int? _parseIntInput(String value) {
@@ -239,19 +240,19 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
   }
 
   DateTime? _parseDateInput(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) return null;
-    return DateTime.tryParse(trimmed);
+    // WHY: Centralize date parsing to keep input handling consistent.
+    return parseDateInput(value);
   }
 
   String _formatDateInput(DateTime? value) {
-    if (value == null) return '';
-    return value.toIso8601String().split('T').first;
+    // WHY: Centralize date formatting for input fields.
+    return formatDateInput(value);
   }
 
   String _formatNumberInput(num? value) {
     if (value == null) return '';
-    return value.toString();
+    // WHY: Format monetary values for display in input fields.
+    return formatNgnInput(value);
   }
 
   Future<void> _openAssetSheet(
@@ -516,7 +517,14 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 8),
                         TextField(
                           controller: purchaseCostCtrl,
-                          keyboardType: TextInputType.number,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                          // WHY: Auto-format money inputs with commas/decimals.
+                          inputFormatters: const [
+                            NgnInputFormatter(),
+                          ],
                           decoration: const InputDecoration(
                             labelText: "Purchase cost (NGN)",
                           ),
@@ -524,6 +532,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: purchaseDateCtrl,
+                          keyboardType: TextInputType.datetime,
                           decoration: const InputDecoration(
                             labelText: "Purchase date (YYYY-MM-DD)",
                           ),
@@ -539,7 +548,14 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: salvageCtrl,
-                          keyboardType: TextInputType.number,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                          // WHY: Auto-format money inputs with commas/decimals.
+                          inputFormatters: const [
+                            NgnInputFormatter(),
+                          ],
                           decoration: const InputDecoration(
                             labelText: "Salvage value (optional)",
                           ),
@@ -555,6 +571,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 8),
                         TextField(
                           controller: leaseStartCtrl,
+                          keyboardType: TextInputType.datetime,
                           decoration: const InputDecoration(
                             labelText: "Lease start (YYYY-MM-DD)",
                           ),
@@ -562,6 +579,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: leaseEndCtrl,
+                          keyboardType: TextInputType.datetime,
                           decoration: const InputDecoration(
                             labelText: "Lease end (YYYY-MM-DD)",
                           ),
@@ -569,7 +587,14 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: leaseCostCtrl,
-                          keyboardType: TextInputType.number,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                          // WHY: Auto-format money inputs with commas/decimals.
+                          inputFormatters: const [
+                            NgnInputFormatter(),
+                          ],
                           decoration: const InputDecoration(
                             labelText: "Lease cost amount",
                           ),
@@ -619,7 +644,14 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 8),
                         TextField(
                           controller: managementFeeCtrl,
-                          keyboardType: TextInputType.number,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                          // WHY: Auto-format money inputs with commas/decimals.
+                          inputFormatters: const [
+                            NgnInputFormatter(),
+                          ],
                           decoration: const InputDecoration(
                             labelText: "Management fee amount",
                           ),
@@ -679,7 +711,14 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         const SizedBox(height: 12),
                         TextField(
                           controller: inventoryUnitCostCtrl,
-                          keyboardType: TextInputType.number,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                          // WHY: Auto-format money inputs with commas/decimals.
+                          inputFormatters: const [
+                            NgnInputFormatter(),
+                          ],
                           decoration: const InputDecoration(
                             labelText: "Unit cost",
                           ),
@@ -820,7 +859,14 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                       Expanded(
                                         child: TextField(
                                           controller: row.rentAmountCtrl,
-                                          keyboardType: TextInputType.number,
+                                          keyboardType:
+                                              const TextInputType.numberWithOptions(
+                                                decimal: true,
+                                              ),
+                                          // WHY: Auto-format rent values as NGN inputs.
+                                          inputFormatters: const [
+                                            NgnInputFormatter(),
+                                          ],
                                           decoration: const InputDecoration(
                                             labelText: "Rent amount",
                                           ),
@@ -1890,7 +1936,9 @@ class _UnitMixControllers {
     return _UnitMixControllers(
       unitTypeCtrl: TextEditingController(text: unit.unitType),
       countCtrl: TextEditingController(text: unit.count.toString()),
-      rentAmountCtrl: TextEditingController(text: unit.rentAmount.toString()),
+      rentAmountCtrl: TextEditingController(
+        text: formatNgnInputFromKobo(unit.rentAmount),
+      ),
       rentPeriod: unit.rentPeriod,
     );
   }

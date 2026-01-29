@@ -12,6 +12,8 @@
 library;
 
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
+import 'package:frontend/app/core/formatters/phone_formatter.dart'
+    as phone_formatter;
 
 class SplitName {
   final String firstName;
@@ -55,33 +57,16 @@ String initialsForProfile(UserProfile profile) {
 }
 
 String? normalizeNigerianPhone(String input) {
-  final raw = input.replaceAll(RegExp(r'\s+'), '').trim();
-  final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
-  final e164 = RegExp(r'^\+234\d{10}$');
-  final local = RegExp(r'^0\d{10}$');
-  final plain = RegExp(r'^234\d{10}$');
-  final digitsOnly = RegExp(r'^\d{10}$');
-
-  if (e164.hasMatch(raw)) return raw;
-  if (local.hasMatch(raw)) return '+234${raw.substring(1)}';
-  if (plain.hasMatch(raw)) return '+$raw';
-  if (digitsOnly.hasMatch(digits)) return '+234$digits';
-
-  return null;
+  // WHY: Reuse the shared formatter so all screens normalize consistently.
+  return phone_formatter.normalizeNigerianPhone(input);
 }
 
 String extractNigerianDigits(String input, {required int maxDigits}) {
-  final digits = input.replaceAll(RegExp(r'[^0-9]'), '');
-  if (digits.startsWith('234') && digits.length >= 13) {
-    return digits.substring(3, 13);
-  }
-  if (digits.startsWith('0') && digits.length == 11) {
-    return digits.substring(1);
-  }
-  if (digits.length <= maxDigits) {
-    return digits;
-  }
-  return digits.substring(0, maxDigits);
+  // WHY: Reuse the shared formatter so display stays consistent.
+  return phone_formatter.extractNigerianDigits(
+    input,
+    maxDigits: maxDigits,
+  );
 }
 
 String formatPhoneDisplay(
@@ -89,12 +74,10 @@ String formatPhoneDisplay(
   required String prefix,
   required int maxDigits,
 }) {
-  if (rawPhone == null || rawPhone.trim().isEmpty) {
-    return '';
-  }
-  final digits = extractNigerianDigits(rawPhone, maxDigits: maxDigits);
-  if (digits.isEmpty) {
-    return '';
-  }
-  return "$prefix$digits";
+  // WHY: Delegate to shared formatter for consistent output.
+  return phone_formatter.formatPhoneDisplay(
+    rawPhone,
+    prefix: prefix,
+    maxDigits: maxDigits,
+  );
 }

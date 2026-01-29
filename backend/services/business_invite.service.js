@@ -68,6 +68,7 @@ async function createInvite({
   inviteeEmail,
   role,
   estateAssetId,
+  agreementText,
 }) {
   if (!inviteeEmail) {
     throw new Error('Invite email is required');
@@ -82,6 +83,9 @@ async function createInvite({
 
   if (role === 'tenant' && !estateAssetId) {
     throw new Error('Estate asset is required for tenant invites');
+  }
+  if (role === 'tenant' && !agreementText) {
+    throw new Error('Agreement text is required for tenant invites');
   }
 
   const token = generateToken();
@@ -102,6 +106,7 @@ async function createInvite({
     tokenHash,
     tokenExpiresAt,
     status: 'pending',
+    agreementText: (agreementText || '').toString().trim(),
   });
 
   const inviteLink = buildInviteLink(token);
@@ -117,6 +122,7 @@ async function createInvite({
     text: `You have been invited to join a business team. Accept your invite: ${inviteLink}`,
     html: `
       <p>You have been invited to join a business team.</p>
+      ${invite.agreementText ? `<p><strong>Agreement:</strong></p><pre>${invite.agreementText}</pre>` : ''}
       <p><a href="${inviteLink}">Accept your invite</a></p>
       <p>This link expires in ${INVITE_TTL_DAYS} days.</p>
     `,
@@ -162,9 +168,61 @@ async function markInviteAccepted({
   await invite.save();
 }
 
+// WHY: Prefill agreements for tenants based on the latest accepted invite.
+async function getLatestAcceptedInviteForUser({
+  businessId,
+  userId,
+}) {
+  if (!businessId || !userId) return null;
+
+  return BusinessInvite.findOne({
+    businessId,
+    acceptedBy: userId,
+    status: 'accepted',
+  })
+    .sort({ acceptedAt: -1 })
+    .lean();
+}
+
+// WHY: Fall back to email lookups when accepted-by is missing or legacy data exists.
+async function getLatestInviteForEmail({
+  businessId,
+  email,
+  statuses,
+}) {
+  if (!businessId || !email) return null;
+
+  // WHY: Normalize email for consistent invite lookups.
+  const normalizedEmail =
+    email.toString().trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  // WHY: Default to accepted/pending for tenant agreement visibility.
+  const statusFilter =
+    Array.isArray(statuses) && statuses.length > 0
+      ? statuses
+      : ['accepted', 'pending'];
+
+  debug('BUSINESS INVITE: lookup by email', {
+    businessId,
+    hasEmail: Boolean(normalizedEmail),
+    statuses: statusFilter,
+  });
+
+  return BusinessInvite.findOne({
+    businessId,
+    inviteeEmail: normalizedEmail,
+    status: { $in: statusFilter },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+}
+
 module.exports = {
   createInvite,
   getInviteByToken,
   markInviteAccepted,
+  getLatestAcceptedInviteForUser,
+  getLatestInviteForEmail,
   buildInviteLink,
 };

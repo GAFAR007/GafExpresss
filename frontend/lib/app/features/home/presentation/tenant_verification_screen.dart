@@ -19,19 +19,26 @@ library;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/constants/app_constants.dart';
+import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/formatters/email_formatter.dart';
+import 'package:frontend/app/core/formatters/phone_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart'
     as business_tenant;
+
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
+import 'package:frontend/app/features/home/presentation/tenant_document_picker.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_model.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_providers.dart';
 import 'package:frontend/app/theme/app_theme.dart';
@@ -62,6 +69,18 @@ class _TenantVerificationScreenState
 
   // WHY: Allow tenant to pick a rent cadence (backend validates if needed).
   static const List<String> _rentPeriods = ["monthly", "quarterly", "yearly"];
+  // WHY: Keep Nigerian phone format consistent with Settings.
+  static const String _ngPhonePrefix = "+234";
+  static const int _ngPhoneDigits = 10;
+  // WHY: Centralize contact error copy to avoid inline strings.
+  static const String _contactMissingFields =
+      "Each reference/guarantor needs first name, last name, email, and phone.";
+  static const String _contactInvalidPhone =
+      "Enter 10 digits after +234 for Nigerian numbers.";
+  static const String _contactInvalidEmail =
+      "Enter a valid email address for each contact.";
+  static const String _contactUploadFailed =
+      "Document upload failed. Try again.";
 
   void _log(String message, {Map<String, dynamic>? extra}) {
     AppDebug.log("TENANT_VERIFY", message, extra: extra);
@@ -120,21 +139,142 @@ class _TenantVerificationScreenState
   }
 
   String _formatRent(double amount) {
-    // WHY: Show readable NGN values without relying on cents formatting.
-    final value = amount.toStringAsFixed(2);
-    final parts = value.split(".");
-    final whole = parts[0].replaceAllMapped(
-      RegExp(r'\B(?=(\d{3})+(?!\d))'),
-      (match) => ",",
-    );
-    return "NGN $whole.${parts.length > 1 ? parts[1] : '00'}";
+    // WHY: Centralize money formatting for rent values.
+    return formatNgnFromCents(amount.round());
   }
 
   String _formatDate(DateTime date) {
-    final year = date.year.toString().padLeft(4, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return "$year-$month-$day";
+    // WHY: Reuse shared date formatting for move-in and summary labels.
+    return formatDateLabel(date);
+  }
+
+  String _formatMoneyKobo(int kobo) {
+    // WHY: Centralize money formatting for payment summaries.
+    return formatNgnFromCents(kobo);
+  }
+
+  bool _isValidEmail(String input) {
+    // WHY: Keep a minimal email validation to block obvious mistakes.
+    final normalized = normalizeEmail(input);
+    if (!normalized.contains("@")) return false;
+    final parts = normalized.split("@");
+    if (parts.length != 2) return false;
+    return parts.last.contains(".");
+  }
+
+  List<TenantContact>? _buildContacts(List<_ContactControllers> controllers) {
+    final contacts = <TenantContact>[];
+
+    for (final ctrl in controllers) {
+      final firstName = ctrl.firstNameCtrl.text.trim();
+      final lastName = ctrl.lastNameCtrl.text.trim();
+      final emailRaw = ctrl.emailCtrl.text.trim();
+      final phoneDigits = ctrl.phoneCtrl.text.trim();
+
+      if (firstName.isEmpty || lastName.isEmpty) {
+        _log("contact_validation_failed", extra: {"reason": "name"});
+        _showMessage(_contactMissingFields);
+        return null;
+      }
+
+      if (emailRaw.isEmpty || !_isValidEmail(emailRaw)) {
+        _log("contact_validation_failed", extra: {"reason": "email"});
+        _showMessage(_contactInvalidEmail);
+        return null;
+      }
+
+      final normalizedPhone = normalizeNigerianPhone(phoneDigits);
+      if (phoneDigits.isEmpty || normalizedPhone == null) {
+        _log("contact_validation_failed", extra: {"reason": "phone"});
+        _showMessage(_contactInvalidPhone);
+        return null;
+      }
+
+      final contact = ctrl.toContact(
+        normalizedPhone: normalizedPhone,
+        normalizedEmail: normalizeEmail(emailRaw),
+      );
+
+      if (contact == null) {
+        _log("contact_validation_failed", extra: {"reason": "contact"});
+        _showMessage(_contactMissingFields);
+        return null;
+      }
+
+      contacts.add(contact);
+    }
+
+    return contacts;
+  }
+
+  Future<void> _uploadContactDocument(_ContactControllers controller) async {
+    if (controller.isUploading) {
+      _log("contact_doc_upload_skip_busy");
+      return;
+    }
+
+    _log("contact_doc_upload_tap");
+    final picked = await pickTenantDocument();
+    if (picked == null) {
+      _log("contact_doc_upload_cancel");
+      return;
+    }
+
+    final session = ref.read(authSessionProvider);
+    if (session == null) {
+      _log("contact_doc_upload_block_session");
+      _showMessage("Session expired. Please sign in again.");
+      return;
+    }
+
+    setState(() => controller.isUploading = true);
+
+    try {
+      final api = ref.read(tenantVerificationApiProvider);
+      _log("contact_doc_upload_start", extra: {"bytes": picked.bytes.length});
+      final data = await api.uploadTenantContactDocument(
+        token: session.token,
+        bytes: picked.bytes,
+        filename: picked.filename,
+      );
+
+      final url = data["documentUrl"]?.toString().trim() ?? "";
+      final publicId = data["documentPublicId"]?.toString().trim() ?? "";
+
+      if (url.isEmpty) {
+        throw Exception("Document URL missing");
+      }
+
+      setState(() {
+        controller.documentUrl = url;
+        controller.documentPublicId = publicId.isEmpty ? null : publicId;
+        controller.documentName = picked.filename;
+      });
+
+      _log(
+        "contact_doc_upload_success",
+        extra: {"hasPublicId": publicId.isNotEmpty},
+      );
+    } catch (error) {
+      _log(
+        "contact_doc_upload_fail",
+        extra: {"error": _extractErrorMessage(error)},
+      );
+      _showMessage(_contactUploadFailed);
+    } finally {
+      if (mounted) {
+        setState(() => controller.isUploading = false);
+      }
+    }
+  }
+
+  void _clearContactDocument(_ContactControllers controller) {
+    _log("contact_doc_remove_tap");
+    setState(() {
+      controller.documentUrl = null;
+      controller.documentPublicId = null;
+      controller.documentName = null;
+    });
   }
 
   Future<void> _pickMoveInDate() async {
@@ -179,6 +319,11 @@ class _TenantVerificationScreenState
       return;
     }
 
+    final application = ref.read(tenantApplicationProvider).asData?.value;
+    final agreementText = (application?.agreementText.isNotEmpty ?? false)
+        ? application!.agreementText
+        : estate.agreementText;
+
     final unitType = _selectedUnitType?.trim() ?? "";
     if (unitType.isEmpty) {
       _log("submit_block_unit_missing");
@@ -199,22 +344,24 @@ class _TenantVerificationScreenState
       return;
     }
 
+    if (estate.tenantRules.requiresAgreementSigned && agreementText.isEmpty) {
+      _log("submit_block_agreement_missing");
+      _showMessage(
+        "Agreement is missing. Ask your owner to resend the invite with the agreement attached.",
+      );
+      return;
+    }
+
     if (estate.tenantRules.requiresAgreementSigned && !_agreementSigned) {
       _log("submit_block_agreement_required");
       _showMessage("Agreement must be signed before verification.");
       return;
     }
 
-    final references = _referenceCtrls
-        .map((ctrl) => ctrl.toContact())
-        .where((contact) => contact != null)
-        .cast<TenantContact>()
-        .toList();
-    final guarantors = _guarantorCtrls
-        .map((ctrl) => ctrl.toContact())
-        .where((contact) => contact != null)
-        .cast<TenantContact>()
-        .toList();
+    final references = _buildContacts(_referenceCtrls);
+    if (references == null) return;
+    final guarantors = _buildContacts(_guarantorCtrls);
+    if (guarantors == null) return;
 
     setState(() => _isSubmitting = true);
 
@@ -226,6 +373,7 @@ class _TenantVerificationScreenState
           "unitType": unitType,
           "references": references.length,
           "guarantors": guarantors.length,
+          "hasAgreement": agreementText.isNotEmpty,
         },
       );
 
@@ -237,6 +385,7 @@ class _TenantVerificationScreenState
         references: references,
         guarantors: guarantors,
         agreementSigned: _agreementSigned,
+        agreementText: agreementText,
       );
 
       _log("submit_success");
@@ -274,14 +423,17 @@ class _TenantVerificationScreenState
 
     try {
       final api = ref.read(tenantVerificationApiProvider);
-      _log(
-        "pay_intent_request",
-        extra: {"tenantId": session.user.id},
-      );
+      _log("pay_intent_request", extra: {"tenantId": session.user.id});
+
+      final callbackUrl = _buildCallbackUrl();
+      if (callbackUrl == null || callbackUrl.isEmpty) {
+        throw Exception("Paystack callback URL not configured");
+      }
 
       final data = await api.createTenantPaymentIntent(
         token: session.token,
         tenantId: session.user.id,
+        callbackUrl: callbackUrl,
       );
 
       final authorizationUrl =
@@ -292,20 +444,12 @@ class _TenantVerificationScreenState
         throw Exception("Payment authorization URL missing");
       }
 
-      final callbackUrl = _buildCallbackUrl();
-      if (callbackUrl == null || callbackUrl.isEmpty) {
-        throw Exception("Paystack callback URL not configured");
-      }
-
       await _openPaystack(
         authorizationUrl: authorizationUrl,
         callbackUrl: callbackUrl,
       );
 
-      _log(
-        "pay_intent_opened",
-        extra: {"hasReference": reference.isNotEmpty},
-      );
+      _log("pay_intent_opened", extra: {"hasReference": reference.isNotEmpty});
     } catch (error) {
       final message = _extractErrorMessage(error);
       _log("pay_intent_fail", extra: {"error": message});
@@ -342,20 +486,43 @@ class _TenantVerificationScreenState
       extra: PaystackCheckoutArgs(
         authorizationUrl: authorizationUrl,
         callbackUrl: callbackUrl,
+        // WHY: Tenant rent success should land on tenant dashboard.
+        successRedirect: "/tenant-dashboard",
       ),
     );
   }
 
   String? _buildCallbackUrl() {
+    // WHY: Attach next route so web callbacks can redirect correctly.
+    const nextRoute = "/tenant-dashboard";
     if (PlatformInfo.isWeb) {
-      return "${Uri.base.origin}/payment-success";
+      return Uri(
+        scheme: Uri.base.scheme,
+        host: Uri.base.host,
+        port: Uri.base.hasPort ? Uri.base.port : null,
+        path: "/payment-success",
+        queryParameters: {"next": nextRoute},
+      ).toString();
     }
 
     if (AppConstants.paystackCallbackBaseUrl.isEmpty) {
       return null;
     }
 
-    return "${AppConstants.paystackCallbackBaseUrl}/payment-success";
+    final baseUri = Uri.parse(AppConstants.paystackCallbackBaseUrl);
+    // WHY: Preserve scheme/host while appending payment-success path.
+    final basePath = baseUri.path;
+    final callbackPath = basePath.endsWith("/payment-success")
+        ? basePath
+        : basePath.isEmpty || basePath == "/"
+        ? "/payment-success"
+        : "${basePath}/payment-success";
+    return baseUri
+        .replace(
+          path: callbackPath,
+          queryParameters: {"next": nextRoute},
+        )
+        .toString();
   }
 
   String _extractErrorMessage(Object error) {
@@ -399,7 +566,11 @@ class _TenantVerificationScreenState
     final profileAsync = ref.watch(userProfileProvider);
     final estateAsync = ref.watch(tenantEstateProvider);
     final applicationAsync = ref.watch(tenantApplicationProvider);
+    final summaryAsync = ref.watch(tenantSummaryProvider);
     final application = applicationAsync.asData?.value;
+    if (application?.agreementSigned == true && !_agreementSigned) {
+      _agreementSigned = true;
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -422,6 +593,7 @@ class _TenantVerificationScreenState
           ref.invalidate(tenantEstateProvider);
           ref.invalidate(userProfileProvider);
           ref.invalidate(tenantApplicationProvider);
+          ref.invalidate(tenantSummaryProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -434,7 +606,16 @@ class _TenantVerificationScreenState
               data: (application) => Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildTenantStatusCard(application: application),
+                  summaryAsync.when(
+                    data: (summary) => _buildTenantStatusCard(
+                      application: application,
+                      summary: summary,
+                    ),
+                    loading: () =>
+                        _buildTenantStatusCard(application: application),
+                    error: (_, __) =>
+                        _buildTenantStatusCard(application: application),
+                  ),
                   const SizedBox(height: 12),
                   _buildMiniTimeline(application),
                 ],
@@ -463,7 +644,8 @@ class _TenantVerificationScreenState
                 _syncContactLists(rules);
 
                 final status = (application?.status ?? "").toLowerCase();
-                final showForm = application == null ||
+                final showForm =
+                    application == null ||
                     status == "pending" ||
                     status == "rejected";
 
@@ -481,12 +663,16 @@ class _TenantVerificationScreenState
                   );
                 }
 
-                return _buildEstateForm(estate, rules);
+                return _buildEstateForm(
+                  estate,
+                  rules,
+                  application: application,
+                );
               },
               loading: () => const _InlineLoader(label: "Loading estate..."),
-            error: (error, _) =>
-                Text("Estate error: ${_extractErrorMessage(error)}"),
-          ),
+              error: (error, _) =>
+                  Text("Estate error: ${_extractErrorMessage(error)}"),
+            ),
             const _HelpFooter(),
           ],
         ),
@@ -496,6 +682,7 @@ class _TenantVerificationScreenState
 
   Widget _buildTenantStatusCard({
     required business_tenant.BusinessTenantApplication? application,
+    business_tenant.TenantSummary? summary,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
@@ -504,7 +691,7 @@ class _TenantVerificationScreenState
       return Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceVariant,
+          color: colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Text(
@@ -516,6 +703,9 @@ class _TenantVerificationScreenState
 
     final status = application.status.toLowerCase();
     final paymentStatus = application.paymentStatus.toLowerCase();
+    final paidThroughDate = summary?.paidThroughDate ?? application.paidAt;
+    final nextDueDate = summary?.nextDueDate;
+    final payments = summary?.paymentsSummary;
     final isApproved = status == "approved";
     final isActive = status == "active";
     final isRejected = status == "rejected";
@@ -561,6 +751,35 @@ class _TenantVerificationScreenState
               color: colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              _StatusValue(
+                label: "Paid through",
+                value: paidThroughDate == null
+                    ? "Awaiting payment"
+                    : _formatDate(paidThroughDate),
+              ),
+              _StatusValue(
+                label: "Next due",
+                value: nextDueDate == null
+                    ? "Awaiting payment"
+                    : _formatDate(nextDueDate),
+              ),
+              if (payments != null)
+                _StatusValue(
+                  label: "Paid YTD",
+                  value: _formatMoneyKobo(payments.totalPaidKoboYtd),
+                ),
+              if (payments != null)
+                _StatusValue(
+                  label: "Payments this year",
+                  value: payments.paymentsThisYear.toString(),
+                ),
+            ],
+          ),
           const SizedBox(height: 12),
           _ReadOnlyRow(label: "Unit", value: application.unitType),
           _ReadOnlyRow(
@@ -598,12 +817,41 @@ class _TenantVerificationScreenState
               alignment: Alignment.centerRight,
               child: TextButton.icon(
                 onPressed: () {
-                  _log("view_receipt", extra: {"applicationId": application.id});
+                  _log(
+                    "view_receipt",
+                    extra: {"applicationId": application.id},
+                  );
                   // TODO: wire to receipts page when available.
                 },
                 icon: const Icon(Icons.receipt_long),
                 label: const Text("View payment receipt"),
               ),
+            ),
+          ],
+          if (isApproved || isActive) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      _log("cta_dashboard");
+                      context.go('/tenant-dashboard');
+                    },
+                    child: const Text("Go to dashboard"),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      _log("cta_view_verification");
+                      // Already on verification; keep for explicit affordance.
+                    },
+                    child: const Text("View verification"),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
@@ -612,14 +860,16 @@ class _TenantVerificationScreenState
   }
 
   Widget _buildMiniTimeline(
-      business_tenant.BusinessTenantApplication? application) {
+    business_tenant.BusinessTenantApplication? application,
+  ) {
     final theme = Theme.of(context);
     if (application == null) return const SizedBox.shrink();
     final steps = [
       _TimelineStep(label: "Submitted", done: application.createdAt != null),
       _TimelineStep(
         label: "Approved",
-        done: application.status.toLowerCase() == "approved" ||
+        done:
+            application.status.toLowerCase() == "approved" ||
             application.status.toLowerCase() == "active",
       ),
       _TimelineStep(
@@ -649,8 +899,9 @@ class _TenantVerificationScreenState
                     s.done ? Icons.check_circle : Icons.radio_button_unchecked,
                     color: s.done
                         ? AppStatusBadgeColors.fromTheme(
-                                theme: theme, tone: AppStatusTone.success)
-                            .foreground
+                            theme: theme,
+                            tone: AppStatusTone.success,
+                          ).foreground
                         : theme.colorScheme.onSurfaceVariant,
                     size: 18,
                   ),
@@ -697,7 +948,7 @@ class _TenantVerificationScreenState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: colorScheme.surfaceVariant,
+              color: colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Column(
@@ -752,9 +1003,15 @@ class _TenantVerificationScreenState
           _ReadOnlyRow(label: "Email", value: profile.email),
           _ReadOnlyRow(
             label: "Phone",
-            value: profile.phone?.isNotEmpty == true
-                ? profile.phone!
-                : "Not provided",
+            value: (() {
+              // WHY: Format verified phone with the same +234 display style.
+              final phone = formatPhoneDisplay(
+                profile.phone,
+                prefix: _ngPhonePrefix,
+                maxDigits: _ngPhoneDigits,
+              );
+              return phone.isNotEmpty ? phone : "Not provided";
+            })(),
           ),
           _ReadOnlyRow(
             label: "NIN",
@@ -777,8 +1034,11 @@ class _TenantVerificationScreenState
     );
   }
 
-  Widget _buildEstateForm(TenantEstate estate, BusinessAssetTenantRules rules) {
-    final colorScheme = Theme.of(context).colorScheme;
+  Widget _buildEstateForm(
+    TenantEstate estate,
+    BusinessAssetTenantRules rules, {
+    business_tenant.BusinessTenantApplication? application,
+  }) {
     final textTheme = Theme.of(context).textTheme;
 
     final unitMix = estate.unitMix;
@@ -798,6 +1058,12 @@ class _TenantVerificationScreenState
       ..._rentPeriods,
       if (selectedUnit.rentPeriod.isNotEmpty) selectedUnit.rentPeriod,
     }.toList();
+
+    final agreementText = (application?.agreementText.isNotEmpty ?? false)
+        ? application!.agreementText
+        : estate.agreementText;
+    final bool isAgreementMissing =
+        rules.requiresAgreementSigned && agreementText.isEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -864,12 +1130,47 @@ class _TenantVerificationScreenState
           },
         ),
         const SizedBox(height: 12),
+        if (isAgreementMissing)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.errorContainer.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              "No agreement is attached. Ask your owner to resend the invite with the tenancy agreement.",
+              style: textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else if (agreementText.isNotEmpty) ...[
+          _AgreementCard(
+            agreementText: agreementText,
+            accepted: _agreementSigned,
+            onAccept: _agreementSigned
+                ? null
+                : () {
+                    _log("agreement_accept");
+                    setState(() => _agreementSigned = true);
+                  },
+          ),
+          const SizedBox(height: 16),
+        ],
         TextField(
           controller: _moveInCtrl,
           readOnly: true,
+          // WHY: Prevent manual input so all dates come from the picker.
+          enableInteractiveSelection: false,
+          showCursor: false,
           decoration: const InputDecoration(
             labelText: "Move-in date",
             hintText: "Select a date",
+            suffixIcon: Icon(Icons.calendar_today_outlined),
           ),
           onTap: _pickMoveInDate,
         ),
@@ -900,30 +1201,10 @@ class _TenantVerificationScreenState
               : null,
         ),
         const SizedBox(height: 20),
-        Row(
-          children: [
-            Checkbox(
-              value: _agreementSigned,
-              onChanged: (value) {
-                _log("agreement_toggle", extra: {"value": value});
-                setState(() => _agreementSigned = value ?? false);
-              },
-            ),
-            Expanded(
-              child: Text(
-                "I confirm the tenancy agreement is signed.",
-                style: textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: _isSubmitting
+            onPressed: _isSubmitting || isAgreementMissing
                 ? null
                 : () async {
                     final profile = ref.read(userProfileProvider).value;
@@ -976,6 +1257,12 @@ class _TenantVerificationScreenState
             index: i,
             controllers: controllers[i],
             onRemove: onRemove == null ? null : () => onRemove(i),
+            onUpload: () => _uploadContactDocument(controllers[i]),
+            onClear: controllers[i].documentUrl == null
+                ? null
+                : () => _clearContactDocument(controllers[i]),
+            isUploading: controllers[i].isUploading,
+            documentName: controllers[i].documentName,
           ),
           const SizedBox(height: 12),
         ],
@@ -1074,28 +1361,90 @@ class _HelpFooter extends StatelessWidget {
   }
 }
 
-class _ContactControllers {
-  final TextEditingController nameCtrl;
-  final TextEditingController phoneCtrl;
+// WHY: Centralize contact field copy to avoid inline strings.
+class _ContactCopy {
+  static const String firstNameLabel = "First name";
+  static const String middleNameLabel = "Middle name";
+  static const String lastNameLabel = "Last name";
+  static const String emailLabel = "Email";
+  static const String phoneLabel = "Phone";
+  static const String noDocument = "No document uploaded";
+  static const String upload = "Upload";
+  static const String uploading = "Uploading...";
+  static const String remove = "Remove";
+}
 
-  _ContactControllers({required this.nameCtrl, required this.phoneCtrl});
+class _ContactControllers {
+  // WHY: Split name fields make validation and display explicit.
+  final TextEditingController firstNameCtrl;
+  // WHY: Middle name is optional but stored for completeness.
+  final TextEditingController middleNameCtrl;
+  // WHY: Last name is required for verification checks.
+  final TextEditingController lastNameCtrl;
+  // WHY: Email is required for contact verification.
+  final TextEditingController emailCtrl;
+  // WHY: Phone is required and normalized to +234 format.
+  final TextEditingController phoneCtrl;
+  // WHY: Keep document metadata attached per contact entry.
+  String? documentUrl;
+  String? documentPublicId;
+  String? documentName;
+  // WHY: Track upload state per contact to disable repeat uploads.
+  bool isUploading = false;
+
+  _ContactControllers({
+    required this.firstNameCtrl,
+    required this.middleNameCtrl,
+    required this.lastNameCtrl,
+    required this.emailCtrl,
+    required this.phoneCtrl,
+  });
 
   factory _ContactControllers.empty() {
     return _ContactControllers(
-      nameCtrl: TextEditingController(),
+      firstNameCtrl: TextEditingController(),
+      middleNameCtrl: TextEditingController(),
+      lastNameCtrl: TextEditingController(),
+      emailCtrl: TextEditingController(),
       phoneCtrl: TextEditingController(),
     );
   }
 
-  TenantContact? toContact() {
-    final name = nameCtrl.text.trim();
-    final phone = phoneCtrl.text.trim();
-    if (name.isEmpty) return null;
-    return TenantContact(name: name, phone: phone.isEmpty ? null : phone);
+  TenantContact? toContact({
+    required String normalizedPhone,
+    required String normalizedEmail,
+  }) {
+    // WHY: Build a display name from split fields for legacy name support.
+    final firstName = firstNameCtrl.text.trim();
+    final middleName = middleNameCtrl.text.trim();
+    final lastName = lastNameCtrl.text.trim();
+    final displayName = [
+      firstName,
+      middleName,
+      lastName,
+    ].where((part) => part.isNotEmpty).join(" ");
+
+    if (firstName.isEmpty || lastName.isEmpty) {
+      return null;
+    }
+
+    return TenantContact(
+      name: displayName,
+      firstName: firstName,
+      middleName: middleName.isEmpty ? null : middleName,
+      lastName: lastName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
+      documentUrl: documentUrl,
+      documentPublicId: documentPublicId,
+    );
   }
 
   void dispose() {
-    nameCtrl.dispose();
+    firstNameCtrl.dispose();
+    middleNameCtrl.dispose();
+    lastNameCtrl.dispose();
+    emailCtrl.dispose();
     phoneCtrl.dispose();
   }
 }
@@ -1104,39 +1453,206 @@ class _ContactRow extends StatelessWidget {
   final int index;
   final _ContactControllers controllers;
   final VoidCallback? onRemove;
+  final VoidCallback? onUpload;
+  final VoidCallback? onClear;
+  final bool isUploading;
+  final String? documentName;
 
   const _ContactRow({
     required this.index,
     required this.controllers,
     required this.onRemove,
+    required this.onUpload,
+    required this.onClear,
+    required this.isUploading,
+    required this.documentName,
   });
 
   @override
   Widget build(BuildContext context) {
-    final _ = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 640;
+            final firstNameField = _ContactTextField(
+              controller: controllers.firstNameCtrl,
+              label: "${_ContactCopy.firstNameLabel} ${index + 1}",
+            );
+            final middleNameField = _ContactTextField(
+              controller: controllers.middleNameCtrl,
+              label: _ContactCopy.middleNameLabel,
+            );
+            final lastNameField = _ContactTextField(
+              controller: controllers.lastNameCtrl,
+              label: _ContactCopy.lastNameLabel,
+            );
+
+            if (isNarrow) {
+              return Column(
+                children: [
+                  firstNameField,
+                  const SizedBox(height: 12),
+                  middleNameField,
+                  const SizedBox(height: 12),
+                  lastNameField,
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(child: firstNameField),
+                const SizedBox(width: 12),
+                Expanded(child: middleNameField),
+                const SizedBox(width: 12),
+                Expanded(child: lastNameField),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isNarrow = constraints.maxWidth < 640;
+            final emailField = _ContactTextField(
+              controller: controllers.emailCtrl,
+              label: _ContactCopy.emailLabel,
+              keyboardType: TextInputType.emailAddress,
+              inputFormatters: const [EmailInputFormatter()],
+            );
+            final phoneField = _ContactTextField(
+              controller: controllers.phoneCtrl,
+              label: _ContactCopy.phoneLabel,
+              keyboardType: TextInputType.phone,
+              prefixText: _TenantVerificationScreenState._ngPhonePrefix,
+              inputFormatters: const [
+                NigerianPhoneDigitsFormatter(
+                  maxDigits: _TenantVerificationScreenState._ngPhoneDigits,
+                ),
+              ],
+            );
+
+            if (isNarrow) {
+              return Column(
+                children: [emailField, const SizedBox(height: 12), phoneField],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(child: emailField),
+                const SizedBox(width: 12),
+                Expanded(child: phoneField),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 10),
+        _ContactDocumentRow(
+          isUploading: isUploading,
+          documentName: documentName,
+          onUpload: onUpload,
+          onClear: onClear,
+        ),
+        if (onRemove != null) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(
+              onPressed: onRemove,
+              icon: const Icon(Icons.close),
+              tooltip: _ContactCopy.remove,
+              color: theme.colorScheme.error,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ContactTextField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
+  final String? prefixText;
+
+  const _ContactTextField({
+    required this.controller,
+    required this.label,
+    this.keyboardType,
+    this.inputFormatters,
+    this.prefixText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // WHY: Keep contact fields consistent across reference/guarantor sections.
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      decoration: InputDecoration(labelText: label, prefixText: prefixText),
+    );
+  }
+}
+
+class _ContactDocumentRow extends StatelessWidget {
+  final bool isUploading;
+  final String? documentName;
+  final VoidCallback? onUpload;
+  final VoidCallback? onClear;
+
+  const _ContactDocumentRow({
+    required this.isUploading,
+    required this.documentName,
+    required this.onUpload,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasDocument = documentName != null && documentName!.trim().isNotEmpty;
 
     return Row(
       children: [
+        Icon(Icons.attach_file, color: theme.colorScheme.primary),
+        const SizedBox(width: 8),
         Expanded(
-          child: TextField(
-            controller: controllers.nameCtrl,
-            decoration: InputDecoration(labelText: "Name ${index + 1}"),
+          child: Text(
+            hasDocument ? documentName! : _ContactCopy.noDocument,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: TextField(
-            controller: controllers.phoneCtrl,
-            decoration: const InputDecoration(labelText: "Phone"),
-            keyboardType: TextInputType.phone,
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: isUploading ? null : onUpload,
+          icon: isUploading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.upload_file),
+          label: Text(
+            isUploading ? _ContactCopy.uploading : _ContactCopy.upload,
           ),
         ),
-        if (onRemove != null) ...[
+        if (hasDocument && onClear != null) ...[
           const SizedBox(width: 8),
-          IconButton(
-            onPressed: onRemove,
-            icon: const Icon(Icons.close),
-            tooltip: "Remove",
+          TextButton(
+            onPressed: onClear,
+            child: const Text(_ContactCopy.remove),
           ),
         ],
       ],
@@ -1207,6 +1723,71 @@ class _ReadOnlyRow extends StatelessWidget {
   }
 }
 
+class _AgreementCard extends StatelessWidget {
+  final String agreementText;
+  final bool accepted;
+  final VoidCallback? onAccept;
+
+  const _AgreementCard({
+    required this.agreementText,
+    required this.accepted,
+    this.onAccept,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                "Tenancy agreement",
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Chip(
+                label: Text(accepted ? "Accepted" : "Pending"),
+                backgroundColor: accepted
+                    ? theme.colorScheme.primaryContainer
+                    : theme.colorScheme.surface,
+                labelStyle: theme.textTheme.labelSmall?.copyWith(
+                  color: accepted
+                      ? theme.colorScheme.onPrimaryContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(agreementText, style: theme.textTheme.bodySmall),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: accepted ? null : onAccept,
+              child: Text(
+                accepted ? "Agreement accepted" : "Accept & continue",
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InlineLoader extends StatelessWidget {
   final String label;
 
@@ -1225,6 +1806,36 @@ class _InlineLoader extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text(label, style: textTheme.bodySmall),
+      ],
+    );
+  }
+}
+
+class _StatusValue extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _StatusValue({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ],
     );
   }

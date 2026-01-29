@@ -30,6 +30,7 @@ class AuthSessionStorage {
   static const String _tokenKey = "auth_token";
   static const String _userKey = "auth_user";
   static const String _lastEmailKey = "auth_last_email";
+  static const String _pendingInviteKey = "auth_pending_invite";
 
   final FlutterSecureStorage _storage;
 
@@ -85,6 +86,41 @@ class AuthSessionStorage {
   Future<void> clearLastEmail() async {
     AppDebug.log("AUTH_STORAGE", "Clearing last email");
     await _storage.delete(key: _lastEmailKey);
+  }
+
+  /// ------------------------------------------------------
+  /// SAVE PENDING INVITE TOKEN
+  /// ------------------------------------------------------
+  Future<void> savePendingInviteToken(String token) async {
+    final trimmed = token.trim();
+    if (trimmed.isEmpty) {
+      AppDebug.log("AUTH_STORAGE", "Skipped savePendingInviteToken (empty)");
+      return;
+    }
+
+    AppDebug.log("AUTH_STORAGE", "Saving pending invite token");
+    await _storage.write(key: _pendingInviteKey, value: trimmed);
+  }
+
+  /// ------------------------------------------------------
+  /// READ PENDING INVITE TOKEN
+  /// ------------------------------------------------------
+  Future<String?> readPendingInviteToken() async {
+    AppDebug.log("AUTH_STORAGE", "Reading pending invite token");
+    final token = await _storage.read(key: _pendingInviteKey);
+    if (token == null || token.isEmpty) {
+      AppDebug.log("AUTH_STORAGE", "No pending invite token found");
+      return null;
+    }
+    return token;
+  }
+
+  /// ------------------------------------------------------
+  /// CLEAR PENDING INVITE TOKEN
+  /// ------------------------------------------------------
+  Future<void> clearPendingInviteToken() async {
+    AppDebug.log("AUTH_STORAGE", "Clearing pending invite token");
+    await _storage.delete(key: _pendingInviteKey);
   }
 
   /// ------------------------------------------------------

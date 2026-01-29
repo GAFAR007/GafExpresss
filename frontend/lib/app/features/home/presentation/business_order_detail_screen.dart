@@ -21,6 +21,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_order_model.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
@@ -228,9 +229,8 @@ class _SummaryCard extends StatelessWidget {
   }
 
   String _formatDate(DateTime? date) {
-    if (date == null) return "—";
-    final local = date.toLocal();
-    return "${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}";
+    // WHY: Keep order dates consistent with shared formatting helpers.
+    return formatDateLabel(date, fallback: kDateFallbackDash);
   }
 
   String _shortId(String id) {
@@ -611,8 +611,8 @@ class _Timeline extends StatelessWidget {
   }
 
   String _formatDate(DateTime date) {
-    final local = date.toLocal();
-    return "${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}";
+    // WHY: Use shared date-time formatting for timeline entries.
+    return formatDateTimeLabel(date);
   }
 }
 

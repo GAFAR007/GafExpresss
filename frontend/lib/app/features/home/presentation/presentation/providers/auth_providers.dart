@@ -97,6 +97,16 @@ final authSessionStorageProvider = Provider<AuthSessionStorage>((ref) {
   return AuthSessionStorage();
 });
 
+/// Holds a pending business invite token in memory.
+///
+/// WHY:
+/// - Router redirects must be synchronous (no async storage reads).
+/// - Keeps invite flow intact when auth state changes on /login.
+final pendingInviteTokenProvider = StateProvider<String?>((ref) {
+  AppDebug.log("PROVIDERS", "pendingInviteTokenProvider created");
+  return null;
+});
+
 /// ------------------------------------------------------------
 /// AUTH SESSION CONTROLLER
 /// ------------------------------------------------------------

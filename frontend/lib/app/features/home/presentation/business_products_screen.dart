@@ -19,6 +19,7 @@ library;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -90,7 +91,9 @@ class _BusinessProductsScreenState
 
     _nameCtrl.text = isEditing ? product.name : '';
     _descCtrl.text = isEditing ? product.description : '';
-    _priceCtrl.text = isEditing ? product.priceCents.toString() : '';
+    // WHY: Display product price in NGN while storing minor units.
+    _priceCtrl.text =
+        isEditing ? formatNgnInputFromKobo(product.priceCents) : '';
     _stockCtrl.text = isEditing ? product.stock.toString() : '';
     _imageCtrl.text = isEditing ? product.imageUrl : '';
 
@@ -133,7 +136,12 @@ class _BusinessProductsScreenState
                 controller: _priceCtrl,
                 label: "Price (NGN)",
                 hint: "129000",
-                keyboardType: TextInputType.number,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                // WHY: Auto-format NGN values as the user types.
+                inputFormatters: const [
+                  NgnInputFormatter(),
+                ],
               ),
               const SizedBox(height: 12),
               _buildTextField(
@@ -189,7 +197,7 @@ class _BusinessProductsScreenState
 
     final name = _nameCtrl.text.trim();
     final description = _descCtrl.text.trim();
-    final price = _parseInt(_priceCtrl.text.trim());
+    final price = parseNgnToKobo(_priceCtrl.text.trim());
     final stock = _parseInt(_stockCtrl.text.trim());
     final imageUrl = _imageCtrl.text.trim();
 
@@ -244,7 +252,7 @@ class _BusinessProductsScreenState
 
     final name = _nameCtrl.text.trim();
     final description = _descCtrl.text.trim();
-    final price = _parseInt(_priceCtrl.text.trim());
+    final price = parseNgnToKobo(_priceCtrl.text.trim());
     final stock = _parseInt(_stockCtrl.text.trim());
     final imageUrl = _imageCtrl.text.trim();
 
@@ -498,10 +506,12 @@ class _BusinessProductsScreenState
     required String label,
     required String hint,
     TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(labelText: label, hintText: hint),
     );
   }

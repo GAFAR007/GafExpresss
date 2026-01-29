@@ -20,6 +20,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/business_team_lookup_invite_cards.dart';
 import 'package:frontend/app/features/home/presentation/business_team_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_team_user.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
@@ -35,21 +36,16 @@ class BusinessTeamScreen extends ConsumerStatefulWidget {
 }
 
 class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
-  final _lookupCtrl = TextEditingController();
-  String _lookupMode = "email";
-  bool _isLookupLoading = false;
   BusinessTeamUser? _foundUser;
-  String? _lookupError;
+  String? _roleError;
 
   String _selectedRole = "staff";
   bool _scopeToEstate = false;
   String? _selectedEstateId;
   bool _isRoleUpdating = false;
-  bool _isInviteSending = false;
 
   @override
   void dispose() {
-    _lookupCtrl.dispose();
     super.dispose();
   }
 
@@ -58,55 +54,6 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
       "action": action,
       ...?extra,
     });
-  }
-
-  Future<void> _lookupUser() async {
-    final query = _lookupCtrl.text.trim();
-    _logTap("lookup_start", extra: {"mode": _lookupMode});
-
-    if (query.isEmpty) {
-      setState(
-        () => _lookupError = "Enter a user ID, email, or phone number.",
-      );
-      return;
-    }
-
-    final session = ref.read(authSessionProvider);
-    if (session == null || !session.isTokenValid) {
-      setState(() => _lookupError = "Session expired. Please sign in again.");
-      return;
-    }
-
-    setState(() {
-      _lookupError = null;
-      _isLookupLoading = true;
-    });
-
-    try {
-      final api = ref.read(businessTeamApiProvider);
-      final user = await api.lookupUser(
-        token: session.token,
-        userId: _lookupMode == "id" ? query : null,
-        email: _lookupMode == "email" ? query : null,
-        phone: _lookupMode == "phone" ? query : null,
-      );
-
-      setState(() {
-        _foundUser = user;
-        _selectedRole = "staff";
-        _scopeToEstate = false;
-        _selectedEstateId = null;
-      });
-    } catch (e) {
-      setState(() {
-        _foundUser = null;
-        _lookupError = _extractError(e);
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLookupLoading = false);
-      }
-    }
   }
 
   Future<void> _assignRole() async {
@@ -119,22 +66,22 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
 
     final session = ref.read(authSessionProvider);
     if (session == null || !session.isTokenValid) {
-      setState(() => _lookupError = "Session expired. Please sign in again.");
+      setState(() => _roleError = "Session expired. Please sign in again.");
       return;
     }
 
     if (_selectedRole == "tenant" && _selectedEstateId == null) {
-      setState(() => _lookupError = "Select an estate asset for tenants.");
+      setState(() => _roleError = "Select an estate asset for tenants.");
       return;
     }
 
     if (_selectedRole == "staff" && _scopeToEstate && _selectedEstateId == null) {
-      setState(() => _lookupError = "Select an estate asset for scoped staff.");
+      setState(() => _roleError = "Select an estate asset for scoped staff.");
       return;
     }
 
     setState(() {
-      _lookupError = null;
+      _roleError = null;
       _isRoleUpdating = true;
     });
 
@@ -155,269 +102,23 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
         _selectedEstateId = updated.estateAssetId;
       });
     } catch (e) {
-      setState(() => _lookupError = _extractError(e));
+      logBusinessTeamApiFailure(
+        source: "BUSINESS_TEAM",
+        operation: "updateUserRole",
+        requestIntent: businessTeamUpdateRoleIntent,
+        requestContext: {
+          "role": _selectedRole,
+          "hasEstate": _selectedEstateId != null,
+          "scopeToEstate": _scopeToEstate,
+        },
+        error: e,
+      );
+      setState(() => _roleError = businessTeamErrorMessage(e));
     } finally {
       if (mounted) {
         setState(() => _isRoleUpdating = false);
       }
     }
-  }
-
-  Future<void> _openInviteSheet({
-    required List<BusinessAsset> estateAssets,
-  }) async {
-    _logTap("invite_sheet_open");
-
-    final emailCtrl = TextEditingController();
-    String role = "staff";
-    String? estateAssetId;
-    String? localError;
-    bool isSending = false;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final viewInsets = MediaQuery.of(context).viewInsets;
-            return Padding(
-              padding: EdgeInsets.only(bottom: viewInsets.bottom),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 16,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(24),
-                  ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Send invite link",
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      "Invite a customer by email to join your team.",
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: emailCtrl,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: "Invitee email",
-                        hintText: "user@email.com",
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: role,
-                      decoration: const InputDecoration(
-                        labelText: "Role",
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: "staff",
-                          child: Text("Staff"),
-                        ),
-                        DropdownMenuItem(
-                          value: "tenant",
-                          child: Text("Tenant"),
-                        ),
-                      ],
-                      onChanged: isSending
-                          ? null
-                          : (value) {
-                              if (value == null) return;
-                              setSheetState(() {
-                                role = value;
-                                if (role != "tenant") {
-                                  estateAssetId = null;
-                                }
-                              });
-                            },
-                    ),
-                    if (role == "tenant") ...[
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: estateAssetId,
-                        decoration: const InputDecoration(
-                          labelText: "Estate asset",
-                        ),
-                        items: estateAssets
-                            .map(
-                              (asset) => DropdownMenuItem(
-                                value: asset.id,
-                                child: Text(asset.name),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: isSending
-                            ? null
-                            : (value) {
-                                setSheetState(() => estateAssetId = value);
-                              },
-                      ),
-                    ],
-                    if (localError != null) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        localError!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: isSending
-                                ? null
-                                : () {
-                                    Navigator.of(context).pop();
-                                  },
-                            child: const Text("Cancel"),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: isSending
-                                ? null
-                                : () async {
-                                    final email =
-                                        emailCtrl.text.trim().toLowerCase();
-                                    if (email.isEmpty) {
-                                      setSheetState(() {
-                                        localError =
-                                            "Enter an email address.";
-                                      });
-                                      return;
-                                    }
-                                    if (role == "tenant" &&
-                                        estateAssetId == null) {
-                                      setSheetState(() {
-                                        localError =
-                                            "Select an estate for tenant invites.";
-                                      });
-                                      return;
-                                    }
-
-                                    setSheetState(() {
-                                      localError = null;
-                                      isSending = true;
-                                    });
-
-                                    _logTap(
-                                      "invite_send_start",
-                                      extra: {
-                                        "role": role,
-                                        "hasEstate": estateAssetId != null,
-                                      },
-                                    );
-
-                                    try {
-                                      final session =
-                                          ref.read(authSessionProvider);
-                                      if (session == null ||
-                                          !session.isTokenValid) {
-                                        throw Exception(
-                                          "Session expired. Please sign in again.",
-                                        );
-                                      }
-
-                                      final api =
-                                          ref.read(businessTeamApiProvider);
-                                      await api.createInvite(
-                                        token: session.token,
-                                        email: email,
-                                        role: role,
-                                        estateAssetId: estateAssetId,
-                                      );
-
-                                      if (!mounted) return;
-                                      Navigator.of(context).pop();
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            "Invite sent to $email",
-                                          ),
-                                        ),
-                                      );
-                                    } catch (e) {
-                                      setSheetState(() {
-                                        localError = _extractError(e);
-                                        isSending = false;
-                                      });
-                                    }
-                                  },
-                            child: isSending
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Text("Send invite"),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    emailCtrl.dispose();
-  }
-
-  String _extractError(Object error) {
-    final raw = error.toString();
-    if (raw.contains("User must be NIN verified")) {
-      return "User must be NIN verified before role upgrade.";
-    }
-    if (raw.contains("User belongs to a different business")) {
-      return "User already belongs to another business.";
-    }
-    if (raw.contains("User not found")) {
-      return "No user found for that lookup.";
-    }
-    if (raw.contains("Invalid user id")) {
-      return "Invalid user ID. Check and try again.";
-    }
-    if (raw.contains("Invite has expired")) {
-      return "Invite link has expired. Send a new invite.";
-    }
-    if (raw.contains("Invite email does not match")) {
-      return "Invite email does not match your account.";
-    }
-    if (raw.contains("Invite email is required")) {
-      return "Invite email is required.";
-    }
-    return raw.replaceAll("Exception:", "").trim();
   }
 
   @override
@@ -471,104 +172,28 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _lookupCtrl,
-                  keyboardType: _lookupMode == "phone"
-                      ? TextInputType.phone
-                      : (_lookupMode == "email"
-                          ? TextInputType.emailAddress
-                          : TextInputType.text),
-                  decoration: InputDecoration(
-                    labelText: _lookupMode == "phone"
-                        ? "Phone number"
-                        : (_lookupMode == "email" ? "Email" : "User ID"),
-                    hintText: _lookupMode == "phone"
-                        ? "e.g. +2348012345678"
-                        : (_lookupMode == "email"
-                            ? "e.g. user@email.com"
-                            : "e.g. 64f0c2..."),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              DropdownButton<String>(
-                value: _lookupMode,
-                onChanged: _isLookupLoading
-                    ? null
-                    : (value) {
-                        if (value == null) return;
-                        _logTap("lookup_mode_change", extra: {"mode": value});
-                        setState(() => _lookupMode = value);
-                      },
-                items: const [
-                  DropdownMenuItem(
-                    value: "id",
-                    child: Text("User ID"),
-                  ),
-                  DropdownMenuItem(
-                    value: "email",
-                    child: Text("Email"),
-                  ),
-                  DropdownMenuItem(
-                    value: "phone",
-                    child: Text("Phone"),
-                  ),
-                ],
-              ),
-            ],
+          // WHY: Reuse shared lookup card to keep search behavior consistent.
+          BusinessUserLookupCard(
+            source: "BUSINESS_TEAM",
+            showSummary: false,
+            onUserChanged: (user) {
+              // WHY: Keep role assignment in sync with lookup results.
+              setState(() {
+                _foundUser = user;
+                _roleError = null;
+                _selectedRole = "staff";
+                _scopeToEstate = false;
+                _selectedEstateId = null;
+              });
+            },
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _isLookupLoading ? null : _lookupUser,
-              icon: _isLookupLoading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.search),
-              label: Text(_isLookupLoading ? "Searching..." : "Find user"),
-            ),
+          const SizedBox(height: 16),
+          // WHY: Inline invite form keeps staff onboarding quick.
+          BusinessInviteFormCard(
+            source: "BUSINESS_TEAM",
+            estateAssets: estateAssets,
+            estateAssetsLoading: estateAssetsAsync.isLoading,
           ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _isInviteSending
-                  ? null
-                  : () async {
-                      if (estateAssetsAsync.isLoading) {
-                        setState(() {
-                          _lookupError =
-                              "Estate assets still loading. Try again.";
-                        });
-                        return;
-                      }
-                      setState(() => _isInviteSending = true);
-                      await _openInviteSheet(estateAssets: estateAssets);
-                      if (mounted) {
-                        setState(() => _isInviteSending = false);
-                      }
-                    },
-              icon: const Icon(Icons.mail_outline),
-              label: const Text("Send invite link"),
-            ),
-          ),
-          if (_lookupError != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _lookupError!,
-              style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.error,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
           const SizedBox(height: 20),
           if (_foundUser != null) ...[
             _UserSummaryCard(user: _foundUser!),
@@ -688,6 +313,17 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
                     color: colorScheme.onSurfaceVariant,
                   ),
             ),
+        ],
+        if (_roleError != null) ...[
+          const SizedBox(height: 8),
+          // WHY: Surface role assignment errors close to the action button.
+          Text(
+            _roleError!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
         ],
         const SizedBox(height: 16),
         SizedBox(

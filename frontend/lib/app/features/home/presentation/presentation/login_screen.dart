@@ -184,21 +184,63 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // WHY: Persist session so router can guard /home reliably.
       await ref.read(authSessionProvider.notifier).setSession(session);
 
+      // WHY: Resolve redirect target from explicit next param or cached invite.
+      final rawRedirect = widget.redirectTo;
+      final decodedRedirect =
+          rawRedirect == null || rawRedirect.trim().isEmpty
+          ? null
+          : Uri.decodeComponent(rawRedirect.trim());
+      String? redirectTarget =
+          decodedRedirect != null && decodedRedirect.startsWith('/')
+          ? decodedRedirect
+          : null;
+
+      if (redirectTarget == null) {
+        // WHY: Recover invite flow when next= is lost during login.
+        final pendingInvite = await storage.readPendingInviteToken();
+        if (pendingInvite != null && pendingInvite.trim().isNotEmpty) {
+          // WHY: Keep pending invite in memory for router redirects.
+          ref.read(pendingInviteTokenProvider.notifier).state =
+              pendingInvite.trim();
+          redirectTarget = Uri(
+            path: '/business-invite',
+            queryParameters: {'token': pendingInvite.trim()},
+          ).toString();
+          AppDebug.log(
+            "LOGIN",
+            "Resolved pending invite token",
+            extra: {"hasPendingInvite": true},
+          );
+        } else {
+          AppDebug.log("LOGIN", "No pending invite token");
+        }
+      } else {
+        // WHY: Clear pending invite token unless we are going back to invite.
+        final isInviteRedirect = redirectTarget.startsWith('/business-invite');
+        if (!isInviteRedirect) {
+          await storage.clearPendingInviteToken();
+          ref.read(pendingInviteTokenProvider.notifier).state = null;
+          AppDebug.log(
+            "LOGIN",
+            "Cleared pending invite token (non-invite redirect)",
+          );
+        }
+      }
+
       _setLoading(false, setModalState: setModalState);
 
       if (!context.mounted) return;
 
-      // WHY: Respect invite/deep-link target if provided.
-      final redirectTarget =
-          widget.redirectTo == null || widget.redirectTo!.trim().isEmpty
-          ? null
-          : Uri.decodeComponent(widget.redirectTo!.trim());
-
       // ✅ Navigate to home or redirect target after successful login
+      final safeTarget =
+          redirectTarget != null &&
+              redirectTarget.startsWith('/business-invite')
+          ? '/business-invite?token=***'
+          : redirectTarget ?? '/home';
       AppDebug.log(
         "LOGIN",
         "Navigate after login",
-        extra: {"target": redirectTarget ?? "/home"},
+        extra: {"target": safeTarget},
       );
       if (Navigator.of(context).canPop()) {
         // WHY: Close the sheet before switching routes.

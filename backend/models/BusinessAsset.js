@@ -124,11 +124,19 @@ const unitMixSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       required: true,
+      // WHY: Monetary values are stored in kobo; enforce integer to avoid fractions.
+      validate: {
+        validator(value) {
+          return Number.isInteger(value);
+        },
+        message: 'Rent amount must be an integer (kobo)',
+      },
     },
     rentPeriod: {
       type: String,
       enum: RENT_PERIODS,
-      default: 'monthly',
+      // WHY: Default estates to yearly rent to match most Nigerian leases.
+      default: 'yearly',
     },
   },
   { _id: false }

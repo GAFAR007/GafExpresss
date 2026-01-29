@@ -23,6 +23,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:frontend/app/core/constants/app_constants.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
@@ -445,11 +446,13 @@ class _ProductDetailBody extends StatelessWidget {
           _InfoRow(label: "Active", value: product.isActive ? "Yes" : "No"),
           _InfoRow(
             label: "Created",
-            value: product.createdAt?.toIso8601String() ?? "N/A",
+            // WHY: Keep product audit dates consistent with shared helpers.
+            value: formatDateLabel(product.createdAt),
           ),
           _InfoRow(
             label: "Updated",
-            value: product.updatedAt?.toIso8601String() ?? "N/A",
+            // WHY: Use the same formatter for updated timestamps.
+            value: formatDateLabel(product.updatedAt),
           ),
           const SizedBox(height: 16),
           // WHY: Let users pick quantity before adding to cart or paying.

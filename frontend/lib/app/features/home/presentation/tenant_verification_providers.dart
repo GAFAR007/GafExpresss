@@ -58,3 +58,17 @@ final tenantApplicationProvider =
   final api = ref.read(tenantVerificationApiProvider);
   return api.fetchTenantApplication(token: session.token);
 });
+
+final tenantSummaryProvider =
+    FutureProvider<business_tenant.TenantSummary>((ref) async {
+  AppDebug.log("PROVIDERS", "tenantSummaryProvider fetch start");
+
+  final session = ref.watch(authSessionProvider);
+  if (session == null) {
+    AppDebug.log("PROVIDERS", "tenantSummaryProvider missing session");
+    throw Exception("Not logged in");
+  }
+
+  final api = ref.read(tenantVerificationApiProvider);
+  return api.fetchTenantSummary(token: session.token);
+});

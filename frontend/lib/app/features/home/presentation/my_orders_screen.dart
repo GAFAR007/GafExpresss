@@ -21,6 +21,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/theme/app_theme.dart';
@@ -196,12 +197,8 @@ class _OrderTile extends StatelessWidget {
   }
 
   String _formatDate(DateTime? date) {
-    if (date == null) return "N/A";
-
-    final local = date.toLocal();
-    final month = local.month.toString().padLeft(2, "0");
-    final day = local.day.toString().padLeft(2, "0");
-    return "${local.year}-$month-$day";
+    // WHY: Keep order date labels consistent with shared helpers.
+    return formatDateLabel(date);
   }
 
   String _shortId(String id) {
