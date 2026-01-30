@@ -30,6 +30,7 @@ import 'package:frontend/app/features/auth/data/auth_api.dart';
 import 'package:frontend/app/features/auth/data/auth_session_storage.dart';
 import 'package:frontend/app/features/auth/data/profile_api.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
+import 'package:frontend/app/features/auth/domain/models/auth_user.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/address_autocomplete_api.dart';
 
@@ -171,6 +172,67 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
     state = session;
     _scheduleAutoLogout(session);
     await _storage.saveSession(session);
+  }
+
+  /// Update the stored role after backend role changes (e.g. invite accepted).
+  Future<void> updateUserRole({
+    required String role,
+    required String source,
+  }) async {
+    final session = state;
+    if (session == null) {
+      // WHY: Without a session we cannot persist role changes.
+      AppDebug.log(
+        "AUTH_SESSION",
+        "updateUserRole() skipped - no session",
+        extra: {"source": source},
+      );
+      return;
+    }
+
+    final trimmedRole = role.trim();
+    if (trimmedRole.isEmpty) {
+      // WHY: Empty roles should never overwrite a valid session role.
+      AppDebug.log(
+        "AUTH_SESSION",
+        "updateUserRole() skipped - empty role",
+        extra: {"source": source},
+      );
+      return;
+    }
+
+    if (session.user.role == trimmedRole) {
+      // WHY: Avoid unnecessary writes to secure storage.
+      AppDebug.log(
+        "AUTH_SESSION",
+        "updateUserRole() skipped - role unchanged",
+        extra: {"source": source, "role": trimmedRole},
+      );
+      return;
+    }
+
+    // WHY: Log role transitions to explain why navigation badges change.
+    AppDebug.log(
+      "AUTH_SESSION",
+      "updateUserRole()",
+      extra: {
+        "source": source,
+        "from": session.user.role,
+        "to": trimmedRole,
+      },
+    );
+
+    // WHY: Preserve identity fields while only updating role.
+    final updatedUser = AuthUser(
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      role: trimmedRole,
+    );
+    // WHY: Keep token intact so the session remains authenticated.
+    final updatedSession = AuthSession(user: updatedUser, token: session.token);
+    // WHY: Reuse setSession so storage + auto-logout stay consistent.
+    await setSession(updatedSession);
   }
 
   /// Clear session on logout.
