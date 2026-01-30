@@ -16,6 +16,7 @@
 /// - Logs build + tap events via AppDebug.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,9 +24,26 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart'
     as tenant_model;
+
+const String _summaryMissingMessage =
+    "No tenant summary yet. Complete verification to activate your dashboard.";
+const String _summaryEstateMissingMessage =
+    "Tenant estate is not assigned yet. Please contact support.";
+const String _summaryAuthMessage =
+    "Your session needs a refresh. Please sign out and sign in again.";
+const String _summaryGenericMessage =
+    "Unable to load tenant summary right now.";
+const String _summaryRefreshLabel = "Refresh";
+const String _summaryRefreshHint = "Kindly refresh to check again.";
+const String _summaryMissingResolutionHint =
+    "Refresh the dashboard to retry loading the summary.";
+const String _summaryRefreshSource = "tenant_dashboard_empty_refresh";
+// WHY: Centralize tenant verification navigation target.
+const String _tenantVerificationRoute = "/tenant-verification";
 
 class TenantDashboardScreen extends ConsumerWidget {
   const TenantDashboardScreen({super.key});
@@ -51,9 +69,13 @@ class TenantDashboardScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
-            onPressed: () {
+            onPressed: () async {
               AppDebug.log("TENANT_DASH", "refresh_action");
-              ref.invalidate(tenantSummaryProvider);
+              // WHY: Central refresh keeps tenant data in sync across screens.
+              await AppRefresh.refreshApp(
+                ref: ref,
+                source: "tenant_dashboard_refresh",
+              );
             },
             icon: const Icon(Icons.refresh),
             tooltip: "Refresh",
@@ -63,24 +85,164 @@ class TenantDashboardScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () async {
           AppDebug.log("TENANT_DASH", "refresh");
-          ref.invalidate(tenantSummaryProvider);
+          // WHY: Central refresh keeps tenant data in sync across screens.
+          await AppRefresh.refreshApp(
+            ref: ref,
+            source: "tenant_dashboard_pull",
+          );
         },
         child: summaryAsync.when(
           data: (summary) => _DashboardBody(summary: summary),
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (err, _) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                "Unable to load tenant summary: ${err.toString()}",
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
+          error: (err, _) => _SummaryErrorState(error: err),
         ),
       ),
     );
   }
+}
+
+class _SummaryErrorState extends ConsumerWidget {
+  final Object error;
+
+  const _SummaryErrorState({required this.error});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resolved = _resolveSummaryError(error);
+    final message = resolved.message;
+    final shouldShowAction = resolved.showRefreshAction;
+    final hint = resolved.uiHint;
+
+    // WHY: Capture error context + next action for support diagnostics.
+    AppDebug.log(
+      "TENANT_DASH",
+      "summary_load_failed",
+      extra: {
+        "reason": resolved.reason,
+        "status": resolved.statusCode,
+        "next_action": resolved.resolutionHint,
+      },
+    );
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              message,
+              textAlign: TextAlign.center,
+            ),
+            if (hint != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                hint,
+                textAlign: TextAlign.center,
+              ),
+            ],
+            if (shouldShowAction) ...[
+              // WHY: Provide a safe retry path using the central refresh flow.
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () async {
+                  AppDebug.log("TENANT_DASH", "summary_refresh_tap");
+                  await AppRefresh.refreshApp(
+                    ref: ref,
+                    source: _summaryRefreshSource,
+                  );
+                },
+                child: const Text(_summaryRefreshLabel),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryErrorResolution {
+  final String message;
+  final String reason;
+  final String resolutionHint;
+  final int statusCode;
+  final bool showRefreshAction;
+  final String? uiHint;
+
+  const _SummaryErrorResolution({
+    required this.message,
+    required this.reason,
+    required this.resolutionHint,
+    required this.statusCode,
+    required this.showRefreshAction,
+    required this.uiHint,
+  });
+}
+
+_SummaryErrorResolution _resolveSummaryError(Object error) {
+  // WHY: Map API errors to tenant-friendly copy + next steps.
+  if (error is DioException) {
+    final status = error.response?.statusCode ?? 0;
+    final data = error.response?.data;
+    final providerMessage = data is Map<String, dynamic>
+        ? data["error"]?.toString()
+        : null;
+
+    if (status == 404) {
+      return const _SummaryErrorResolution(
+        message: _summaryMissingMessage,
+        reason: "tenant_summary_not_found",
+        resolutionHint: _summaryMissingResolutionHint,
+        statusCode: 404,
+        showRefreshAction: true,
+        uiHint: _summaryRefreshHint,
+      );
+    }
+
+    if (status == 400 &&
+        providerMessage != null &&
+        providerMessage.toLowerCase().contains("estate")) {
+      return const _SummaryErrorResolution(
+        message: _summaryEstateMissingMessage,
+        reason: "tenant_estate_missing",
+        resolutionHint: "Assign a tenant estate or contact support.",
+        statusCode: 400,
+        showRefreshAction: false,
+        uiHint: null,
+      );
+    }
+
+    if (status == 401 || status == 403) {
+      return const _SummaryErrorResolution(
+        message: _summaryAuthMessage,
+        reason: "tenant_auth_error",
+        resolutionHint: "Sign out and sign in again to refresh your session.",
+        statusCode: 403,
+        showRefreshAction: false,
+        uiHint: null,
+      );
+    }
+
+    return _SummaryErrorResolution(
+      message: _summaryGenericMessage,
+      reason: "tenant_summary_error",
+      resolutionHint:
+          "Try again or contact support if the issue persists.",
+      statusCode: status,
+      showRefreshAction: false,
+      uiHint: null,
+    );
+  }
+
+  return const _SummaryErrorResolution(
+    message: _summaryGenericMessage,
+    reason: "tenant_summary_unknown_error",
+    resolutionHint: "Try again or contact support if the issue persists.",
+    statusCode: 0,
+    showRefreshAction: false,
+    uiHint: null,
+  );
 }
 
 class _DashboardBody extends StatelessWidget {
@@ -161,7 +323,7 @@ class _DashboardBody extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: () {
                   AppDebug.log("TENANT_DASH", "cta_verify");
-                  context.go('/tenant-verification');
+                  context.go(_tenantVerificationRoute);
                 },
                 icon: const Icon(Icons.verified_user),
                 label: const Text("View verification"),
@@ -173,7 +335,7 @@ class _DashboardBody extends StatelessWidget {
                 onPressed: isApprovedOrActive
                     ? () {
                         AppDebug.log("TENANT_DASH", "cta_pay");
-                        context.go('/tenant-verification');
+                  context.go(_tenantVerificationRoute);
                       }
                     : null,
                 icon: const Icon(Icons.payments),

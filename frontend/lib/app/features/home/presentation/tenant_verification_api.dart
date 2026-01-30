@@ -341,27 +341,104 @@ class TenantVerificationApi {
     required String? token,
   }) async {
     AppDebug.log("TENANT_API", "fetchTenantSummary() start");
+    try {
+      final resp = await _dio.get(
+        "/business/tenant/summary",
+        options: _authOptions(token),
+      );
 
-    final resp = await _dio.get(
-      "/business/tenant/summary",
-      options: _authOptions(token),
-    );
+      final data = resp.data as Map<String, dynamic>;
+      final summaryMap = data["summary"] as Map<String, dynamic>? ?? {};
+      final summary =
+          business_tenant.TenantSummary.fromJson(summaryMap);
 
-    final data = resp.data as Map<String, dynamic>;
-    final summaryMap = data["summary"] as Map<String, dynamic>? ?? {};
-    final summary =
-        business_tenant.TenantSummary.fromJson(summaryMap);
+      AppDebug.log(
+        "TENANT_API",
+        "fetchTenantSummary() success",
+        extra: {
+          "applicationId": summary.applicationId,
+          "status": summary.status,
+          "paymentStatus": summary.paymentStatus,
+        },
+      );
 
-    AppDebug.log(
-      "TENANT_API",
-      "fetchTenantSummary() success",
-      extra: {
-        "applicationId": summary.applicationId,
-        "status": summary.status,
-        "paymentStatus": summary.paymentStatus,
-      },
-    );
+      return summary;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+      final responseData = error.response?.data;
+      final providerMessage = responseData is Map<String, dynamic>
+          ? responseData["error"]?.toString()
+          : null;
+      final classification = _classifySummaryFailure(
+        statusCode: status,
+        providerMessage: providerMessage,
+      );
+      final resolutionHint = _summaryResolutionHint(classification);
 
-    return summary;
+      AppDebug.log(
+        "TENANT_API",
+        "fetchTenantSummary() failed",
+        extra: {
+          "service": "business_tenant_summary",
+          "operation": "fetchTenantSummary",
+          "intent": "load tenant dashboard status",
+          "country": "unknown",
+          "source": "tenant_verification_api",
+          "context": {"hasToken": token != null && token.trim().isNotEmpty},
+          "http_status": status,
+          "provider_error_code": null,
+          "provider_error_message": providerMessage,
+          "failure_classification": classification,
+          "resolution_hint": resolutionHint,
+          "retry_skipped": true,
+          "retry_reason": "User action required",
+        },
+      );
+      rethrow;
+    }
+  }
+
+  String _classifySummaryFailure({
+    required int statusCode,
+    required String? providerMessage,
+  }) {
+    // WHY: Map status codes to required failure classifications.
+    if (statusCode == 401 || statusCode == 403) {
+      return "AUTHENTICATION_ERROR";
+    }
+    if (statusCode == 404) {
+      return "MISSING_REQUIRED_FIELD";
+    }
+    if (statusCode == 400) {
+      return "INVALID_INPUT";
+    }
+    if (statusCode == 429) {
+      return "RATE_LIMITED";
+    }
+    if (statusCode >= 500) {
+      return "PROVIDER_OUTAGE";
+    }
+    if (providerMessage != null && providerMessage.isNotEmpty) {
+      return "UNKNOWN_PROVIDER_ERROR";
+    }
+    return "UNKNOWN_PROVIDER_ERROR";
+  }
+
+  String _summaryResolutionHint(String classification) {
+    // WHY: Give supportable next steps for each failure class.
+    switch (classification) {
+      case "AUTHENTICATION_ERROR":
+        return "Sign out and sign in again to refresh your session.";
+      case "MISSING_REQUIRED_FIELD":
+        return "Complete tenant verification or contact support to assign an estate.";
+      case "INVALID_INPUT":
+        return "Ensure your tenant profile is complete and try again.";
+      case "RATE_LIMITED":
+        return "Wait a moment before retrying.";
+      case "PROVIDER_OUTAGE":
+        return "Try again shortly or check service status.";
+      default:
+        return "Try again or contact support if the issue persists.";
+    }
   }
 }

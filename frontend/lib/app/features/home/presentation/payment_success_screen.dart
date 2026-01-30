@@ -17,11 +17,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 
-class PaymentSuccessScreen extends StatefulWidget {
+class PaymentSuccessScreen extends ConsumerStatefulWidget {
   final String reference;
   final String? nextRoute;
 
@@ -32,10 +34,11 @@ class PaymentSuccessScreen extends StatefulWidget {
   });
 
   @override
-  State<PaymentSuccessScreen> createState() => _PaymentSuccessScreenState();
+  ConsumerState<PaymentSuccessScreen> createState() =>
+      _PaymentSuccessScreenState();
 }
 
-class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
+class _PaymentSuccessScreenState extends ConsumerState<PaymentSuccessScreen> {
   bool _redirectHandled = false;
 
   @override
@@ -46,9 +49,15 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
     if (next.isEmpty) return;
 
     // WHY: Auto-redirect tenants to their dashboard after successful payment.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || _redirectHandled) return;
       _redirectHandled = true;
+      // WHY: Refresh payment-sensitive views before redirecting.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "payment_success_auto_redirect",
+      );
+      if (!mounted) return;
       AppDebug.log(
         "PAYMENT_SUCCESS",
         "Auto-redirect to next route",
@@ -101,12 +110,18 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton(
-                  onPressed: () {
+                  onPressed: () async {
                     AppDebug.log(
                       "PAYMENT_SUCCESS",
                       "View next tapped",
                       extra: {"next": next.isEmpty ? "/orders" : next},
                     );
+                    // WHY: Refresh before leaving payment success.
+                    await AppRefresh.refreshApp(
+                      ref: ref,
+                      source: "payment_success_continue",
+                    );
+                    if (!mounted) return;
                     context.go(next.isEmpty ? "/orders" : next);
                   },
                   child: Text(next.isEmpty ? "View Orders" : "Continue"),

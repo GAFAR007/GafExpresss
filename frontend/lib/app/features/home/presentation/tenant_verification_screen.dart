@@ -33,6 +33,7 @@ import 'package:frontend/app/core/formatters/phone_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart'
     as business_tenant;
@@ -81,6 +82,39 @@ class _TenantVerificationScreenState
       "Enter a valid email address for each contact.";
   static const String _contactUploadFailed =
       "Document upload failed. Try again.";
+  static const String _statusErrorMessage =
+      "We couldn't load your tenant status yet.";
+  static const String _estateErrorMessage =
+      "We couldn't load your estate details yet.";
+  static const String _profileErrorMessage =
+      "We couldn't load your tenant profile yet.";
+  static const String _authErrorMessage =
+      "Your session needs a refresh. Please sign out and sign in again.";
+  static const String _missingApplicationMessage =
+      "No tenant application found yet. Complete the form below.";
+  static const String _missingEstateMessage =
+      "Your tenant estate is not assigned yet. Please contact support.";
+  static const String _genericErrorMessage =
+      "Please try again or contact support if this keeps happening.";
+  // WHY: Keep tenant error UI copy and actions consistent across sections.
+  static const String _statusErrorTitle = "Tenant status unavailable";
+  static const String _estateErrorTitle = "Estate details unavailable";
+  static const String _profileErrorTitle = "Tenant profile unavailable";
+  static const String _authErrorTitle = "Sign-in needed";
+  static const String _actionRefreshLabel = "Refresh";
+  static const String _actionSettingsLabel = "Open settings";
+  static const String _settingsRoute = "/settings";
+  static const String _refreshSourceStatus =
+      "tenant_verification_status_refresh";
+  static const String _refreshSourceEstate =
+      "tenant_verification_estate_refresh";
+  static const String _refreshSourceProfile =
+      "tenant_verification_profile_refresh";
+  // WHY: Use named HTTP codes to avoid magic numbers in error mapping.
+  static const int _httpBadRequest = 400;
+  static const int _httpUnauthorized = 401;
+  static const int _httpForbidden = 403;
+  static const int _httpNotFound = 404;
 
   void _log(String message, {Map<String, dynamic>? extra}) {
     AppDebug.log("TENANT_VERIFY", message, extra: extra);
@@ -391,8 +425,20 @@ class _TenantVerificationScreenState
       _log("submit_success");
 
       if (!mounted) return;
+      // WHY: Refresh tenant dashboard + verification state after submission.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "tenant_verification_submit_success",
+      );
       _showMessage("Tenant verification submitted successfully.");
-      context.pop();
+      // WHY: Guard pop to avoid GoError when this is a top-level route.
+      if (context.canPop()) {
+        _log("submit_nav_pop");
+        context.pop();
+      } else {
+        _log("submit_nav_fallback", extra: {"to": "/tenant-dashboard"});
+        context.go("/tenant-dashboard");
+      }
     } catch (error) {
       final message = _extractErrorMessage(error);
       _log("submit_fail", extra: {"error": message});
@@ -538,6 +584,136 @@ class _TenantVerificationScreenState
     return error.toString().replaceAll('Exception:', '').trim();
   }
 
+  Widget _buildSectionError(Object error, _TenantErrorSection section) {
+    // WHY: Provide a consistent, friendly error card per section.
+    final resolution = _resolveSectionError(error, section);
+    return _TenantSectionError(
+      title: resolution.title,
+      message: resolution.message,
+      hint: resolution.hint,
+      actionLabel: resolution.actionLabel,
+      actionIcon: resolution.actionIcon,
+      onAction: resolution.onAction,
+    );
+  }
+
+  _TenantErrorResolution _resolveSectionError(
+    Object error,
+    _TenantErrorSection section,
+  ) {
+    // WHY: Map transport errors into actionable, tenant-friendly guidance.
+    final statusCode = error is DioException
+        ? error.response?.statusCode
+        : null;
+    final title = _titleForSection(section);
+    final baseMessage = _baseMessageForSection(section);
+
+    if (statusCode == _httpUnauthorized || statusCode == _httpForbidden) {
+      return _TenantErrorResolution(
+        title: _authErrorTitle,
+        message: _authErrorMessage,
+        hint: _genericErrorMessage,
+        actionLabel: _actionSettingsLabel,
+        actionIcon: Icons.settings,
+        onAction: () => _openSettingsFromError(section),
+      );
+    }
+
+    if (statusCode == _httpNotFound) {
+      return _TenantErrorResolution(
+        title: title,
+        message: _missingMessageForSection(section),
+        hint: _genericErrorMessage,
+        actionLabel: _actionRefreshLabel,
+        actionIcon: Icons.refresh,
+        onAction: () => _handleSectionRefresh(section),
+      );
+    }
+
+    if (statusCode == _httpBadRequest) {
+      return _TenantErrorResolution(
+        title: title,
+        message: baseMessage,
+        hint: _genericErrorMessage,
+        actionLabel: _actionRefreshLabel,
+        actionIcon: Icons.refresh,
+        onAction: () => _handleSectionRefresh(section),
+      );
+    }
+
+    return _TenantErrorResolution(
+      title: title,
+      message: baseMessage,
+      hint: _genericErrorMessage,
+      actionLabel: _actionRefreshLabel,
+      actionIcon: Icons.refresh,
+      onAction: () => _handleSectionRefresh(section),
+    );
+  }
+
+  String _titleForSection(_TenantErrorSection section) {
+    // WHY: Keep titles consistent across error cards.
+    switch (section) {
+      case _TenantErrorSection.status:
+        return _statusErrorTitle;
+      case _TenantErrorSection.estate:
+        return _estateErrorTitle;
+      case _TenantErrorSection.profile:
+        return _profileErrorTitle;
+    }
+  }
+
+  String _baseMessageForSection(_TenantErrorSection section) {
+    // WHY: Provide a default message when no special case applies.
+    switch (section) {
+      case _TenantErrorSection.status:
+        return _statusErrorMessage;
+      case _TenantErrorSection.estate:
+        return _estateErrorMessage;
+      case _TenantErrorSection.profile:
+        return _profileErrorMessage;
+    }
+  }
+
+  String _missingMessageForSection(_TenantErrorSection section) {
+    // WHY: Clarify what is missing so tenants know the next step.
+    switch (section) {
+      case _TenantErrorSection.status:
+        return _missingApplicationMessage;
+      case _TenantErrorSection.estate:
+        return _missingEstateMessage;
+      case _TenantErrorSection.profile:
+        return _profileErrorMessage;
+    }
+  }
+
+  Future<void> _handleSectionRefresh(_TenantErrorSection section) async {
+    // WHY: Let tenants retry loading without leaving the screen.
+    _log("section_refresh_tap", extra: {"section": section.name});
+    await AppRefresh.refreshApp(
+      ref: ref,
+      source: _refreshSourceForSection(section),
+    );
+  }
+
+  void _openSettingsFromError(_TenantErrorSection section) {
+    // WHY: Settings provides the logout path to recover session errors.
+    _log("section_settings_tap", extra: {"section": section.name});
+    context.go(_settingsRoute);
+  }
+
+  String _refreshSourceForSection(_TenantErrorSection section) {
+    // WHY: Keep refresh telemetry stable per section.
+    switch (section) {
+      case _TenantErrorSection.status:
+        return _refreshSourceStatus;
+      case _TenantErrorSection.estate:
+        return _refreshSourceEstate;
+      case _TenantErrorSection.profile:
+        return _refreshSourceProfile;
+    }
+  }
+
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -583,17 +759,18 @@ class _TenantVerificationScreenState
               context.pop();
               return;
             }
-            context.go('/settings');
+            context.go(_settingsRoute);
           },
         ),
       ),
       body: RefreshIndicator(
         onRefresh: () async {
           _log("refresh_tap");
-          ref.invalidate(tenantEstateProvider);
-          ref.invalidate(userProfileProvider);
-          ref.invalidate(tenantApplicationProvider);
-          ref.invalidate(tenantSummaryProvider);
+          // WHY: Central refresh keeps tenant data in sync across screens.
+          await AppRefresh.refreshApp(
+            ref: ref,
+            source: "tenant_verification_pull",
+          );
         },
         child: ListView(
           padding: const EdgeInsets.all(16),
@@ -623,7 +800,7 @@ class _TenantVerificationScreenState
               loading: () =>
                   const _InlineLoader(label: "Loading tenant status..."),
               error: (error, _) =>
-                  Text("Status error: ${_extractErrorMessage(error)}"),
+                  _buildSectionError(error, _TenantErrorSection.status),
             ),
             const SizedBox(height: 16),
             profileAsync.when(
@@ -635,7 +812,7 @@ class _TenantVerificationScreenState
               },
               loading: () => const _InlineLoader(label: "Loading profile..."),
               error: (error, _) =>
-                  Text("Profile error: ${_extractErrorMessage(error)}"),
+                  _buildSectionError(error, _TenantErrorSection.profile),
             ),
             const SizedBox(height: 16),
             estateAsync.when(
@@ -671,7 +848,7 @@ class _TenantVerificationScreenState
               },
               loading: () => const _InlineLoader(label: "Loading estate..."),
               error: (error, _) =>
-                  Text("Estate error: ${_extractErrorMessage(error)}"),
+                  _buildSectionError(error, _TenantErrorSection.estate),
             ),
             const _HelpFooter(),
           ],
@@ -1310,6 +1487,109 @@ class _AdminViewNote extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _TenantErrorSection { status, estate, profile }
+
+class _TenantErrorResolution {
+  final String title;
+  final String message;
+  final String? hint;
+  final String? actionLabel;
+  final IconData? actionIcon;
+  final VoidCallback? onAction;
+
+  const _TenantErrorResolution({
+    required this.title,
+    required this.message,
+    required this.hint,
+    required this.actionLabel,
+    required this.actionIcon,
+    required this.onAction,
+  });
+}
+
+class _TenantSectionError extends StatelessWidget {
+  final String title;
+  final String message;
+  final String? hint;
+  final String? actionLabel;
+  final IconData? actionIcon;
+  final VoidCallback? onAction;
+
+  const _TenantSectionError({
+    required this.title,
+    required this.message,
+    required this.hint,
+    required this.actionLabel,
+    required this.actionIcon,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final hasAction =
+        actionLabel != null && onAction != null && actionIcon != null;
+
+    // WHY: Provide a compact, accessible error card with optional retry action.
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline, color: colorScheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              hint!,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (hasAction) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: onAction,
+                icon: Icon(actionIcon),
+                label: Text(actionLabel!),
+              ),
+            ),
+          ],
         ],
       ),
     );
