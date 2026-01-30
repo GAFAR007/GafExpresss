@@ -22,6 +22,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/core/formatters/phone_formatter.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -135,6 +136,11 @@ class _BusinessTenantReviewScreenState
       ref.invalidate(businessTenantByIdProvider(applicationId));
 
       if (!mounted) return;
+      // WHY: Refresh shared tenant/business data after verification updates.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "business_tenant_contact_verify",
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -175,6 +181,11 @@ class _BusinessTenantReviewScreenState
       ref.invalidate(businessTenantApplicationsProvider);
 
       if (!mounted) return;
+      // WHY: Refresh shared tenant/business data after approval.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "business_tenant_approve_success",
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Tenant approved successfully")),
       );
@@ -217,6 +228,11 @@ class _BusinessTenantReviewScreenState
       ref.invalidate(businessTenantByIdProvider(applicationId));
 
       if (!mounted) return;
+      // WHY: Refresh shared tenant/business data after agreement approval.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "business_agreement_approve_success",
+      );
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Agreement approved")));
@@ -284,9 +300,13 @@ class _BusinessTenantReviewScreenState
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
+            onPressed: () async {
               _logTap("refresh");
-              ref.invalidate(businessTenantByIdProvider(widget.applicationId));
+              // WHY: Central refresh keeps tenant data in sync across screens.
+              await AppRefresh.refreshApp(
+                ref: ref,
+                source: "business_tenant_review_refresh",
+              );
             },
           ),
         ],
@@ -294,7 +314,11 @@ class _BusinessTenantReviewScreenState
       body: RefreshIndicator(
         onRefresh: () async {
           _logTap("pull_to_refresh");
-          ref.invalidate(businessTenantByIdProvider(widget.applicationId));
+          // WHY: Central refresh keeps tenant data in sync across screens.
+          await AppRefresh.refreshApp(
+            ref: ref,
+            source: "business_tenant_review_pull",
+          );
         },
         child: detailAsync.when(
           data: (application) {
