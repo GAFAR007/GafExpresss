@@ -24,6 +24,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
+import 'package:frontend/app/features/auth/domain/models/auth_user.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_team_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
@@ -40,7 +43,8 @@ class BusinessInviteScreen extends ConsumerStatefulWidget {
 // WHY: Centralize invite copy to avoid inline strings.
 class _Copy {
   static const String title = "Business invite";
-  static const String heading = "You have been invited to join a business team.";
+  static const String heading =
+      "You have been invited to join a business team.";
   static const String subheading =
       "Complete your invite to unlock the business workspace.";
   static const String stepOne = "Sign in with the invited email.";
@@ -78,16 +82,12 @@ class _Copy {
   // WHY: Keep backend error matching phrases centralized.
   static const String _errEmailMismatch =
       "Invite email does not match signed-in user";
-  static const String _errNinRequired =
-      "User must be NIN verified";
-  static const String _errRoleNotEligible =
-      "Only customers can be upgraded";
+  static const String _errNinRequired = "User must be NIN verified";
+  static const String _errRoleNotEligible = "Only customers can be upgraded";
   static const String _errDifferentBusiness =
       "User belongs to a different business";
-  static const String _errMissingEstate =
-      "Estate asset is required";
-  static const String _errMissingToken =
-      "Invite token is required";
+  static const String _errMissingEstate = "Estate asset is required";
+  static const String _errMissingToken = "Invite token is required";
 }
 
 class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
@@ -312,10 +312,11 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
       // WHY:
       // - token: your authenticated session token (Authorization header)
       // - inviteToken: the invite token from the email link (body payload)
-      final invitedUser = await api.acceptInvite(
+      final acceptance = await api.acceptInvite(
         token: session.token,
         inviteToken: widget.token,
       );
+      final invitedUser = acceptance.user;
 
       _log(
         "accept_success",
@@ -328,11 +329,47 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
       ref.read(pendingInviteTokenProvider.notifier).state = null;
       _log("pending_invite_cleared_success");
 
+      final nextToken = acceptance.token?.trim() ?? "";
+      if (nextToken.isNotEmpty) {
+        // WHY: Refresh the session token so backend role checks pass immediately.
+        final updatedUser = AuthUser(
+          id: session.user.id,
+          name: session.user.name,
+          email: session.user.email,
+          role: invitedUser.role,
+        );
+        final updatedSession = AuthSession(
+          user: updatedUser,
+          token: nextToken,
+        );
+        await ref.read(authSessionProvider.notifier).setSession(updatedSession);
+        _log(
+          "session_refreshed",
+          extra: {"role": invitedUser.role, "hasToken": true},
+        );
+      } else {
+        // WHY: Fallback to role update if token refresh is unavailable.
+        await ref.read(authSessionProvider.notifier).updateUserRole(
+              role: invitedUser.role,
+              source: "business_invite_accept_missing_token",
+            );
+        _log(
+          "session_role_only",
+          extra: {"role": invitedUser.role, "hasToken": false},
+        );
+      }
+
+      // WHY: Refresh cached data so tenant/business nav updates immediately.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "business_invite_accept_success",
+      );
+
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(_Copy.inviteAccepted)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(_Copy.inviteAccepted)));
 
       // WHY: Tenant invites go straight to tenant verification.
       if (invitedUser.role == "tenant") {
@@ -344,8 +381,7 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
       context.go('/business-dashboard');
     } catch (e) {
       final cleaned = _extractErrorMessage(e);
-      final statusCode =
-          e is DioException ? e.response?.statusCode : null;
+      final statusCode = e is DioException ? e.response?.statusCode : null;
       final classification = _classifyInviteFailure(
         message: cleaned,
         statusCode: statusCode,
@@ -362,7 +398,7 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
           "source": "business_invite_screen",
           "context": {
             "hasInviteToken": widget.token.trim().isNotEmpty,
-            "hasAuthSession": session != null && session.isTokenValid,
+            "hasAuthSession": session.isTokenValid,
           },
           "http_status": statusCode ?? 0,
           "provider_error_code": null,
@@ -465,8 +501,7 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
               children: [
                 Icon(
                   isSignedIn ? Icons.check_circle : Icons.lock_outline,
-                  color:
-                      isSignedIn ? colorScheme.primary : colorScheme.outline,
+                  color: isSignedIn ? colorScheme.primary : colorScheme.outline,
                   size: 18,
                 ),
                 const SizedBox(width: 8),
@@ -538,9 +573,7 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Text(
-                        isSignedIn
-                            ? _Copy.acceptInvite
-                            : _Copy.signInToAccept,
+                        isSignedIn ? _Copy.acceptInvite : _Copy.signInToAccept,
                       ),
               ),
             ),

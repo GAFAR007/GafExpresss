@@ -26,6 +26,7 @@ const businessTenantService = require("../services/business.tenant.service");
 const tenantContactDocumentService = require("../services/tenant_contact_document.service");
 const paymentService = require("../services/payment.service");
 const Payment = require("../models/Payment");
+const { signToken } = require("../config/jwt");
 const {
   writeAuditLog,
 } = require("../utils/audit");
@@ -1355,6 +1356,9 @@ async function acceptInvite(req, res) {
       },
     );
 
+    // WHY: Issue a fresh token so the updated role is effective immediately.
+    const authToken = signToken(user);
+
     await writeAuditLog({
       businessId: invite.businessId,
       actorId: user._id,
@@ -1383,6 +1387,7 @@ async function acceptInvite(req, res) {
       message:
         "Invite accepted successfully",
       user,
+      token: authToken,
       role: user.role,
       estateAssetId: user.estateAssetId,
       businessId: user.businessId,

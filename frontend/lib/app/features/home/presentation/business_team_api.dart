@@ -23,6 +23,22 @@ import 'package:dio/dio.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'business_team_user.dart';
 
+/// --------------------------------------------------------
+/// INVITE ACCEPTANCE RESULT
+/// --------------------------------------------------------
+/// WHY:
+/// - Accept invite can return a fresh auth token when role changes.
+/// - Keeps response parsing centralized and typed.
+class BusinessInviteAcceptance {
+  final BusinessTeamUser user;
+  final String? token;
+
+  const BusinessInviteAcceptance({
+    required this.user,
+    required this.token,
+  });
+}
+
 class BusinessTeamApi {
   final Dio _dio;
 
@@ -169,7 +185,7 @@ class BusinessTeamApi {
   /// ------------------------------------------------------
   /// ACCEPT INVITE
   /// ------------------------------------------------------
-  Future<BusinessTeamUser> acceptInvite({
+  Future<BusinessInviteAcceptance> acceptInvite({
     required String? token,
     required String inviteToken,
   }) async {
@@ -188,13 +204,19 @@ class BusinessTeamApi {
     final data = resp.data as Map<String, dynamic>;
     final userMap = (data["user"] ?? {}) as Map<String, dynamic>;
     final user = BusinessTeamUser.fromJson(userMap);
+    // WHY: Accept invite may return a refreshed auth token.
+    final nextToken = data["token"]?.toString();
 
     AppDebug.log(
       "BUSINESS_TEAM_API",
       "acceptInvite() success",
-      extra: {"userId": user.id, "role": user.role},
+      extra: {
+        "userId": user.id,
+        "role": user.role,
+        "hasToken": nextToken != null && nextToken.trim().isNotEmpty,
+      },
     );
 
-    return user;
+    return BusinessInviteAcceptance(user: user, token: nextToken);
   }
 }
