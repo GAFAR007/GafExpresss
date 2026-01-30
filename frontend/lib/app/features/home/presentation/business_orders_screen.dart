@@ -22,6 +22,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_order_model.dart';
 import 'package:frontend/app/features/home/presentation/business_order_providers.dart';
@@ -77,9 +78,13 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: () {
+            onPressed: () async {
               _logTap("refresh");
-              ref.invalidate(businessOrdersProvider);
+              // WHY: Central refresh keeps business data in sync across screens.
+              await AppRefresh.refreshApp(
+                ref: ref,
+                source: "business_orders_refresh",
+              );
             },
             icon: const Icon(Icons.refresh),
           ),
@@ -88,8 +93,11 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
       body: RefreshIndicator(
         onRefresh: () async {
           _logTap("pull_to_refresh");
-          ref.invalidate(businessOrdersProvider);
-          ref.invalidate(businessAnalyticsSummaryProvider);
+          // WHY: Central refresh keeps business data in sync across screens.
+          await AppRefresh.refreshApp(
+            ref: ref,
+            source: "business_orders_pull",
+          );
         },
         child: ordersAsync.when(
           data: (result) {
@@ -206,6 +214,11 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
       );
       ref.invalidate(businessOrdersProvider);
       if (!mounted) return;
+      // WHY: Refresh shared data so order changes propagate globally.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "business_order_update_success",
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Order updated to $selected")),
       );

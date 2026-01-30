@@ -25,6 +25,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
 import 'package:frontend/app/features/home/presentation/delivery_address_sheet.dart';
@@ -146,6 +147,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         token: session.token,
         items: [CartItem.fromProduct(product, quantity: safeQty)],
         deliveryAddress: selection.toPayload(),
+      );
+
+      // WHY: Refresh shared data so order lists update after creation.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "order_create_success_product_detail",
       );
 
       final callbackUrl = _buildCallbackUrl();
