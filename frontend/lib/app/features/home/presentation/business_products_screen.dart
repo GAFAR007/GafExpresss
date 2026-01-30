@@ -25,6 +25,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_analytics_models.dart';
@@ -82,7 +83,11 @@ class _BusinessProductsScreenState
 
   Future<void> _refreshProducts() async {
     _logFlow("REFRESH", "Refreshing products");
-    ref.invalidate(businessProductsProvider(_buildQuery()));
+    // WHY: Central refresh keeps business data in sync across screens.
+    await AppRefresh.refreshApp(
+      ref: ref,
+      source: "business_products_refresh",
+    );
   }
 
   Future<void> _openProductForm({Product? product}) async {

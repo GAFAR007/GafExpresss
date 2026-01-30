@@ -20,6 +20,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
@@ -197,9 +198,13 @@ class _BusinessTenantApplicationsScreenState
         ),
         actions: [
           IconButton(
-            onPressed: () {
+            onPressed: () async {
               _logTap("refresh");
-              ref.invalidate(businessTenantApplicationsProvider(query));
+              // WHY: Central refresh keeps tenant data in sync across screens.
+              await AppRefresh.refreshApp(
+                ref: ref,
+                source: "business_tenants_refresh",
+              );
             },
             icon: const Icon(Icons.refresh),
           ),
@@ -208,10 +213,11 @@ class _BusinessTenantApplicationsScreenState
       body: RefreshIndicator(
         onRefresh: () async {
           _logTap("pull_to_refresh");
-          ref.invalidate(businessTenantApplicationsProvider(query));
-          if (isEstateScoped && estateAnalyticsAsync != null) {
-            ref.invalidate(estateAnalyticsProvider(widget.estateAssetId!));
-          }
+          // WHY: Central refresh keeps tenant data in sync across screens.
+          await AppRefresh.refreshApp(
+            ref: ref,
+            source: "business_tenants_pull",
+          );
         },
         child: tenantsAsync.when(
           data: (result) {

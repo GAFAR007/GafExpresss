@@ -22,6 +22,7 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/theme/app_theme.dart';
@@ -53,9 +54,13 @@ class MyOrdersScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
-            onPressed: () {
+            onPressed: () async {
               AppDebug.log("MY_ORDERS", "Refresh tapped");
-              ref.invalidate(myOrdersProvider);
+              // WHY: Central refresh keeps consumer data in sync across screens.
+              await AppRefresh.refreshApp(
+                ref: ref,
+                source: "my_orders_refresh",
+              );
             },
             icon: const Icon(Icons.refresh),
           ),

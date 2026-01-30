@@ -23,6 +23,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/home_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/home_categories_section.dart';
 import 'package:frontend/app/features/home/presentation/home_filter_sheet.dart';
@@ -35,6 +36,10 @@ import 'package:frontend/app/features/home/presentation/cart_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/product_providers.dart';
+
+const String _homeLogTag = "HOME";
+const String _homeRefreshLog = "pull_to_refresh";
+const String _homeRefreshSource = "home_pull";
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -138,6 +143,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _inStockOnly = result.inStockOnly;
       _sort = result.sort;
     });
+  }
+
+  Future<void> _handleRefresh() async {
+    // WHY: Central refresh keeps Home aligned with other sections.
+    AppDebug.log(_homeLogTag, _homeRefreshLog);
+    await AppRefresh.refreshApp(ref: ref, source: _homeRefreshSource);
   }
 
   List<Product> _applyFilters(List<Product> products) {
@@ -271,50 +282,58 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         },
       ),
       body: SafeArea(
-        child: productsAsync.when(
-          data: (products) {
-            return _buildHomeBody(
-              header: header,
-              products: products,
-              pendingQuery: pendingQuery,
-              activeQuery: activeQuery,
-              isTyping: isTyping,
-              hasFilters: hasFilters,
-              isAdminAsync: isAdminAsync,
-            );
-          },
-          loading: () {
-            // WHY: Keep header visible while fetching new search results.
-            return SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  header,
-                  const SizedBox(height: 24),
-                  const Center(child: CircularProgressIndicator()),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            );
-          },
-          error: (error, _) {
-            AppDebug.log(
-              "HOME",
-              "Products load failed",
-              extra: {"error": error.toString()},
-            );
-            return SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  header,
-                  const SizedBox(height: 24),
-                  const Center(child: Text("Failed to load products")),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            );
-          },
+        // WHY: Refresh indicator lets Home trigger the central app refresh.
+        child: RefreshIndicator(
+          onRefresh: _handleRefresh,
+          child: productsAsync.when(
+            data: (products) {
+              return _buildHomeBody(
+                header: header,
+                products: products,
+                pendingQuery: pendingQuery,
+                activeQuery: activeQuery,
+                isTyping: isTyping,
+                hasFilters: hasFilters,
+                isAdminAsync: isAdminAsync,
+              );
+            },
+            loading: () {
+              // WHY: Keep header visible while fetching new search results.
+              return SingleChildScrollView(
+                // WHY: Allow pull-to-refresh even when content is short.
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    header,
+                    const SizedBox(height: 24),
+                    const Center(child: CircularProgressIndicator()),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              );
+            },
+            error: (error, _) {
+              AppDebug.log(
+                "HOME",
+                "Products load failed",
+                extra: {"error": error.toString()},
+              );
+              return SingleChildScrollView(
+                // WHY: Allow pull-to-refresh even when content is short.
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    header,
+                    const SizedBox(height: 24),
+                    const Center(child: Text("Failed to load products")),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -339,6 +358,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     return SingleChildScrollView(
+      // WHY: Allow pull-to-refresh even when content is short.
+      physics: const AlwaysScrollableScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
