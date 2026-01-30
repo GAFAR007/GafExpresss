@@ -25,6 +25,7 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/phone_formatter.dart'
     as phone_formatter;
+import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/nin_id_card.dart';
@@ -103,6 +104,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   static const String _ngPhonePrefix = "+234";
   static const int _ngPhoneDigits = 10;
   static const int _ninDigits = 11;
+  // WHY: Keep role comparisons consistent when locking account type.
+  static const String _roleStaff = "staff";
+  static const String _roleTenant = "tenant";
+  // WHY: Explain why account type changes are blocked for staff/tenants.
+  static const String _accountTypeLockedMessage =
+      "Account type is locked for staff and tenants.";
+  static const String _accountTypeLockedHint =
+      "Contact the business owner if this should change.";
 
   // WHY: Normalize pasted values and keep digits-only input consistent.
   static final List<TextInputFormatter> _ngPhoneInputFormatters = [
@@ -116,6 +125,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // WHY: Centralize debug formatting so logs are consistent and easy to scan.
   void _logFlow(String step, String message, {Map<String, dynamic>? extra}) {
     AppDebug.log("SETTINGS_FLOW", "$step | $message", extra: extra);
+  }
+
+  bool _isAccountTypeLocked(String? role) {
+    // WHY: Staff and tenant roles must not switch account type.
+    if (role == null) return false;
+    return role == _roleStaff || role == _roleTenant;
   }
 
   // WHY: Keep account type labels consistent with backend values.
@@ -240,6 +255,51 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// ------------------------------------------------------------
   /// REFRESH HELPERS
   /// ------------------------------------------------------------
+  Future<void> _refreshAll({required String source}) async {
+    // WHY: Avoid overlapping refresh calls from pull-to-refresh + auto refresh.
+    if (_isRefreshing) {
+      AppDebug.log(
+        "SETTINGS",
+        "Full refresh skipped",
+        extra: {"source": source, "reason": "already_refreshing"},
+      );
+      return;
+    }
+
+    if (_isSaving) {
+      AppDebug.log(
+        "SETTINGS",
+        "Full refresh skipped",
+        extra: {"source": source, "reason": "saving"},
+      );
+      return;
+    }
+
+    _isRefreshing = true;
+    _logFlow(
+      "REFRESH_START",
+      "Full refresh start",
+      extra: {"source": source},
+    );
+
+    try {
+      await AppRefresh.refreshApp(ref: ref, source: source);
+      _logFlow(
+        "REFRESH_OK",
+        "Full refresh success",
+        extra: {"source": source},
+      );
+    } catch (e) {
+      _logFlow(
+        "REFRESH_FAIL",
+        "Full refresh failed",
+        extra: {"source": source, "error": e.toString()},
+      );
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
   Future<void> _refreshProfile({required String source}) async {
     // WHY: Avoid overlapping refresh calls from pull-to-refresh + auto refresh.
     if (_isRefreshing) {
@@ -705,7 +765,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // WHY: Verification flags should reflect backend truth, not local UI state.
     final latestProfile =
         ref.read(userProfileProvider).value ?? _currentProfile;
-    final canEditAccountType = latestProfile?.isNinVerified ?? false;
+    final resolvedRole =
+        latestProfile?.role ?? _currentProfile?.role ?? session.user.role;
+    final isAccountTypeLocked = _isAccountTypeLocked(resolvedRole);
+    // WHY: Only verified users can change account type unless role is locked.
+    final canEditAccountType =
+        (latestProfile?.isNinVerified ?? false) && !isAccountTypeLocked;
     final homeAddress = buildAddressFromControllers(
       houseNumberCtrl: _homeHouseNumberCtrl,
       streetCtrl: _homeStreetCtrl,
@@ -777,6 +842,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _applyProfile(updated);
 
       if (!mounted) return;
+      // WHY: Refresh shared data so profile updates propagate globally.
+      await AppRefresh.refreshApp(
+        ref: ref,
+        source: "profile_update_success",
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Profile updated successfully")),
       );
@@ -1040,9 +1110,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             context.go('/home');
           },
         ),
+        actions: [
+          IconButton(
+            onPressed: _isSaving
+                ? null
+                : () async {
+                    // WHY: Provide a fast logout action from the header.
+                    AppDebug.log("SETTINGS", "Header logout tapped");
+                    await ref.read(authSessionProvider.notifier).logout();
+
+                    if (!context.mounted) return;
+                    AppDebug.log("SETTINGS", "Navigate -> /login");
+                    context.go("/login");
+                  },
+            icon: const Icon(Icons.logout),
+            tooltip: "Logout",
+          ),
+        ],
       ),
       body: RefreshIndicator(
-        onRefresh: () => _refreshProfile(source: "pull_to_refresh"),
+        onRefresh: () => _refreshAll(source: "settings_pull"),
         child: profileAsync.when(
           data: (profile) {
             // WHY: Fallback to a minimal profile if API returns null.
@@ -1092,10 +1179,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   );
 
             final activeProfile = profile ?? _currentProfile ?? fallbackProfile;
+            final theme = Theme.of(context);
             // WHY: Once NIN is verified, lock identity fields only.
             final isIdentityLocked = activeProfile.isNinVerified;
-            // WHY: Only verified users can change account type.
-            final canEditAccountType = activeProfile.isNinVerified;
+            // WHY: Staff/tenant roles must not switch account type.
+            final isAccountTypeLocked =
+                _isAccountTypeLocked(activeProfile.role);
+            // WHY: Only verified users can change account type unless locked.
+            final canEditAccountType =
+                activeProfile.isNinVerified && !isAccountTypeLocked;
+            // WHY: Show account type when locked so users see their value.
+            final showAccountTypeSection =
+                canEditAccountType || isAccountTypeLocked;
             // WHY: Show business dashboard entry only for business roles.
             final isBusinessUser = activeProfile.role == 'business_owner' ||
                 activeProfile.role == 'staff';
@@ -1305,7 +1400,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ],
                   const SizedBox(height: 20),
-                  if (canEditAccountType) ...[
+                  if (showAccountTypeSection) ...[
                     const SizedBox(height: 12),
                     const SettingsSectionHeader(
                       title: "Account type",
@@ -1313,6 +1408,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           "Select the account type that matches your business.",
                     ),
                     const SizedBox(height: 12),
+                    if (isAccountTypeLocked) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _accountTypeLockedMessage,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _accountTypeLockedHint,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     DropdownButtonFormField<String>(
                       initialValue: _accountType,
                       decoration: const InputDecoration(
@@ -1326,7 +1452,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ),
                           )
                           .toList(),
-                      onChanged: _isSaving
+                      onChanged: _isSaving || !canEditAccountType
                           ? null
                           : (value) {
                               if (value == null) return;
@@ -1365,26 +1491,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     child: ElevatedButton(
                       onPressed: _isSaving ? null : _onSavePressed,
                       child: Text(_isSaving ? "Saving..." : "Save changes"),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _isSaving
-                          ? null
-                          : () async {
-                              AppDebug.log("SETTINGS", "Logout tapped");
-                              await ref
-                                  .read(authSessionProvider.notifier)
-                                  .logout();
-
-                              if (!context.mounted) return;
-                              AppDebug.log("SETTINGS", "Navigate -> /login");
-                              context.go("/login");
-                            },
-                      icon: const Icon(Icons.logout),
-                      label: const Text("Logout"),
                     ),
                   ),
                 ],
