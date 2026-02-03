@@ -15,6 +15,16 @@ library;
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 
+// WHY: Keep JSON keys centralized for tenant summary parsing.
+const String _summaryRemainingPeriodsKey = "remainingPeriods";
+const String _summaryTermTotalPeriodsKey = "termTotalPeriods";
+const String _summaryTermPaidPeriodsKey = "termPaidPeriodsYtd";
+const String _summaryTermRemainingPeriodsKey =
+    "termRemainingPeriodsYtd";
+const String _summaryIsFinalPaymentKey = "isFinalPayment";
+const String _summaryIsYearCompleteKey = "isYearComplete";
+const String _summaryIsOverdueKey = "isOverdue";
+
 class TenantContact {
   final String name;
   // WHY: Store split names for clearer review displays.
@@ -190,6 +200,20 @@ class TenantSummary {
   final int unitCount;
   final String estateAssetId;
   final TenantPaymentsSummary? paymentsSummary;
+  // WHY: Allow UI to clamp payment options when backend supplies remaining span.
+  final int? remainingPeriods;
+  // WHY: Yearly term totals drive the "paid vs left" tenant UX.
+  final int? termTotalPeriods;
+  // WHY: Track how many periods have been paid this calendar year.
+  final int? termPaidPeriodsYtd;
+  // WHY: Remaining periods in the current calendar year.
+  final int? termRemainingPeriodsYtd;
+  // WHY: Identify when the last payment must complete the year.
+  final bool isFinalPayment;
+  // WHY: Flag when the current calendar year is fully paid.
+  final bool isYearComplete;
+  // WHY: Overdue status should be visible in tenant UI.
+  final bool isOverdue;
 
   const TenantSummary({
     required this.applicationId,
@@ -209,6 +233,13 @@ class TenantSummary {
     required this.unitCount,
     required this.estateAssetId,
     required this.paymentsSummary,
+    required this.remainingPeriods,
+    required this.termTotalPeriods,
+    required this.termPaidPeriodsYtd,
+    required this.termRemainingPeriodsYtd,
+    required this.isFinalPayment,
+    required this.isYearComplete,
+    required this.isOverdue,
   });
 
   factory TenantSummary.fromJson(Map<String, dynamic> json) {
@@ -218,6 +249,18 @@ class TenantSummary {
       if (value == null) return 0;
       if (value is num) return value.toDouble();
       return double.tryParse(value.toString()) ?? 0;
+    }
+    int? toOptionalInt(dynamic value) {
+      // WHY: Support nullable counters without throwing on missing fields.
+      if (value == null) return null;
+      if (value is int) return value;
+      return int.tryParse(value.toString());
+    }
+    bool toBool(dynamic value) {
+      // WHY: Default to false when flags are missing from legacy payloads.
+      if (value == null) return false;
+      if (value is bool) return value;
+      return value.toString().toLowerCase() == "true";
     }
 
     return TenantSummary(
@@ -244,6 +287,16 @@ class TenantSummary {
           : TenantPaymentsSummary.fromJson(
               json['paymentsSummary'] as Map<String, dynamic>,
             ),
+      remainingPeriods: toOptionalInt(json[_summaryRemainingPeriodsKey]),
+      termTotalPeriods:
+          toOptionalInt(json[_summaryTermTotalPeriodsKey]),
+      termPaidPeriodsYtd:
+          toOptionalInt(json[_summaryTermPaidPeriodsKey]),
+      termRemainingPeriodsYtd:
+          toOptionalInt(json[_summaryTermRemainingPeriodsKey]),
+      isFinalPayment: toBool(json[_summaryIsFinalPaymentKey]),
+      isYearComplete: toBool(json[_summaryIsYearCompleteKey]),
+      isOverdue: toBool(json[_summaryIsOverdueKey]),
     );
   }
 }

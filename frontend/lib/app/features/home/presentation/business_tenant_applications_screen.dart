@@ -29,6 +29,13 @@ import 'package:frontend/app/features/home/presentation/business_tenant_model.da
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
+// WHY: Centralize payment history route values for business navigation.
+const String _businessTenantPaymentsRoute = "/business-tenant-payments";
+const String _tenantNameExtraKey = "tenantName";
+const String _viewPaymentsLabel = "View payments";
+const String _viewPaymentsAction = "view_payments";
+const double _actionSpacing = 8;
+
 class BusinessTenantApplicationsScreen extends ConsumerStatefulWidget {
   final String? estateAssetId;
 
@@ -149,6 +156,22 @@ class _BusinessTenantApplicationsScreenState
       default:
         return "Pending";
     }
+  }
+
+  void _openTenantPayments({
+    required BuildContext context,
+    required String tenantId,
+    required String tenantName,
+  }) {
+    // WHY: Payment history lives on a dedicated screen to avoid UI bloat.
+    _logTap(
+      _viewPaymentsAction,
+      extra: {"tenantId": tenantId},
+    );
+    context.push(
+      "$_businessTenantPaymentsRoute/$tenantId",
+      extra: {_tenantNameExtraKey: tenantName},
+    );
   }
 
   @override
@@ -302,21 +325,36 @@ class _BusinessTenantApplicationsScreenState
                   const _EmptyState(text: "No tenant applications yet")
                 else
                   ...apps.map(
-                    (application) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _TenantApplicationCard(
-                        application: application,
-                        statusLabel: _statusLabel(application.status),
-                        statusTone: _toneForStatus(application.status),
-                        onView: () {
-                          _logTap(
-                            "open_detail",
-                            extra: {"applicationId": application.id},
-                          );
-                          context.push('/tenant-review/${application.id}');
-                        },
-                      ),
-                    ),
+                    (application) {
+                      // WHY: Payment history is keyed to the tenant user id.
+                      final tenantId =
+                          application.tenantUserStatus?.id ?? "";
+                      // WHY: Disable navigation if tenant id is missing.
+                      final canViewPayments = tenantId.isNotEmpty;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _TenantApplicationCard(
+                          application: application,
+                          statusLabel: _statusLabel(application.status),
+                          statusTone: _toneForStatus(application.status),
+                          onView: () {
+                            _logTap(
+                              "open_detail",
+                              extra: {"applicationId": application.id},
+                            );
+                            context.push('/tenant-review/${application.id}');
+                          },
+                          onViewPayments: canViewPayments
+                              ? () => _openTenantPayments(
+                                    context: context,
+                                    tenantId: tenantId,
+                                    tenantName:
+                                        application.tenantSnapshot.name,
+                                  )
+                              : null,
+                        ),
+                      );
+                    },
                   ),
               ],
             );
@@ -538,12 +576,14 @@ class _TenantApplicationCard extends StatelessWidget {
   final String statusLabel;
   final AppStatusTone statusTone;
   final VoidCallback onView;
+  final VoidCallback? onViewPayments;
 
   const _TenantApplicationCard({
     required this.application,
     required this.statusLabel,
     required this.statusTone,
     required this.onView,
+    required this.onViewPayments,
   });
 
   @override
@@ -627,10 +667,22 @@ class _TenantApplicationCard extends StatelessWidget {
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: onView,
-              icon: const Icon(Icons.open_in_new),
-              label: const Text("View details"),
+            child: Wrap(
+              spacing: _actionSpacing,
+              children: [
+                // WHY: Keep the existing review flow as the primary action.
+                TextButton.icon(
+                  onPressed: onView,
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text("View details"),
+                ),
+                // WHY: Payment history is optional when tenant id is missing.
+                TextButton.icon(
+                  onPressed: onViewPayments,
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text(_viewPaymentsLabel),
+                ),
+              ],
             ),
           ),
         ],

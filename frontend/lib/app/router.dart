@@ -39,6 +39,8 @@ import 'package:frontend/app/features/home/presentation/business_products_screen
 import 'package:frontend/app/features/home/presentation/business_register_help_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_applications_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_review_screen.dart';
+import 'package:frontend/app/features/home/presentation/payments/business_tenant_payment_history_screen.dart';
+import 'package:frontend/app/features/home/presentation/payments/tenant_payment_receipts_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_invite_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_verified_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_verify_screen.dart';
@@ -53,6 +55,9 @@ import 'package:frontend/app/features/home/presentation/product_detail_screen.da
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
 import 'package:frontend/app/theme/business_theme_wrapper.dart';
+
+// WHY: Keep route keys centralized for payment history navigation extras.
+const String _tenantNameExtraKey = "tenantName";
 
 final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
@@ -81,7 +86,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           path.startsWith('/business-orders') ||
           path.startsWith('/business-assets') ||
           path.startsWith('/business-tenants') ||
+          path.startsWith('/business-tenant-payments') ||
           path.startsWith('/tenant-review');
+      // WHY: Tenant receipts should be guarded the same as tenant dashboards.
+      final bool isTenantPayments =
+          path.startsWith('/tenant-payments');
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
@@ -164,13 +173,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       // WHY: Tenant dashboard should be tenant-only (staff/owners use admin panels).
-      if (isAuthed && isTenantDashboard) {
+      if (isAuthed && (isTenantDashboard || isTenantPayments)) {
         final role = session.user.role;
         final allowedRoles = ['tenant'];
         if (!allowedRoles.contains(role)) {
           AppDebug.log(
             "ROUTER",
-            "redirect -> /settings (tenant dashboard guard)",
+            "redirect -> /settings (tenant guard)",
             extra: {"role": role, "allowed": allowedRoles},
           );
           return '/settings';
@@ -264,6 +273,16 @@ final routerProvider = Provider<GoRouter>((ref) {
           AppDebug.log("ROUTER", "-> /tenant-dashboard");
           return const BusinessThemeWrapper(
             child: TenantDashboardScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/tenant-payments',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /tenant-payments");
+          // WHY: Keep tenant receipts aligned with tenant dashboard theming.
+          return const BusinessThemeWrapper(
+            child: TenantPaymentReceiptsScreen(),
           );
         },
       ),
@@ -403,6 +422,33 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           return BusinessThemeWrapper(
             child: BusinessTenantReviewScreen(applicationId: id),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/business-tenant-payments/:tenantId',
+        builder: (context, state) {
+          final tenantId =
+              state.pathParameters['tenantId'] ?? '';
+          final extra = state.extra;
+          // WHY: Tenant name is optional; fall back to id-only display.
+          final tenantName =
+              extra is Map<String, dynamic>
+                  ? extra[_tenantNameExtraKey] as String?
+                  : null;
+          AppDebug.log(
+            "ROUTER",
+            "-> /business-tenant-payments/:tenantId",
+            extra: {
+              "tenantId": tenantId,
+              "hasName": tenantName != null && tenantName.isNotEmpty,
+            },
+          );
+          return BusinessThemeWrapper(
+            child: BusinessTenantPaymentHistoryScreen(
+              tenantId: tenantId,
+              tenantName: tenantName,
+            ),
           );
         },
       ),

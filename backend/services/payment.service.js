@@ -33,6 +33,7 @@ const {
   computeCoversTo,
   computeMaxPeriodsWithin36Months,
   periodCountFromYears,
+  periodsPerYear,
 } = require("../utils/rentCoverage");
 
 // WHY: Keep payment purpose/event strings centralized for audit consistency.
@@ -44,6 +45,324 @@ const PAYMENT_EVENTS = {
     "tenant_payment_intent",
   DEV_MARK_PAID: "dev_mark_paid",
 };
+
+// WHY: Enforce per-payment rent coverage caps by rent cadence.
+const RENT_PERIOD_LIMITS = {
+  monthly: {
+    maxPeriods: 12,
+    label: "months",
+  },
+  quarterly: {
+    maxPeriods: 4,
+    label: "quarters",
+  },
+  yearly: {
+    maxPeriods: 3,
+    label: "years",
+  },
+};
+
+// WHY: Prevent abuse / enforce policy. Tenant can pay rent at most 3 times per calendar year.
+const MAX_TENANT_RENT_PAYMENTS_PER_YEAR = 3;
+/* =========================
+ * YEARLY PAYMENT HELPERS
+ * =========================
+ *
+ * PURPOSE:
+ * - These helpers enforce a BUSINESS RULE (not a UI rule):
+ *   → A tenant can make a maximum number of SUCCESSFUL rent payments
+ *     per CALENDAR YEAR.
+ *
+ * WHY THIS EXISTS:
+ * - Prevents abuse (e.g. micro-payments to extend rent indefinitely)
+ * - Keeps accounting, analytics, and reporting predictable
+ * - Ensures rent coverage is extended intentionally, not accidentally
+ *
+ * IMPORTANT:
+ * - This logic MUST run BEFORE creating a payment intent.
+ * - It MUST NOT live in the webhook.
+ * - It MUST count ONLY successful payments.
+ * - Removing or bypassing this will allow unlimited payments per year.
+ */
+
+/**
+ * Returns the start and end boundaries of the CURRENT CALENDAR YEAR.
+ *
+ * HOW IT WORKS:
+ * - Uses the system date (or provided date) to determine the year.
+ * - Constructs explicit Date objects for:
+ *   • January 1st 00:00:00.000
+ *   • December 31st 23:59:59.999
+ *
+ * WHY THIS MATTERS:
+ * - “Payments this year” must be defined consistently everywhere.
+ * - Avoids bugs caused by rolling windows or timezone drift.
+ * - Aligns with business reporting (tax, audit, analytics).
+ *
+ * NOTE:
+ * - We intentionally use CALENDAR YEAR, not last 12 months.
+ */
+function getYearBounds(
+  now = new Date(),
+) {
+  // Get the calendar year (e.g. 2026) from the current date.
+  // WHY: All yearly payment limits are enforced per calendar year.
+  const y = now.getFullYear();
+
+  // Construct the very first millisecond of the year:
+  // January 1st, 00:00:00.000
+  // WHY: Used as the lower bound when counting "payments this year".
+  const startOfYear = new Date(
+    y,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+  );
+
+  // Construct the very last millisecond of the year:
+  // December 31st, 23:59:59.999
+  // WHY: Ensures payments on the last day of the year are included.
+  const endOfYear = new Date(
+    y,
+    11,
+    31,
+    23,
+    59,
+    59,
+    999,
+  );
+
+  // Return both boundaries so they can be reused in queries.
+  // WHY: Keeps date logic centralized and consistent.
+  return { startOfYear, endOfYear };
+}
+
+/**
+ * Counts how many SUCCESSFUL tenant rent payments
+ * have been created in the CURRENT calendar year.
+ *
+ * WHAT IT COUNTS:
+ * - Only payments with:
+ *   • purpose === TENANT_RENT
+ *   • status === "success"
+ *   • createdAt within current calendar year
+ *
+ * WHAT IT EXPLICITLY DOES NOT COUNT:
+ * - Pending payment intents
+ * - Failed payments
+ * - Retries / duplicate webhook events
+ * - Payments from previous years
+ *
+ * WHY createdAt IS USED (VERY IMPORTANT):
+ * - Payment date is defined as the creation timestamp for
+ *   successful rent payments in this system.
+ * - Coverage dates do not affect calendar-year limits.
+ *
+ * SECURITY / SAFETY:
+ * - This function is read-only.
+ * - It does not mutate tenant state.
+ * - It is safe to call multiple times.
+ *
+ * USED BY:
+ * - createTenantPaymentIntent (pre-flight enforcement)
+ *
+ * DO NOT:
+ * - Move this logic to the frontend
+ * - Enforce this rule in the webhook
+ * - Count pending or failed payments
+ */
+async function countSuccessfulTenantRentPaymentsThisYear({
+  businessId,
+  tenantApplicationId,
+}) {
+  // Get the start and end dates for the CURRENT calendar year.
+  // WHY: Ensures we only count payments made within this year,
+  // not a rolling 12-month window or historical data.
+  const { startOfYear, endOfYear } =
+    getYearBounds();
+
+  // Count how many tenant rent payments were SUCCESSFULLY created
+  // within the current calendar year.
+  const count =
+    await Payment.countDocuments({
+      // Scope to the correct business to prevent cross-business leakage.
+      businessId,
+
+      // Scope to a single tenant application.
+      // WHY: Payments are tracked per tenancy, not just per user.
+      tenantApplication:
+        tenantApplicationId,
+
+      // Only count rent payments (ignore orders, fees, etc.).
+      purpose:
+        PAYMENT_PURPOSES.TENANT_RENT,
+
+      // CRITICAL: Only successful payments count toward the yearly limit.
+      // Pending or failed payments must NEVER block future payments.
+      status: "success",
+
+      // Use createdAt because calendar-year limits are based on payment date.
+      createdAt: {
+        $gte: startOfYear,
+        $lte: endOfYear,
+      },
+    });
+
+  // Debug log is intentionally detailed so we can diagnose:
+  // - Why a tenant was blocked
+  // - How many payments were already counted
+  // - Which year boundaries were used
+  debug(
+    "PAYMENT SERVICE: tenant rent payments this year (success only)",
+    {
+      tenantApplicationId,
+      count,
+      startOfYear,
+      endOfYear,
+    },
+  );
+
+  // Return the number of successful payments made this year.
+  // This value is used to decide whether to allow or block
+  // creation of a new payment intent.
+  return count;
+}
+
+/**
+ * Sums how many rent periods have been paid
+ * in the CURRENT calendar year, plus the
+ * total amount paid in kobo.
+ *
+ * WHY:
+ * - We need to know how many periods remain in the year.
+ * - Payments are counted by payment date (createdAt), not coverage dates.
+ */
+async function sumTenantRentPeriodsPaidThisYear({
+  businessId,
+  tenantApplicationId,
+}) {
+  const { startOfYear, endOfYear } =
+    getYearBounds();
+
+  const payments =
+    await Payment.find({
+      businessId,
+      tenantApplication:
+        tenantApplicationId,
+      purpose:
+        PAYMENT_PURPOSES.TENANT_RENT,
+      status: "success",
+      createdAt: {
+        $gte: startOfYear,
+        $lte: endOfYear,
+      },
+    })
+      .select(
+        "periodCount createdAt amount",
+      )
+      .lean();
+
+  let totalPeriods = 0;
+  let missingPeriodCount = 0;
+  let totalPaidKoboYtd = 0;
+
+  payments.forEach((payment) => {
+    // WHY: Always track paid totals, even when periodCount is missing.
+    totalPaidKoboYtd += Number.isFinite(
+      payment?.amount,
+    )
+      ? Math.max(
+          0,
+          Math.round(payment.amount),
+        )
+      : 0;
+    const raw = payment?.periodCount;
+    if (!Number.isFinite(raw)) {
+      missingPeriodCount += 1;
+      return;
+    }
+    const safePeriods = Math.max(
+      0,
+      Math.floor(raw),
+    );
+    totalPeriods += safePeriods;
+  });
+
+  debug(
+    "PAYMENT SERVICE: tenant rent periods paid this year",
+    {
+      tenantApplicationId,
+      totalPeriods,
+      missingPeriodCount,
+      totalPaidKoboYtd,
+      startOfYear,
+      endOfYear,
+    },
+  );
+
+  return {
+    totalPeriods,
+    totalPaidKoboYtd,
+    missingPeriodCount,
+  };
+}
+
+function normalizeRentPeriod(
+  rentPeriod,
+) {
+  // WHY: Normalize rent period inputs for consistent downstream logic.
+  return (rentPeriod || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+}
+
+function resolveRentPeriodLimit(
+  rentPeriod,
+) {
+  // WHY: Provide a single source of truth for per-payment rent limits.
+  const normalized =
+    normalizeRentPeriod(rentPeriod);
+  return (
+    RENT_PERIOD_LIMITS[normalized] ||
+    null
+  );
+}
+
+function computePeriodAmountMinor(
+  yearlyAmountMinor,
+  rentPeriod,
+) {
+  // WHY: Tenancy rent amounts are stored yearly; compute per-period price.
+  const months =
+    monthsPerPeriod(rentPeriod);
+  if (!months) return 0;
+
+  const periodsPerYear = 12 / months;
+  const rawAmount =
+    yearlyAmountMinor / periodsPerYear;
+  const roundedAmount =
+    Math.floor(rawAmount);
+
+  if (rawAmount !== roundedAmount) {
+    debug(
+      "PAYMENT SERVICE: rent amount floored to minor units",
+      {
+        rentPeriod,
+        yearlyAmountMinor,
+        rawAmount,
+        roundedAmount,
+        hint:
+          "Final payment will absorb remainder to match yearly total.",
+      },
+    );
+  }
+
+  return roundedAmount;
+}
 
 const {
   assertTransition,
@@ -523,15 +842,25 @@ async function processPaystackEvent(
         application.status = "active";
       }
       // WHY: Payment success should finalize agreement status for active tenants.
-      if (application.agreementStatus !== "approved") {
-        application.agreementStatus = "approved";
-        if (!application.agreementAcceptedAt) {
+      if (
+        application.agreementStatus !==
+        "approved"
+      ) {
+        application.agreementStatus =
+          "approved";
+        if (
+          !application.agreementAcceptedAt
+        ) {
           // WHY: Preserve a reasonable approval timestamp for audit clarity.
-          application.agreementAcceptedAt = now;
+          application.agreementAcceptedAt =
+            now;
         }
         debug(
           "PAYMENT SERVICE: Agreement auto-approved after payment",
-          { applicationId: application._id },
+          {
+            applicationId:
+              application._id,
+          },
         );
       }
 
@@ -829,6 +1158,7 @@ async function createTenantPaymentIntent({
   actorId,
   actorRole,
   yearsToPay = 1,
+  periodCount,
   callbackUrl,
 }) {
   debug(
@@ -840,7 +1170,10 @@ async function createTenantPaymentIntent({
       actorId,
       actorRole,
       yearsToPay,
-      hasCallbackUrl: Boolean(callbackUrl),
+      periodCount,
+      hasCallbackUrl: Boolean(
+        callbackUrl,
+      ),
     },
   );
 
@@ -879,6 +1212,55 @@ async function createTenantPaymentIntent({
     );
   }
 
+  /**
+   * WHY: Enforce maximum number of SUCCESSFUL tenant rent payments
+   * allowed per CALENDAR YEAR.
+   *
+   * HOW THIS WORKS:
+   * - Counts ONLY payments with:
+   *   • purpose = TENANT_RENT
+   *   • status = "success"
+   *   • createdAt within current calendar year
+   *
+   * IMPORTANT:
+   * - This runs BEFORE creating a payment intent.
+   * - This runs BEFORE calling Paystack.
+   * - If this throws, NO money flow is initiated.
+   */
+  const paymentsThisYear =
+    await countSuccessfulTenantRentPaymentsThisYear(
+      {
+        businessId,
+        tenantApplicationId:
+          application._id,
+      },
+    );
+
+  if (
+    paymentsThisYear >=
+    MAX_TENANT_RENT_PAYMENTS_PER_YEAR
+  ) {
+    debug(
+      "PAYMENT SERVICE: yearly rent payment limit exceeded — refusing intent",
+      {
+        tenantApplicationId:
+          application._id,
+        businessId,
+        paymentsThisYear,
+        maxAllowed:
+          MAX_TENANT_RENT_PAYMENTS_PER_YEAR,
+      },
+    );
+
+    // HARD STOP:
+    // - Do NOT create a Payment record
+    // - Do NOT call Paystack
+    // - Do NOT allow tenant to proceed
+    throw new Error(
+      `Maximum of ${MAX_TENANT_RENT_PAYMENTS_PER_YEAR} rent payments allowed per calendar year`,
+    );
+  }
+
   const tenantUser =
     await User.findById(
       tenantUserId,
@@ -903,38 +1285,13 @@ async function createTenantPaymentIntent({
     debug(
       "PAYMENT SERVICE: Invalid tenant rent amount (expected kobo)",
       {
-        rentAmount: application.rentAmount,
+        rentAmount:
+          application.rentAmount,
         hint: "Normalize rent amounts to kobo before payment.",
       },
     );
     throw new Error(
       "Rent amount must be an integer minor unit",
-    );
-  }
-
-  // WHY: Enforce max 3 successful rent payments per calendar year.
-  const startOfYear = dayjs()
-    .startOf("year")
-    .toDate();
-  const endOfYear = dayjs()
-    .endOf("year")
-    .toDate();
-  const yearlyPaymentsCount =
-    await Payment.countDocuments({
-      purpose:
-        PAYMENT_PURPOSES.TENANT_RENT,
-      tenantApplication:
-        application._id,
-      status: "success",
-      processedAt: {
-        $gte: startOfYear,
-        $lte: endOfYear,
-      },
-    });
-
-  if (yearlyPaymentsCount >= 3) {
-    throw new Error(
-      "Max rent payments reached for this year",
     );
   }
 
@@ -952,16 +1309,158 @@ async function createTenantPaymentIntent({
     );
   }
 
-  const requestedPeriodCount =
-    periodCountFromYears(
+  const rentPeriod =
+    normalizeRentPeriod(
       application.rentPeriod,
-      yearsToPay,
     );
+  const rentLimit =
+    resolveRentPeriodLimit(rentPeriod);
+  if (!rentLimit) {
+    throw new Error(
+      "Unsupported rent period for payment",
+    );
+  }
+
+  // WHY: Enforce calendar-year rent term limits (independent of coverage dates).
+  const termTotalPeriods =
+    periodsPerYear(rentPeriod);
+  if (!termTotalPeriods) {
+    debug(
+      "PAYMENT SERVICE: unsupported rent period for yearly term",
+      {
+        tenantApplicationId:
+          application._id,
+        businessId,
+        rentPeriod,
+        classification: "INVALID_INPUT",
+        error_code:
+          "TENANT_RENT_TERM_UNSUPPORTED_PERIOD",
+        step: "VALIDATION_FAIL",
+        resolution_hint:
+          "Ensure the tenant rent period is monthly, quarterly, or yearly.",
+      },
+    );
+    throw new Error(
+      "Unsupported rent period for yearly limits",
+    );
+  }
+
+  const {
+    totalPeriods: termPaidPeriodsYtd,
+    totalPaidKoboYtd,
+    missingPeriodCount:
+      termMissingPeriodCount,
+  } = await sumTenantRentPeriodsPaidThisYear({
+    businessId,
+    tenantApplicationId:
+      application._id,
+  });
+
+  const termRemainingPeriodsYtd =
+    Math.max(
+      0,
+      termTotalPeriods -
+        termPaidPeriodsYtd,
+    );
+
+  // WHY: The third payment in the year must complete the remaining periods.
+  const isFinalPayment =
+    paymentsThisYear >=
+      MAX_TENANT_RENT_PAYMENTS_PER_YEAR - 1 &&
+    termRemainingPeriodsYtd > 0;
+
+  if (termRemainingPeriodsYtd <= 0) {
+    debug(
+      "PAYMENT SERVICE: yearly rent term already completed",
+      {
+        tenantApplicationId:
+          application._id,
+        businessId,
+        termTotalPeriods,
+        termPaidPeriodsYtd,
+        paymentsThisYear,
+        classification: "INVALID_INPUT",
+        error_code:
+          "TENANT_RENT_YEAR_ALREADY_COMPLETE",
+        step: "VALIDATION_FAIL",
+        resolution_hint:
+          "Wait until the next calendar year or contact support.",
+      },
+    );
+    throw new Error(
+      "Rent for this year is already complete",
+    );
+  }
+
+  const periodAmountMinor =
+    computePeriodAmountMinor(
+      amountMinor,
+      rentPeriod,
+    );
+  if (periodAmountMinor <= 0) {
+    throw new Error(
+      "Rent amount must be positive",
+    );
+  }
+
+  // WHY: Prefer explicit periodCount (months/quarters); fallback to years for backwards compatibility.
+  let requestedPeriodCount =
+    (
+      Number.isFinite(periodCount) &&
+      Number(periodCount) > 0
+    ) ?
+      Math.floor(Number(periodCount))
+    : Math.floor(
+        periodCountFromYears(
+          rentPeriod,
+          yearsToPay,
+        ),
+      );
+
+  if (isFinalPayment) {
+    debug(
+      "PAYMENT SERVICE: forcing final payment to complete year",
+      {
+        tenantApplicationId:
+          application._id,
+        businessId,
+        paymentsThisYear,
+        requestedPeriodCount,
+        forcedPeriodCount:
+          termRemainingPeriodsYtd,
+        totalPaidKoboYtd,
+        missingPeriodCount:
+          termMissingPeriodCount,
+      },
+    );
+    requestedPeriodCount =
+      termRemainingPeriodsYtd;
+  }
+
+  if (
+    !Number.isInteger(
+      requestedPeriodCount,
+    ) ||
+    requestedPeriodCount <= 0
+  ) {
+    throw new Error(
+      "Invalid rent coverage selection",
+    );
+  }
+
+  if (
+    requestedPeriodCount >
+    rentLimit.maxPeriods
+  ) {
+    throw new Error(
+      `Max ${rentLimit.maxPeriods} ${rentLimit.label} per payment`,
+    );
+  }
 
   const maxAllowedPeriodCount =
     computeMaxPeriodsWithin36Months(
       coversFrom,
-      application.rentPeriod,
+      rentPeriod,
     );
 
   const approvedPeriodCount = Math.min(
@@ -975,12 +1474,38 @@ async function createTenantPaymentIntent({
     );
   }
 
-  const approvedAmount =
-    amountMinor * approvedPeriodCount;
+  // WHY: When a payment completes the current calendar year,
+  // charge the exact remaining yearly amount to remove rounding drift.
+  const completesYear =
+    approvedPeriodCount ===
+    termRemainingPeriodsYtd;
+  const approvedAmount = completesYear
+    ? Math.max(
+        0,
+        amountMinor - totalPaidKoboYtd,
+      )
+    : periodAmountMinor *
+        approvedPeriodCount;
+  if (completesYear) {
+    debug(
+      "PAYMENT SERVICE: final payment uses remaining yearly amount",
+      {
+        tenantApplicationId:
+          application._id,
+        businessId,
+        approvedPeriodCount,
+        termRemainingPeriodsYtd,
+        totalPaidKoboYtd,
+        yearlyAmountMinor:
+          amountMinor,
+        approvedAmount,
+      },
+    );
+  }
   const coversTo = computeCoversTo(
     coversFrom,
     approvedPeriodCount,
-    application.rentPeriod,
+    rentPeriod,
   );
 
   const reference = `tenant_rent_${application._id}_${Date.now()}`;
@@ -998,16 +1523,28 @@ async function createTenantPaymentIntent({
       PAYMENT_PURPOSES.TENANT_RENT,
     coversFrom,
     coversTo,
-    rentPeriod: application.rentPeriod,
+    rentPeriod,
     periodCount: approvedPeriodCount,
     rawEvent: {
       source:
         PAYMENT_EVENTS.TENANT_INTENT,
       requestedYearsToPay: yearsToPay,
+      requestedPeriodCount,
       approvedPeriodCount,
       autoReduced:
         approvedPeriodCount !==
         requestedPeriodCount,
+      finalPaymentForced:
+        isFinalPayment,
+      // WHY: Keep yearly settlement context for support/debugging.
+      completesYear,
+      totalPaidKoboYtd,
+      missingPeriodCount:
+        termMissingPeriodCount,
+      termTotalPeriods,
+      termPaidPeriodsYtd,
+      termRemainingPeriodsYtd,
+      paymentsThisYear,
     },
   });
 
@@ -1016,7 +1553,7 @@ async function createTenantPaymentIntent({
       {
         reference,
         email: tenantUser.email,
-        amountMinor,
+        amountMinor: approvedAmount,
         metadata: {
           purpose:
             PAYMENT_PURPOSES.TENANT_RENT,
@@ -1025,12 +1562,12 @@ async function createTenantPaymentIntent({
           tenantUserId,
           businessId,
           paymentId: payment._id,
-          rentPeriod:
-            application.rentPeriod,
+          rentPeriod,
           periodCount:
             approvedPeriodCount,
           coversFrom,
           coversTo,
+          requestedPeriodCount,
         },
         callbackUrl:
           callbackUrl || undefined,
@@ -1185,15 +1722,24 @@ async function devMarkTenantPaymentSucceeded({
     application.status = "active";
   }
   // WHY: Keep agreement status aligned with successful tenant payment.
-  if (application.agreementStatus !== "approved") {
-    application.agreementStatus = "approved";
-    if (!application.agreementAcceptedAt) {
+  if (
+    application.agreementStatus !==
+    "approved"
+  ) {
+    application.agreementStatus =
+      "approved";
+    if (
+      !application.agreementAcceptedAt
+    ) {
       // WHY: Ensure approval timestamp is captured for reporting.
-      application.agreementAcceptedAt = now;
+      application.agreementAcceptedAt =
+        now;
     }
     debug(
       "PAYMENT SERVICE: Agreement auto-approved after payment (dev)",
-      { applicationId: application._id },
+      {
+        applicationId: application._id,
+      },
     );
   }
 
@@ -1343,4 +1889,6 @@ module.exports = {
   processPaystackVerify,
   createTenantPaymentIntent,
   devMarkTenantPaymentSucceeded,
+  // WHY: Share the rent-period configuration with other layers that need it.
+  resolveRentPeriodLimit,
 };

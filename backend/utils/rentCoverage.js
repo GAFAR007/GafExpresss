@@ -18,6 +18,7 @@ const dayjs = require('dayjs');
 const debug = require('./debug');
 
 const RENT_PERIODS = ['monthly', 'quarterly', 'yearly'];
+const MONTHS_IN_YEAR = 12;
 
 // WHY: Avoid magic numbers sprinkled across services.
 function monthsPerPeriod(rentPeriod) {
@@ -75,7 +76,14 @@ function computeMaxPeriodsWithin36Months(coversFrom, rentPeriod) {
 function periodCountFromYears(rentPeriod, yearsToPay) {
   const months = monthsPerPeriod(rentPeriod);
   if (!months || !yearsToPay) return 0;
-  return (12 / months) * yearsToPay;
+  return (MONTHS_IN_YEAR / months) * yearsToPay;
+}
+
+// WHY: Convert rent cadence into the number of periods in a calendar year.
+function periodsPerYear(rentPeriod) {
+  const months = monthsPerPeriod(rentPeriod);
+  if (!months) return 0;
+  return MONTHS_IN_YEAR / months;
 }
 
 module.exports = {
@@ -84,4 +92,5 @@ module.exports = {
   computeCoversTo,
   computeMaxPeriodsWithin36Months,
   periodCountFromYears,
+  periodsPerYear,
 };

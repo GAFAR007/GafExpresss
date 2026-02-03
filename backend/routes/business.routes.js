@@ -298,6 +298,23 @@ router.get(
   businessController.getTenantSummary,
 );
 
+router.get(
+  "/tenant/payments",
+  requireAuth,
+  requireAnyRole(["tenant"]),
+  businessController.getTenantPayments,
+);
+
+router.get(
+  "/tenant/:tenantId/payments",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getBusinessTenantPayments,
+);
+
 router.patch(
   "/tenant/application",
   requireAuth,

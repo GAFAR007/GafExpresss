@@ -1,20 +1,10 @@
-/// lib/app/features/home/presentation/tenant_verification_model.dart
-/// -----------------------------------------------------------------
-/// WHAT:
-/// - Models for tenant verification (estate + contact input).
-///
-/// WHY:
-/// - Keeps tenant onboarding payloads typed and consistent.
-/// - Avoids ad-hoc Map access in the UI.
-///
-/// HOW:
-/// - TenantEstate maps the /business/tenant/estate payload.
-/// - TenantContact captures reference/guarantor entries for POST body.
-/// -----------------------------------------------------------------
 library;
 
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 
+/// =========================
+/// TENANT ESTATE
+/// =========================
 class TenantEstate {
   final String id;
   final String name;
@@ -39,10 +29,8 @@ class TenantEstate {
     );
   }
 
-  // WHY: Keep unit options access safe for null estates.
   List<BusinessAssetUnitMix> get unitMix => estate?.unitMix ?? const [];
 
-  // WHY: Use rule defaults if the backend estate is missing rules.
   BusinessAssetTenantRules get tenantRules =>
       estate?.tenantRules ??
       const BusinessAssetTenantRules(
@@ -55,21 +43,17 @@ class TenantEstate {
       );
 }
 
+/// =========================
+/// TENANT CONTACT
+/// =========================
 class TenantContact {
   final String name;
-  // WHY: Split names support cleaner verification and review display.
   final String firstName;
-  // WHY: Middle name stays optional for legacy and usability.
   final String? middleName;
-  // WHY: Last name is required for contact verification.
   final String lastName;
-  // WHY: Email is required for contact verification workflows.
   final String email;
-  // WHY: Phone is required for contact verification workflows.
   final String phone;
-  // WHY: Optional document evidence for references/guarantors.
   final String? documentUrl;
-  // WHY: Cloudinary id enables future clean-up if needed.
   final String? documentPublicId;
 
   const TenantContact({
@@ -94,5 +78,42 @@ class TenantContact {
       "documentUrl": documentUrl,
       "documentPublicId": documentPublicId,
     };
+  }
+}
+
+/// =========================
+/// TENANT VERIFICATION STATE
+/// =========================
+/// WHY:
+/// - Holds transient UI state for rent period + coverage selection.
+/// - Used by TenantVerificationNotifier (Riverpod).
+/// - Keeps rent defaults and user intent consistent.
+class TenantVerificationState {
+  final String rentPeriod;
+  final int periodCount;
+
+  /// WHY:
+  /// - Once the user manually changes the count,
+  ///   we must not auto-reset it when rentPeriod changes.
+  final bool hasUserManuallyChangedPeriodCount;
+
+  const TenantVerificationState({
+    required this.rentPeriod,
+    required this.periodCount,
+    required this.hasUserManuallyChangedPeriodCount,
+  });
+
+  TenantVerificationState copyWith({
+    String? rentPeriod,
+    int? periodCount,
+    bool? hasUserManuallyChangedPeriodCount,
+  }) {
+    return TenantVerificationState(
+      rentPeriod: rentPeriod ?? this.rentPeriod,
+      periodCount: periodCount ?? this.periodCount,
+      hasUserManuallyChangedPeriodCount:
+          hasUserManuallyChangedPeriodCount ??
+          this.hasUserManuallyChangedPeriodCount,
+    );
   }
 }

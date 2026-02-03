@@ -297,10 +297,14 @@ class TenantVerificationApi {
   /// ------------------------------------------------------
   /// CREATE TENANT PAYMENT INTENT
   /// ------------------------------------------------------
+  /// [periodCount] Optional. Months (monthly), quarters (quarterly), or years (yearly).
+  /// [yearsToPay] Optional fallback when periodCount not provided; backend default 1.
   Future<Map<String, dynamic>> createTenantPaymentIntent({
     required String? token,
     required String tenantId,
     String? callbackUrl,
+    int? periodCount,
+    int? yearsToPay,
   }) async {
     AppDebug.log(
       "TENANT_API",
@@ -308,15 +312,25 @@ class TenantVerificationApi {
       extra: {
         "tenantId": tenantId,
         "hasCallbackUrl": callbackUrl != null && callbackUrl.trim().isNotEmpty,
+        "periodCount": periodCount,
+        "yearsToPay": yearsToPay,
       },
     );
 
+    final body = <String, dynamic>{};
+    if (callbackUrl != null && callbackUrl.trim().isNotEmpty) {
+      body["callbackUrl"] = callbackUrl.trim();
+    }
+    if (periodCount != null && periodCount > 0) {
+      body["periodCount"] = periodCount;
+    }
+    if (yearsToPay != null && yearsToPay > 0) {
+      body["yearsToPay"] = yearsToPay;
+    }
+
     final resp = await _dio.post(
       "/business/tenants/$tenantId/payment-intent",
-      data: {
-        if (callbackUrl != null && callbackUrl.trim().isNotEmpty)
-          "callbackUrl": callbackUrl.trim(),
-      },
+      data: body,
       options: _authOptions(token),
     );
 

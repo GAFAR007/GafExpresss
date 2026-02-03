@@ -44,6 +44,10 @@ const String _summaryMissingResolutionHint =
 const String _summaryRefreshSource = "tenant_dashboard_empty_refresh";
 // WHY: Centralize tenant verification navigation target.
 const String _tenantVerificationRoute = "/tenant-verification";
+// WHY: Centralize tenant receipts navigation target.
+const String _tenantPaymentsRoute = "/tenant-payments";
+// WHY: Keep log action names consistent across dashboard actions.
+const String _logCtaReceipts = "cta_receipts";
 
 class TenantDashboardScreen extends ConsumerWidget {
   const TenantDashboardScreen({super.key});
@@ -281,7 +285,8 @@ class _DashboardBody extends StatelessWidget {
           showReceipt: isPaid,
           onViewReceipt: () {
             AppDebug.log("TENANT_DASH", "view_receipt_tap");
-            // TODO: Navigate to receipts when available.
+            // WHY: Receipts live on a dedicated screen to keep dashboard lean.
+            context.go(_tenantPaymentsRoute);
           },
         ),
         const SizedBox(height: 16),
@@ -334,8 +339,14 @@ class _DashboardBody extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: isApprovedOrActive
                     ? () {
+                        if (isActive) {
+                          AppDebug.log("TENANT_DASH", _logCtaReceipts);
+                          // WHY: Active tenants should view receipts, not pay again.
+                          context.go(_tenantPaymentsRoute);
+                          return;
+                        }
                         AppDebug.log("TENANT_DASH", "cta_pay");
-                  context.go(_tenantVerificationRoute);
+                        context.go(_tenantVerificationRoute);
                       }
                     : null,
                 icon: const Icon(Icons.payments),
