@@ -23,7 +23,6 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart'
     as business_tenant;
-import 'package:frontend/app/features/home/presentation/tenant_rent_constants.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_api.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_model.dart';
 
@@ -93,103 +92,62 @@ final tenantSummaryProvider = FutureProvider<business_tenant.TenantSummary>((
   return api.fetchTenantSummary(token: session.token);
 });
 
-/// ==============================
-/// TENANT VERIFICATION CONTROLLER
-/// ==============================
-/// WHAT:
-/// - Tracks transient UI intent for rent period + coverage selection.
+/// =========================
+/// TENANT VERIFICATION NOTIFIER
+/// =========================
 /// WHY:
-/// - Prevents rentPeriod from jumping when backend data arrives.
-/// - Lets the selector keep defaults while still honoring manual tweaks.
-/// HOW:
-/// - Exposes a StateNotifierProvider that updates rentPeriod + periodCount.
-final tenantVerificationProvider =
-    StateNotifierProvider<TenantVerificationNotifier, TenantVerificationState>(
-  (ref) => TenantVerificationNotifier(),
-);
-
+/// - Central brain for rent period + payment span.
+/// - Applies safe defaults (1 year coverage).
+/// - Respects user choice once they manually edit period count.
 class TenantVerificationNotifier
     extends StateNotifier<TenantVerificationState> {
-  TenantVerificationNotifier() : super(_initialState()) {
-    AppDebug.log(
-      "PROVIDERS",
-      "tenantVerificationProvider initialized",
-      extra: {
-        "rentPeriod": state.rentPeriod,
-        "periodCount": state.periodCount,
-      },
-    );
-  }
+  TenantVerificationNotifier()
+    : super(
+        const TenantVerificationState(
+          rentPeriod: 'monthly',
+          periodCount: 12, // SAFE DEFAULT = 1 year
+          hasUserManuallyChangedPeriodCount: false,
+        ),
+      );
 
-  static const String _fallbackRentPeriod = "monthly";
-
-  /// WHY: Provide a default rent period that always exists.
-  static String get _defaultRentPeriod {
-    final keys = defaultPeriodCountByRentPeriod.keys;
-    if (keys.isNotEmpty && keys.first.isNotEmpty) {
-      return keys.first;
-    }
-    return _fallbackRentPeriod;
-  }
-
-  /// WHY: Keep the UI initialized to a safe period count before data arrives.
-  static int get _defaultPeriodCount =>
-      defaultPeriodCountByRentPeriod[_defaultRentPeriod] ?? 1;
-
-  static TenantVerificationState _initialState() {
-    return TenantVerificationState(
-      rentPeriod: _defaultRentPeriod,
-      periodCount: _defaultPeriodCount,
-      hasUserManuallyChangedPeriodCount: false,
-    );
-  }
-
-  /// WHY: Resume backend intent without clobbering a user-selected period count.
+  /// WHY:
+  /// - When rent period changes, auto-set a safe default
+  ///   UNLESS the user already changed it manually.
   void setRentPeriod(String rentPeriod) {
-    final normalized = rentPeriod.trim().toLowerCase();
-    if (normalized.isEmpty) return;
-
-    final defaultCount =
-        defaultPeriodCountByRentPeriod[normalized] ?? _defaultPeriodCount;
-    final periodCount = state.hasUserManuallyChangedPeriodCount
-        ? state.periodCount
-        : defaultCount;
-
-    state = state.copyWith(
-      rentPeriod: normalized,
-      periodCount: periodCount,
+    AppDebug.log(
+      "TENANT_VERIFY",
+      "set_rent_period",
+      extra: {"rentPeriod": rentPeriod},
     );
 
-    AppDebug.log(
-      "PROVIDERS",
-      "tenantVerificationProvider rentPeriodUpdated",
-      extra: {
-        "rentPeriod": normalized,
-        "periodCount": periodCount,
-        "manualOverride": state.hasUserManuallyChangedPeriodCount,
-      },
+    state = state.copyWith(
+      rentPeriod: rentPeriod,
+      periodCount: state.hasUserManuallyChangedPeriodCount
+          ? state.periodCount
+          : defaultPeriodCountByRentPeriod[rentPeriod] ?? 1,
     );
   }
 
-  /// WHY: Record the tenant's manual period selection to avoid resets.
-  void setPeriodCount(int periodCount) {
-    final limit = getRentPeriodLimit(state.rentPeriod);
-    final safeCount = limit == null
-        ? periodCount
-        : periodCount.clamp(1, limit.maxPeriods);
-
-    state = state.copyWith(
-      periodCount: safeCount,
-      hasUserManuallyChangedPeriodCount: true,
+  /// WHY:
+  /// - Explicit user action must override defaults.
+  void setPeriodCount(int count) {
+    AppDebug.log(
+      "TENANT_VERIFY",
+      "set_period_count",
+      extra: {"periodCount": count},
     );
 
-    AppDebug.log(
-      "PROVIDERS",
-      "tenantVerificationProvider periodCountUpdated",
-      extra: {
-        "rentPeriod": state.rentPeriod,
-        "periodCount": safeCount,
-      },
+    state = state.copyWith(
+      periodCount: count,
+      hasUserManuallyChangedPeriodCount: true,
     );
   }
 }
+
+/// WHY:
+/// - Exposes verification rent state to UI.
+/// - Prevents widgets from owning payment logic.
+final tenantVerificationProvider =
+    StateNotifierProvider<TenantVerificationNotifier, TenantVerificationState>(
+      (ref) => TenantVerificationNotifier(),
+    );

@@ -32,10 +32,7 @@ import 'package:frontend/app/core/formatters/email_formatter.dart';
 import 'package:frontend/app/core/formatters/phone_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
-import 'package:frontend/app/features/home/presentation/tenant_verification_providers.dart'
-    as tvp;
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
-
 import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart'
@@ -72,7 +69,6 @@ class _TenantVerificationScreenState
   String? _selectedUnitType;
   String? _selectedRentPeriod; // ✅ REQUIRED
   String? _lastRulesKey;
-  bool _rentPeriodSyncScheduled = false;
   // WHY: Tenant chooses how many months/quarters/years to pay per payment.
   int _selectedPeriodCount = 1;
 
@@ -112,52 +108,12 @@ class _TenantVerificationScreenState
   static const String _actionRefreshLabel = "Refresh";
   static const String _actionSettingsLabel = "Open settings";
   static const String _settingsRoute = "/settings";
-  // WHY: Keep tenant receipts navigation centralized for reuse.
-  static const String _tenantPaymentsRoute = "/tenant-payments";
   static const String _refreshSourceStatus =
       "tenant_verification_status_refresh";
   static const String _refreshSourceEstate =
       "tenant_verification_estate_refresh";
   static const String _refreshSourceProfile =
       "tenant_verification_profile_refresh";
-  // WHY: Clarify rent coverage hints near payment selector.
-  static const String _paymentRangeRemainingLabel =
-      "Remaining coverage this year";
-  static const String _paymentRangeMaxLabel = "Max per payment";
-  static const String _paymentRangeSeparator = ": ";
-  // WHY: Keep yearly payment UX copy consistent across states.
-  static const String _paymentSelectTitle =
-      "Choose how much to pay this year";
-  static const String _paymentSelectHint =
-      "You can choose how many periods to pay now.";
-  static const String _paymentLimitHint =
-      "Maximum of 3 payments per calendar year.";
-  static const String _paymentFinalTitle =
-      "Final payment for this year";
-  static const String _paymentFinalHintPrefix =
-      "To complete this year's rent, this payment will cover the remaining ";
-  static const String _paymentFinalHintSuffix = ".";
-  static const String _paymentYearCompleteTitle =
-      "Rent for this year is complete.";
-  static const String _paymentYearCompleteHintPrefix =
-      "You are paid through ";
-  static const String _paymentOverdueTitle = "Payment overdue";
-  static const String _paymentOverdueHintPrefix =
-      "Rent was due on ";
-  static const String _paymentOverdueHintSuffix =
-      ". This payment will cover unpaid rent starting from your last paid date.";
-  static const String _paymentYearProgressLabel = "Year coverage";
-  static const String _paymentYearProgressPaidSuffix = "paid";
-  static const String _paymentYearProgressLeftSuffix = "left";
-  static const String _paymentYearProgressDivider = " • ";
-  // WHY: Keep yearly payment limits centralized in UI.
-  static const int _maxPaymentsPerYear = 3;
-  static const int _finalPaymentThreshold =
-      _maxPaymentsPerYear - 1;
-  // WHY: Keep rent-period clamp logs consistent across releases.
-  static const String _logPaymentRangeOverride = "payment_range_override_applied";
-  // WHY: Avoid zero/negative payment counts.
-  static const int _minPeriodsPerPayment = 1;
   // WHY: Use named HTTP codes to avoid magic numbers in error mapping.
   static const int _httpBadRequest = 400;
   static const int _httpUnauthorized = 401;
@@ -233,209 +189,6 @@ class _TenantVerificationScreenState
   String _formatMoneyKobo(int kobo) {
     // WHY: Centralize money formatting for payment summaries.
     return formatNgnFromCents(kobo);
-  }
-
-  int? _resolvePaymentMaxOverride({
-    required RentPeriodLimit? limit,
-    required int? remainingPeriods,
-  }) {
-    // WHY: Clamp payment options when backend says fewer periods remain.
-    if (limit == null) return null;
-    if (remainingPeriods == null) return null;
-    if (remainingPeriods < _minPeriodsPerPayment) return null;
-
-    final safeRemaining = remainingPeriods.clamp(
-      _minPeriodsPerPayment,
-      limit.maxPeriods,
-    );
-    if (safeRemaining == limit.maxPeriods) return null;
-
-    _log(
-      _logPaymentRangeOverride,
-      extra: {
-        "rentPeriod": limit.label,
-        "baseMax": limit.maxPeriods,
-        "remaining": safeRemaining,
-      },
-    );
-
-    return safeRemaining;
-  }
-
-  int? _resolvePaymentRemainingDisplay({
-    required RentPeriodLimit? limit,
-    required int? remainingPeriods,
-  }) {
-    // WHY: Display backend remaining periods even when equal to the base max.
-    if (limit == null) return null;
-    if (remainingPeriods == null) return null;
-    if (remainingPeriods < _minPeriodsPerPayment) return null;
-
-    return remainingPeriods.clamp(_minPeriodsPerPayment, limit.maxPeriods);
-  }
-
-  Widget _buildPaymentRangeHint({
-    required RentPeriodLimit limit,
-    required int? remainingPeriods,
-  }) {
-    // WHY: Explain the dropdown scope so tenants understand coverage left.
-    final theme = Theme.of(context);
-    final textTheme = theme.textTheme;
-    final color = theme.colorScheme.onSurfaceVariant;
-    final hintText = remainingPeriods != null
-        ? "$_paymentRangeRemainingLabel$_paymentRangeSeparator"
-            "$remainingPeriods ${limit.label}"
-        : "$_paymentRangeMaxLabel$_paymentRangeSeparator"
-            "${limit.maxPeriods} ${limit.label}";
-
-    return Text(
-      hintText,
-      style: textTheme.bodySmall?.copyWith(color: color),
-    );
-  }
-
-  Widget _buildPaymentGuidance({
-    required RentPeriodLimit limit,
-    required int? remainingPeriodsYtd,
-    required bool isFinalPayment,
-    required bool isYearComplete,
-    required DateTime? paidThroughDate,
-  }) {
-    // WHY: Explain the yearly payment rules to avoid tenant confusion.
-    final theme = Theme.of(context);
-    final textTheme = theme.textTheme;
-    final color = theme.colorScheme.onSurfaceVariant;
-
-    if (isYearComplete) {
-      final paidThroughText = paidThroughDate == null
-          ? "—"
-          : _formatDate(paidThroughDate);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _paymentYearCompleteTitle,
-            style: textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "$_paymentYearCompleteHintPrefix$paidThroughText.",
-            style: textTheme.bodySmall?.copyWith(color: color),
-          ),
-        ],
-      );
-    }
-
-    if (isFinalPayment) {
-      final remaining = remainingPeriodsYtd ?? 0;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _paymentFinalTitle,
-            style: textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "$_paymentFinalHintPrefix"
-            "$remaining ${limit.label}"
-            "$_paymentFinalHintSuffix",
-            style: textTheme.bodySmall?.copyWith(color: color),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            _paymentLimitHint,
-            style: textTheme.bodySmall?.copyWith(color: color),
-          ),
-        ],
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _paymentSelectTitle,
-          style: textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          _paymentSelectHint,
-          style: textTheme.bodySmall?.copyWith(color: color),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          _paymentLimitHint,
-          style: textTheme.bodySmall?.copyWith(color: color),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildYearProgressHint({
-    required RentPeriodLimit limit,
-    required int? termTotalPeriods,
-    required int? termPaidPeriodsYtd,
-    required int? termRemainingPeriodsYtd,
-  }) {
-    // WHY: Provide the "12 total, 5 paid, 7 left" clarity in one line.
-    final total = termTotalPeriods;
-    final paid = termPaidPeriodsYtd;
-    final remaining = termRemainingPeriodsYtd;
-    if (total == null || paid == null || remaining == null) {
-      return const SizedBox.shrink();
-    }
-
-    final theme = Theme.of(context);
-    final textTheme = theme.textTheme;
-    final color = theme.colorScheme.onSurfaceVariant;
-
-    return Text(
-      "$_paymentYearProgressLabel$_paymentRangeSeparator"
-      "$paid/$total ${limit.label} $_paymentYearProgressPaidSuffix"
-      "$_paymentYearProgressDivider"
-      "$remaining ${limit.label} $_paymentYearProgressLeftSuffix",
-      style: textTheme.bodySmall?.copyWith(color: color),
-    );
-  }
-
-  Widget _buildOverdueBanner({
-    required DateTime? nextDueDate,
-  }) {
-    // WHY: Overdue should be obvious, but payments must still be allowed.
-    if (nextDueDate == null) return const SizedBox.shrink();
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _paymentOverdueTitle,
-            style: textTheme.bodyMedium?.copyWith(
-              color: colorScheme.onErrorContainer,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "$_paymentOverdueHintPrefix${_formatDate(nextDueDate)}"
-            "$_paymentOverdueHintSuffix",
-            style: textTheme.bodySmall?.copyWith(
-              color: colorScheme.onErrorContainer,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   bool _isValidEmail(String input) {
@@ -701,8 +454,6 @@ class _TenantVerificationScreenState
 
   Future<void> _startTenantPayment({
     required business_tenant.BusinessTenantApplication application,
-    int? maxPeriodsOverride,
-    int? forcedPeriodCount,
   }) async {
     if (_isPaying) {
       _log("pay_skip_busy");
@@ -730,22 +481,9 @@ class _TenantVerificationScreenState
       }
 
       final limit = getRentPeriodLimit(application.rentPeriod);
-      // WHY: Prevent submitting a period count beyond remaining coverage.
-      final effectiveMax = maxPeriodsOverride ?? limit?.maxPeriods;
-      final selectedCount = forcedPeriodCount ?? _selectedPeriodCount;
-      final periodCount = effectiveMax != null
-          ? selectedCount.clamp(_minPeriodsPerPayment, effectiveMax)
-          : selectedCount;
-
-      if (forcedPeriodCount != null) {
-        _log(
-          "pay_forced_final_periods",
-          extra: {
-            "forcedPeriodCount": forcedPeriodCount,
-            "effectiveMax": effectiveMax,
-          },
-        );
-      }
+      final periodCount = limit != null
+          ? _selectedPeriodCount.clamp(1, limit.maxPeriods)
+          : _selectedPeriodCount;
 
       final data = await api.createTenantPaymentIntent(
         token: session.token,
@@ -1040,8 +778,9 @@ class _TenantVerificationScreenState
     // WHY: Owners/staff may review tenant submissions from their account.
     final isAdminViewer = role == "business_owner" || role == "staff";
 
-    final verificationState = ref.watch(tvp.tenantVerificationProvider);
+    final verificationState = ref.watch(tenantVerificationProvider);
 
+    final verificationNotifier = ref.read(tenantVerificationProvider.notifier);
     final profileAsync = ref.watch(userProfileProvider);
     final estateAsync = ref.watch(tenantEstateProvider);
     final applicationAsync = ref.watch(tenantApplicationProvider);
@@ -1050,45 +789,17 @@ class _TenantVerificationScreenState
     final application = applicationAsync.asData?.value;
 
     // =========================
-    // 🔁 RENT PERIOD SYNC
+    // 🔁 RENT PERIOD SYNC (PUT IT HERE)
     // =========================
 
-    final applicationRentPeriod = application?.rentPeriod ?? "";
-    final hasApplicationRentPeriod =
-        application != null && applicationRentPeriod.isNotEmpty;
-    final shouldSyncRentPeriod =
-        hasApplicationRentPeriod &&
-            verificationState.rentPeriod != applicationRentPeriod;
-
-    /// Keep notifier updates outside of the build phase so Riverpod stays happy.
-    if (shouldSyncRentPeriod) {
-      if (!_rentPeriodSyncScheduled) {
-        _rentPeriodSyncScheduled = true;
-        final targetRentPeriod = applicationRentPeriod;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final currentRentPeriod =
-              ref.read(tvp.tenantVerificationProvider).rentPeriod;
-          if (currentRentPeriod != targetRentPeriod) {
-            _log(
-              "rent_period_sync",
-              extra: {
-                "from": currentRentPeriod,
-                "to": targetRentPeriod,
-              },
-            );
-            ref.read(tvp.tenantVerificationProvider.notifier).setRentPeriod(
-              targetRentPeriod,
-            );
-          }
-          _rentPeriodSyncScheduled = false;
-        });
-      }
-    } else {
-      _rentPeriodSyncScheduled = false;
+    /// STEP 3A — backend → provider (runs once safely)
+    if (application != null &&
+        application.rentPeriod.isNotEmpty &&
+        verificationState.rentPeriod != application.rentPeriod) {
+      verificationNotifier.setRentPeriod(application.rentPeriod);
     }
 
-    /// Keep the dropdown synced with the notifier-managed rent period.
+    /// STEP 3B — provider → local UI (runs once)
     _selectedRentPeriod ??= verificationState.rentPeriod;
 
     // WHY: Keep agreement toggle in sync with backend
@@ -1228,32 +939,6 @@ class _TenantVerificationScreenState
     final paidThroughDate = summary?.paidThroughDate ?? application.paidAt;
     final nextDueDate = summary?.nextDueDate;
     final payments = summary?.paymentsSummary;
-    // WHY: Use summary coverage to adjust payment selector and hint text.
-    final rentPeriodLimit = getRentPeriodLimit(application.rentPeriod);
-    final remainingPeriods =
-        summary?.termRemainingPeriodsYtd ?? summary?.remainingPeriods;
-    final termTotalPeriods = summary?.termTotalPeriods;
-    final termPaidPeriodsYtd = summary?.termPaidPeriodsYtd;
-    final paymentsThisYear = payments?.paymentsThisYear ?? 0;
-    final isFinalPayment =
-        summary?.isFinalPayment == true ||
-        (paymentsThisYear >= _finalPaymentThreshold &&
-            (remainingPeriods ?? 0) > 0);
-    final isYearComplete =
-        summary?.isYearComplete == true ||
-        (remainingPeriods != null && remainingPeriods <= 0);
-    final isOverdue = summary?.isOverdue == true;
-    final maxPeriodsOverride = _resolvePaymentMaxOverride(
-      limit: rentPeriodLimit,
-      remainingPeriods: remainingPeriods,
-    );
-    final remainingPeriodsDisplay = _resolvePaymentRemainingDisplay(
-      limit: rentPeriodLimit,
-      remainingPeriods: remainingPeriods,
-    );
-    final forcedPeriodCount = isFinalPayment
-        ? (remainingPeriods ?? remainingPeriodsDisplay)
-        : null;
     final isApproved = status == "approved";
     final isActive = status == "active";
     final isRejected = status == "rejected";
@@ -1343,59 +1028,20 @@ class _TenantVerificationScreenState
           ),
           if ((isApproved && !isPaid) || isActive) ...[
             const SizedBox(height: 12),
-            if (rentPeriodLimit != null && isOverdue)
-              _buildOverdueBanner(nextDueDate: nextDueDate),
-            if (rentPeriodLimit != null)
-              const SizedBox(height: 8),
-            if (rentPeriodLimit != null)
-              _buildYearProgressHint(
-                limit: rentPeriodLimit,
-                termTotalPeriods: termTotalPeriods,
-                termPaidPeriodsYtd: termPaidPeriodsYtd,
-                termRemainingPeriodsYtd: remainingPeriods,
-              ),
-            if (rentPeriodLimit != null)
-              const SizedBox(height: 8),
-            if (rentPeriodLimit != null)
-              _buildPaymentGuidance(
-                limit: rentPeriodLimit,
-                remainingPeriodsYtd: remainingPeriods,
-                isFinalPayment: isFinalPayment,
-                isYearComplete: isYearComplete,
-                paidThroughDate: paidThroughDate,
-              ),
-            if (rentPeriodLimit != null)
-              const SizedBox(height: 12),
-            if (rentPeriodLimit != null &&
-                !isFinalPayment &&
-                !isYearComplete)
+            if (getRentPeriodLimit(application.rentPeriod) != null)
               TenantRentPeriodSelector(
                 rentPeriod: application.rentPeriod,
                 value: _selectedPeriodCount,
-                maxPeriodsOverride: maxPeriodsOverride,
                 onChanged: (v) => setState(() => _selectedPeriodCount = v),
               ),
-            if (rentPeriodLimit != null &&
-                !isFinalPayment &&
-                !isYearComplete)
+            if (getRentPeriodLimit(application.rentPeriod) != null)
               const SizedBox(height: 8),
-            if (rentPeriodLimit != null &&
-                !isFinalPayment &&
-                !isYearComplete)
-              _buildPaymentRangeHint(
-                limit: rentPeriodLimit,
-                remainingPeriods: remainingPeriodsDisplay,
-              ),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _isPaying || isYearComplete
+                onPressed: _isPaying
                     ? null
-                    : () => _startTenantPayment(
-                        application: application,
-                        maxPeriodsOverride: maxPeriodsOverride,
-                        forcedPeriodCount: forcedPeriodCount,
-                      ),
+                    : () => _startTenantPayment(application: application),
                 child: _isPaying
                     ? const SizedBox(
                         width: 18,
@@ -1416,8 +1062,7 @@ class _TenantVerificationScreenState
                     "view_receipt",
                     extra: {"applicationId": application.id},
                   );
-                  // WHY: Receipts live on a dedicated screen to keep verification lean.
-                  context.go(_tenantPaymentsRoute);
+                  // TODO: wire to receipts page when available.
                 },
                 icon: const Icon(Icons.receipt_long),
                 label: const Text("View payment receipt"),
@@ -1725,9 +1370,7 @@ class _TenantVerificationScreenState
             _log("rent_period_change", extra: {"rentPeriod": value});
 
             // ✅ SOURCE OF TRUTH
-            ref
-                .read(tvp.tenantVerificationProvider.notifier)
-                .setRentPeriod(value);
+            ref.read(tenantVerificationProvider.notifier).setRentPeriod(value);
 
             // ✅ UI mirror
             setState(() {
