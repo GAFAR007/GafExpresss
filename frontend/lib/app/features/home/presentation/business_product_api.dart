@@ -10,6 +10,7 @@
 /// HOW:
 /// - GET /business/products (list)
 /// - POST /business/products (create)
+/// - POST /business/products/ai-draft (AI draft)
 /// - PATCH /business/products/:id (update)
 /// - DELETE /business/products/:id (soft delete)
 /// - PATCH /business/products/:id/restore (restore)
@@ -23,6 +24,7 @@ import 'package:dio/dio.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'business_analytics_models.dart';
+import 'product_ai_model.dart';
 import 'product_model.dart';
 
 class BusinessProductApi {
@@ -140,6 +142,65 @@ class BusinessProductApi {
     );
 
     return products;
+  }
+
+  /// ------------------------------------------------------
+  /// AI PRODUCT DRAFT
+  /// ------------------------------------------------------
+  Future<ProductDraft> generateProductDraft({
+    required String token,
+    required String prompt,
+    bool useReasoning = false,
+  }) async {
+    // WHY: Avoid unauthenticated AI draft calls.
+    if (token.trim().isEmpty) {
+      AppDebug.log(
+        "BUSINESS_PRODUCT_API",
+        "generateProductDraft() missing token",
+      );
+      throw Exception("Missing auth token");
+    }
+
+    final trimmedPrompt = prompt.trim();
+    if (trimmedPrompt.isEmpty) {
+      AppDebug.log(
+        "BUSINESS_PRODUCT_API",
+        "generateProductDraft() missing prompt",
+      );
+      throw Exception("Prompt is required");
+    }
+
+    AppDebug.log(
+      "BUSINESS_PRODUCT_API",
+      "generateProductDraft() start",
+      extra: {
+        "promptLength": trimmedPrompt.length,
+        "useReasoning": useReasoning,
+      },
+    );
+
+    final resp = await _dio.post(
+      "/business/products/ai-draft",
+      data: {
+        "prompt": trimmedPrompt,
+        "useReasoning": useReasoning,
+      },
+      options: Options(
+        headers: {"Authorization": "Bearer $token"},
+      ),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final draftMap = (data["draft"] ?? {}) as Map<String, dynamic>;
+    final draft = ProductDraft.fromJson(draftMap);
+
+    AppDebug.log(
+      "BUSINESS_PRODUCT_API",
+      "generateProductDraft() success",
+      extra: {"hasName": draft.name.trim().isNotEmpty},
+    );
+
+    return draft;
   }
 
   /// ------------------------------------------------------

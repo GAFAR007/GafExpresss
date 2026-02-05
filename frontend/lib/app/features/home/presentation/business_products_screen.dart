@@ -19,7 +19,6 @@ library;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -27,6 +26,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/business_product_form_sheet.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_analytics_models.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
@@ -46,30 +46,10 @@ class _BusinessProductsScreenState
     extends ConsumerState<BusinessProductsScreen> {
   // WHY: Track filter state to show active vs archived items.
   bool _showArchivedOnly = false;
-  // WHY: Prevent double submits for create/update actions.
-  bool _isSubmitting = false;
   // WHY: Prevent concurrent product image uploads.
   bool _isUploadingImage = false;
   // WHY: Prevent overlapping image deletes on the same screen.
   bool _isDeletingImage = false;
-
-  // WHY: Controllers keep form inputs stable across rebuilds.
-  final _nameCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  final _priceCtrl = TextEditingController();
-  final _stockCtrl = TextEditingController();
-  final _imageCtrl = TextEditingController();
-
-  @override
-  void dispose() {
-    // WHY: Avoid memory leaks from controllers.
-    _nameCtrl.dispose();
-    _descCtrl.dispose();
-    _priceCtrl.dispose();
-    _stockCtrl.dispose();
-    _imageCtrl.dispose();
-    super.dispose();
-  }
 
   void _logFlow(String step, String message, {Map<String, dynamic>? extra}) {
     // WHY: Consistent logs help trace user flows and failures.
@@ -92,204 +72,27 @@ class _BusinessProductsScreenState
 
   Future<void> _openProductForm({Product? product}) async {
     // WHY: Use one form for both create and edit to keep UX consistent.
-    final isEditing = product != null;
-
-    _nameCtrl.text = isEditing ? product.name : '';
-    _descCtrl.text = isEditing ? product.description : '';
-    // WHY: Display product price in NGN while storing minor units.
-    _priceCtrl.text =
-        isEditing ? formatNgnInputFromKobo(product.priceCents) : '';
-    _stockCtrl.text = isEditing ? product.stock.toString() : '';
-    _imageCtrl.text = isEditing ? product.imageUrl : '';
-
     _logFlow(
       "FORM_OPEN",
-      isEditing ? "Edit product" : "Create product",
+      product == null ? "Create product" : "Edit product",
       extra: {"id": product?.id},
     );
 
-    await showModalBottomSheet<void>(
+    final saved = await showBusinessProductFormSheet(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (context) {
-        final viewInsets = MediaQuery.of(context).viewInsets;
-        return Padding(
-          padding: EdgeInsets.only(bottom: viewInsets.bottom),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                isEditing ? "Edit product" : "Create product",
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _nameCtrl,
-                label: "Name",
-                hint: "Executive chair",
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _descCtrl,
-                label: "Description",
-                hint: "High-back office chair",
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _priceCtrl,
-                label: "Price (NGN)",
-                hint: "129000",
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                // WHY: Auto-format NGN values as the user types.
-                inputFormatters: const [
-                  NgnInputFormatter(),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _stockCtrl,
-                label: "Stock",
-                hint: "10",
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _imageCtrl,
-                label: "Image URL",
-                hint: "https://example.com/item.png",
-                keyboardType: TextInputType.url,
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isSubmitting
-                      ? null
-                      : () async {
-                          if (isEditing) {
-                            await _updateProduct(product.id);
-                          } else {
-                            await _createProduct();
-                          }
-
-                          if (!mounted) return;
-                          Navigator.of(context).pop();
-                        },
-                  child: Text(isEditing ? "Save changes" : "Create product"),
-                ),
-              ),
-            ],
-          ),
-        );
+      product: product,
+      onSuccess: (_) async {
+        // WHY: Refresh list so the new/updated product appears immediately.
+        await _refreshProducts();
       },
     );
-  }
 
-  Future<void> _createProduct() async {
-    if (_isSubmitting) return;
-
-    _logFlow("CREATE_TAP", "Create product tapped");
-
-    final session = ref.read(authSessionProvider);
-    if (session == null || !session.isTokenValid) {
-      _logFlow("CREATE_BLOCK", "Missing session");
-      _showSnack("Session expired. Please sign in again.");
+    if (saved == null) {
+      _logFlow("FORM_CANCEL", "Product form dismissed");
       return;
     }
 
-    final name = _nameCtrl.text.trim();
-    final description = _descCtrl.text.trim();
-    final price = parseNgnToKobo(_priceCtrl.text.trim());
-    final stock = _parseInt(_stockCtrl.text.trim());
-    final imageUrl = _imageCtrl.text.trim();
-
-    if (name.isEmpty || price == null || stock == null) {
-      _showSnack("Name, price, and stock are required.");
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-
-    try {
-      final api = ref.read(businessProductApiProvider);
-      _logFlow("CREATE_REQUEST", "Creating product");
-      await api.createProduct(
-        token: session.token,
-        payload: {
-          "name": name,
-          "description": description,
-          "price": price,
-          "stock": stock,
-          "imageUrl": imageUrl,
-          "isActive": true,
-        },
-      );
-      await _refreshProducts();
-      _showSnack("Product created successfully.");
-    } catch (e) {
-      _logFlow(
-        "CREATE_FAIL",
-        "Create product failed",
-        extra: {"error": e.toString()},
-      );
-      _showSnack(_extractErrorMessage(e));
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
-  }
-
-  Future<void> _updateProduct(String id) async {
-    if (_isSubmitting) return;
-
-    _logFlow("UPDATE_TAP", "Update product tapped", extra: {"id": id});
-
-    final session = ref.read(authSessionProvider);
-    if (session == null || !session.isTokenValid) {
-      _logFlow("UPDATE_BLOCK", "Missing session");
-      _showSnack("Session expired. Please sign in again.");
-      return;
-    }
-
-    final payload = <String, dynamic>{};
-
-    final name = _nameCtrl.text.trim();
-    final description = _descCtrl.text.trim();
-    final price = parseNgnToKobo(_priceCtrl.text.trim());
-    final stock = _parseInt(_stockCtrl.text.trim());
-    final imageUrl = _imageCtrl.text.trim();
-
-    if (name.isNotEmpty) payload["name"] = name;
-    if (description.isNotEmpty) payload["description"] = description;
-    if (price != null) payload["price"] = price;
-    if (stock != null) payload["stock"] = stock;
-    if (imageUrl.isNotEmpty) payload["imageUrl"] = imageUrl;
-
-    if (payload.isEmpty) {
-      _showSnack("No changes to save.");
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-
-    try {
-      final api = ref.read(businessProductApiProvider);
-      _logFlow("UPDATE_REQUEST", "Updating product", extra: {"id": id});
-      await api.updateProduct(token: session.token, id: id, payload: payload);
-      await _refreshProducts();
-      _showSnack("Product updated successfully.");
-    } catch (e) {
-      _logFlow(
-        "UPDATE_FAIL",
-        "Update product failed",
-        extra: {"error": e.toString()},
-      );
-      _showSnack(_extractErrorMessage(e));
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
+    _logFlow("FORM_DONE", "Product saved", extra: {"id": saved.id});
   }
 
   Future<void> _softDeleteProduct(String id) async {
@@ -486,12 +289,6 @@ class _BusinessProductsScreenState
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  int? _parseInt(String value) {
-    // WHY: Guard against empty or non-numeric values from text fields.
-    if (value.trim().isEmpty) return null;
-    return int.tryParse(value.trim());
-  }
-
   String _extractErrorMessage(Object error) {
     // WHY: Prefer backend error payloads so the UI stays "dumb".
     if (error is DioException) {
@@ -504,21 +301,6 @@ class _BusinessProductsScreenState
       }
     }
     return "Action failed. Please try again.";
-  }
-
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    TextInputType? keyboardType,
-    List<TextInputFormatter>? inputFormatters,
-  }) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      decoration: InputDecoration(labelText: label, hintText: hint),
-    );
   }
 
   @override
@@ -652,6 +434,9 @@ class _BusinessProductsScreenState
         context.go('/business-orders');
         return;
       case 4:
+        context.go('/chat');
+        return;
+      case 5:
         context.go('/settings');
         return;
     }
