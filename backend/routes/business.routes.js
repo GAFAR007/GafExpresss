@@ -21,6 +21,11 @@ const {
   requireAnyRole,
   requireRole,
 } = require("../middlewares/requireRole.middleware");
+const {
+  requirePermission,
+  PERMISSION_MODULES,
+  PERMISSION_CAPABILITIES,
+} = require("../middlewares/permissions.middleware");
 const businessController = require("../controllers/business.controller");
 const {
   verifyPaystackSignature,
@@ -47,7 +52,26 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.createProduct,
+);
+
+// WHY: Generate AI drafts to help staff prefill product details faster.
+router.post(
+  "/products/ai-draft",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
+  businessController.generateProductDraftHandler,
 );
 
 router.get(
@@ -57,6 +81,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getAllProducts,
 );
 
@@ -67,6 +95,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getProductById,
 );
 
@@ -77,6 +109,10 @@ router.patch(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.updateProduct,
 );
 
@@ -87,6 +123,10 @@ router.patch(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.restoreProduct,
 );
 
@@ -97,6 +137,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   upload.single("image"),
   businessController.uploadProductImage,
 );
@@ -108,6 +152,10 @@ router.delete(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.deleteProductImage,
 );
 
@@ -118,6 +166,10 @@ router.delete(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.softDeleteProduct,
 );
 
@@ -154,6 +206,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.createAsset,
 );
 
@@ -164,6 +220,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getAssets,
 );
 
@@ -174,6 +234,10 @@ router.patch(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.updateAsset,
 );
 
@@ -184,6 +248,10 @@ router.delete(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.softDeleteAsset,
 );
 
@@ -211,6 +279,180 @@ router.post(
 );
 
 /**
+ * STAFF MANAGEMENT (OWNER + STAFF)
+ */
+router.get(
+  "/staff",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.listStaffProfiles,
+);
+
+router.get(
+  "/staff/:id",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getStaffProfile,
+);
+
+router.get(
+  "/staff/:id/compensation",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.PAYROLL,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
+  businessController.getStaffCompensation,
+);
+
+router.patch(
+  "/staff/:id/compensation",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.PAYROLL,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
+  businessController.upsertStaffCompensation,
+);
+
+router.post(
+  "/staff/attendance/clock-in",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.clockInStaff,
+);
+
+router.post(
+  "/staff/attendance/clock-out",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.clockOutStaff,
+);
+
+router.get(
+  "/staff/attendance",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.listStaffAttendance,
+);
+
+/**
+ * PRODUCTION PLANS (OWNER + STAFF)
+ */
+router.post(
+  "/production/plans/ai-draft",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.generateProductionPlanDraftHandler,
+);
+
+router.post(
+  "/production/plans",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.createProductionPlan,
+);
+
+router.get(
+  "/production/plans",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.listProductionPlans,
+);
+
+router.get(
+  "/production/plans/:id",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getProductionPlanDetail,
+);
+
+router.patch(
+  "/production/tasks/:id/status",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.updateProductionTaskStatus,
+);
+
+router.post(
+  "/production/tasks/:id/approve",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.approveProductionTask,
+);
+
+router.post(
+  "/production/tasks/:id/reject",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.rejectProductionTask,
+);
+
+router.post(
+  "/production/outputs",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.createProductionOutput,
+);
+
+router.get(
+  "/production/outputs",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.listProductionOutputs,
+);
+
+/**
  * TENANT VERIFICATION (ESTATE-ONLY)
  */
 router.get(
@@ -220,6 +462,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.listTenantApplications,
 );
 
@@ -230,6 +476,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getTenantApplicationDetail,
 );
 
@@ -240,6 +490,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.VERIFY,
+  }),
   businessController.verifyTenantContact,
 );
 
@@ -249,6 +503,10 @@ router.post(
   requireAnyRole([
     "business_owner",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
   businessController.approveAgreement,
 );
 
@@ -259,6 +517,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
   businessController.setAgreementText,
 );
 
@@ -312,6 +574,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.PAYMENTS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getBusinessTenantPayments,
 );
 
@@ -339,6 +605,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.REPORTS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getAnalyticsSummary,
 );
 
@@ -349,6 +619,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.REPORTS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getAnalyticsEvents,
 );
 
@@ -359,6 +633,10 @@ router.get(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.REPORTS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
   businessController.getEstateAnalytics,
 );
 

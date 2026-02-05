@@ -25,10 +25,23 @@ const businessInviteService = require("../services/business_invite.service");
 const businessTenantService = require("../services/business.tenant.service");
 const tenantContactDocumentService = require("../services/tenant_contact_document.service");
 const paymentService = require("../services/payment.service");
+const {
+  generateProductionPlanDraft,
+} = require("../services/production_plan_ai.service");
+const {
+  generateProductDraft,
+} = require("../services/product_ai.service");
 const { resolveRentPeriodLimit } =
   paymentService;
 const Payment = require("../models/Payment");
 const BusinessTenantApplication = require("../models/BusinessTenantApplication");
+const BusinessStaffProfile = require("../models/BusinessStaffProfile");
+const StaffAttendance = require("../models/StaffAttendance");
+const StaffCompensation = require("../models/StaffCompensation");
+const ProductionPlan = require("../models/ProductionPlan");
+const ProductionPhase = require("../models/ProductionPhase");
+const ProductionTask = require("../models/ProductionTask");
+const ProductionOutput = require("../models/ProductionOutput");
 const {
   periodsPerYear,
 } = require("../utils/rentCoverage");
@@ -38,6 +51,13 @@ const {
 const {
   writeAuditLog,
 } = require("../utils/audit");
+const {
+  resolveBusinessContext,
+  resolveStaffProfile,
+} = require("../services/business_context.service");
+const {
+  DEFAULT_PRODUCTION_PHASES,
+} = require("../utils/production_defaults");
 
 // WHY: Enforce the same yearly payment cap in summary calculations.
 const MAX_TENANT_RENT_PAYMENTS_PER_YEAR = 3;
@@ -54,6 +74,9 @@ const PAYMENT_STATUS_LABELS = {
 };
 const PAYMENT_STATUS_UNKNOWN =
   "UNKNOWN";
+// WHY: Allow safe default when country headers are missing.
+const COUNTRY_HEADER_KEY = "x-country";
+const DEFAULT_COUNTRY = "unknown";
 const TENANT_PAYMENTS_ERROR_CODES = {
   TENANT_ID_REQUIRED:
     "TENANT_PAYMENTS_TENANT_ID_REQUIRED",
@@ -121,31 +144,250 @@ const TENANT_PAYMENTS_INTENTS = {
     "load tenant payment receipts",
 };
 
+// WHY: Centralize staff roles used in permission checks.
+const STAFF_ROLE_ESTATE_MANAGER =
+  "estate_manager";
+const STAFF_ROLE_ACCOUNTANT =
+  "accountant";
+const STAFF_ROLE_FARM_MANAGER =
+  "farm_manager";
+const STAFF_ROLE_ASSET_MANAGER =
+  "asset_manager";
+const STAFF_STATUS_ACTIVE = "active";
+
+// WHY: Reuse copy for staff endpoints to avoid inline magic strings.
+const STAFF_COPY = {
+  BUSINESS_ACCESS_REQUIRED:
+    "Business access required",
+  STAFF_ACCESS_REQUIRED:
+    "Staff access required",
+  STAFF_PROFILE_REQUIRED:
+    "Staff profile is required",
+  STAFF_PROFILE_NOT_FOUND:
+    "Staff profile not found",
+  STAFF_ROLE_REQUIRED:
+    "Staff role is required",
+  STAFF_LIST_OK:
+    "Staff profiles fetched successfully",
+  STAFF_DETAIL_OK:
+    "Staff profile fetched successfully",
+  STAFF_ATTENDANCE_OK:
+    "Attendance fetched successfully",
+  STAFF_CLOCK_IN_OK:
+    "Clock-in recorded successfully",
+  STAFF_CLOCK_OUT_OK:
+    "Clock-out recorded successfully",
+  STAFF_CLOCK_IN_OPEN:
+    "Staff already has an open attendance session",
+  STAFF_CLOCK_OUT_MISSING:
+    "No open attendance session to close",
+  STAFF_FORBIDDEN:
+    "You do not have permission to access staff data",
+  STAFF_PROFILE_ID_REQUIRED:
+    "Staff profile id is required",
+  STAFF_ROLE_INVALID:
+    "Staff role is invalid",
+  STAFF_ROLE_REQUIRED:
+    "Staff role is required for staff invites",
+};
+
+// WHY: Centralize staff compensation copy for payroll endpoints.
+const STAFF_COMPENSATION_COPY = {
+  COMPENSATION_OK:
+    "Staff compensation fetched successfully",
+  COMPENSATION_EMPTY:
+    "Staff compensation has not been set",
+  COMPENSATION_UPDATED:
+    "Staff compensation saved successfully",
+  COMPENSATION_FORBIDDEN:
+    "You do not have permission to manage compensation",
+  COMPENSATION_PROFILE_REQUIRED:
+    "Staff profile id is required",
+  COMPENSATION_AMOUNT_REQUIRED:
+    "Salary amount is required",
+  COMPENSATION_AMOUNT_INVALID:
+    "Salary amount is invalid",
+  COMPENSATION_CADENCE_REQUIRED:
+    "Salary cadence is required",
+  COMPENSATION_CADENCE_INVALID:
+    "Salary cadence is invalid",
+  COMPENSATION_UPDATE_REQUIRED:
+    "Provide at least one compensation field to update",
+};
+
+// WHY: Keep compensation field names consistent for payload checks.
+const STAFF_COMPENSATION_FIELDS = {
+  SALARY_AMOUNT: "salaryAmountKobo",
+  SALARY_CADENCE: "salaryCadence",
+  PAY_DAY: "payDay",
+  NOTES: "notes",
+};
+
+// WHY: Standardize compensation logs for diagnostics.
+const STAFF_COMPENSATION_LOG = {
+  FETCH_ENTRY:
+    "BUSINESS CONTROLLER: getStaffCompensation - entry",
+  FETCH_SUCCESS:
+    "BUSINESS CONTROLLER: getStaffCompensation - success",
+  FETCH_ERROR:
+    "BUSINESS CONTROLLER: getStaffCompensation - error",
+  UPSERT_ENTRY:
+    "BUSINESS CONTROLLER: upsertStaffCompensation - entry",
+  UPSERT_SUCCESS:
+    "BUSINESS CONTROLLER: upsertStaffCompensation - success",
+  UPSERT_ERROR:
+    "BUSINESS CONTROLLER: upsertStaffCompensation - error",
+};
+
+// WHY: Centralize production plan copy to avoid inline strings.
+const PRODUCTION_COPY = {
+  PLAN_CREATED:
+    "Production plan created successfully",
+  PLAN_DRAFT_OK:
+    "Production plan draft generated successfully",
+  PLAN_LIST_OK:
+    "Production plans fetched successfully",
+  PLAN_DETAIL_OK:
+    "Production plan fetched successfully",
+  PLAN_ID_REQUIRED:
+    "Production plan id is required",
+  PLAN_NOT_FOUND:
+    "Production plan not found",
+  PLAN_DRAFT_FAILED:
+    "Unable to generate production plan draft",
+  PHASES_REQUIRED:
+    "Production phases are required",
+  TASKS_REQUIRED:
+    "Production tasks are required",
+  TASK_NOT_FOUND:
+    "Production task not found",
+  TASK_STATUS_REQUIRED:
+    "Task status is required",
+  OUTPUT_CREATED:
+    "Production output created successfully",
+  OUTPUT_LIST_OK:
+    "Production outputs fetched successfully",
+  PRODUCT_REQUIRED:
+    "Product is required",
+  OUTPUT_QUANTITY_REQUIRED:
+    "Output quantity is required",
+  PRODUCT_NOT_FOUND:
+    "Product not found",
+  STAFF_REQUIRED_FOR_DRAFT:
+    "Staff profiles are required to generate a draft",
+  ESTATE_REQUIRED:
+    "Estate asset is required",
+  DATES_REQUIRED:
+    "Start and end dates are required",
+  DATE_RANGE_INVALID:
+    "End date must be after start date",
+  STAFF_ASSIGN_REQUIRED:
+    "Assigned staff is required",
+  STAFF_ROLE_REQUIRED:
+    "Task role is required",
+  STAFF_ROLE_MISMATCH:
+    "Assigned staff role does not match task role",
+  STAFF_ASSIGN_APPROVAL_REQUIRED:
+    "Only business owners can approve assignments",
+  STAFF_ASSIGN_REJECT_REQUIRED:
+    "Only business owners can reject assignments",
+  STAFF_TASK_FORBIDDEN:
+    "You do not have permission to update this task",
+  INVALID_UNIT_TYPE:
+    "Invalid unit type",
+  TASK_STATUS_UPDATED:
+    "Task status updated successfully",
+  TASK_ASSIGN_APPROVED:
+    "Task assignment approved",
+  TASK_ASSIGN_REJECTED:
+    "Task assignment rejected",
+};
+
+// WHY: Keep AI product draft copy centralized for consistent UX.
+const PRODUCT_AI_COPY = {
+  PROMPT_REQUIRED:
+    "Describe the product you want to create",
+  DRAFT_OK:
+    "Product draft generated successfully",
+  DRAFT_FAILED:
+    "Unable to generate product draft",
+};
+
+// WHY: Standardize AI product draft logs for diagnostics.
+const PRODUCT_AI_LOG = {
+  ENTRY:
+    "BUSINESS CONTROLLER: generateProductDraft - entry",
+  SUCCESS:
+    "BUSINESS CONTROLLER: generateProductDraft - success",
+  ERROR:
+    "BUSINESS CONTROLLER: generateProductDraft - error",
+};
+const PRODUCT_AI_ERROR_HINT =
+  "Verify prompt and AI configuration before retrying.";
+const PRODUCT_AI_ERROR_REASON =
+  "product_draft_failed";
+
+// WHY: Standardize logs for production output → listing updates.
+const PRODUCTION_OUTPUT_LOG = {
+  LISTING_UPDATE_START:
+    "BUSINESS CONTROLLER: productionOutput listing update - start",
+  LISTING_UPDATE_SUCCESS:
+    "BUSINESS CONTROLLER: productionOutput listing update - success",
+  LISTING_UPDATE_ERROR:
+    "BUSINESS CONTROLLER: productionOutput listing update - error",
+};
+const PRODUCTION_OUTPUT_LISTING_REASON =
+  "production_output_listing_update_failed";
+const PRODUCTION_OUTPUT_LISTING_HINT =
+  "Retry listing update or adjust product stock manually.";
+const PRODUCTION_OUTPUT_RESPONSE_KEYS =
+  {
+    LISTING_UPDATED: "listingUpdated",
+    LISTING_ERROR: "listingError",
+    PRODUCT: "product",
+  };
+
+// WHY: Keep production status values centralized.
+const PRODUCTION_STATUS_DRAFT = "draft";
+const PRODUCTION_PHASE_STATUS_PENDING =
+  "pending";
+const PRODUCTION_TASK_STATUS_PENDING =
+  "pending";
+const PRODUCTION_TASK_STATUS_DONE =
+  "done";
+const PRODUCTION_TASK_APPROVAL_PENDING =
+  "pending_approval";
+const PRODUCTION_TASK_APPROVAL_APPROVED =
+  "approved";
+const PRODUCTION_TASK_APPROVAL_REJECTED =
+  "rejected";
+const DEFAULT_TASK_TITLE = "Task";
+const DEFAULT_PHASE_NAME_PREFIX =
+  "Phase";
+const MS_PER_MINUTE = 60000;
+const MS_PER_DAY = 86400000;
+
+// WHY: Provide safe fallbacks for validation lists.
+const STAFF_ROLE_VALUES =
+  BusinessStaffProfile.STAFF_ROLES ||
+  [];
+const COMPENSATION_CADENCE_VALUES =
+  StaffCompensation.COMPENSATION_CADENCE ||
+  [];
+const OUTPUT_UNIT_VALUES =
+  ProductionOutput.PRODUCTION_OUTPUT_UNITS ||
+  [];
+const TASK_STATUS_VALUES =
+  ProductionTask.PRODUCTION_TASK_STATUSES ||
+  [];
+const OUTPUT_UNIT_FALLBACK = "units";
+
 // WHY: Resolve actor + businessId once per request.
 async function getBusinessContext(
   userId,
 ) {
-  const actor = await User.findById(
-    userId,
-  ).select(
-    // WHY: Tenant applications need identity fields for snapshots + review.
-    "role businessId isNinVerified email estateAssetId name firstName middleName lastName phone ninLast4",
-  );
-
-  if (!actor) {
-    throw new Error("User not found");
-  }
-
-  if (!actor.businessId) {
-    throw new Error(
-      "Business scope is not configured for this user",
-    );
-  }
-
-  return {
-    actor,
-    businessId: actor.businessId,
-  };
+  // WHY: Share the same business-context loader across controllers + middleware.
+  return resolveBusinessContext(userId);
 }
 
 // WHY: Estate-scoped staff should only manage their assigned estate asset.
@@ -180,6 +422,384 @@ function blockEstateScopedStaff(
       "Estate-scoped staff can only manage their assigned estate asset",
   });
   return true;
+}
+
+// WHY: Load staff profile for staff-role actors to enforce staff-role permissions.
+async function getStaffProfileForActor({
+  actor,
+  businessId,
+  allowMissing = false,
+}) {
+  // WHY: Share the staff profile lookup across controllers + middleware.
+  return resolveStaffProfile({
+    actor,
+    businessId,
+    allowMissing,
+  });
+}
+
+// WHY: Only estate managers can manage staff visibility (besides owners).
+function canManageStaffDirectory({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    staffRole ===
+      STAFF_ROLE_ESTATE_MANAGER
+  );
+}
+
+// WHY: Staff compensation is limited to owners + estate managers.
+function canManageStaffCompensation({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    staffRole ===
+      STAFF_ROLE_ESTATE_MANAGER
+  );
+}
+
+// WHY: Attendance management is limited to owner and estate managers.
+function canManageAttendance({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    staffRole ===
+      STAFF_ROLE_ESTATE_MANAGER
+  );
+}
+
+// WHY: Accountants may view attendance but not edit it.
+function canViewAttendance({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    (staffRole ===
+      STAFF_ROLE_ESTATE_MANAGER ||
+      staffRole ===
+        STAFF_ROLE_ACCOUNTANT)
+  );
+}
+
+// WHY: Production plans are managed by owners and estate managers.
+function canCreateProductionPlan({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    staffRole ===
+      STAFF_ROLE_ESTATE_MANAGER
+  );
+}
+
+// WHY: Task assignments can be initiated by designated managers.
+function canAssignProductionTasks({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    (staffRole ===
+      STAFF_ROLE_ESTATE_MANAGER ||
+      staffRole ===
+        STAFF_ROLE_FARM_MANAGER ||
+      staffRole ===
+        STAFF_ROLE_ASSET_MANAGER)
+  );
+}
+
+// WHY: Normalize date inputs and guard against invalid values.
+function parseDateInput(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date;
+}
+
+// WHY: Auto-calculate phase dates across a plan duration.
+function buildPhaseSchedule({
+  startDate,
+  endDate,
+  phases,
+}) {
+  const totalMs =
+    endDate.getTime() -
+    startDate.getTime();
+  const phaseCount = phases.length;
+  const baseMs =
+    phaseCount > 0 ?
+      Math.floor(totalMs / phaseCount)
+    : 0;
+
+  let cursor = new Date(startDate);
+  return phases.map((phase, index) => {
+    const isLast =
+      index === phaseCount - 1;
+    const phaseStart = new Date(cursor);
+    const phaseEnd =
+      isLast ?
+        new Date(endDate)
+      : new Date(
+          cursor.getTime() + baseMs,
+        );
+    cursor = new Date(phaseEnd);
+
+    return {
+      ...phase,
+      startDate: phaseStart,
+      endDate: phaseEnd,
+    };
+  });
+}
+
+// WHY: Auto-calculate task dates inside a phase using weights.
+function buildTaskSchedule({
+  phaseStart,
+  phaseEnd,
+  tasks,
+}) {
+  const totalMs =
+    phaseEnd.getTime() -
+    phaseStart.getTime();
+  const taskCount = tasks.length;
+  if (taskCount === 0) {
+    return [];
+  }
+
+  const safeWeights = tasks.map(
+    (task) =>
+      (
+        Number.isFinite(task.weight) &&
+        Number(task.weight) > 0
+      ) ?
+        Math.floor(Number(task.weight))
+      : 1,
+  );
+  const totalWeight =
+    safeWeights.reduce(
+      (sum, weight) => sum + weight,
+      0,
+    );
+  const baseUnitMs =
+    totalWeight > 0 ?
+      totalMs / totalWeight
+    : 0;
+
+  let cursor = new Date(phaseStart);
+  return tasks.map((task, index) => {
+    const isLast =
+      index === taskCount - 1;
+    const durationMs =
+      isLast ?
+        phaseEnd.getTime() -
+        cursor.getTime()
+      : Math.floor(
+          baseUnitMs *
+            safeWeights[index],
+        );
+    const taskStart = new Date(cursor);
+    const taskEnd = new Date(
+      cursor.getTime() + durationMs,
+    );
+    cursor = new Date(taskEnd);
+
+    return {
+      ...task,
+      startDate: taskStart,
+      dueDate: taskEnd,
+      weight: safeWeights[index],
+    };
+  });
+}
+
+// WHY: Summarize task + output performance for KPI dashboards.
+function computeProductionKpis({
+  phases,
+  tasks,
+  outputs,
+}) {
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter(
+    (task) =>
+      task.status ===
+        PRODUCTION_TASK_STATUS_DONE ||
+      Boolean(task.completedAt),
+  );
+  const completedCount =
+    completedTasks.length;
+  const onTimeCount =
+    completedTasks.filter((task) => {
+      if (
+        !task.completedAt ||
+        !task.dueDate
+      ) {
+        return false;
+      }
+      return (
+        new Date(task.completedAt) <=
+        new Date(task.dueDate)
+      );
+    }).length;
+
+  const totalDelayDays =
+    completedTasks.reduce(
+      (sum, task) => {
+        if (
+          !task.completedAt ||
+          !task.dueDate
+        ) {
+          return sum;
+        }
+        const delayMs =
+          new Date(task.completedAt) -
+          new Date(task.dueDate);
+        const delayDays = Math.max(
+          0,
+          Math.floor(
+            delayMs / MS_PER_DAY,
+          ),
+        );
+        return sum + delayDays;
+      },
+      0,
+    );
+
+  const phaseCompletion = phases.map(
+    (phase) => {
+      const phaseTasks = tasks.filter(
+        (task) =>
+          task.phaseId?.toString() ===
+          phase._id?.toString(),
+      );
+      const phaseDone =
+        phaseTasks.filter(
+          (task) =>
+            task.status ===
+              PRODUCTION_TASK_STATUS_DONE ||
+            Boolean(task.completedAt),
+        );
+      return {
+        phaseId: phase._id,
+        name: phase.name,
+        totalTasks: phaseTasks.length,
+        completedTasks:
+          phaseDone.length,
+        completionRate:
+          phaseTasks.length > 0 ?
+            phaseDone.length /
+            phaseTasks.length
+          : 0,
+      };
+    },
+  );
+
+  const staffPerformance = {};
+  completedTasks.forEach((task) => {
+    const staffId =
+      task.assignedStaffId?.toString();
+    if (!staffId) return;
+    if (!staffPerformance[staffId]) {
+      staffPerformance[staffId] = {
+        completedTasks: 0,
+        totalDelayDays: 0,
+      };
+    }
+    const delayMs =
+      new Date(task.completedAt) -
+      new Date(
+        task.dueDate ||
+          task.completedAt,
+      );
+    const delayDays = Math.max(
+      0,
+      Math.floor(delayMs / MS_PER_DAY),
+    );
+    staffPerformance[
+      staffId
+    ].completedTasks += 1;
+    staffPerformance[
+      staffId
+    ].totalDelayDays += delayDays;
+  });
+
+  const staffKpis = Object.entries(
+    staffPerformance,
+  ).map(([staffId, data]) => ({
+    staffId,
+    completedTasks: data.completedTasks,
+    avgDelayDays:
+      data.completedTasks > 0 ?
+        data.totalDelayDays /
+        data.completedTasks
+      : 0,
+  }));
+
+  const outputByUnit = outputs.reduce(
+    (acc, output) => {
+      const unit =
+        output.unitType ||
+        OUTPUT_UNIT_FALLBACK;
+      acc[unit] =
+        (acc[unit] || 0) +
+        (Number(output.quantity) || 0);
+      return acc;
+    },
+    {},
+  );
+
+  return {
+    totalTasks,
+    completedTasks: completedCount,
+    completionRate:
+      totalTasks > 0 ?
+        completedCount / totalTasks
+      : 0,
+    onTimeRate:
+      completedCount > 0 ?
+        onTimeCount / completedCount
+      : 0,
+    avgDelayDays:
+      completedCount > 0 ?
+        totalDelayDays / completedCount
+      : 0,
+    phaseCompletion,
+    staffKpis,
+    outputByUnit,
+  };
 }
 
 async function resolveEstateAsset({
@@ -456,10 +1076,7 @@ function computeYearlyRentTotal({
   // Final yearly rent calculation:
   // - Multiply by the sanitized rent amount per unit
   // - Multiply by the number of units
-  return (
-    safeAmount *
-    safeUnitCount
-  );
+  return safeAmount * safeUnitCount;
 }
 
 function computeYearlyRentTotalPerUnit({
@@ -668,6 +1285,88 @@ async function createProduct(req, res) {
     return res
       .status(400)
       .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/products/ai-draft
+ * Owner + staff: generate an AI draft for product details.
+ */
+async function generateProductDraftHandler(
+  req,
+  res,
+) {
+  debug(PRODUCT_AI_LOG.ENTRY, {
+    actorId: req.user?.sub,
+    hasPrompt: Boolean(
+      req.body?.prompt,
+    ),
+  });
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const prompt =
+      req.body?.prompt
+        ?.toString()
+        .trim() || "";
+    const useReasoning = Boolean(
+      req.body?.useReasoning,
+    );
+
+    if (!prompt) {
+      return res.status(400).json({
+        error:
+          PRODUCT_AI_COPY.PROMPT_REQUIRED,
+      });
+    }
+
+    const draft =
+      await generateProductDraft({
+        prompt,
+        useReasoning,
+        context: {
+          route: req.originalUrl,
+          requestId: req.id,
+          userRole: actor.role,
+          businessId,
+          country:
+            req.headers[
+              COUNTRY_HEADER_KEY
+            ] || DEFAULT_COUNTRY,
+        },
+      });
+
+    debug(PRODUCT_AI_LOG.SUCCESS, {
+      actorId: actor._id,
+      hasDraft: Boolean(draft?.name),
+    });
+
+    return res.status(200).json({
+      message: PRODUCT_AI_COPY.DRAFT_OK,
+      draft,
+    });
+  } catch (err) {
+    debug(PRODUCT_AI_LOG.ERROR, {
+      actorId: req.user?.sub,
+      error: err.message,
+      classification:
+        err.classification ||
+        "UNKNOWN_PROVIDER_ERROR",
+      error_code:
+        err.errorCode ||
+        "PRODUCT_AI_DRAFT_FAILED",
+      resolution_hint:
+        err.resolutionHint ||
+        PRODUCT_AI_ERROR_HINT,
+      reason: PRODUCT_AI_ERROR_REASON,
+    });
+    return res.status(400).json({
+      error:
+        PRODUCT_AI_COPY.DRAFT_FAILED,
+    });
   }
 }
 
@@ -1603,6 +2302,9 @@ async function createInvite(req, res) {
       hasEstate: Boolean(
         req.body?.estateAssetId,
       ),
+      hasStaffRole: Boolean(
+        req.body?.staffRole,
+      ),
     },
   );
 
@@ -1637,6 +2339,11 @@ async function createInvite(req, res) {
         ?.toString()
         .trim() || "";
 
+    const staffRole =
+      req.body?.staffRole
+        ?.toString()
+        .trim() || "";
+
     const estateAssetId =
       req.body?.estateAssetId
         ?.toString()
@@ -1658,6 +2365,27 @@ async function createInvite(req, res) {
           "Agreement text is required for tenant invites",
       });
     }
+    if (
+      role === "staff" &&
+      (!staffRole ||
+        staffRole.length === 0)
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_ROLE_REQUIRED,
+      });
+    }
+    if (
+      role === "staff" &&
+      !STAFF_ROLE_VALUES.includes(
+        staffRole,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_ROLE_INVALID,
+      });
+    }
 
     // WHY: Validate estate assignments before issuing an invite.
     await resolveEstateAsset({
@@ -1672,6 +2400,7 @@ async function createInvite(req, res) {
           inviterId: actor._id,
           inviteeEmail: inviteEmail,
           role,
+          staffRole,
           estateAssetId,
           agreementText,
         },
@@ -1692,6 +2421,8 @@ async function createInvite(req, res) {
         id: invite._id,
         email: invite.inviteeEmail,
         role: invite.role,
+        staffRole:
+          invite.staffRole || null,
         status: invite.status,
         expiresAt:
           invite.tokenExpiresAt,
@@ -1803,6 +2534,15 @@ async function acceptInvite(req, res) {
           "Estate asset is required for tenant assignment",
       });
     }
+    if (
+      invite.role === "staff" &&
+      !invite.staffRole
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_ROLE_REQUIRED,
+      });
+    }
 
     const estateAsset =
       await resolveEstateAsset({
@@ -1815,6 +2555,62 @@ async function acceptInvite(req, res) {
     user.estateAssetId =
       estateAsset?._id || null;
     await user.save();
+
+    if (invite.role === "staff") {
+      const existingProfile =
+        await BusinessStaffProfile.findOne(
+          {
+            userId: user._id,
+            businessId:
+              invite.businessId,
+          },
+        );
+
+      if (existingProfile) {
+        // WHY: Keep staff profile aligned to the accepted invite.
+        existingProfile.staffRole =
+          invite.staffRole;
+        existingProfile.estateAssetId =
+          estateAsset?._id || null;
+        existingProfile.status =
+          STAFF_STATUS_ACTIVE;
+        await existingProfile.save();
+        debug(
+          "BUSINESS CONTROLLER: acceptInvite - staff profile updated",
+          {
+            userId: user._id,
+            staffProfileId:
+              existingProfile._id,
+            staffRole: invite.staffRole,
+          },
+        );
+      } else {
+        const newProfile =
+          await BusinessStaffProfile.create(
+            {
+              userId: user._id,
+              businessId:
+                invite.businessId,
+              staffRole:
+                invite.staffRole,
+              estateAssetId:
+                estateAsset?._id ||
+                null,
+              status:
+                STAFF_STATUS_ACTIVE,
+            },
+          );
+        debug(
+          "BUSINESS CONTROLLER: acceptInvite - staff profile created",
+          {
+            userId: user._id,
+            staffProfileId:
+              newProfile._id,
+            staffRole: invite.staffRole,
+          },
+        );
+      }
+    }
 
     await businessInviteService.markInviteAccepted(
       {
@@ -1839,6 +2635,8 @@ async function acceptInvite(req, res) {
         role: user.role,
         estateAssetId:
           user.estateAssetId,
+        staffRole:
+          invite.staffRole || null,
       },
     });
 
@@ -1864,6 +2662,2574 @@ async function acceptInvite(req, res) {
   } catch (err) {
     debug(
       "BUSINESS CONTROLLER: acceptInvite - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/staff
+ * Owner + estate manager: list staff profiles.
+ */
+async function listStaffProfiles(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: listStaffProfiles - entry",
+    {
+      actorId: req.user?.sub,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canManageStaffDirectory({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    // WHY: Estate-scoped staff should only see profiles in their estate.
+    const filter = {
+      businessId,
+    };
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId
+    ) {
+      filter.estateAssetId =
+        actor.estateAssetId;
+    }
+
+    const profiles =
+      await BusinessStaffProfile.find(
+        filter,
+      )
+        .populate(
+          "userId",
+          "name email phone role",
+        )
+        .lean();
+
+    const staff = profiles.map(
+      (profile) => ({
+        id: profile._id,
+        staffRole: profile.staffRole,
+        status: profile.status,
+        estateAssetId:
+          profile.estateAssetId,
+        startDate: profile.startDate,
+        endDate: profile.endDate,
+        notes: profile.notes,
+        user: profile.userId,
+      }),
+    );
+
+    debug(
+      "BUSINESS CONTROLLER: listStaffProfiles - success",
+      {
+        actorId: actor._id,
+        count: staff.length,
+      },
+    );
+
+    return res.status(200).json({
+      message: STAFF_COPY.STAFF_LIST_OK,
+      staff,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: listStaffProfiles - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/staff/:id
+ * Owner + estate manager: fetch a staff profile.
+ */
+async function getStaffProfile(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: getStaffProfile - entry",
+    {
+      actorId: req.user?.sub,
+      staffProfileId: req.params?.id,
+    },
+  );
+
+  try {
+    const staffProfileId =
+      req.params?.id?.toString().trim();
+    if (!staffProfileId) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_ID_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canManageStaffDirectory({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    const profile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: staffProfileId,
+          businessId,
+        },
+      )
+        .populate(
+          "userId",
+          "name email phone role",
+        )
+        .lean();
+
+    if (!profile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    // WHY: Estate-scoped staff must only access their own estate.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      profile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    debug(
+      "BUSINESS CONTROLLER: getStaffProfile - success",
+      {
+        actorId: actor._id,
+        staffProfileId: profile._id,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        STAFF_COPY.STAFF_DETAIL_OK,
+      staff: {
+        id: profile._id,
+        staffRole: profile.staffRole,
+        status: profile.status,
+        estateAssetId:
+          profile.estateAssetId,
+        startDate: profile.startDate,
+        endDate: profile.endDate,
+        notes: profile.notes,
+        user: profile.userId,
+      },
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: getStaffProfile - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/staff/:id/compensation
+ * Owner + estate manager: fetch staff compensation.
+ */
+async function getStaffCompensation(
+  req,
+  res,
+) {
+  debug(
+    STAFF_COMPENSATION_LOG.FETCH_ENTRY,
+    {
+      actorId: req.user?.sub,
+      staffProfileId: req.params?.id,
+    },
+  );
+
+  try {
+    const staffProfileId =
+      req.params?.id?.toString().trim();
+    if (!staffProfileId) {
+      return res.status(400).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_PROFILE_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      actor.role === "staff" &&
+      !staffProfile
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_REQUIRED,
+      });
+    }
+
+    if (
+      !canManageStaffCompensation({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_FORBIDDEN,
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: staffProfileId,
+          businessId,
+        },
+      );
+
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    // WHY: Estate-scoped managers can only access their estate staff.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      targetProfile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_FORBIDDEN,
+      });
+    }
+
+    const compensation =
+      await StaffCompensation.findOne({
+        staffProfileId:
+          targetProfile._id,
+        businessId,
+      }).lean();
+
+    debug(
+      STAFF_COMPENSATION_LOG.FETCH_SUCCESS,
+      {
+        actorId: actor._id,
+        staffProfileId:
+          targetProfile._id,
+        hasCompensation: Boolean(
+          compensation,
+        ),
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        compensation ?
+          STAFF_COMPENSATION_COPY.COMPENSATION_OK
+        : STAFF_COMPENSATION_COPY.COMPENSATION_EMPTY,
+      compensation,
+    });
+  } catch (err) {
+    debug(
+      STAFF_COMPENSATION_LOG.FETCH_ERROR,
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * PATCH /business/staff/:id/compensation
+ * Owner + estate manager: create or update compensation.
+ */
+async function upsertStaffCompensation(
+  req,
+  res,
+) {
+  debug(
+    STAFF_COMPENSATION_LOG.UPSERT_ENTRY,
+    {
+      actorId: req.user?.sub,
+      staffProfileId: req.params?.id,
+      hasAmount:
+        Object.prototype.hasOwnProperty.call(
+          req.body || {},
+          STAFF_COMPENSATION_FIELDS.SALARY_AMOUNT,
+        ),
+      hasCadence:
+        Object.prototype.hasOwnProperty.call(
+          req.body || {},
+          STAFF_COMPENSATION_FIELDS.SALARY_CADENCE,
+        ),
+    },
+  );
+
+  try {
+    const staffProfileId =
+      req.params?.id?.toString().trim();
+    if (!staffProfileId) {
+      return res.status(400).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_PROFILE_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      actor.role === "staff" &&
+      !staffProfile
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_REQUIRED,
+      });
+    }
+
+    if (
+      !canManageStaffCompensation({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_FORBIDDEN,
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: staffProfileId,
+          businessId,
+        },
+      );
+
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    // WHY: Estate-scoped managers can only update their estate staff.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      targetProfile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_FORBIDDEN,
+      });
+    }
+
+    const body = req.body || {};
+    const hasAmount =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        STAFF_COMPENSATION_FIELDS.SALARY_AMOUNT,
+      );
+    const hasCadence =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        STAFF_COMPENSATION_FIELDS.SALARY_CADENCE,
+      );
+    const hasPayDay =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        STAFF_COMPENSATION_FIELDS.PAY_DAY,
+      );
+    const hasNotes =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        STAFF_COMPENSATION_FIELDS.NOTES,
+      );
+
+    const rawAmount =
+      hasAmount ?
+        body[
+          STAFF_COMPENSATION_FIELDS
+            .SALARY_AMOUNT
+        ]
+      : null;
+    const salaryAmount =
+      hasAmount ?
+        Number(rawAmount)
+      : null;
+    if (
+      hasAmount &&
+      (!Number.isFinite(salaryAmount) ||
+        salaryAmount < 0)
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_AMOUNT_INVALID,
+      });
+    }
+
+    const salaryCadence =
+      hasCadence ?
+        body[
+          STAFF_COMPENSATION_FIELDS
+            .SALARY_CADENCE
+        ]
+          ?.toString()
+          .trim()
+      : "";
+
+    if (
+      hasCadence &&
+      (!salaryCadence ||
+        !COMPENSATION_CADENCE_VALUES.includes(
+          salaryCadence,
+        ))
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_CADENCE_INVALID,
+      });
+    }
+
+    const existing =
+      await StaffCompensation.findOne({
+        staffProfileId:
+          targetProfile._id,
+        businessId,
+      });
+
+    if (!existing) {
+      if (!hasAmount) {
+        return res.status(400).json({
+          error:
+            STAFF_COMPENSATION_COPY.COMPENSATION_AMOUNT_REQUIRED,
+        });
+      }
+      if (!hasCadence) {
+        return res.status(400).json({
+          error:
+            STAFF_COMPENSATION_COPY.COMPENSATION_CADENCE_REQUIRED,
+        });
+      }
+
+      const compensation =
+        await StaffCompensation.create({
+          staffProfileId:
+            targetProfile._id,
+          businessId,
+          salaryAmountKobo: Math.floor(
+            salaryAmount || 0,
+          ),
+          salaryCadence,
+          payDay:
+            hasPayDay ?
+              body[
+                STAFF_COMPENSATION_FIELDS
+                  .PAY_DAY
+              ]
+                ?.toString()
+                .trim() || ""
+            : "",
+          notes:
+            hasNotes ?
+              body[
+                STAFF_COMPENSATION_FIELDS
+                  .NOTES
+              ]
+                ?.toString()
+                .trim() || ""
+            : "",
+          lastUpdatedBy: actor._id,
+          lastUpdatedAt: new Date(),
+        });
+
+      debug(
+        STAFF_COMPENSATION_LOG.UPSERT_SUCCESS,
+        {
+          actorId: actor._id,
+          staffProfileId:
+            targetProfile._id,
+          compensationId:
+            compensation._id,
+          created: true,
+        },
+      );
+
+      return res.status(201).json({
+        message:
+          STAFF_COMPENSATION_COPY.COMPENSATION_UPDATED,
+        compensation,
+      });
+    }
+
+    const updates = {};
+    if (hasAmount) {
+      updates.salaryAmountKobo =
+        Math.floor(salaryAmount || 0);
+    }
+    if (hasCadence) {
+      updates.salaryCadence =
+        salaryCadence;
+    }
+    if (hasPayDay) {
+      updates.payDay =
+        body[
+          STAFF_COMPENSATION_FIELDS
+            .PAY_DAY
+        ]
+          ?.toString()
+          .trim() || "";
+    }
+    if (hasNotes) {
+      updates.notes =
+        body[
+          STAFF_COMPENSATION_FIELDS
+            .NOTES
+        ]
+          ?.toString()
+          .trim() || "";
+    }
+
+    if (
+      Object.keys(updates).length === 0
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COMPENSATION_COPY.COMPENSATION_UPDATE_REQUIRED,
+      });
+    }
+
+    updates.lastUpdatedBy = actor._id;
+    updates.lastUpdatedAt = new Date();
+
+    existing.set(updates);
+    await existing.save();
+
+    debug(
+      STAFF_COMPENSATION_LOG.UPSERT_SUCCESS,
+      {
+        actorId: actor._id,
+        staffProfileId:
+          targetProfile._id,
+        compensationId: existing._id,
+        created: false,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        STAFF_COMPENSATION_COPY.COMPENSATION_UPDATED,
+      compensation: existing,
+    });
+  } catch (err) {
+    debug(
+      STAFF_COMPENSATION_LOG.UPSERT_ERROR,
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/staff/attendance/clock-in
+ * Staff + managers: record clock-in.
+ */
+async function clockInStaff(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: clockInStaff - entry",
+    {
+      actorId: req.user?.sub,
+      staffProfileId:
+        req.body?.staffProfileId,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    const canManage =
+      canManageAttendance({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      });
+
+    // WHY: Managers can clock in on behalf of staff.
+    const targetStaffProfileId =
+      canManage ?
+        req.body?.staffProfileId
+          ?.toString()
+          .trim()
+      : staffProfile?._id?.toString();
+
+    if (!targetStaffProfileId) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_ID_REQUIRED,
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: targetStaffProfileId,
+          businessId,
+        },
+      );
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    // WHY: Estate-scoped staff may only clock in within their estate.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      targetProfile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    const existingOpen =
+      await StaffAttendance.findOne({
+        staffProfileId:
+          targetProfile._id,
+        clockOutAt: null,
+      });
+
+    if (existingOpen) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_CLOCK_IN_OPEN,
+      });
+    }
+
+    const attendance =
+      await StaffAttendance.create({
+        staffProfileId:
+          targetProfile._id,
+        clockInAt: new Date(),
+        clockInBy: actor._id,
+      });
+
+    debug(
+      "BUSINESS CONTROLLER: clockInStaff - success",
+      {
+        actorId: actor._id,
+        attendanceId: attendance._id,
+        staffProfileId:
+          targetProfile._id,
+      },
+    );
+
+    return res.status(201).json({
+      message:
+        STAFF_COPY.STAFF_CLOCK_IN_OK,
+      attendance,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: clockInStaff - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/staff/attendance/clock-out
+ * Staff + managers: record clock-out.
+ */
+async function clockOutStaff(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: clockOutStaff - entry",
+    {
+      actorId: req.user?.sub,
+      staffProfileId:
+        req.body?.staffProfileId,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    const canManage =
+      canManageAttendance({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      });
+
+    // WHY: Managers can clock out on behalf of staff.
+    const targetStaffProfileId =
+      canManage ?
+        req.body?.staffProfileId
+          ?.toString()
+          .trim()
+      : staffProfile?._id?.toString();
+
+    if (!targetStaffProfileId) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_ID_REQUIRED,
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: targetStaffProfileId,
+          businessId,
+        },
+      );
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    // WHY: Estate-scoped staff may only clock out within their estate.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      targetProfile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    const openAttendance =
+      await StaffAttendance.findOne({
+        staffProfileId:
+          targetProfile._id,
+        clockOutAt: null,
+      });
+
+    if (!openAttendance) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_CLOCK_OUT_MISSING,
+      });
+    }
+
+    const clockOutAt = new Date();
+    const durationMinutes = Math.max(
+      0,
+      Math.floor(
+        (clockOutAt -
+          openAttendance.clockInAt) /
+          MS_PER_MINUTE,
+      ),
+    );
+
+    openAttendance.clockOutAt =
+      clockOutAt;
+    openAttendance.clockOutBy =
+      actor._id;
+    openAttendance.durationMinutes =
+      durationMinutes;
+    await openAttendance.save();
+
+    debug(
+      "BUSINESS CONTROLLER: clockOutStaff - success",
+      {
+        actorId: actor._id,
+        attendanceId:
+          openAttendance._id,
+        staffProfileId:
+          targetProfile._id,
+        durationMinutes,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        STAFF_COPY.STAFF_CLOCK_OUT_OK,
+      attendance: openAttendance,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: clockOutStaff - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/staff/attendance
+ * Staff + managers: list attendance records.
+ */
+async function listStaffAttendance(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: listStaffAttendance - entry",
+    {
+      actorId: req.user?.sub,
+      staffProfileId:
+        req.query?.staffProfileId,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    const requestedProfileId =
+      req.query?.staffProfileId
+        ?.toString()
+        .trim() || null;
+
+    const canView = canViewAttendance({
+      actorRole: actor.role,
+      staffRole:
+        staffProfile?.staffRole,
+    });
+
+    let staffProfileIds = [];
+
+    if (requestedProfileId) {
+      const targetProfile =
+        await BusinessStaffProfile.findOne(
+          {
+            _id: requestedProfileId,
+            businessId,
+          },
+        );
+      if (!targetProfile) {
+        return res.status(404).json({
+          error:
+            STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+        });
+      }
+
+      if (
+        actor.role === "staff" &&
+        actor.estateAssetId &&
+        targetProfile.estateAssetId?.toString() !==
+          actor.estateAssetId.toString()
+      ) {
+        return res.status(403).json({
+          error:
+            STAFF_COPY.STAFF_FORBIDDEN,
+        });
+      }
+
+      if (
+        !canView &&
+        staffProfile?._id?.toString() !==
+          requestedProfileId
+      ) {
+        return res.status(403).json({
+          error:
+            STAFF_COPY.STAFF_FORBIDDEN,
+        });
+      }
+
+      staffProfileIds = [
+        targetProfile._id,
+      ];
+    } else if (canView) {
+      // WHY: Managers can view attendance for all staff in scope.
+      const filter = {
+        businessId,
+      };
+      if (
+        actor.role === "staff" &&
+        actor.estateAssetId
+      ) {
+        filter.estateAssetId =
+          actor.estateAssetId;
+      }
+
+      const profiles =
+        await BusinessStaffProfile.find(
+          filter,
+        ).select("_id");
+      staffProfileIds = profiles.map(
+        (profile) => profile._id,
+      );
+    } else if (staffProfile?._id) {
+      staffProfileIds = [
+        staffProfile._id,
+      ];
+    } else {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    const attendance =
+      await StaffAttendance.find({
+        staffProfileId: {
+          $in: staffProfileIds,
+        },
+      })
+        .sort({ clockInAt: -1 })
+        .lean();
+
+    debug(
+      "BUSINESS CONTROLLER: listStaffAttendance - success",
+      {
+        actorId: actor._id,
+        count: attendance.length,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        STAFF_COPY.STAFF_ATTENDANCE_OK,
+      attendance,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: listStaffAttendance - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/production/plans/ai-draft
+ * Owner + estate manager: generate an AI draft for a production plan.
+ */
+async function generateProductionPlanDraftHandler(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: generateProductionPlanDraft - entry",
+    {
+      actorId: req.user?.sub,
+      hasProduct: Boolean(
+        req.body?.productId,
+      ),
+      hasEstate: Boolean(
+        req.body?.estateAssetId,
+      ),
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canCreateProductionPlan({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const estateAssetId =
+      req.body?.estateAssetId
+        ?.toString()
+        .trim() || "";
+    const productId =
+      req.body?.productId
+        ?.toString()
+        .trim() || "";
+    const startDate = parseDateInput(
+      req.body?.startDate,
+    );
+    const endDate = parseDateInput(
+      req.body?.endDate,
+    );
+    const useReasoning = Boolean(
+      req.body?.useReasoning,
+    );
+
+    if (!estateAssetId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.ESTATE_REQUIRED,
+      });
+    }
+    if (!productId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_REQUIRED,
+      });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATES_REQUIRED,
+      });
+    }
+    if (endDate <= startDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATE_RANGE_INVALID,
+      });
+    }
+
+    // WHY: Estate-scoped managers can only draft plans for their estate.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      actor.estateAssetId.toString() !==
+        estateAssetId
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const estateAsset =
+      await resolveEstateAsset({
+        estateAssetId,
+        businessId,
+      });
+
+    const product =
+      await businessProductService.getProductById(
+        {
+          businessId,
+          id: productId,
+        },
+      );
+    if (!product) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
+      });
+    }
+
+    // WHY: Include business-wide staff plus estate-specific staff for drafting.
+    const staffFilter = {
+      businessId,
+      status: STAFF_STATUS_ACTIVE,
+      $or: [
+        { estateAssetId },
+        { estateAssetId: null },
+      ],
+    };
+    const staffProfiles =
+      await BusinessStaffProfile.find(
+        staffFilter,
+      )
+        .populate(
+          "userId",
+          "name email",
+        )
+        .lean();
+
+    if (staffProfiles.length === 0) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.STAFF_REQUIRED_FOR_DRAFT,
+      });
+    }
+
+    const draft =
+      await generateProductionPlanDraft(
+        {
+          productName: product.name,
+          estateName: estateAsset?.name,
+          startDate:
+            startDate.toISOString(),
+          endDate:
+            endDate.toISOString(),
+          staffProfiles,
+          useReasoning,
+          context: {
+            route: req.originalUrl,
+            requestId: req.id,
+            userRole: actor.role,
+            businessId,
+            country:
+              req.headers[
+                COUNTRY_HEADER_KEY
+              ] || DEFAULT_COUNTRY,
+          },
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: generateProductionPlanDraft - success",
+      {
+        actorId: actor._id,
+        phaseCount: draft.phases.length,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.PLAN_DRAFT_OK,
+      draft: {
+        ...draft,
+        estateAssetId,
+        productId,
+        startDate:
+          startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      },
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: generateProductionPlanDraft - error",
+      {
+        error: err.message,
+        resolution_hint:
+          "Verify inputs and AI configuration before retrying.",
+        reason:
+          "production_plan_draft_failed",
+      },
+    );
+    return res.status(400).json({
+      error:
+        PRODUCTION_COPY.PLAN_DRAFT_FAILED,
+    });
+  }
+}
+
+/**
+ * POST /business/production/plans
+ * Owner + estate manager: create a production plan with phases/tasks.
+ */
+async function createProductionPlan(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: createProductionPlan - entry",
+    {
+      actorId: req.user?.sub,
+      hasProduct: Boolean(
+        req.body?.productId,
+      ),
+      hasEstate: Boolean(
+        req.body?.estateAssetId,
+      ),
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canCreateProductionPlan({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const estateAssetId =
+      req.body?.estateAssetId
+        ?.toString()
+        .trim() || "";
+    const productId =
+      req.body?.productId
+        ?.toString()
+        .trim() || "";
+    const title =
+      req.body?.title
+        ?.toString()
+        .trim() || "";
+    const notes =
+      req.body?.notes
+        ?.toString()
+        .trim() || "";
+    const aiGenerated = Boolean(
+      req.body?.aiGenerated,
+    );
+
+    const startDate = parseDateInput(
+      req.body?.startDate,
+    );
+    const endDate = parseDateInput(
+      req.body?.endDate,
+    );
+
+    if (!estateAssetId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.ESTATE_REQUIRED,
+      });
+    }
+    if (!productId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_REQUIRED,
+      });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATES_REQUIRED,
+      });
+    }
+    if (endDate <= startDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATE_RANGE_INVALID,
+      });
+    }
+
+    // WHY: Estate-scoped managers can only create plans for their estate.
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      actor.estateAssetId.toString() !==
+        estateAssetId
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    await resolveEstateAsset({
+      estateAssetId,
+      businessId,
+    });
+
+    const rawPhases =
+      Array.isArray(req.body?.phases) ?
+        req.body.phases
+      : [];
+
+    const phaseTemplates =
+      rawPhases.length > 0 ?
+        rawPhases
+      : DEFAULT_PRODUCTION_PHASES;
+
+    if (phaseTemplates.length === 0) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PHASES_REQUIRED,
+      });
+    }
+
+    const normalizedPhases =
+      phaseTemplates.map(
+        (phase, index) => ({
+          name:
+            (phase?.name || "")
+              .toString()
+              .trim() ||
+            DEFAULT_PRODUCTION_PHASES[
+              index
+            ]?.name ||
+            `${DEFAULT_PHASE_NAME_PREFIX} ${index + 1}`,
+          order:
+            (
+              Number.isFinite(
+                phase?.order,
+              ) &&
+              Number(phase.order) > 0
+            ) ?
+              Math.floor(
+                Number(phase.order),
+              )
+            : index + 1,
+          kpiTarget:
+            phase?.kpiTarget || null,
+          tasks:
+            (
+              Array.isArray(
+                phase?.tasks,
+              )
+            ) ?
+              phase.tasks
+            : [],
+        }),
+      );
+
+    const scheduledPhases =
+      buildPhaseSchedule({
+        startDate,
+        endDate,
+        phases: normalizedPhases,
+      });
+
+    const tasksInputByPhase =
+      scheduledPhases.map(
+        (phase) => phase.tasks || [],
+      );
+
+    const assignedStaffIds =
+      tasksInputByPhase
+        .flat()
+        .map((task) =>
+          task?.assignedStaffId
+            ?.toString()
+            .trim(),
+        )
+        .filter(Boolean);
+
+    // WHY: Preload staff profiles for assignment validation.
+    const staffProfiles =
+      assignedStaffIds.length > 0 ?
+        await BusinessStaffProfile.find(
+          {
+            _id: {
+              $in: assignedStaffIds,
+            },
+            businessId,
+          },
+        ).lean()
+      : [];
+    const staffProfileMap = new Map(
+      staffProfiles.map((profile) => [
+        profile._id.toString(),
+        profile,
+      ]),
+    );
+
+    // WHY: Validate all task assignments before creating records.
+    scheduledPhases.forEach((phase) => {
+      const scheduledTasks =
+        buildTaskSchedule({
+          phaseStart: phase.startDate,
+          phaseEnd: phase.endDate,
+          tasks: phase.tasks || [],
+        });
+      scheduledTasks.forEach((task) => {
+        if (!task.roleRequired) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ROLE_REQUIRED,
+          );
+        }
+        if (
+          !STAFF_ROLE_VALUES.includes(
+            task.roleRequired,
+          )
+        ) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ROLE_REQUIRED,
+          );
+        }
+        if (!task.assignedStaffId) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ASSIGN_REQUIRED,
+          );
+        }
+
+        const assignedProfile =
+          staffProfileMap.get(
+            task.assignedStaffId
+              .toString()
+              .trim(),
+          );
+        if (!assignedProfile) {
+          throw new Error(
+            STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+          );
+        }
+        if (
+          assignedProfile.staffRole !==
+          task.roleRequired
+        ) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+          );
+        }
+        if (
+          assignedProfile.estateAssetId &&
+          assignedProfile.estateAssetId.toString() !==
+            estateAssetId
+        ) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+          );
+        }
+      });
+    });
+
+    const plan =
+      await ProductionPlan.create({
+        businessId,
+        estateAssetId,
+        productId,
+        title,
+        startDate,
+        endDate,
+        status: PRODUCTION_STATUS_DRAFT,
+        createdBy: actor._id,
+        notes,
+        aiGenerated,
+      });
+
+    const createdPhases =
+      await ProductionPhase.insertMany(
+        scheduledPhases.map(
+          (phase) => ({
+            planId: plan._id,
+            name: phase.name,
+            order: phase.order,
+            startDate: phase.startDate,
+            endDate: phase.endDate,
+            status:
+              PRODUCTION_PHASE_STATUS_PENDING,
+            kpiTarget: phase.kpiTarget,
+          }),
+        ),
+      );
+
+    const tasksToCreate = [];
+    createdPhases.forEach(
+      (phase, index) => {
+        const phaseTasks =
+          tasksInputByPhase[index] ||
+          [];
+        if (phaseTasks.length === 0) {
+          return;
+        }
+
+        const scheduledTasks =
+          buildTaskSchedule({
+            phaseStart: phase.startDate,
+            phaseEnd: phase.endDate,
+            tasks: phaseTasks,
+          });
+
+        scheduledTasks.forEach(
+          (task) => {
+            const assignedProfile =
+              staffProfileMap.get(
+                task.assignedStaffId
+                  .toString()
+                  .trim(),
+              );
+
+            const isOwner =
+              actor.role ===
+              "business_owner";
+            const approvalStatus =
+              isOwner ?
+                PRODUCTION_TASK_APPROVAL_APPROVED
+              : PRODUCTION_TASK_APPROVAL_PENDING;
+            const reviewedBy =
+              isOwner ?
+                actor._id
+              : null;
+            const reviewedAt =
+              isOwner ?
+                new Date()
+              : null;
+
+            tasksToCreate.push({
+              planId: plan._id,
+              phaseId: phase._id,
+              title:
+                task.title
+                  ?.toString()
+                  .trim() ||
+                DEFAULT_TASK_TITLE,
+              roleRequired:
+                task.roleRequired,
+              assignedStaffId:
+                assignedProfile._id,
+              weight: task.weight || 1,
+              startDate: task.startDate,
+              dueDate: task.dueDate,
+              status:
+                PRODUCTION_TASK_STATUS_PENDING,
+              instructions:
+                task.instructions
+                  ?.toString()
+                  .trim() || "",
+              dependencies:
+                (
+                  Array.isArray(
+                    task.dependencies,
+                  )
+                ) ?
+                  task.dependencies
+                : [],
+              createdBy: actor._id,
+              approvalStatus,
+              assignedBy: actor._id,
+              reviewedBy,
+              reviewedAt,
+              rejectionReason: "",
+            });
+          },
+        );
+      },
+    );
+
+    const createdTasks =
+      tasksToCreate.length > 0 ?
+        await ProductionTask.insertMany(
+          tasksToCreate,
+        )
+      : [];
+
+    debug(
+      "BUSINESS CONTROLLER: createProductionPlan - success",
+      {
+        actorId: actor._id,
+        planId: plan._id,
+        phases: createdPhases.length,
+        tasks: createdTasks.length,
+      },
+    );
+
+    return res.status(201).json({
+      message:
+        PRODUCTION_COPY.PLAN_CREATED,
+      plan,
+      phases: createdPhases,
+      tasks: createdTasks,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: createProductionPlan - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/production/plans
+ * Staff + owner: list production plans.
+ */
+async function listProductionPlans(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: listProductionPlans - entry",
+    {
+      actorId: req.user?.sub,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      actor.role === "staff" &&
+      !staffProfile
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_REQUIRED,
+      });
+    }
+
+    const filter = {
+      businessId,
+    };
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId
+    ) {
+      filter.estateAssetId =
+        actor.estateAssetId;
+    }
+
+    const plans =
+      await ProductionPlan.find(filter)
+        .sort({ createdAt: -1 })
+        .lean();
+
+    debug(
+      "BUSINESS CONTROLLER: listProductionPlans - success",
+      {
+        actorId: actor._id,
+        count: plans.length,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.PLAN_LIST_OK,
+      plans,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: listProductionPlans - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/production/plans/:id
+ * Staff + owner: plan detail with phases/tasks/outputs.
+ */
+async function getProductionPlanDetail(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: getProductionPlanDetail - entry",
+    {
+      actorId: req.user?.sub,
+      planId: req.params?.id,
+    },
+  );
+
+  try {
+    const planId = req.params?.id
+      ?.toString()
+      .trim();
+    if (!planId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLAN_ID_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      actor.role === "staff" &&
+      !staffProfile
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_REQUIRED,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: planId,
+        businessId,
+      }).lean();
+
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      plan.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const phases =
+      await ProductionPhase.find({
+        planId: plan._id,
+      })
+        .sort({ order: 1 })
+        .lean();
+
+    const tasks =
+      await ProductionTask.find({
+        planId: plan._id,
+      })
+        .sort({ startDate: 1 })
+        .lean();
+
+    const outputs =
+      await ProductionOutput.find({
+        planId: plan._id,
+      })
+        .sort({ createdAt: -1 })
+        .lean();
+
+    const kpis = computeProductionKpis({
+      phases,
+      tasks,
+      outputs,
+    });
+
+    debug(
+      "BUSINESS CONTROLLER: getProductionPlanDetail - success",
+      {
+        actorId: actor._id,
+        planId: plan._id,
+        phases: phases.length,
+        tasks: tasks.length,
+        outputs: outputs.length,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.PLAN_DETAIL_OK,
+      plan,
+      phases,
+      tasks,
+      outputs,
+      kpis,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: getProductionPlanDetail - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * PATCH /business/production/tasks/:id/status
+ * Staff: update task status (own tasks only).
+ */
+async function updateProductionTaskStatus(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: updateProductionTaskStatus - entry",
+    {
+      actorId: req.user?.sub,
+      taskId: req.params?.id,
+      status: req.body?.status,
+    },
+  );
+
+  try {
+    const taskId = req.params?.id
+      ?.toString()
+      .trim();
+    const nextStatus =
+      req.body?.status
+        ?.toString()
+        .trim() || "";
+
+    if (!taskId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+    if (!nextStatus) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_STATUS_REQUIRED,
+      });
+    }
+    if (
+      !TASK_STATUS_VALUES.includes(
+        nextStatus,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_STATUS_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+      });
+
+    const task =
+      await ProductionTask.findById(
+        taskId,
+      );
+
+    if (!task) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: task.planId,
+        businessId,
+      }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    // WHY: Staff can only update tasks assigned to them.
+    if (
+      actor.role === "staff" &&
+      staffProfile?._id?.toString() !==
+        task.assignedStaffId?.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    task.status = nextStatus;
+    if (
+      nextStatus ===
+      PRODUCTION_TASK_STATUS_DONE
+    ) {
+      task.completedAt = new Date();
+    }
+    await task.save();
+
+    debug(
+      "BUSINESS CONTROLLER: updateProductionTaskStatus - success",
+      {
+        actorId: actor._id,
+        taskId: task._id,
+        status: task.status,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.TASK_STATUS_UPDATED,
+      task,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: updateProductionTaskStatus - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/production/tasks/:id/approve
+ * Business owner: approve task assignment.
+ */
+async function approveProductionTask(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: approveProductionTask - entry",
+    {
+      actorId: req.user?.sub,
+      taskId: req.params?.id,
+    },
+  );
+
+  try {
+    const taskId = req.params?.id
+      ?.toString()
+      .trim();
+    if (!taskId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    if (
+      actor.role !== "business_owner"
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_ASSIGN_APPROVAL_REQUIRED,
+      });
+    }
+
+    const task =
+      await ProductionTask.findById(
+        taskId,
+      );
+    if (!task) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: task.planId,
+        businessId,
+      }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    task.approvalStatus =
+      PRODUCTION_TASK_APPROVAL_APPROVED;
+    task.reviewedBy = actor._id;
+    task.reviewedAt = new Date();
+    task.rejectionReason = "";
+    await task.save();
+
+    debug(
+      "BUSINESS CONTROLLER: approveProductionTask - success",
+      {
+        actorId: actor._id,
+        taskId: task._id,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.TASK_ASSIGN_APPROVED,
+      task,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: approveProductionTask - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/production/tasks/:id/reject
+ * Business owner: reject task assignment.
+ */
+async function rejectProductionTask(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: rejectProductionTask - entry",
+    {
+      actorId: req.user?.sub,
+      taskId: req.params?.id,
+    },
+  );
+
+  try {
+    const taskId = req.params?.id
+      ?.toString()
+      .trim();
+    if (!taskId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const rejectionReason =
+      req.body?.reason
+        ?.toString()
+        .trim() || "";
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    if (
+      actor.role !== "business_owner"
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_ASSIGN_REJECT_REQUIRED,
+      });
+    }
+
+    const task =
+      await ProductionTask.findById(
+        taskId,
+      );
+    if (!task) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: task.planId,
+        businessId,
+      }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    task.approvalStatus =
+      PRODUCTION_TASK_APPROVAL_REJECTED;
+    task.reviewedBy = actor._id;
+    task.reviewedAt = new Date();
+    task.rejectionReason =
+      rejectionReason;
+    await task.save();
+
+    debug(
+      "BUSINESS CONTROLLER: rejectProductionTask - success",
+      {
+        actorId: actor._id,
+        taskId: task._id,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.TASK_ASSIGN_REJECTED,
+      task,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: rejectProductionTask - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * POST /business/production/outputs
+ * Owner + estate manager: record production output.
+ */
+async function createProductionOutput(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: createProductionOutput - entry",
+    {
+      actorId: req.user?.sub,
+      planId: req.body?.planId,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canCreateProductionPlan({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const planId =
+      req.body?.planId
+        ?.toString()
+        .trim() || "";
+    const productId =
+      req.body?.productId
+        ?.toString()
+        .trim() || "";
+    const unitType =
+      req.body?.unitType
+        ?.toString()
+        .trim() || "";
+    const quantity = Number(
+      req.body?.quantity,
+    );
+    const readyForSale = Boolean(
+      req.body?.readyForSale,
+    );
+    const rawPricePerUnit =
+      req.body?.pricePerUnit != null ?
+        Number(req.body.pricePerUnit)
+      : null;
+    // WHY: Normalize invalid prices to null to avoid NaN writes.
+    const pricePerUnit =
+      Number.isFinite(rawPricePerUnit) ?
+        rawPricePerUnit
+      : null;
+
+    if (!planId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLAN_ID_REQUIRED,
+      });
+    }
+    if (!productId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_REQUIRED,
+      });
+    }
+    if (
+      !OUTPUT_UNIT_VALUES.includes(
+        unitType,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.INVALID_UNIT_TYPE,
+      });
+    }
+    if (
+      !Number.isFinite(quantity) ||
+      quantity <= 0
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.OUTPUT_QUANTITY_REQUIRED,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: planId,
+        businessId,
+      }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    const product =
+      await businessProductService.getProductById(
+        {
+          businessId,
+          id: productId,
+        },
+      );
+    if (!product) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
+      });
+    }
+
+    const output =
+      await ProductionOutput.create({
+        planId: plan._id,
+        productId,
+        unitType,
+        quantity,
+        readyForSale,
+        pricePerUnit,
+      });
+
+    let listingUpdated = false;
+    let listingError = null;
+    let updatedProduct = null;
+    if (readyForSale) {
+      debug(
+        PRODUCTION_OUTPUT_LOG.LISTING_UPDATE_START,
+        {
+          actorId: actor._id,
+          productId,
+          outputId: output._id,
+        },
+      );
+
+      try {
+        const currentStock = Number(
+          product.stock || 0,
+        );
+        const nextStock =
+          currentStock + quantity;
+        const updates = {
+          stock: nextStock,
+          isActive: true,
+        };
+        if (
+          Number.isFinite(pricePerUnit)
+        ) {
+          updates.price = pricePerUnit;
+        }
+
+        updatedProduct =
+          await businessProductService.updateProduct(
+            {
+              businessId,
+              id: productId,
+              updates,
+              actor,
+            },
+          );
+
+        listingUpdated = true;
+        debug(
+          PRODUCTION_OUTPUT_LOG.LISTING_UPDATE_SUCCESS,
+          {
+            actorId: actor._id,
+            productId,
+            outputId: output._id,
+            nextStock,
+          },
+        );
+      } catch (err) {
+        listingError = err.message;
+        debug(
+          PRODUCTION_OUTPUT_LOG.LISTING_UPDATE_ERROR,
+          {
+            actorId: actor._id,
+            productId,
+            outputId: output._id,
+            reason:
+              PRODUCTION_OUTPUT_LISTING_REASON,
+            resolution_hint:
+              PRODUCTION_OUTPUT_LISTING_HINT,
+            error: err.message,
+          },
+        );
+      }
+    }
+
+    debug(
+      "BUSINESS CONTROLLER: createProductionOutput - success",
+      {
+        actorId: actor._id,
+        outputId: output._id,
+      },
+    );
+
+    return res.status(201).json({
+      message:
+        PRODUCTION_COPY.OUTPUT_CREATED,
+      output,
+      [PRODUCTION_OUTPUT_RESPONSE_KEYS.LISTING_UPDATED]:
+        listingUpdated,
+      [PRODUCTION_OUTPUT_RESPONSE_KEYS.LISTING_ERROR]:
+        listingError,
+      [PRODUCTION_OUTPUT_RESPONSE_KEYS.PRODUCT]:
+        updatedProduct,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: createProductionOutput - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+/**
+ * GET /business/production/outputs
+ * Staff + owner: list production outputs.
+ */
+async function listProductionOutputs(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: listProductionOutputs - entry",
+    {
+      actorId: req.user?.sub,
+      planId: req.query?.planId,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      actor.role === "staff" &&
+      !staffProfile
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_REQUIRED,
+      });
+    }
+
+    const planId =
+      req.query?.planId
+        ?.toString()
+        .trim() || null;
+
+    const filter = {
+      planId,
+    };
+    if (!planId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLAN_ID_REQUIRED,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: planId,
+        businessId,
+      }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      plan.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const outputs =
+      await ProductionOutput.find(
+        filter,
+      )
+        .sort({ createdAt: -1 })
+        .lean();
+
+    debug(
+      "BUSINESS CONTROLLER: listProductionOutputs - success",
+      {
+        actorId: actor._id,
+        count: outputs.length,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.OUTPUT_LIST_OK,
+      outputs,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: listProductionOutputs - error",
       err.message,
     );
     return res
@@ -4691,6 +8057,7 @@ async function getTenants(req, res) {
 
 module.exports = {
   createProduct,
+  generateProductDraftHandler,
   getAllProducts,
   getProductById,
   updateProduct,
@@ -4698,6 +8065,22 @@ module.exports = {
   restoreProduct,
   uploadProductImage,
   deleteProductImage,
+  listStaffProfiles,
+  getStaffProfile,
+  getStaffCompensation,
+  upsertStaffCompensation,
+  clockInStaff,
+  clockOutStaff,
+  listStaffAttendance,
+  generateProductionPlanDraftHandler,
+  createProductionPlan,
+  listProductionPlans,
+  getProductionPlanDetail,
+  updateProductionTaskStatus,
+  approveProductionTask,
+  rejectProductionTask,
+  createProductionOutput,
+  listProductionOutputs,
   getOrders,
   updateOrderStatus,
   createAsset,

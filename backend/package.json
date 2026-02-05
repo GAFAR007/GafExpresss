@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "seed:staff-bots": "node scripts/seed-staff-bots.js",
+    "cleanup:staff-bots": "node scripts/cleanup-staff-bots.js"
   },
   "keywords": [],
   "author": "",
@@ -19,9 +21,11 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "glob": "^13.0.0",
+    "groq-sdk": "^0.37.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.0",
     "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   },
