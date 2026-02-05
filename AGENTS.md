@@ -152,6 +152,51 @@ UNKNOWN_PROVIDER_ERROR is a last resort and must include justification.
 
 ---
 
+## 4.1) Global alignment rule (MANDATORY)
+
+All AGENTS.md files MUST work together and stay consistent.
+
+If you add a new cross-cutting rule here, you MUST mirror it in:
+
+- `frontend/AGENTS.md`
+- `backend/AGENTS.md`
+
+If there is a conflict → **STOP and ASK**.
+
+---
+
+## 4.2) Global safety + performance rule (MANDATORY)
+
+All changes must optimize for:
+
+- **Safety** (no secrets, no unsafe defaults)
+- **Security** (least privilege, scoped access, sanitised logs)
+- **Scalability** (avoid N+1, add indexes, batch operations)
+- **Performance** (fast UI, minimal lag, small payloads)
+
+If a change risks any of the above → **STOP and ASK**.
+
+---
+
+## 5️⃣ How to guarantee ZERO lag (important rules)
+
+If you follow these, chat will feel instant:
+
+### Backend rules
+
+- Never do AI inside socket events.
+- Never upload files via socket.
+- Save message → emit → handle receipts async.
+- Index `conversationId` + `createdAt`.
+
+### Frontend rules
+
+- Optimistic UI (show message immediately).
+- Socket only for sync, not rendering logic.
+- Batch read receipts.
+
+---
+
 ## Retry and fallback rules
 
 Retries are NOT automatic.
