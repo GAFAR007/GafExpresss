@@ -337,6 +337,8 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
           name: session.user.name,
           email: session.user.email,
           role: invitedUser.role,
+          // WHY: Prefer invite-linked business scope when available.
+          businessId: invitedUser.businessId ?? session.user.businessId,
         );
         final updatedSession = AuthSession(
           user: updatedUser,

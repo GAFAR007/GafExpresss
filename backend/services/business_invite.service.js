@@ -25,6 +25,12 @@ const INVITE_TTL_DAYS = Number(
 const FRONTEND_BASE_URL =
   (process.env.FRONTEND_BASE_URL || 'http://localhost:5173').trim();
 
+// WHY: Centralize invite error strings for reuse.
+const INVITE_ERRORS = {
+  STAFF_ROLE_REQUIRED:
+    'Staff role is required for staff invites',
+};
+
 function generateToken() {
   return crypto.randomBytes(24).toString('hex');
 }
@@ -67,6 +73,7 @@ async function createInvite({
   inviterId,
   inviteeEmail,
   role,
+  staffRole,
   estateAssetId,
   agreementText,
 }) {
@@ -87,6 +94,9 @@ async function createInvite({
   if (role === 'tenant' && !agreementText) {
     throw new Error('Agreement text is required for tenant invites');
   }
+  if (role === 'staff' && !staffRole) {
+    throw new Error(INVITE_ERRORS.STAFF_ROLE_REQUIRED);
+  }
 
   const token = generateToken();
   const tokenHash = hashToken(token);
@@ -102,6 +112,7 @@ async function createInvite({
     inviterId,
     inviteeEmail: normalizedEmail,
     role,
+    staffRole: staffRole || null,
     estateAssetId: estateAssetId || null,
     tokenHash,
     tokenExpiresAt,

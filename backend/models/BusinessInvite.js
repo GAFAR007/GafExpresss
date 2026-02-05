@@ -15,6 +15,9 @@
 
 const mongoose = require('mongoose');
 const debug = require('../utils/debug');
+const {
+  STAFF_ROLES,
+} = require('./BusinessStaffProfile');
 
 debug('Loading BusinessInvite model...');
 
@@ -50,6 +53,12 @@ const businessInviteSchema = new mongoose.Schema(
       type: String,
       enum: ['staff', 'tenant'],
       required: true,
+    },
+    // WHY: Preserve staff role choice during invite flow.
+    staffRole: {
+      type: String,
+      enum: STAFF_ROLES,
+      default: null,
     },
     estateAssetId: {
       type: mongoose.Schema.Types.ObjectId,

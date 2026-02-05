@@ -147,6 +147,7 @@ class BusinessTeamApi {
     required String? token,
     required String email,
     required String role,
+    String? staffRole,
     String? estateAssetId,
     String? agreementText,
   }) async {
@@ -155,6 +156,7 @@ class BusinessTeamApi {
       "createInvite() start",
       extra: {
         "role": role,
+        "staffRole": staffRole,
         "hasEstate": estateAssetId != null,
       },
     );
@@ -164,6 +166,8 @@ class BusinessTeamApi {
       data: {
         "email": email.trim(),
         "role": role,
+        if (staffRole != null && staffRole.trim().isNotEmpty)
+          "staffRole": staffRole.trim(),
         if (estateAssetId != null && estateAssetId.trim().isNotEmpty)
           "estateAssetId": estateAssetId.trim(),
         if (agreementText != null && agreementText.trim().isNotEmpty)

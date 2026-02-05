@@ -20,12 +20,19 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/business_staff_compensation_section.dart';
+import 'package:frontend/app/features/home/presentation/business_staff_routes.dart';
 import 'package:frontend/app/features/home/presentation/business_team_lookup_invite_cards.dart';
 import 'package:frontend/app/features/home/presentation/business_team_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_team_user.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/theme/app_spacing.dart';
+
+// WHY: Centralize staff directory copy to avoid inline strings.
+const String _staffDirectoryLabel = "Open staff directory";
+const String _staffDirectoryTap = "staff_directory_open";
 
 class BusinessTeamScreen extends ConsumerStatefulWidget {
   const BusinessTeamScreen({super.key});
@@ -171,7 +178,18 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
               color: colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () {
+                _logTap(_staffDirectoryTap);
+                context.go(businessStaffDirectoryRoute);
+              },
+              child: const Text(_staffDirectoryLabel),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
           // WHY: Reuse shared lookup card to keep search behavior consistent.
           BusinessUserLookupCard(
             source: "BUSINESS_TEAM",
@@ -203,6 +221,9 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
               colorScheme: colorScheme,
             ),
           ],
+          const SizedBox(height: AppSpacing.xl),
+          // WHY: Keep compensation edits accessible without expanding the role form.
+          const BusinessStaffCompensationSection(),
         ],
       ),
       bottomNavigationBar: BusinessBottomNav(
@@ -358,6 +379,9 @@ class _BusinessTeamScreenState extends ConsumerState<BusinessTeamScreen> {
         context.go('/business-orders');
         return;
       case 4:
+        context.go('/chat');
+        return;
+      case 5:
         context.go('/settings');
         return;
     }

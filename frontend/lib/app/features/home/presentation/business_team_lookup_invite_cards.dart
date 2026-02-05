@@ -23,6 +23,7 @@ import 'package:frontend/app/features/home/presentation/business_asset_model.dar
 import 'package:frontend/app/features/home/presentation/business_team_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_team_user.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 
 // WHY: Default to the NG context because tenancy flows are NGN-based.
 const String _kDefaultCountry = "NG";
@@ -39,6 +40,8 @@ const String _kLookupModePhone = "phone";
 // WHY: Keep roles consistent with backend enums.
 const String _kRoleStaff = "staff";
 const String _kRoleTenant = "tenant";
+// WHY: Default staff role prevents empty invite submissions.
+const String _kDefaultStaffRole = staffRoleEstateManager;
 // WHY: Keep log contexts consistent across widgets.
 const String _kLogContextLookup = "Lookup";
 const String _kLogContextInvite = "Invite";
@@ -80,6 +83,22 @@ class _Copy {
   static const String inviteRoleLabel = "Role";
   static const String inviteRoleStaff = "Staff";
   static const String inviteRoleTenant = "Tenant";
+  static const String inviteStaffRoleLabel = "Staff role";
+  static const String inviteMissingStaffRole =
+      "Select a staff role for staff invites.";
+  static const String staffRoleAssetManager = "Asset manager";
+  static const String staffRoleFarmManager = "Farm manager";
+  static const String staffRoleEstateManager = "Estate manager";
+  static const String staffRoleAccountant = "Accountant";
+  static const String staffRoleFieldAgent = "Field agent";
+  static const String staffRoleCleaner = "Cleaner";
+  static const String staffRoleFarmer = "Farmer";
+  static const String staffRoleInventoryKeeper = "Inventory keeper";
+  static const String staffRoleAuditor = "Auditor";
+  static const String staffRoleSecurity = "Security";
+  static const String staffRoleMaintenanceTechnician =
+      "Maintenance / Technician";
+  static const String staffRoleLogisticsDriver = "Logistics / Driver";
   static const String inviteEstateLabel = "Estate asset";
   static const String inviteAgreementLabel =
       "Agreement text (required for tenants)";
@@ -129,6 +148,65 @@ class _UiSpacing {
   static const double microGap = 2;
   static const double summaryRadius = 12;
 }
+
+// WHY: Keep staff role options centralized for dropdowns.
+class _StaffRoleOption {
+  final String value;
+  final String label;
+
+  const _StaffRoleOption(this.value, this.label);
+}
+
+const List<_StaffRoleOption> _staffRoleOptions = [
+  _StaffRoleOption(
+    staffRoleEstateManager,
+    _Copy.staffRoleEstateManager,
+  ),
+  _StaffRoleOption(
+    staffRoleFarmManager,
+    _Copy.staffRoleFarmManager,
+  ),
+  _StaffRoleOption(
+    staffRoleAssetManager,
+    _Copy.staffRoleAssetManager,
+  ),
+  _StaffRoleOption(
+    staffRoleAccountant,
+    _Copy.staffRoleAccountant,
+  ),
+  _StaffRoleOption(
+    staffRoleFieldAgent,
+    _Copy.staffRoleFieldAgent,
+  ),
+  _StaffRoleOption(
+    staffRoleInventoryKeeper,
+    _Copy.staffRoleInventoryKeeper,
+  ),
+  _StaffRoleOption(
+    staffRoleFarmer,
+    _Copy.staffRoleFarmer,
+  ),
+  _StaffRoleOption(
+    staffRoleCleaner,
+    _Copy.staffRoleCleaner,
+  ),
+  _StaffRoleOption(
+    staffRoleAuditor,
+    _Copy.staffRoleAuditor,
+  ),
+  _StaffRoleOption(
+    staffRoleSecurity,
+    _Copy.staffRoleSecurity,
+  ),
+  _StaffRoleOption(
+    staffRoleMaintenanceTechnician,
+    _Copy.staffRoleMaintenanceTechnician,
+  ),
+  _StaffRoleOption(
+    staffRoleLogisticsDriver,
+    _Copy.staffRoleLogisticsDriver,
+  ),
+];
 
 // WHY: Centralize multi-line text input sizing.
 const int _kAgreementLines = 4;
@@ -668,6 +746,7 @@ class _BusinessInviteFormCardState
   final _emailCtrl = TextEditingController();
   final _agreementCtrl = TextEditingController();
   String _role = _kRoleStaff;
+  String _staffRole = _kDefaultStaffRole;
   String? _estateAssetId;
   String? _error;
   bool _isSending = false;
@@ -703,6 +782,10 @@ class _BusinessInviteFormCardState
       setState(() => _error = _Copy.inviteMissingAgreement);
       return;
     }
+    if (_role == _kRoleStaff && _staffRole.trim().isEmpty) {
+      setState(() => _error = _Copy.inviteMissingStaffRole);
+      return;
+    }
 
     final session = ref.read(authSessionProvider);
     // WHY: Block sending when the auth session is not valid.
@@ -719,7 +802,11 @@ class _BusinessInviteFormCardState
 
     _log(
       _LogKeys.inviteSendStart,
-      extra: {"role": _role, "hasEstate": _estateAssetId != null},
+      extra: {
+        "role": _role,
+        "staffRole": _staffRole,
+        "hasEstate": _estateAssetId != null,
+      },
     );
 
     try {
@@ -729,6 +816,7 @@ class _BusinessInviteFormCardState
         token: session.token,
         email: email,
         role: _role,
+        staffRole: _role == _kRoleStaff ? _staffRole : null,
         estateAssetId: _estateAssetId,
         agreementText: _role == _kRoleTenant ? _agreementCtrl.text : null,
       );
@@ -746,6 +834,7 @@ class _BusinessInviteFormCardState
         _agreementCtrl.clear();
         _estateAssetId = null;
         _role = _kRoleStaff;
+        _staffRole = _kDefaultStaffRole;
       });
     } catch (e) {
       logBusinessTeamApiFailure(
@@ -756,6 +845,7 @@ class _BusinessInviteFormCardState
           "hasEstate": _estateAssetId != null,
           "hasAgreement": _agreementCtrl.text.trim().isNotEmpty,
           "role": _role,
+          "staffRole": _staffRole,
         },
         error: e,
       );
@@ -778,6 +868,7 @@ class _BusinessInviteFormCardState
       emailCtrl: _emailCtrl,
       agreementCtrl: _agreementCtrl,
       role: _role,
+      staffRole: _staffRole,
       estateAssetId: _estateAssetId,
       error: _error,
       isSending: _isSending,
@@ -791,7 +882,15 @@ class _BusinessInviteFormCardState
           if (_role != _kRoleTenant) {
             _estateAssetId = null;
           }
+          if (_role == _kRoleStaff && _staffRole.trim().isEmpty) {
+            _staffRole = _kDefaultStaffRole;
+          }
         });
+      },
+      onStaffRoleChanged: (value) {
+        if (value == null) return;
+        // WHY: Track staff role selection for staff invites.
+        setState(() => _staffRole = value);
       },
       onEstateChanged: (value) {
         // WHY: Track estate selection for tenant invites.
@@ -827,12 +926,14 @@ class _BusinessInviteFormBody extends StatelessWidget {
   final TextEditingController emailCtrl;
   final TextEditingController agreementCtrl;
   final String role;
+  final String staffRole;
   final String? estateAssetId;
   final String? error;
   final bool isSending;
   final bool estateAssetsLoading;
   final List<BusinessAsset> estateAssets;
   final ValueChanged<String?> onRoleChanged;
+  final ValueChanged<String?> onStaffRoleChanged;
   final ValueChanged<String?> onEstateChanged;
   final VoidCallback onSendInvite;
   final bool showHeader;
@@ -844,12 +945,14 @@ class _BusinessInviteFormBody extends StatelessWidget {
     required this.emailCtrl,
     required this.agreementCtrl,
     required this.role,
+    required this.staffRole,
     required this.estateAssetId,
     required this.error,
     required this.isSending,
     required this.estateAssetsLoading,
     required this.estateAssets,
     required this.onRoleChanged,
+    required this.onStaffRoleChanged,
     required this.onEstateChanged,
     required this.onSendInvite,
     this.showHeader = true,
@@ -860,6 +963,8 @@ class _BusinessInviteFormBody extends StatelessWidget {
   Widget build(BuildContext context) {
     // WHY: Tenant-only fields keep staff invites uncluttered.
     final showTenantFields = role == _kRoleTenant;
+    // WHY: Staff role is required when inviting staff.
+    final showStaffRole = role == _kRoleStaff;
 
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -876,6 +981,14 @@ class _BusinessInviteFormBody extends StatelessWidget {
           isSending: isSending,
           onRoleChanged: onRoleChanged,
         ),
+        if (showStaffRole) ...[
+          const SizedBox(height: _UiSpacing.sectionGap),
+          _InviteStaffRoleField(
+            staffRole: staffRole,
+            isSending: isSending,
+            onStaffRoleChanged: onStaffRoleChanged,
+          ),
+        ],
         if (showTenantFields) ...[
           const SizedBox(height: _UiSpacing.sectionGap),
           _InviteTenantFields(
@@ -993,6 +1106,38 @@ class _InviteRoleField extends StatelessWidget {
         ),
       ],
       onChanged: isSending ? null : onRoleChanged,
+    );
+  }
+}
+
+class _InviteStaffRoleField extends StatelessWidget {
+  final String staffRole;
+  final bool isSending;
+  final ValueChanged<String?> onStaffRoleChanged;
+
+  const _InviteStaffRoleField({
+    required this.staffRole,
+    required this.isSending,
+    required this.onStaffRoleChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // WHY: Staff role selection is required for staff invites.
+    return DropdownButtonFormField<String>(
+      value: staffRole,
+      onChanged: isSending ? null : onStaffRoleChanged,
+      decoration: const InputDecoration(
+        labelText: _Copy.inviteStaffRoleLabel,
+      ),
+      items: _staffRoleOptions
+          .map(
+            (option) => DropdownMenuItem<String>(
+              value: option.value,
+              child: Text(option.label),
+            ),
+          )
+          .toList(),
     );
   }
 }
