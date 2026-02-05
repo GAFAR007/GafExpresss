@@ -395,6 +395,9 @@ class _BusinessTenantApplicationsScreenState
               context.go('/business-orders');
               return;
             case 4:
+              context.go('/chat');
+              return;
+            case 5:
               context.go('/settings');
               return;
           }

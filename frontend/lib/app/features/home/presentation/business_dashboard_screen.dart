@@ -18,7 +18,17 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/business_staff_routes.dart';
+import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/theme/theme_mode_toggle.dart';
+
+// WHY: Keep new production action copy consistent in one place.
+const String _productionActionLabel = "Production";
+const String _productionActionHelper = "Plan cycles";
+const String _productionActionTap = "production_quick";
+const String _staffActionLabel = "Staff";
+const String _staffActionHelper = "Directory";
+const String _staffActionTap = "staff_directory_quick";
 
 class BusinessDashboardScreen extends StatelessWidget {
   const BusinessDashboardScreen({super.key});
@@ -139,6 +149,14 @@ class BusinessDashboardScreen extends StatelessWidget {
               _logTap("tenants_quick");
               context.go('/business-tenants');
             },
+            onProductionTap: () {
+              _logTap(_productionActionTap);
+              context.go(productionPlansRoute);
+            },
+            onStaffTap: () {
+              _logTap(_staffActionTap);
+              context.go(businessStaffDirectoryRoute);
+            },
           ),
         ],
       ),
@@ -165,6 +183,9 @@ class BusinessDashboardScreen extends StatelessWidget {
         context.go('/business-orders');
         return;
       case 4:
+        context.go('/chat');
+        return;
+      case 5:
         context.go('/settings');
         return;
     }
@@ -286,12 +307,16 @@ class _ActionStrip extends StatelessWidget {
   final VoidCallback onOrdersTap;
   final VoidCallback onAssetsTap;
   final VoidCallback onTenantsTap;
+  final VoidCallback onProductionTap;
+  final VoidCallback onStaffTap;
 
   const _ActionStrip({
     required this.onProductsTap,
     required this.onOrdersTap,
     required this.onAssetsTap,
     required this.onTenantsTap,
+    required this.onProductionTap,
+    required this.onStaffTap,
   });
 
   @override
@@ -299,6 +324,12 @@ class _ActionStrip extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     // WHY: Keep actions in a single list so we can render a scrollable loop.
     final actions = [
+      _ActionItem(
+        icon: Icons.groups_outlined,
+        label: _staffActionLabel,
+        helper: _staffActionHelper,
+        onTap: onStaffTap,
+      ),
       _ActionItem(
         icon: Icons.inventory_2_outlined,
         label: "Products",
@@ -322,6 +353,12 @@ class _ActionStrip extends StatelessWidget {
         label: "Tenants",
         helper: "Review requests",
         onTap: onTenantsTap,
+      ),
+      _ActionItem(
+        icon: Icons.eco_outlined,
+        label: _productionActionLabel,
+        helper: _productionActionHelper,
+        onTap: onProductionTap,
       ),
     ];
 

@@ -25,12 +25,15 @@ require('dotenv').config();
 // --------------------------------------------------
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const debug = require('./utils/debug');
 const connectDB = require('./config/db');
 const registerRoutes = require('./routes');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
+const { registerChatSocket } = require('./services/chat_socket.service');
 
 /**
  * --------------------------------------------------
@@ -39,6 +42,9 @@ const swaggerSpec = require('./config/swagger');
  */
 debug('Creating Express app instance');
 const app = express();
+
+// WHY: Create a shared HTTP server for Express + Socket.IO.
+const server = http.createServer(app);
 
 
 // BEFORE express.json() important — raw body for webhooks
@@ -91,7 +97,19 @@ registerRoutes(app);
  */
 const PORT = process.env.PORT || 4000;
 
-app.listen(PORT, () => {
+// WHY: Allow Socket.IO to reuse the same server + port.
+const SOCKET_ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN || '*';
+const io = new Server(server, {
+  cors: {
+    origin: SOCKET_ALLOWED_ORIGIN,
+    methods: ['GET', 'POST'],
+  },
+});
+
+// WHY: Register chat socket events after server initialization.
+registerChatSocket(io);
+
+server.listen(PORT, () => {
   console.log(`🟢 Server running on http://localhost:${PORT}`);
   debug('Server successfully listening');
 });

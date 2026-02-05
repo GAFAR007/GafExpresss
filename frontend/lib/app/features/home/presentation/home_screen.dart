@@ -270,12 +270,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             context.go('/orders');
             return;
           }
-          if (isTenant && index == 3) {
+          if (index == 3) {
+            AppDebug.log("HOME", "Nav -> Chat");
+            context.go('/chat');
+            return;
+          }
+          if (isTenant && index == 4) {
             AppDebug.log("HOME", "Nav -> Tenant");
             context.go('/tenant-verification');
             return;
           }
-          if (index == (isTenant ? 4 : 3)) {
+          if (index == (isTenant ? 5 : 4)) {
             AppDebug.log("HOME", "Nav -> Settings");
             context.go('/settings');
           }

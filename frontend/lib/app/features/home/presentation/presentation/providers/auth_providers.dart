@@ -228,6 +228,8 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
       name: session.user.name,
       email: session.user.email,
       role: trimmedRole,
+      // WHY: Keep business scope stable across role updates.
+      businessId: session.user.businessId,
     );
     // WHY: Keep token intact so the session remains authenticated.
     final updatedSession = AuthSession(user: updatedUser, token: session.token);

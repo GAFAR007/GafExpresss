@@ -51,6 +51,9 @@ dependencies:
   # Web-safe file picker for profile uploads
   file_picker: ^8.1.7
 
+  # Socket.IO client for real-time chat
+  socket_io_client: ^2.0.3
+
   # Secure storage for JWTs / refresh tokens
   flutter_secure_storage: ^9.2.2
 

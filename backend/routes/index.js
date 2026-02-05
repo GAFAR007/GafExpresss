@@ -24,6 +24,7 @@ const debug = require('../utils/debug');
 const authRoutes = require('./auth.routes');
 const adminRoutes = require('./admin.routes');
 const businessRoutes = require('./business.routes');
+const chatRoutes = require('./chat.routes');
 
 
 // Public product routes (no auth needed)
@@ -67,6 +68,13 @@ module.exports = (app) => {
    */
   debug('Registering business routes');
   app.use('/business', businessRoutes);
+
+  /**
+   * CHAT ROUTES
+   * /chat/*
+   */
+  debug('Registering chat routes');
+  app.use('/chat', chatRoutes);
 
   /**
    * PUBLIC PRODUCT ROUTES

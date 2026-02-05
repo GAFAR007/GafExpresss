@@ -225,6 +225,9 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
         context.go('/business-orders');
         return;
       case 4:
+        context.go('/chat');
+        return;
+      case 5:
         context.go('/settings');
         return;
     }

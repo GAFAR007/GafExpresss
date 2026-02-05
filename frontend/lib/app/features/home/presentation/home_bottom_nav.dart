@@ -77,6 +77,10 @@ class HomeBottomNav extends StatelessWidget {
         icon: Icon(Icons.receipt_long),
         label: "Orders",
       ),
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.chat_bubble_outline),
+        label: "Chat",
+      ),
     ];
 
     if (showTenantTab) {

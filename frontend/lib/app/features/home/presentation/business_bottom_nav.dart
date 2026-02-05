@@ -52,6 +52,11 @@ class BusinessBottomNav extends StatelessWidget {
       helper: "Fulfill",
     ),
     _BusinessNavItem(
+      icon: Icons.chat_bubble_outline,
+      label: "Chat",
+      helper: "Talk",
+    ),
+    _BusinessNavItem(
       icon: Icons.person_outline,
       label: "Profile",
       helper: "Settings",
