@@ -42,22 +42,42 @@ import 'package:frontend/app/features/home/presentation/business_tenant_review_s
 import 'package:frontend/app/features/home/presentation/payments/business_tenant_payment_history_screen.dart';
 import 'package:frontend/app/features/home/presentation/payments/tenant_payment_receipts_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_invite_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_staff_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_staff_directory_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_staff_routes.dart';
 import 'package:frontend/app/features/home/presentation/business_verified_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_verify_screen.dart';
 import 'package:frontend/app/features/home/presentation/home_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_dashboard_screen.dart';
 import 'package:frontend/app/features/home/presentation/my_orders_screen.dart';
 import 'package:frontend/app/features/home/presentation/order_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/chat_inbox_screen.dart';
+import 'package:frontend/app/features/home/presentation/chat_thread_screen.dart';
+import 'package:frontend/app/features/home/presentation/chat_routes.dart';
+import 'package:frontend/app/features/home/presentation/chat_models.dart';
 import 'package:frontend/app/features/home/presentation/order_model.dart';
 import 'package:frontend/app/features/home/presentation/payment_success_screen.dart';
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_plan_list_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_plan_create_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_plan_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/theme/business_theme_wrapper.dart';
 
 // WHY: Keep route keys centralized for payment history navigation extras.
 const String _tenantNameExtraKey = "tenantName";
+const String _productionPlanIdParam = "id";
+const String _staffProfileIdParam = "id";
+const String _routeProductionListLog = "-> /business-production";
+const String _routeProductionCreateLog = "-> /business-production/create";
+const String _routeProductionDetailLog = "-> /business-production/:id";
+const String _routeStaffDirectoryLog = "-> /business-staff-directory";
+const String _routeStaffDetailLog = "-> /business-staff/:id";
+const String _routeChatInboxLog = "-> /chat";
+const String _routeChatThreadLog = "-> /chat/:id";
 
 final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
@@ -87,7 +107,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           path.startsWith('/business-assets') ||
           path.startsWith('/business-tenants') ||
           path.startsWith('/business-tenant-payments') ||
-          path.startsWith('/tenant-review');
+          path.startsWith('/tenant-review') ||
+          path.startsWith(productionPlansRoute) ||
+          path.startsWith(businessStaffDirectoryRoute) ||
+          path.startsWith(businessStaffDetailBaseRoute);
       // WHY: Tenant receipts should be guarded the same as tenant dashboards.
       final bool isTenantPayments =
           path.startsWith('/tenant-payments');
@@ -214,6 +237,31 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /register");
           return const RegisterScreen();
+        },
+      ),
+      GoRoute(
+        path: chatInboxRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeChatInboxLog);
+          return const ChatInboxScreen();
+        },
+      ),
+      GoRoute(
+        path: "$chatThreadRouteBase/:$chatThreadRouteParam",
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeChatThreadLog);
+          final conversationId =
+              state.pathParameters[chatThreadRouteParam] ?? "";
+          final extra = state.extra;
+          final args = extra is ChatThreadArgs
+              ? extra
+              : extra is ChatConversation
+                  ? ChatThreadArgs(conversation: extra)
+                  : null;
+          return ChatThreadScreen(
+            conversationId: conversationId,
+            args: args,
+          );
         },
       ),
       GoRoute(
@@ -449,6 +497,65 @@ final routerProvider = Provider<GoRouter>((ref) {
               tenantId: tenantId,
               tenantName: tenantName,
             ),
+          );
+        },
+      ),
+      GoRoute(
+        path: businessStaffDirectoryRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeStaffDirectoryLog);
+          return const BusinessThemeWrapper(
+            child: BusinessStaffDirectoryScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: businessStaffDetailRoute,
+        builder: (context, state) {
+          final staffProfileId =
+              state.pathParameters[_staffProfileIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeStaffDetailLog,
+            extra: {_staffProfileIdParam: staffProfileId},
+          );
+          return BusinessThemeWrapper(
+            child: BusinessStaffDetailScreen(
+              staffProfileId: staffProfileId,
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlansRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionListLog);
+          return const BusinessThemeWrapper(
+            child: ProductionPlanListScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanCreateRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionCreateLog);
+          return const BusinessThemeWrapper(
+            child: ProductionPlanCreateScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanDetailRoute,
+        builder: (context, state) {
+          final planId =
+              state.pathParameters[_productionPlanIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionDetailLog,
+            extra: {_productionPlanIdParam: planId},
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPlanDetailScreen(planId: planId),
           );
         },
       ),
