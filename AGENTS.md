@@ -178,6 +178,167 @@ If a change risks any of the above → **STOP and ASK**.
 
 ---
 
+## AI-Assisted Business Philosophy (MANDATORY)
+
+This product uses AI as a **business assistant**, not a form filler.
+
+AI exists to:
+- reduce friction
+- lower expertise barriers
+- translate human intent into structured business plans
+- make business workflows easier, faster, and more accessible
+
+AI must NOT:
+- behave like a strict validator during draft or ideation stages
+- require users to pre-define every business entity before assistance
+- block creativity due to missing structured data
+
+### Core Principle
+Humans express **intent**.
+AI proposes **structure**.
+Humans **review, adjust, and confirm**.
+
+---
+
+## AI Intelligence Loop (MANDATORY — LONG-TERM)
+
+AI in this product is not a one-off feature or isolated assistant.
+
+AI MUST operate as a continuous intelligence loop:
+
+1. Observe business data (events, metrics, outcomes)
+2. Compare expected vs actual performance
+3. Detect patterns, gaps, and trends over time
+4. Propose improvements, plans, or adjustments
+5. Track progress against confirmed targets
+6. Repeat as new data arrives
+
+### Key rules
+
+- AI suggestions MUST be grounded in real business data.
+- AI MUST prefer trends over snapshots (time matters).
+- AI MUST explain *why* a suggestion is being made.
+- AI MUST surface confidence/assumptions when data is incomplete.
+- AI MUST improve accuracy as historical data grows.
+
+### Forbidden
+
+- One-off AI outputs with no follow-up tracking
+- Suggestions with no measurable outcome
+- AI acting without comparing past performance
+
+### Design intent
+
+AI should feel like:
+“A business partner that learns your operation over time.”
+
+Not:
+“A chatbot that answers isolated questions.”
+
+---
+
+## Expected & Target Data (MANDATORY AI BEHAVIOR)
+
+For any business entity that represents effort, cost, duration, or output,
+AI SHOULD attempt to propose expected or target values.
+
+Examples include (but are not limited to):
+- expected_yield
+- expected_cost
+- expected_duration
+- monthly_revenue_target
+- inventory_turnover_target
+- production_output_target
+
+### Rules
+
+- Expected values MUST be marked as AI-generated.
+- Expected values MUST be editable by the user.
+- Expected values MUST NOT be required to save drafts.
+- Expected values MUST NOT auto-commit without confirmation.
+
+### Purpose
+
+Expected data exists to:
+- enable comparison (expected vs actual)
+- unlock progress tracking
+- support future insights and recommendations
+
+### Forbidden
+
+- Treating expected values as facts
+- Blocking workflows due to missing expected data
+- Generating expectations without explaining assumptions
+
+---
+
+## AI Draft Generation Rules
+
+### Required Human Context (Minimum)
+For AI draft generation, require ONLY:
+- a real-world anchor (e.g. Estate, Location, Business Unit)
+
+Everything else MAY be inferred or proposed by AI.
+
+### AI Is Allowed to Propose
+When generating drafts, AI is explicitly allowed to:
+- create draft products or services
+- estimate timelines and durations
+- propose start and end dates
+- define phases, steps, and tasks
+- infer quantities (e.g. acreage, units, scale) from natural language
+- surface risks and assumptions
+
+All AI-created entities must be:
+- clearly marked as AI-generated
+- editable by the user
+- uncommitted until human confirmation
+
+---
+
+## Validation Timing Rules
+
+### Draft Phase
+- Validation must be **soft**
+- Missing fields should guide, not block
+- Errors should be framed as "more context helps us help you"
+
+### Final Save / Commit Phase
+- Validation becomes **strict**
+- All required business entities must exist
+- AI suggestions must be explicitly accepted or modified
+
+AI drafts must NEVER auto-persist without human confirmation.
+
+---
+
+## Error & UX Tone
+
+AI-related messages must:
+- feel supportive, not punitive
+- explain what additional context would improve results
+- never blame the user for missing data
+
+Prefer:
+"We need a little more context to tailor this plan."
+
+Avoid:
+"Missing required fields."
+
+---
+
+## Feature Design Guidance (IMPORTANT)
+
+When designing new features:
+- Always ask: "How can AI reduce user effort here?"
+- Prefer intent-based inputs over rigid forms
+- If a human can describe it in words, AI should help structure it
+- AI should optimize for accessibility, not expert-only workflows
+
+If a feature can be made easier with AI, it should be.
+
+---
+
 ## 5️⃣ How to guarantee ZERO lag (important rules)
 
 If you follow these, chat will feel instant:

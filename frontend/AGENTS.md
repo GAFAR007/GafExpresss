@@ -163,6 +163,167 @@ If a change risks any of the above → **STOP and ASK**.
 
 ---
 
+## AI-Assisted Business Philosophy (MANDATORY)
+
+This product uses AI as a **business assistant**, not a form filler.
+
+AI exists to:
+- reduce friction
+- lower expertise barriers
+- translate human intent into structured business plans
+- make business workflows easier, faster, and more accessible
+
+AI must NOT:
+- behave like a strict validator during draft or ideation stages
+- require users to pre-define every business entity before assistance
+- block creativity due to missing structured data
+
+### Core Principle
+Humans express **intent**.
+AI proposes **structure**.
+Humans **review, adjust, and confirm**.
+
+---
+
+## AI Intelligence Loop (MANDATORY — LONG-TERM)
+
+AI in this product is not a one-off feature or isolated assistant.
+
+AI MUST operate as a continuous intelligence loop:
+
+1. Observe business data (events, metrics, outcomes)
+2. Compare expected vs actual performance
+3. Detect patterns, gaps, and trends over time
+4. Propose improvements, plans, or adjustments
+5. Track progress against confirmed targets
+6. Repeat as new data arrives
+
+### Key rules
+
+- AI suggestions MUST be grounded in real business data.
+- AI MUST prefer trends over snapshots (time matters).
+- AI MUST explain *why* a suggestion is being made.
+- AI MUST surface confidence/assumptions when data is incomplete.
+- AI MUST improve accuracy as historical data grows.
+
+### Forbidden
+
+- One-off AI outputs with no follow-up tracking
+- Suggestions with no measurable outcome
+- AI acting without comparing past performance
+
+### Design intent
+
+AI should feel like:
+“A business partner that learns your operation over time.”
+
+Not:
+“A chatbot that answers isolated questions.”
+
+---
+
+## Expected & Target Data (MANDATORY AI BEHAVIOR)
+
+For any business entity that represents effort, cost, duration, or output,
+AI SHOULD attempt to propose expected or target values.
+
+Examples include (but are not limited to):
+- expected_yield
+- expected_cost
+- expected_duration
+- monthly_revenue_target
+- inventory_turnover_target
+- production_output_target
+
+### Rules
+
+- Expected values MUST be marked as AI-generated.
+- Expected values MUST be editable by the user.
+- Expected values MUST NOT be required to save drafts.
+- Expected values MUST NOT auto-commit without confirmation.
+
+### Purpose
+
+Expected data exists to:
+- enable comparison (expected vs actual)
+- unlock progress tracking
+- support future insights and recommendations
+
+### Forbidden
+
+- Treating expected values as facts
+- Blocking workflows due to missing expected data
+- Generating expectations without explaining assumptions
+
+---
+
+## AI Draft Generation Rules
+
+### Required Human Context (Minimum)
+For AI draft generation, require ONLY:
+- a real-world anchor (e.g. Estate, Location, Business Unit)
+
+Everything else MAY be inferred or proposed by AI.
+
+### AI Is Allowed to Propose
+When generating drafts, AI is explicitly allowed to:
+- create draft products or services
+- estimate timelines and durations
+- propose start and end dates
+- define phases, steps, and tasks
+- infer quantities (e.g. acreage, units, scale) from natural language
+- surface risks and assumptions
+
+All AI-created entities must be:
+- clearly marked as AI-generated
+- editable by the user
+- uncommitted until human confirmation
+
+---
+
+## Validation Timing Rules
+
+### Draft Phase
+- Validation must be **soft**
+- Missing fields should guide, not block
+- Errors should be framed as "more context helps us help you"
+
+### Final Save / Commit Phase
+- Validation becomes **strict**
+- All required business entities must exist
+- AI suggestions must be explicitly accepted or modified
+
+AI drafts must NEVER auto-persist without human confirmation.
+
+---
+
+## Error & UX Tone
+
+AI-related messages must:
+- feel supportive, not punitive
+- explain what additional context would improve results
+- never blame the user for missing data
+
+Prefer:
+"We need a little more context to tailor this plan."
+
+Avoid:
+"Missing required fields."
+
+---
+
+## Feature Design Guidance (IMPORTANT)
+
+When designing new features:
+- Always ask: "How can AI reduce user effort here?"
+- Prefer intent-based inputs over rigid forms
+- If a human can describe it in words, AI should help structure it
+- AI should optimize for accessibility, not expert-only workflows
+
+If a feature can be made easier with AI, it should be.
+
+---
+
 ## 4.3) ZERO‑lag chat rules (MANDATORY)
 
 If you follow these, chat will feel instant:
@@ -233,6 +394,198 @@ If contrast is questionable → **STOP and ASK**.
 - Tap targets: ≥ 44px
 - Use semantic labels on key icons/buttons
 - Avoid low-contrast text in any theme
+
+## 🎨 UI & Visual System Philosophy (MANDATORY — NON-FUNCTIONAL)
+
+This section defines how the app must *feel*, not just how it functions.
+
+The UI must feel:
+- Calm, not crowded
+- Spacious, not dense
+- Intentional, not decorative
+- Predictable, not surprising
+
+Target quality: classic, Apple-like.
+
+If a screen feels noisy, busy, playful, or attention-grabbing → it is wrong.
+Note: These rules apply to design and layout decisions, not runtime behavior.
+UI must remain stable and predictable once rendered.
+---
+
+### 1) Visual hierarchy rule (MANDATORY)
+
+Every screen must answer within 3 seconds:
+- Where am I?
+- What matters most here?
+- What can I do next?
+
+Required order:
+1. Page title + short helper text
+2. Primary KPI or primary action
+3. Secondary metrics or content
+4. Details, lists, and history
+
+If hierarchy is unclear → STOP and ASK.
+
+---
+
+### 2) Density rule (MANDATORY)
+
+If a screen feels busy:
+- remove before adding
+- summarise before listing
+- collapse before expanding
+
+Long lists without summaries are forbidden.
+
+A user should understand a screen without scrolling.
+
+---
+
+### 3) Navigation philosophy (MANDATORY)
+
+- Bottom navigation is for primary destinations only
+- Maximum 4–5 items
+- Dashboard may be visually emphasised as the anchor
+- Secondary tools (staff, admin, settings) belong behind:
+  - Dashboard sections, or
+  - Profile
+
+If navigation feels crowded → it is wrong.
+
+---
+
+### 4) Color system rules (MANDATORY)
+
+Color is functional, not decorative.
+
+Colors exist to:
+- guide attention
+- communicate status
+- support hierarchy
+
+Colors must never be added just to “look nice”.
+
+#### 4.1 Color roles (STRICT)
+
+Every color must map to exactly one role:
+- Surface (backgrounds, cards, containers)
+- Text (primary / secondary / muted)
+- Accent (primary CTA, selected navigation)
+- Status (success, warning, error)
+- Divider / Border (structure only)
+
+If a color does not clearly fit one role → it does not belong.
+
+---
+
+#### 4.2 Accent usage rules (CRITICAL)
+
+- Only ONE accent color per theme
+- Accent is used sparingly:
+  - selected navigation item
+  - primary CTA
+- Accent must never be decorative
+- Accent must not compete with content
+
+If accent draws attention away from data → STOP.
+
+---
+
+#### 4.3 Status color rules (VERY IMPORTANT)
+
+- Green = success / growth / completion ONLY
+- Green must NEVER be the main accent in Business mode
+- Status colors must never be reused as accents
+- Status colors must work across all themes
+
+If green appears everywhere → it is wrong.
+
+---
+
+### 5) Theme differentiation rules (MANDATORY)
+
+The app supports Classic / Dark / Business modes.
+
+They must feel distinct at a glance.
+
+#### Classic
+- Warm, friendly
+- Soft surfaces
+- Muted accent (green allowed but restrained)
+
+#### Business
+- Neutral or cool surfaces
+- High contrast text
+- Desaturated accent (NOT green)
+- Green reserved strictly for positive deltas and success indicators
+- Must feel professional, calm, data-focused
+
+#### Dark
+- Deep neutral surfaces (not pure black)
+- Soft, readable text
+- Subtle accent
+- No neon or glowing colors
+
+If two modes look similar → the design has failed.
+
+---
+
+### 6) Theme token enforcement (MANDATORY)
+
+All colors MUST come from:
+- Theme.of(context)
+- ColorScheme
+- TextTheme
+- AppColors (status colors only)
+
+Forbidden:
+- Hardcoded hex colors
+- Inline color usage
+- Copy-pasted color values
+
+If a new color is needed:
+- Explain the role
+- Explain why it’s needed
+- STOP and ASK
+
+---
+
+### 7) Component visual consistency (MANDATORY)
+
+Reusable components must share:
+- spacing rhythm
+- border radius
+- elevation/shadow (theme-driven)
+- typography scale
+
+Cards must feel like containers, not buttons.
+
+---
+
+### 8) Button hierarchy rules (MANDATORY)
+
+- One primary action per screen
+- Secondary actions are visually quieter
+- Destructive actions are clearly separated
+
+Multiple competing primary buttons are forbidden.
+
+---
+
+### 9) AI-assisted UX alignment (MANDATORY)
+
+AI features must follow the same visual restraint as the rest of the UI.
+
+- AI suggestions must look proposed, not enforced
+- AI-generated fields must be clearly labelled
+- AI errors must feel supportive, not punitive
+
+Prefer:
+“We can generate a better plan with a little more context.”
+
+Avoid:
+“Missing required fields.”
 
 ---
 

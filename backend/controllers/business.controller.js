@@ -3737,6 +3737,9 @@ async function generateProductionPlanDraftHandler(
   req,
   res,
 ) {
+  // WHY: Keep validation failure metadata consistent for frontend recovery.
+  const validationRetryReason =
+    "client_validation_failed";
   debug(
     "BUSINESS CONTROLLER: generateProductionPlanDraft - entry",
     {
@@ -3746,6 +3749,9 @@ async function generateProductionPlanDraftHandler(
       ),
       hasEstate: Boolean(
         req.body?.estateAssetId,
+      ),
+      hasPrompt: Boolean(
+        req.body?.prompt,
       ),
     },
   );
@@ -3784,40 +3790,107 @@ async function generateProductionPlanDraftHandler(
       req.body?.productId
         ?.toString()
         .trim() || "";
+    const startDateInput =
+      req.body?.startDate
+        ?.toString()
+        .trim() || "";
+    const endDateInput =
+      req.body?.endDate
+        ?.toString()
+        .trim() || "";
     const startDate = parseDateInput(
-      req.body?.startDate,
+      startDateInput,
     );
     const endDate = parseDateInput(
-      req.body?.endDate,
+      endDateInput,
     );
     const useReasoning = Boolean(
       req.body?.useReasoning,
     );
+    const prompt =
+      req.body?.prompt
+        ?.toString()
+        .trim() || "";
 
     if (!estateAssetId) {
       return res.status(400).json({
         error:
           PRODUCTION_COPY.ESTATE_REQUIRED,
+        classification:
+          "MISSING_REQUIRED_FIELD",
+        error_code:
+          "PRODUCTION_AI_ESTATE_REQUIRED",
+        resolution_hint:
+          "Select an estate before generating an AI draft.",
+        retry_skipped: true,
+        retry_reason:
+          validationRetryReason,
       });
     }
-    if (!productId) {
-      return res.status(400).json({
-        error:
-          PRODUCTION_COPY.PRODUCT_REQUIRED,
-      });
-    }
-    if (!startDate || !endDate) {
+    // WHY: Draft mode allows missing dates, but invalid provided dates must fail fast.
+    if (
+      startDateInput &&
+      !startDate
+    ) {
       return res.status(400).json({
         error:
           PRODUCTION_COPY.DATES_REQUIRED,
+        classification:
+          "INVALID_INPUT",
+        error_code:
+          "PRODUCTION_AI_START_DATE_INVALID",
+        resolution_hint:
+          "Start date should be YYYY-MM-DD when provided.",
+        retry_skipped: true,
+        retry_reason:
+          validationRetryReason,
       });
     }
-    if (endDate <= startDate) {
+    if (endDateInput && !endDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATES_REQUIRED,
+        classification:
+          "INVALID_INPUT",
+        error_code:
+          "PRODUCTION_AI_END_DATE_INVALID",
+        resolution_hint:
+          "End date should be YYYY-MM-DD when provided.",
+        retry_skipped: true,
+        retry_reason:
+          validationRetryReason,
+      });
+    }
+    if (
+      startDate &&
+      endDate &&
+      endDate <= startDate
+    ) {
       return res.status(400).json({
         error:
           PRODUCTION_COPY.DATE_RANGE_INVALID,
+        classification:
+          "INVALID_INPUT",
+        error_code:
+          "PRODUCTION_AI_DATE_RANGE_INVALID",
+        resolution_hint:
+          "Set an end date that is after the start date.",
+        retry_skipped: true,
+        retry_reason:
+          validationRetryReason,
       });
     }
+    // WHY: Keep AI draft dates aligned with strict YYYY-MM-DD schema when provided.
+    const startDateValue = startDate
+      ? startDate
+          .toISOString()
+          .slice(0, 10)
+      : null;
+    const endDateValue = endDate
+      ? endDate
+          .toISOString()
+          .slice(0, 10)
+      : null;
 
     // WHY: Estate-scoped managers can only draft plans for their estate.
     if (
@@ -3838,18 +3911,21 @@ async function generateProductionPlanDraftHandler(
         businessId,
       });
 
-    const product =
-      await businessProductService.getProductById(
-        {
-          businessId,
-          id: productId,
-        },
-      );
-    if (!product) {
-      return res.status(404).json({
-        error:
-          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
-      });
+    let product = null;
+    if (productId) {
+      product =
+        await businessProductService.getProductById(
+          {
+            businessId,
+            id: productId,
+          },
+        );
+      if (!product) {
+        return res.status(404).json({
+          error:
+            PRODUCTION_COPY.PRODUCT_NOT_FOUND,
+        });
+      }
     }
 
     // WHY: Include business-wide staff plus estate-specific staff for drafting.
@@ -3878,22 +3954,26 @@ async function generateProductionPlanDraftHandler(
       });
     }
 
-    const draft =
+    const aiResult =
       await generateProductionPlanDraft(
         {
-          productName: product.name,
+          // WHY: Product can be omitted in draft mode so AI can propose one.
+          productName:
+            product?.name || "",
           estateName: estateAsset?.name,
-          startDate:
-            startDate.toISOString(),
-          endDate:
-            endDate.toISOString(),
+          estateAssetId,
+          productId,
+          startDate: startDateValue,
+          endDate: endDateValue,
           staffProfiles,
+          assistantPrompt: prompt,
           useReasoning,
           context: {
             route: req.originalUrl,
             requestId: req.id,
             userRole: actor.role,
             businessId,
+            hasPrompt: Boolean(prompt),
             country:
               req.headers[
                 COUNTRY_HEADER_KEY
@@ -3906,7 +3986,16 @@ async function generateProductionPlanDraftHandler(
       "BUSINESS CONTROLLER: generateProductionPlanDraft - success",
       {
         actorId: actor._id,
-        phaseCount: draft.phases.length,
+        phaseCount:
+          aiResult?.draft?.phases
+            ?.length || 0,
+        warnings:
+          aiResult?.warnings
+            ?.length || 0,
+        provider:
+          aiResult?.diagnostics
+            ?.provider || "unknown",
+        hasPrompt: Boolean(prompt),
       },
     );
 
@@ -3914,28 +4003,128 @@ async function generateProductionPlanDraftHandler(
       message:
         PRODUCTION_COPY.PLAN_DRAFT_OK,
       draft: {
-        ...draft,
+        ...aiResult.draft,
         estateAssetId,
-        productId,
-        startDate:
-          startDate.toISOString(),
-        endDate: endDate.toISOString(),
+        ...(productId
+          ? { productId }
+          : {}),
+        ...(startDateValue
+          ? {
+              startDate:
+                startDateValue,
+            }
+          : {}),
+        ...(endDateValue
+          ? {
+              endDate: endDateValue,
+            }
+          : {}),
+      },
+      warnings:
+        aiResult?.warnings || [],
+      diagnostics: {
+        provider:
+          aiResult?.diagnostics
+            ?.provider || "unknown",
+        model:
+          aiResult?.diagnostics
+            ?.model || null,
+        requestId:
+          aiResult?.diagnostics
+            ?.requestId ||
+          req.id ||
+          "unknown",
       },
     });
   } catch (err) {
+    const classification =
+      err.classification ||
+      "UNKNOWN_PROVIDER_ERROR";
+    const errorCode =
+      err.errorCode ||
+      "PRODUCTION_AI_DRAFT_FAILED";
+    const resolutionHint =
+      err.resolutionHint ||
+      "Verify inputs and AI configuration before retrying.";
+    const details =
+      err.details &&
+      typeof err.details === "object"
+        ? err.details
+        : {
+            missing: [],
+            invalid: [],
+            providerMessage:
+              err.providerMessage ||
+              "",
+          };
+    const retryAllowed =
+      err.retry_allowed === true;
+    const retryReason =
+      err.retry_reason ||
+      (retryAllowed
+        ? "provider_output_invalid"
+        : "unexpected_error");
+    const httpStatus =
+      err.httpStatus === 422
+        ? 422
+        : err.httpStatus === 400
+        ? 400
+        : null;
+
     debug(
       "BUSINESS CONTROLLER: generateProductionPlanDraft - error",
       {
         error: err.message,
+        classification:
+          classification,
+        error_code: errorCode,
         resolution_hint:
-          "Verify inputs and AI configuration before retrying.",
+          resolutionHint,
+        retry_allowed:
+          retryAllowed,
+        retry_reason:
+          retryReason,
         reason:
           "production_plan_draft_failed",
       },
     );
+
+    if (
+      httpStatus === 422 ||
+      classification ===
+        "PROVIDER_REJECTED_FORMAT"
+    ) {
+      return res.status(422).json({
+        error:
+          err.message ||
+          "AI draft did not match required schema.",
+        classification:
+          classification,
+        error_code: errorCode,
+        resolution_hint:
+          resolutionHint,
+        details,
+        retry_allowed:
+          retryAllowed,
+        retry_reason:
+          retryReason,
+      });
+    }
+
     return res.status(400).json({
       error:
+        err.message ||
         PRODUCTION_COPY.PLAN_DRAFT_FAILED,
+      classification:
+        classification,
+      error_code: errorCode,
+      resolution_hint:
+        resolutionHint,
+      details,
+      retry_allowed:
+        retryAllowed,
+      retry_reason:
+        retryReason,
     });
   }
 }

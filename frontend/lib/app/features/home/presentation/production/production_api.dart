@@ -95,6 +95,25 @@ const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
 const String _extraStaffCountKey = "staffCount";
 const String _extraPhaseCountKey = "phaseCount";
+const String _extraClassificationKey = "classification";
+const String _extraErrorCodeKey = "errorCode";
+const String _extraResolutionHintKey = "resolutionHint";
+const String _extraRetryAllowedKey = "retryAllowed";
+const String _extraRetryReasonKey = "retryReason";
+const String _extraDetailsKey = "details";
+const String _responseErrorKey = "error";
+const String _responseClassificationKey = "classification";
+const String _responseErrorCodeKey = "error_code";
+const String _responseResolutionHintKey = "resolution_hint";
+const String _responseDetailsKey = "details";
+const String _responseRetryAllowedKey = "retry_allowed";
+const String _responseRetryReasonKey = "retry_reason";
+const int _httpBadRequest = 400;
+const int _httpUnprocessable = 422;
+const String _aiDraftFallbackClassification = "UNKNOWN_PROVIDER_ERROR";
+const String _aiDraftFallbackErrorCode = "PRODUCTION_AI_DRAFT_FAILED";
+const String _aiDraftFallbackResolutionHint =
+    "Retry the request or adjust your AI prompt.";
 
 class ProductionApi {
   final Dio _dio;
@@ -136,10 +155,7 @@ class ProductionApi {
     );
 
     try {
-      final resp = await _dio.get(
-        _plansPath,
-        options: _authOptions(token),
-      );
+      final resp = await _dio.get(_plansPath, options: _authOptions(token));
 
       final data = resp.data as Map<String, dynamic>;
       final parsed = ProductionPlanListResponse.fromJson(data);
@@ -159,7 +175,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _plansFailureMessage,
@@ -218,7 +236,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _planDetailFailureMessage,
@@ -278,7 +298,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _planCreateFailureMessage,
@@ -341,8 +363,19 @@ class ProductionApi {
     } on DioException catch (error) {
       // WHY: Capture status + response for debugging AI failures.
       final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final rawData = error.response?.data;
+      final responseMap = rawData is Map<String, dynamic>
+          ? rawData
+          : <String, dynamic>{};
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          rawData?.toString() ?? error.message ?? _fallbackErrorReason;
+      final classification = responseMap[_responseClassificationKey];
+      final errorCode = responseMap[_responseErrorCodeKey];
+      final resolutionHint = responseMap[_responseResolutionHintKey];
+      final retryAllowed = responseMap[_responseRetryAllowedKey] == true;
+      final retryReason =
+          responseMap[_responseRetryReasonKey]?.toString() ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _planDraftFailureMessage,
@@ -352,9 +385,41 @@ class ProductionApi {
           _extraIntentKey: _intentPlanDraft,
           _extraStatusKey: status,
           _extraReasonKey: reason,
+          _extraClassificationKey:
+              classification ?? _aiDraftFallbackClassification,
+          _extraErrorCodeKey: errorCode ?? _aiDraftFallbackErrorCode,
+          _extraResolutionHintKey:
+              resolutionHint ?? _aiDraftFallbackResolutionHint,
+          _extraRetryAllowedKey: retryAllowed,
+          _extraRetryReasonKey: retryReason,
+          _extraDetailsKey: responseMap[_responseDetailsKey] ?? const {},
           _extraNextActionKey: _nextActionRetry,
         },
       );
+
+      final hasStructuredAiError =
+          responseMap[_responseClassificationKey] != null ||
+          responseMap[_responseErrorCodeKey] != null ||
+          responseMap[_responseResolutionHintKey] != null;
+      if ((status == _httpUnprocessable || status == _httpBadRequest) &&
+          hasStructuredAiError) {
+        final errorPayload = responseMap.isEmpty
+            ? <String, dynamic>{
+                _responseErrorKey: reason,
+                _responseClassificationKey: _aiDraftFallbackClassification,
+                _responseErrorCodeKey: _aiDraftFallbackErrorCode,
+                _responseResolutionHintKey: _aiDraftFallbackResolutionHint,
+                _responseRetryAllowedKey: true,
+                _responseRetryReasonKey: _fallbackErrorReason,
+                _responseDetailsKey: const <String, dynamic>{},
+              }
+            : responseMap;
+        throw ProductionAiDraftError.fromBackend(
+          errorPayload,
+          statusCode: status,
+        );
+      }
+
       rethrow;
     }
   }
@@ -404,7 +469,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _taskStatusFailureMessage,
@@ -465,7 +532,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _taskApproveFailureMessage,
@@ -528,7 +597,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _taskRejectFailureMessage,
@@ -563,16 +634,16 @@ class ProductionApi {
     );
 
     try {
-      final resp = await _dio.get(
-        _staffPath,
-        options: _authOptions(token),
-      );
+      final resp = await _dio.get(_staffPath, options: _authOptions(token));
 
       final data = resp.data as Map<String, dynamic>;
       final staffList = (data[_keyStaff] ?? []) as List<dynamic>;
       final staff = staffList
-          .map((item) =>
-              BusinessStaffProfileSummary.fromJson(item as Map<String, dynamic>))
+          .map(
+            (item) => BusinessStaffProfileSummary.fromJson(
+              item as Map<String, dynamic>,
+            ),
+          )
           .toList();
 
       AppDebug.log(
@@ -590,7 +661,9 @@ class ProductionApi {
     } on DioException catch (error) {
       final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         _staffFailureMessage,

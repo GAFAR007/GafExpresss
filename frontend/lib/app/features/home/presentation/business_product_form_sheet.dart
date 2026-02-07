@@ -40,6 +40,7 @@ const String _logAiDraftFail = "ai_draft_fail";
 const String _extraModeKey = "mode";
 const String _extraProductIdKey = "productId";
 const String _extraErrorKey = "error";
+const String _extraHasInitialDraftKey = "hasInitialDraft";
 
 const String _modeCreate = "create";
 const String _modeEdit = "edit";
@@ -98,9 +99,7 @@ const int _aiPromptMaxLines = 3;
 
 void _showProductFormSnack(BuildContext context, String message) {
   // WHY: Keep snack handling consistent for create/edit flows.
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text(message)));
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
 int? _parseProductStock(String value) {
@@ -165,6 +164,7 @@ Map<String, dynamic>? _buildProductPayload({
 Future<Product?> showBusinessProductFormSheet({
   required BuildContext context,
   Product? product,
+  ProductDraft? initialDraft,
   Future<void> Function(Product product)? onSuccess,
 }) async {
   // WHY: Log sheet opens so we can trace product creation flows.
@@ -174,6 +174,7 @@ Future<Product?> showBusinessProductFormSheet({
     extra: {
       _extraModeKey: product == null ? _modeCreate : _modeEdit,
       if (product != null) _extraProductIdKey: product.id,
+      _extraHasInitialDraftKey: initialDraft != null,
     },
   );
 
@@ -188,6 +189,7 @@ Future<Product?> showBusinessProductFormSheet({
         padding: EdgeInsets.only(bottom: viewInsets.bottom),
         child: BusinessProductFormSheet(
           product: product,
+          initialDraft: initialDraft,
           onSuccess: onSuccess,
         ),
       );
@@ -197,11 +199,13 @@ Future<Product?> showBusinessProductFormSheet({
 
 class BusinessProductFormSheet extends ConsumerStatefulWidget {
   final Product? product;
+  final ProductDraft? initialDraft;
   final Future<void> Function(Product product)? onSuccess;
 
   const BusinessProductFormSheet({
     super.key,
     this.product,
+    this.initialDraft,
     this.onSuccess,
   });
 
@@ -233,12 +237,20 @@ class _BusinessProductFormSheetState
     super.initState();
     // WHY: Pre-fill fields when editing an existing product.
     final product = widget.product;
-    _nameCtrl.text = product?.name ?? '';
-    _descCtrl.text = product?.description ?? '';
-    _priceCtrl.text =
-        product == null ? '' : formatNgnInputFromKobo(product.priceCents);
-    _stockCtrl.text = product?.stock.toString() ?? '';
-    _imageCtrl.text = product?.imageUrl ?? '';
+    if (product != null) {
+      _nameCtrl.text = product.name;
+      _descCtrl.text = product.description;
+      _priceCtrl.text = formatNgnInputFromKobo(product.priceCents);
+      _stockCtrl.text = product.stock.toString();
+      _imageCtrl.text = product.imageUrl;
+      return;
+    }
+
+    // WHY: Let callers seed the sheet from AI-suggested product values.
+    final initialDraft = widget.initialDraft;
+    if (initialDraft != null) {
+      _applyAiDraft(initialDraft);
+    }
   }
 
   @override
@@ -316,10 +328,7 @@ class _BusinessProductFormSheetState
         extra: {_extraErrorKey: error.toString()},
       );
       if (mounted) {
-        _showProductFormSnack(
-          context,
-          _extractAiDraftErrorMessage(error),
-        );
+        _showProductFormSnack(context, _extractAiDraftErrorMessage(error));
       }
     } finally {
       if (mounted) setState(() => _isDrafting = false);
@@ -360,10 +369,7 @@ class _BusinessProductFormSheetState
               id: widget.product!.id,
               payload: payload,
             )
-          : await api.createProduct(
-              token: session.token,
-              payload: payload,
-            );
+          : await api.createProduct(token: session.token, payload: payload);
 
       if (widget.onSuccess != null) {
         // WHY: Allow callers to refresh lists or update selections.
@@ -532,10 +538,7 @@ class _ProductAiDraftSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _labelAiSectionTitle,
-            style: theme.textTheme.titleSmall,
-          ),
+          Text(_labelAiSectionTitle, style: theme.textTheme.titleSmall),
           const SizedBox(height: _fieldSpacing),
           Text(
             _labelAiSectionHint,
@@ -566,9 +569,7 @@ class _ProductAiDraftSection extends StatelessWidget {
                       ),
                     )
                   : const Icon(Icons.auto_awesome),
-              label: Text(
-                isDrafting ? _labelAiGenerating : _labelAiGenerate,
-              ),
+              label: Text(isDrafting ? _labelAiGenerating : _labelAiGenerate),
             ),
           ),
         ],

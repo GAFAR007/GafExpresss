@@ -16,6 +16,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/product_ai_model.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 
 // WHY: Default phases match backend scheduling rules.
@@ -30,19 +31,32 @@ const List<String> _defaultPhaseNames = [
 // WHY: Keep task defaults predictable for auto-scheduling.
 const int _defaultTaskWeight = 1;
 const String _defaultTaskTitle = "Task";
-const String _defaultPhaseNamePrefix = "Phase";
 const String _taskIdPrefix = "draft_task_";
 const String _emptyText = "";
 const int _minIndex = 0;
 const int _phaseOrderOffset = 1;
-const Object _unsetValue = Object();
+
+class _UnsetValue {
+  const _UnsetValue();
+}
+
+const _UnsetValue _unsetValue = _UnsetValue();
+const int _defaultPhaseEstimatedDays = 7;
+const int _maxTaskWeight = 5;
+const String _aiDraftFallbackMessage = "Unable to parse AI production draft.";
+const String _aiDraftFallbackClassification = "PROVIDER_REJECTED_FORMAT";
+const String _aiDraftFallbackErrorCode = "PRODUCTION_AI_SCHEMA_INVALID";
+const String _aiDraftFallbackResolutionHint =
+    "Refine prompt or retry; required fields are missing/invalid.";
+const int _aiDraftFallbackStatus = 422;
+const String _aiDraftFallbackRetryReason = "provider_output_invalid";
+const String _isoDatePattern = r"^\d{4}-\d{2}-\d{2}$";
 
 // WHY: Draft statuses drive the create-table UI without touching backend payloads.
 enum ProductionTaskStatus { notStarted, inProgress, blocked, done }
 
 // WHY: Keep status defaults consistent across manual + AI drafts.
-const ProductionTaskStatus _defaultTaskStatus =
-    ProductionTaskStatus.notStarted;
+const ProductionTaskStatus _defaultTaskStatus = ProductionTaskStatus.notStarted;
 
 // WHY: Validation copy must stay consistent across UI messages.
 const String _errorTitleRequired = "Plan title is required.";
@@ -59,6 +73,7 @@ const String _errorTaskStaffRequired = "Assigned staff is required.";
 // WHY: Payload keys should be consistent with backend expectations.
 const String _payloadEstateId = "estateAssetId";
 const String _payloadProductId = "productId";
+const String _payloadPlanTitle = "planTitle";
 const String _payloadTitle = "title";
 const String _payloadNotes = "notes";
 const String _payloadStartDate = "startDate";
@@ -67,6 +82,7 @@ const String _payloadAiGenerated = "aiGenerated";
 const String _payloadPhases = "phases";
 const String _payloadPhaseName = "name";
 const String _payloadPhaseOrder = "order";
+const String _payloadPhaseEstimatedDays = "estimatedDays";
 const String _payloadTasks = "tasks";
 const String _payloadTaskTitle = "title";
 const String _payloadTaskRole = "roleRequired";
@@ -74,6 +90,13 @@ const String _payloadTaskStaff = "assignedStaffId";
 const String _payloadTaskWeight = "weight";
 const String _payloadTaskInstructions = "instructions";
 const String _payloadTaskDependencies = "dependencies";
+const String _payloadSummary = "summary";
+const String _payloadSummaryTotalTasks = "totalTasks";
+const String _payloadSummaryTotalEstimatedDays = "totalEstimatedDays";
+const String _payloadSummaryRiskNotes = "riskNotes";
+const String _payloadProposedProduct = "proposedProduct";
+const String _payloadProposedStartDate = "proposedStartDate";
+const String _payloadProposedEndDate = "proposedEndDate";
 
 const String _logTag = "PRODUCTION_DRAFT";
 const String _logInit = "draft initialized";
@@ -101,6 +124,78 @@ const String _fieldAiGenerated = "aiGenerated";
 const String _fieldTask = "task";
 const String _responseDraftKey = "draft";
 const String _extraPhaseCountKey = "phaseCount";
+const String _extraMissingKey = "missing";
+const String _extraInvalidKey = "invalid";
+
+class ProductionAiDraftError implements Exception {
+  final String message;
+  final String classification;
+  final String errorCode;
+  final String resolutionHint;
+  final Map<String, dynamic> details;
+  final bool retryAllowed;
+  final String retryReason;
+  final int statusCode;
+
+  const ProductionAiDraftError({
+    required this.message,
+    required this.classification,
+    required this.errorCode,
+    required this.resolutionHint,
+    required this.details,
+    required this.retryAllowed,
+    required this.retryReason,
+    required this.statusCode,
+  });
+
+  factory ProductionAiDraftError.fromBackend(
+    Map<String, dynamic> json, {
+    required int statusCode,
+  }) {
+    final details = json["details"];
+    return ProductionAiDraftError(
+      message: (json["error"] ?? _aiDraftFallbackMessage).toString().trim(),
+      classification: (json["classification"] ?? _aiDraftFallbackClassification)
+          .toString()
+          .trim(),
+      errorCode: (json["error_code"] ?? _aiDraftFallbackErrorCode)
+          .toString()
+          .trim(),
+      resolutionHint:
+          (json["resolution_hint"] ?? _aiDraftFallbackResolutionHint)
+              .toString()
+              .trim(),
+      details: details is Map<String, dynamic> ? details : const {},
+      retryAllowed: json["retry_allowed"] == true,
+      retryReason: (json["retry_reason"] ?? _aiDraftFallbackRetryReason)
+          .toString()
+          .trim(),
+      statusCode: statusCode,
+    );
+  }
+
+  factory ProductionAiDraftError.schema({
+    required List<String> missing,
+    required List<String> invalid,
+    String? message,
+  }) {
+    return ProductionAiDraftError(
+      message: message ?? _aiDraftFallbackMessage,
+      classification: _aiDraftFallbackClassification,
+      errorCode: _aiDraftFallbackErrorCode,
+      resolutionHint: _aiDraftFallbackResolutionHint,
+      details: {_extraMissingKey: missing, _extraInvalidKey: invalid},
+      retryAllowed: true,
+      retryReason: _aiDraftFallbackRetryReason,
+      statusCode: _aiDraftFallbackStatus,
+    );
+  }
+
+  @override
+  String toString() {
+    return "$message ($classification/$errorCode)";
+  }
+}
 
 class ProductionTaskDraft {
   final String id;
@@ -158,20 +253,24 @@ class ProductionTaskDraft {
 class ProductionPhaseDraft {
   final String name;
   final int order;
+  final int estimatedDays;
   final List<ProductionTaskDraft> tasks;
 
   const ProductionPhaseDraft({
     required this.name,
     required this.order,
+    required this.estimatedDays,
     required this.tasks,
   });
 
   ProductionPhaseDraft copyWith({
+    int? estimatedDays,
     List<ProductionTaskDraft>? tasks,
   }) {
     return ProductionPhaseDraft(
       name: name,
       order: order,
+      estimatedDays: estimatedDays ?? this.estimatedDays,
       tasks: tasks ?? this.tasks,
     );
   }
@@ -184,7 +283,14 @@ class ProductionPlanDraftState {
   final String? productId;
   final DateTime? startDate;
   final DateTime? endDate;
+  final ProductDraft? proposedProduct;
+  final bool productAiSuggested;
+  final bool startDateAiSuggested;
+  final bool endDateAiSuggested;
   final bool aiGenerated;
+  final int totalTasks;
+  final int totalEstimatedDays;
+  final List<String> riskNotes;
   final List<ProductionPhaseDraft> phases;
 
   const ProductionPlanDraftState({
@@ -194,28 +300,57 @@ class ProductionPlanDraftState {
     required this.productId,
     required this.startDate,
     required this.endDate,
+    required this.proposedProduct,
+    required this.productAiSuggested,
+    required this.startDateAiSuggested,
+    required this.endDateAiSuggested,
     required this.aiGenerated,
+    required this.totalTasks,
+    required this.totalEstimatedDays,
+    required this.riskNotes,
     required this.phases,
   });
 
   ProductionPlanDraftState copyWith({
     String? title,
     String? notes,
-    String? estateAssetId,
-    String? productId,
-    DateTime? startDate,
-    DateTime? endDate,
+    Object? estateAssetId = _unsetValue,
+    Object? productId = _unsetValue,
+    Object? startDate = _unsetValue,
+    Object? endDate = _unsetValue,
+    Object? proposedProduct = _unsetValue,
+    bool? productAiSuggested,
+    bool? startDateAiSuggested,
+    bool? endDateAiSuggested,
     bool? aiGenerated,
+    int? totalTasks,
+    int? totalEstimatedDays,
+    List<String>? riskNotes,
     List<ProductionPhaseDraft>? phases,
   }) {
     return ProductionPlanDraftState(
       title: title ?? this.title,
       notes: notes ?? this.notes,
-      estateAssetId: estateAssetId ?? this.estateAssetId,
-      productId: productId ?? this.productId,
-      startDate: startDate ?? this.startDate,
-      endDate: endDate ?? this.endDate,
+      estateAssetId: estateAssetId == _unsetValue
+          ? this.estateAssetId
+          : estateAssetId as String?,
+      productId: productId == _unsetValue
+          ? this.productId
+          : productId as String?,
+      startDate: startDate == _unsetValue
+          ? this.startDate
+          : startDate as DateTime?,
+      endDate: endDate == _unsetValue ? this.endDate : endDate as DateTime?,
+      proposedProduct: proposedProduct == _unsetValue
+          ? this.proposedProduct
+          : proposedProduct as ProductDraft?,
+      productAiSuggested: productAiSuggested ?? this.productAiSuggested,
+      startDateAiSuggested: startDateAiSuggested ?? this.startDateAiSuggested,
+      endDateAiSuggested: endDateAiSuggested ?? this.endDateAiSuggested,
       aiGenerated: aiGenerated ?? this.aiGenerated,
+      totalTasks: totalTasks ?? this.totalTasks,
+      totalEstimatedDays: totalEstimatedDays ?? this.totalEstimatedDays,
+      riskNotes: riskNotes ?? this.riskNotes,
       phases: phases ?? this.phases,
     );
   }
@@ -224,79 +359,67 @@ class ProductionPlanDraftState {
 class ProductionPlanDraftController
     extends StateNotifier<ProductionPlanDraftState> {
   ProductionPlanDraftController()
-      : super(
-          ProductionPlanDraftState(
-            title: _emptyText,
-            notes: _emptyText,
-            estateAssetId: null,
-            productId: null,
-            startDate: null,
-            endDate: null,
-            aiGenerated: false,
-            phases: _buildDefaultPhases(),
-          ),
-        ) {
+    : super(
+        ProductionPlanDraftState(
+          title: _emptyText,
+          notes: _emptyText,
+          estateAssetId: null,
+          productId: null,
+          startDate: null,
+          endDate: null,
+          proposedProduct: null,
+          productAiSuggested: false,
+          startDateAiSuggested: false,
+          endDateAiSuggested: false,
+          aiGenerated: false,
+          phases: _buildDefaultPhases(),
+          totalTasks: 0,
+          totalEstimatedDays:
+              _defaultPhaseNames.length * _defaultPhaseEstimatedDays,
+          riskNotes: const [],
+        ),
+      ) {
     AppDebug.log(_logTag, _logInit);
   }
 
   void updateTitle(String value) {
     // WHY: Title helps distinguish plans in list views.
     state = state.copyWith(title: value);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldTitle},
-    );
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldTitle});
   }
 
   void updateNotes(String value) {
     // WHY: Notes capture plan context for managers.
     state = state.copyWith(notes: value);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldNotes},
-    );
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldNotes});
   }
 
   void updateEstate(String? estateAssetId) {
     // WHY: Estate scope is required for plan creation.
     state = state.copyWith(estateAssetId: estateAssetId);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldEstate},
-    );
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldEstate});
   }
 
   void updateProduct(String? productId) {
     // WHY: Product links plan output to inventory.
-    state = state.copyWith(productId: productId);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldProduct},
+    state = state.copyWith(
+      productId: productId,
+      proposedProduct: null,
+      productAiSuggested: false,
     );
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldProduct});
   }
 
   void updateStartDate(DateTime? date) {
     // WHY: Start date drives phase and task scheduling.
-    state = state.copyWith(startDate: date);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldStartDate},
-    );
+    state = state.copyWith(startDate: date, startDateAiSuggested: false);
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldStartDate});
   }
 
   void updateEndDate(DateTime? date) {
     // WHY: End date drives phase and task scheduling.
-    state = state.copyWith(endDate: date);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldEndDate},
-    );
+    state = state.copyWith(endDate: date, endDateAiSuggested: false);
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldEndDate});
   }
 
   void updateAiGenerated(bool value) {
@@ -318,8 +441,16 @@ class ProductionPlanDraftController
       productId: null,
       startDate: null,
       endDate: null,
+      proposedProduct: null,
+      productAiSuggested: false,
+      startDateAiSuggested: false,
+      endDateAiSuggested: false,
       aiGenerated: false,
       phases: _buildDefaultPhases(),
+      totalTasks: 0,
+      totalEstimatedDays:
+          _defaultPhaseNames.length * _defaultPhaseEstimatedDays,
+      riskNotes: const [],
     );
     AppDebug.log(_logTag, _logReset);
   }
@@ -356,12 +487,8 @@ class ProductionPlanDraftController
     final updatedTasks = [...phase.tasks, task];
     phases[phaseIndex] = phase.copyWith(tasks: updatedTasks);
 
-    state = state.copyWith(phases: phases);
-    AppDebug.log(
-      _logTag,
-      _logTaskAdded,
-      extra: {_extraPhaseKey: phase.name},
-    );
+    state = _withComputedSummary(state.copyWith(phases: phases));
+    AppDebug.log(_logTag, _logTaskAdded, extra: {_extraPhaseKey: phase.name});
   }
 
   void removeTask(int phaseIndex, String taskId) {
@@ -371,15 +498,13 @@ class ProductionPlanDraftController
 
     final phases = [...state.phases];
     final phase = phases[phaseIndex];
-    final updatedTasks = phase.tasks.where((task) => task.id != taskId).toList();
+    final updatedTasks = phase.tasks
+        .where((task) => task.id != taskId)
+        .toList();
     phases[phaseIndex] = phase.copyWith(tasks: updatedTasks);
 
-    state = state.copyWith(phases: phases);
-    AppDebug.log(
-      _logTag,
-      _logTaskRemoved,
-      extra: {_extraPhaseKey: phase.name},
-    );
+    state = _withComputedSummary(state.copyWith(phases: phases));
+    AppDebug.log(_logTag, _logTaskRemoved, extra: {_extraPhaseKey: phase.name});
   }
 
   void updateTaskTitle(int phaseIndex, String taskId, String title) {
@@ -416,11 +541,7 @@ class ProductionPlanDraftController
   }
 
   void updateTaskWeight(int phaseIndex, String taskId, int weight) {
-    _updateTask(
-      phaseIndex,
-      taskId,
-      (task) => task.copyWith(weight: weight),
-    );
+    _updateTask(phaseIndex, taskId, (task) => task.copyWith(weight: weight));
   }
 
   void updateTaskInstructions(int phaseIndex, String taskId, String value) {
@@ -436,7 +557,8 @@ class ProductionPlanDraftController
     String taskId,
     ProductionTaskStatus status,
   ) {
-    final phaseName = phaseIndex >= _minIndex && phaseIndex < state.phases.length
+    final phaseName =
+        phaseIndex >= _minIndex && phaseIndex < state.phases.length
         ? state.phases[phaseIndex].name
         : _emptyText;
     _updateTask(
@@ -444,8 +566,9 @@ class ProductionPlanDraftController
       taskId,
       (task) => task.copyWith(
         status: status,
-        completedAt:
-            status == ProductionTaskStatus.done ? DateTime.now() : null,
+        completedAt: status == ProductionTaskStatus.done
+            ? DateTime.now()
+            : null,
         completedByStaffId: status == ProductionTaskStatus.done
             ? task.assignedStaffId
             : null,
@@ -465,11 +588,7 @@ class ProductionPlanDraftController
   void markTaskDone(int phaseIndex, String taskId) {
     // WHY: Done sets completion metadata for quick tracking in the table.
     updateTaskStatus(phaseIndex, taskId, ProductionTaskStatus.done);
-    AppDebug.log(
-      _logTag,
-      _logTaskDone,
-      extra: {_extraTaskIdKey: taskId},
-    );
+    AppDebug.log(_logTag, _logTaskDone, extra: {_extraTaskIdKey: taskId});
   }
 
   void clearTaskDone(int phaseIndex, String taskId) {
@@ -502,7 +621,7 @@ class ProductionPlanDraftController
     }
     if (state.startDate != null &&
         state.endDate != null &&
-        state.endDate!.isBefore(state.startDate!)) {
+        !state.endDate!.isAfter(state.startDate!)) {
       errors.add(_errorDateRange);
     }
 
@@ -520,7 +639,8 @@ class ProductionPlanDraftController
         errors.add(_errorTaskRoleRequired);
         break;
       }
-      if (task.assignedStaffId == null || task.assignedStaffId!.trim().isEmpty) {
+      if (task.assignedStaffId == null ||
+          task.assignedStaffId!.trim().isEmpty) {
         errors.add(_errorTaskStaffRequired);
         break;
       }
@@ -547,6 +667,7 @@ class ProductionPlanDraftController
       return {
         _payloadPhaseName: phase.name,
         _payloadPhaseOrder: phase.order,
+        _payloadPhaseEstimatedDays: phase.estimatedDays,
         _payloadTasks: taskPayloads,
       };
     }).toList();
@@ -579,35 +700,69 @@ class ProductionPlanDraftController
         .toList();
     phases[phaseIndex] = phase.copyWith(tasks: updatedTasks);
 
-    state = state.copyWith(phases: phases);
-    AppDebug.log(
-      _logTag,
-      _logUpdate,
-      extra: {_extraFieldKey: _fieldTask},
-    );
+    state = _withComputedSummary(state.copyWith(phases: phases));
+    AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldTask});
   }
 }
 
+ProductionPlanDraftState _withComputedSummary(ProductionPlanDraftState draft) {
+  // WHY: Keep summary counters synchronized with local task edits.
+  final totalTasks = draft.phases.fold<int>(
+    0,
+    (sum, phase) => sum + phase.tasks.length,
+  );
+  final totalEstimatedDays = draft.phases.fold<int>(
+    0,
+    (sum, phase) => sum + phase.estimatedDays,
+  );
+  return draft.copyWith(
+    totalTasks: totalTasks,
+    totalEstimatedDays: totalEstimatedDays,
+  );
+}
+
 final productionPlanDraftProvider =
-    StateNotifierProvider<ProductionPlanDraftController, ProductionPlanDraftState>(
-  (ref) => ProductionPlanDraftController(),
-);
+    StateNotifierProvider<
+      ProductionPlanDraftController,
+      ProductionPlanDraftState
+    >((ref) => ProductionPlanDraftController());
 
 ProductionPlanDraftState parseProductionPlanDraftResponse(
   Map<String, dynamic> json,
 ) {
-  final draftMap = json[_responseDraftKey] is Map<String, dynamic>
-      ? json[_responseDraftKey] as Map<String, dynamic>
-      : <String, dynamic>{};
-  // WHY: Avoid unsafe casts when the response is incomplete.
-  final phasesValue = draftMap[_payloadPhases];
-  final phaseCount = phasesValue is List ? phasesValue.length : 0;
+  final draftValue = json[_responseDraftKey];
+  if (draftValue is! Map<String, dynamic>) {
+    throw ProductionAiDraftError.schema(
+      missing: [_responseDraftKey],
+      invalid: const [],
+      message: _aiDraftFallbackMessage,
+    );
+  }
+
+  final diagnostics = _validateDraftMap(draftValue);
+  if (diagnostics.missing.isNotEmpty || diagnostics.invalid.isNotEmpty) {
+    AppDebug.log(
+      _logTag,
+      _aiDraftFallbackErrorCode,
+      extra: {
+        _extraMissingKey: diagnostics.missing,
+        _extraInvalidKey: diagnostics.invalid,
+      },
+    );
+    throw ProductionAiDraftError.schema(
+      missing: diagnostics.missing,
+      invalid: diagnostics.invalid,
+      message: _aiDraftFallbackMessage,
+    );
+  }
+
+  final parsed = _buildStrictDraftState(draftValue);
   AppDebug.log(
     _logTag,
     _logDraftParsed,
-    extra: {_extraPhaseCountKey: phaseCount},
+    extra: {_extraPhaseCountKey: parsed.phases.length},
   );
-  return _buildDraftState(draftMap);
+  return parsed;
 }
 
 List<ProductionPhaseDraft> _buildDefaultPhases() {
@@ -618,6 +773,7 @@ List<ProductionPhaseDraft> _buildDefaultPhases() {
         (entry) => ProductionPhaseDraft(
           name: entry.value,
           order: entry.key + _phaseOrderOffset,
+          estimatedDays: _defaultPhaseEstimatedDays,
           tasks: const [],
         ),
       )
@@ -628,145 +784,409 @@ String _buildTaskId() {
   return "$_taskIdPrefix${DateTime.now().microsecondsSinceEpoch}";
 }
 
-ProductionPlanDraftState _buildDraftState(
-  Map<String, dynamic> draft,
-) {
-  // WHY: Use backend-provided draft values where possible.
-  final parsedPhases = _parseDraftPhases(
-    draft[_payloadPhases],
-  );
+class _DraftValidation {
+  final List<String> missing;
+  final List<String> invalid;
+
+  const _DraftValidation({required this.missing, required this.invalid});
+}
+
+_DraftValidation _validateDraftMap(Map<String, dynamic> draft) {
+  final missing = <String>[];
+  final invalid = <String>[];
+
+  final titleValue = draft[_payloadPlanTitle] ?? draft[_payloadTitle];
+  if (titleValue == null) {
+    missing.add(_payloadPlanTitle);
+  } else if (!_isValidRequiredString(titleValue)) {
+    invalid.add(_payloadPlanTitle);
+  }
+
+  if (!draft.containsKey(_payloadNotes)) {
+    missing.add(_payloadNotes);
+  } else if (draft[_payloadNotes] is! String) {
+    invalid.add(_payloadNotes);
+  }
+
+  final startDateValue = draft[_payloadStartDate];
+  final endDateValue = draft[_payloadEndDate];
+  final proposedStartDateValue = draft[_payloadProposedStartDate];
+  final proposedEndDateValue = draft[_payloadProposedEndDate];
+  if (startDateValue != null && !_isValidIsoDate(startDateValue.toString())) {
+    invalid.add(_payloadStartDate);
+  }
+  if (endDateValue != null && !_isValidIsoDate(endDateValue.toString())) {
+    invalid.add(_payloadEndDate);
+  }
+  if (proposedStartDateValue != null &&
+      !_isValidIsoDate(proposedStartDateValue.toString())) {
+    invalid.add(_payloadProposedStartDate);
+  }
+  if (proposedEndDateValue != null &&
+      !_isValidIsoDate(proposedEndDateValue.toString())) {
+    invalid.add(_payloadProposedEndDate);
+  }
+  final resolvedStartDate =
+      _isValidIsoDate(startDateValue?.toString() ?? _emptyText)
+      ? startDateValue.toString()
+      : _isValidIsoDate(proposedStartDateValue?.toString() ?? _emptyText)
+      ? proposedStartDateValue.toString()
+      : null;
+  final resolvedEndDate =
+      _isValidIsoDate(endDateValue?.toString() ?? _emptyText)
+      ? endDateValue.toString()
+      : _isValidIsoDate(proposedEndDateValue?.toString() ?? _emptyText)
+      ? proposedEndDateValue.toString()
+      : null;
+  if (resolvedStartDate == null) {
+    missing.add(_payloadStartDate);
+  }
+  if (resolvedEndDate == null) {
+    missing.add(_payloadEndDate);
+  }
+  if (resolvedStartDate != null && resolvedEndDate != null) {
+    final start = DateTime.parse(resolvedStartDate);
+    final end = DateTime.parse(resolvedEndDate);
+    if (!end.isAfter(start)) {
+      invalid.add(_payloadEndDate);
+    }
+  }
+
+  if (!_isValidRequiredString(draft[_payloadEstateId])) {
+    if (draft[_payloadEstateId] == null) {
+      missing.add(_payloadEstateId);
+    } else {
+      invalid.add(_payloadEstateId);
+    }
+  }
+  final hasDirectProduct = _isValidRequiredString(draft[_payloadProductId]);
+  final proposedProductValue = draft[_payloadProposedProduct];
+  if (!hasDirectProduct) {
+    if (proposedProductValue == null) {
+      missing.add(_payloadProductId);
+      missing.add(_payloadProposedProduct);
+    } else if (proposedProductValue is! Map<String, dynamic>) {
+      invalid.add(_payloadProposedProduct);
+    } else {
+      _validateRequiredStringField(
+        proposedProductValue,
+        "name",
+        missing,
+        invalid,
+        phasePath: _payloadProposedProduct,
+      );
+      _validateRequiredStringField(
+        proposedProductValue,
+        "description",
+        missing,
+        invalid,
+        phasePath: _payloadProposedProduct,
+      );
+      _validateRequiredIntField(
+        proposedProductValue,
+        "priceNgn",
+        missing,
+        invalid,
+        phasePath: _payloadProposedProduct,
+        minValue: 0,
+      );
+      _validateRequiredIntField(
+        proposedProductValue,
+        "stock",
+        missing,
+        invalid,
+        phasePath: _payloadProposedProduct,
+        minValue: 0,
+      );
+      if (proposedProductValue.containsKey("imageUrl") &&
+          proposedProductValue["imageUrl"] != null &&
+          proposedProductValue["imageUrl"] is! String) {
+        invalid.add("$_payloadProposedProduct.imageUrl");
+      }
+    }
+  } else if (!_isValidRequiredString(draft[_payloadProductId])) {
+    invalid.add(_payloadProductId);
+  }
+
+  final phasesValue = draft[_payloadPhases];
+  if (phasesValue == null) {
+    missing.add(_payloadPhases);
+  } else if (phasesValue is! List || phasesValue.isEmpty) {
+    invalid.add(_payloadPhases);
+  }
+
+  if (phasesValue is List) {
+    for (var phaseIndex = 0; phaseIndex < phasesValue.length; phaseIndex++) {
+      final phasePath = "$_payloadPhases[$phaseIndex]";
+      final phase = phasesValue[phaseIndex];
+      if (phase is! Map<String, dynamic>) {
+        invalid.add(phasePath);
+        continue;
+      }
+
+      _validateRequiredStringField(
+        phase,
+        _payloadPhaseName,
+        missing,
+        invalid,
+        phasePath: phasePath,
+      );
+      _validateRequiredIntField(
+        phase,
+        _payloadPhaseOrder,
+        missing,
+        invalid,
+        phasePath: phasePath,
+        minValue: 1,
+      );
+      _validateRequiredIntField(
+        phase,
+        _payloadPhaseEstimatedDays,
+        missing,
+        invalid,
+        phasePath: phasePath,
+        minValue: 1,
+      );
+
+      final tasks = phase[_payloadTasks];
+      if (tasks == null) {
+        missing.add("$phasePath.$_payloadTasks");
+      } else if (tasks is! List) {
+        invalid.add("$phasePath.$_payloadTasks");
+      }
+
+      if (tasks is List) {
+        for (var taskIndex = 0; taskIndex < tasks.length; taskIndex++) {
+          final taskPath = "$phasePath.$_payloadTasks[$taskIndex]";
+          final task = tasks[taskIndex];
+          if (task is! Map<String, dynamic>) {
+            invalid.add(taskPath);
+            continue;
+          }
+
+          _validateRequiredStringField(
+            task,
+            _payloadTaskTitle,
+            missing,
+            invalid,
+            phasePath: taskPath,
+          );
+          _validateRequiredStringField(
+            task,
+            _payloadTaskRole,
+            missing,
+            invalid,
+            phasePath: taskPath,
+          );
+          _validateRequiredStringField(
+            task,
+            _payloadTaskInstructions,
+            missing,
+            invalid,
+            phasePath: taskPath,
+          );
+          _validateRequiredIntField(
+            task,
+            _payloadTaskWeight,
+            missing,
+            invalid,
+            phasePath: taskPath,
+            minValue: _defaultTaskWeight,
+            maxValue: _maxTaskWeight,
+          );
+
+          if (task.containsKey(_payloadTaskStaff) &&
+              task[_payloadTaskStaff] != null &&
+              !_isValidRequiredString(task[_payloadTaskStaff])) {
+            invalid.add("$taskPath.$_payloadTaskStaff");
+          }
+        }
+      }
+    }
+  }
+
+  final summaryValue = draft[_payloadSummary];
+  if (summaryValue == null) {
+    missing.add(_payloadSummary);
+  } else if (summaryValue is! Map<String, dynamic>) {
+    invalid.add(_payloadSummary);
+  }
+
+  if (summaryValue is Map<String, dynamic>) {
+    _validateRequiredIntField(
+      summaryValue,
+      _payloadSummaryTotalTasks,
+      missing,
+      invalid,
+      phasePath: _payloadSummary,
+      minValue: 0,
+    );
+    _validateRequiredIntField(
+      summaryValue,
+      _payloadSummaryTotalEstimatedDays,
+      missing,
+      invalid,
+      phasePath: _payloadSummary,
+      minValue: 0,
+    );
+    final riskNotes = summaryValue[_payloadSummaryRiskNotes];
+    final riskPath = "$_payloadSummary.$_payloadSummaryRiskNotes";
+    if (riskNotes == null) {
+      missing.add(riskPath);
+    } else if (riskNotes is! List ||
+        riskNotes.any((item) => !_isValidRequiredString(item))) {
+      invalid.add(riskPath);
+    }
+  }
+
+  return _DraftValidation(missing: missing, invalid: invalid);
+}
+
+ProductionPlanDraftState _buildStrictDraftState(Map<String, dynamic> draft) {
+  final phasesRaw = draft[_payloadPhases] as List<dynamic>;
+  final summaryMap = draft[_payloadSummary] as Map<String, dynamic>;
+  final startDateRaw = draft[_payloadStartDate];
+  final endDateRaw = draft[_payloadEndDate];
+  final proposedStartDateRaw = draft[_payloadProposedStartDate];
+  final proposedEndDateRaw = draft[_payloadProposedEndDate];
+  final startDateString =
+      _isValidIsoDate(startDateRaw?.toString() ?? _emptyText)
+      ? startDateRaw.toString()
+      : proposedStartDateRaw.toString();
+  final endDateString = _isValidIsoDate(endDateRaw?.toString() ?? _emptyText)
+      ? endDateRaw.toString()
+      : proposedEndDateRaw.toString();
+  final hasDirectProduct = _isValidRequiredString(draft[_payloadProductId]);
+  final proposedProductRaw = draft[_payloadProposedProduct];
+  final suggestedProduct =
+      !hasDirectProduct && proposedProductRaw is Map<String, dynamic>
+      ? ProductDraft.fromJson(proposedProductRaw)
+      : null;
+  final phases = <ProductionPhaseDraft>[];
+
+  for (var phaseIndex = 0; phaseIndex < phasesRaw.length; phaseIndex++) {
+    final phaseMap = phasesRaw[phaseIndex] as Map<String, dynamic>;
+    final tasksRaw = phaseMap[_payloadTasks] as List<dynamic>;
+    final tasks = <ProductionTaskDraft>[];
+
+    for (var taskIndex = 0; taskIndex < tasksRaw.length; taskIndex++) {
+      final taskMap = tasksRaw[taskIndex] as Map<String, dynamic>;
+      final assignedStaff = taskMap[_payloadTaskStaff];
+      tasks.add(
+        ProductionTaskDraft(
+          id: _buildTaskId(),
+          title: taskMap[_payloadTaskTitle].toString().trim(),
+          roleRequired: taskMap[_payloadTaskRole].toString().trim(),
+          assignedStaffId: assignedStaff?.toString().trim(),
+          weight: _parseStrictInt(taskMap[_payloadTaskWeight])!,
+          instructions: taskMap[_payloadTaskInstructions].toString().trim(),
+          status: _defaultTaskStatus,
+          completedAt: null,
+          completedByStaffId: null,
+        ),
+      );
+    }
+
+    phases.add(
+      ProductionPhaseDraft(
+        name: phaseMap[_payloadPhaseName].toString().trim(),
+        order: _parseStrictInt(phaseMap[_payloadPhaseOrder])!,
+        estimatedDays: _parseStrictInt(phaseMap[_payloadPhaseEstimatedDays])!,
+        tasks: tasks,
+      ),
+    );
+  }
+
+  final riskNotes = (summaryMap[_payloadSummaryRiskNotes] as List<dynamic>)
+      .map((item) => item.toString().trim())
+      .toList();
 
   return ProductionPlanDraftState(
-    title: _parseString(
-      draft[_payloadTitle],
-      fallback: _emptyText,
-    ),
-    notes: _parseString(
-      draft[_payloadNotes],
-      fallback: _emptyText,
-    ),
-    estateAssetId: _parseNullableString(
-      draft[_payloadEstateId],
-    ),
-    productId: _parseNullableString(
-      draft[_payloadProductId],
-    ),
-    startDate: _parseDate(
-      draft[_payloadStartDate],
-    ),
-    endDate: _parseDate(
-      draft[_payloadEndDate],
-    ),
-    aiGenerated: draft[_payloadAiGenerated] == true,
-    phases: parsedPhases.isEmpty
-        ? _buildDefaultPhases()
-        : parsedPhases,
+    title: (draft[_payloadPlanTitle] ?? draft[_payloadTitle]).toString().trim(),
+    notes: draft[_payloadNotes].toString().trim(),
+    estateAssetId: draft[_payloadEstateId].toString().trim(),
+    productId: hasDirectProduct
+        ? draft[_payloadProductId].toString().trim()
+        : null,
+    startDate: DateTime.parse(startDateString),
+    endDate: DateTime.parse(endDateString),
+    proposedProduct: suggestedProduct,
+    productAiSuggested: suggestedProduct != null,
+    startDateAiSuggested:
+        !_isValidIsoDate(startDateRaw?.toString() ?? _emptyText) &&
+        _isValidIsoDate(proposedStartDateRaw?.toString() ?? _emptyText),
+    endDateAiSuggested:
+        !_isValidIsoDate(endDateRaw?.toString() ?? _emptyText) &&
+        _isValidIsoDate(proposedEndDateRaw?.toString() ?? _emptyText),
+    aiGenerated: true,
+    phases: phases,
+    totalTasks: _parseStrictInt(summaryMap[_payloadSummaryTotalTasks])!,
+    totalEstimatedDays: _parseStrictInt(
+      summaryMap[_payloadSummaryTotalEstimatedDays],
+    )!,
+    riskNotes: riskNotes,
   );
 }
 
-List<ProductionPhaseDraft> _parseDraftPhases(
-  dynamic value,
-) {
-  // WHY: Defensive parsing keeps UI stable on partial drafts.
-  final list = value is List ? value : const [];
-  return list
-      .asMap()
-      .entries
-      .map((entry) => _parseDraftPhase(entry.key, entry.value))
-      .toList();
+bool _isValidRequiredString(dynamic value) {
+  if (value == null) return false;
+  return value.toString().trim().isNotEmpty;
 }
 
-ProductionPhaseDraft _parseDraftPhase(
-  int index,
-  dynamic value,
-) {
-  // WHY: Coerce phase payloads into predictable draft objects.
-  final map = value is Map<String, dynamic>
-      ? value
-      : <String, dynamic>{};
-  final name = _parseString(
-    map[_payloadPhaseName],
-    fallback: "${_defaultPhaseNamePrefix} ${index + _phaseOrderOffset}",
-  );
-  final order = _parseInt(
-    map[_payloadPhaseOrder],
-    fallback: index + _phaseOrderOffset,
-  );
-  return ProductionPhaseDraft(
-    name: name,
-    order: order,
-    tasks: _parseDraftTasks(
-      map[_payloadTasks],
-    ),
-  );
+void _validateRequiredStringField(
+  Map<String, dynamic> source,
+  String field,
+  List<String> missing,
+  List<String> invalid, {
+  required String phasePath,
+}) {
+  final keyPath = "$phasePath.$field";
+  final value = source[field];
+  if (value == null) {
+    missing.add(keyPath);
+    return;
+  }
+  if (!_isValidRequiredString(value)) {
+    invalid.add(keyPath);
+  }
 }
 
-List<ProductionTaskDraft> _parseDraftTasks(
-  dynamic value,
-) {
-  // WHY: Default to empty tasks when AI returns null.
-  final list = value is List ? value : const [];
-  return list
-      .map((item) => _parseDraftTask(item))
-      .toList();
+void _validateRequiredIntField(
+  Map<String, dynamic> source,
+  String field,
+  List<String> missing,
+  List<String> invalid, {
+  required String phasePath,
+  required int minValue,
+  int? maxValue,
+}) {
+  final keyPath = "$phasePath.$field";
+  final value = source[field];
+  if (value == null) {
+    missing.add(keyPath);
+    return;
+  }
+  final parsed = _parseStrictInt(value);
+  if (parsed == null ||
+      parsed < minValue ||
+      (maxValue != null && parsed > maxValue)) {
+    invalid.add(keyPath);
+  }
 }
 
-ProductionTaskDraft _parseDraftTask(dynamic value) {
-  // WHY: Normalize task fields before editing in UI.
-  final map = value is Map<String, dynamic>
-      ? value
-      : <String, dynamic>{};
-  final role = _parseString(
-    map[_payloadTaskRole],
-    fallback: staffRoleValues.first,
-  );
-  return ProductionTaskDraft(
-    id: _buildTaskId(),
-    title: _parseString(
-      map[_payloadTaskTitle],
-      fallback: _defaultTaskTitle,
-    ),
-    roleRequired: role,
-    assignedStaffId: _parseNullableString(
-      map[_payloadTaskStaff],
-    ),
-    weight: _parseInt(
-      map[_payloadTaskWeight],
-      fallback: _defaultTaskWeight,
-    ),
-    instructions: _parseString(
-      map[_payloadTaskInstructions],
-      fallback: _emptyText,
-    ),
-    status: _defaultTaskStatus,
-    completedAt: null,
-    completedByStaffId: null,
-  );
+int? _parseStrictInt(dynamic value) {
+  if (value is int) return value;
+  if (value is String && RegExp(r"^-?\d+$").hasMatch(value.trim())) {
+    return int.tryParse(value.trim());
+  }
+  return null;
 }
 
-String _parseString(dynamic value, {required String fallback}) {
-  // WHY: Ensure labels never render as "null".
-  if (value == null) return fallback;
-  final text = value.toString().trim();
-  return text.isEmpty ? fallback : text;
-}
-
-String? _parseNullableString(dynamic value) {
-  // WHY: Preserve nulls for optional fields like staff assignment.
-  if (value == null) return null;
-  final text = value.toString().trim();
-  return text.isEmpty ? null : text;
-}
-
-int _parseInt(dynamic value, {required int fallback}) {
-  // WHY: Avoid crashes when AI returns non-numeric weights.
-  if (value == null) return fallback;
-  final parsed = int.tryParse(value.toString());
-  return parsed ?? fallback;
-}
-
-DateTime? _parseDate(dynamic value) {
-  // WHY: Dates may be missing in drafts; keep nullable.
-  if (value == null) return null;
-  return DateTime.tryParse(value.toString());
+bool _isValidIsoDate(String value) {
+  if (!RegExp(_isoDatePattern).hasMatch(value)) {
+    return false;
+  }
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return false;
+  return parsed.toIso8601String().startsWith(value);
 }
