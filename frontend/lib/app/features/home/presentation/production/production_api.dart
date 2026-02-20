@@ -16,32 +16,70 @@ library;
 import 'package:dio/dio.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/features/home/presentation/production/production_assistant_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_calendar_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 
 // WHY: Centralize endpoint paths to avoid inline magic strings.
 const String _plansPath = "/business/production/plans";
+const String _calendarPath = "/business/production/calendar";
+const String _assistantTurnPath = "/business/production/plans/assistant-turn";
 const String _planDraftPath = "/business/production/plans/ai-draft";
+const String _schedulePolicyPath = "/business/production/schedule-policy";
 const String _tasksPath = "/business/production/tasks";
+const String _taskProgressPath = "/business/production/task-progress";
+const String _preorderReconcilePath =
+    "/business/preorder/reservations/reconcile-expired";
+const String _preorderReservationsPath = "/business/preorder/reservations";
 const String _staffPath = "/business/staff";
+const String _staffCapacityPath = "/business/staff/capacity";
 
 // WHY: Keep logs consistent across production endpoints.
 const String _logTag = "PRODUCTION_API";
 const String _serviceName = "production_api";
 const String _intentPlans = "load production plans";
+const String _intentCalendar = "load production calendar";
+const String _intentAssistantTurn = "run production assistant turn";
 const String _intentPlanDetail = "load production plan detail";
 const String _intentPlanCreate = "create production plan";
 const String _intentPlanDraft = "generate production plan draft";
+const String _intentSchedulePolicy = "load production schedule policy";
+const String _intentSchedulePolicyUpdate = "update production schedule policy";
+const String _intentStaffCapacity = "load production staff capacity";
+const String _intentPlanPreorder = "update production preorder state";
+const String _intentPreorderReservations = "list preorder reservations";
+const String _intentPreorderReconcile =
+    "reconcile expired preorder reservations";
 const String _intentTaskStatus = "update production task status";
+const String _intentTaskAssign = "assign production task staff profiles";
+const String _intentTaskProgress = "log production task progress";
+const String _intentTaskProgressBatch = "batch log production task progress";
+const String _intentTaskProgressApprove = "approve production task progress";
+const String _intentTaskProgressReject = "reject production task progress";
 const String _intentTaskApprove = "approve production task";
 const String _intentTaskReject = "reject production task";
 const String _intentStaff = "load staff directory";
 const String _operationAuth = "authOptions";
 const String _operationPlans = "fetchPlans";
+const String _operationCalendar = "fetchCalendar";
+const String _operationAssistantTurn = "assistantTurn";
 const String _operationPlanDetail = "fetchPlanDetail";
 const String _operationPlanCreate = "createPlan";
 const String _operationPlanDraft = "generatePlanDraft";
+const String _operationSchedulePolicy = "fetchSchedulePolicy";
+const String _operationSchedulePolicyUpdate = "updateSchedulePolicy";
+const String _operationStaffCapacity = "fetchStaffCapacity";
+const String _operationPlanPreorder = "updatePlanPreorder";
+const String _operationPreorderReservations = "listPreorderReservations";
+const String _operationPreorderReconcile = "reconcileExpiredPreorders";
 const String _operationTaskStatus = "updateTaskStatus";
+const String _operationTaskAssign = "assignTaskStaffProfiles";
+const String _operationTaskProgress = "logTaskProgress";
+const String _operationTaskProgressBatch = "logTaskProgressBatch";
+const String _operationTaskProgressApprove = "approveTaskProgress";
+const String _operationTaskProgressReject = "rejectTaskProgress";
 const String _operationTaskApprove = "approveTask";
 const String _operationTaskReject = "rejectTask";
 const String _operationStaff = "fetchStaffProfiles";
@@ -52,15 +90,33 @@ const String _authIntent = "ensure auth headers";
 const String _fallbackErrorReason = "unknown_error";
 const int _fallbackStatusCode = 0;
 const String _authHeaderKey = "Authorization";
+const String _keyFrom = "from";
+const String _keyTo = "to";
 const String _keyTask = "task";
 const String _keyStaff = "staff";
 const String _keyStatus = "status";
 const String _keyReason = "reason";
+const String _keyPreorderSummary = "preorderSummary";
+const String _keyWorkDate = "workDate";
+const String _keyEstateAssetId = "estateAssetId";
+const String _keyStaffId = "staffId";
+const String _keyAssignedStaffProfileIds = "assignedStaffProfileIds";
+const String _keyActualPlots = "actualPlots";
+const String _keyDelayReason = "delayReason";
+const String _keyNotes = "notes";
+const String _keyEntries = "entries";
+const String _keySummary = "summary";
 
 // WHY: Keep log messages consistent and reusable.
 const String _plansStartMessage = "fetchPlans() start";
 const String _plansSuccessMessage = "fetchPlans() success";
 const String _plansFailureMessage = "fetchPlans() failed";
+const String _calendarStartMessage = "fetchCalendar() start";
+const String _calendarSuccessMessage = "fetchCalendar() success";
+const String _calendarFailureMessage = "fetchCalendar() failed";
+const String _assistantTurnStartMessage = "assistantTurn() start";
+const String _assistantTurnSuccessMessage = "assistantTurn() success";
+const String _assistantTurnFailureMessage = "assistantTurn() failed";
 const String _planDetailStartMessage = "fetchPlanDetail() start";
 const String _planDetailSuccessMessage = "fetchPlanDetail() success";
 const String _planDetailFailureMessage = "fetchPlanDetail() failed";
@@ -70,9 +126,53 @@ const String _planCreateFailureMessage = "createPlan() failed";
 const String _planDraftStartMessage = "generatePlanDraft() start";
 const String _planDraftSuccessMessage = "generatePlanDraft() success";
 const String _planDraftFailureMessage = "generatePlanDraft() failed";
+const String _schedulePolicyStartMessage = "fetchSchedulePolicy() start";
+const String _schedulePolicySuccessMessage = "fetchSchedulePolicy() success";
+const String _schedulePolicyFailureMessage = "fetchSchedulePolicy() failed";
+const String _schedulePolicyUpdateStartMessage = "updateSchedulePolicy() start";
+const String _schedulePolicyUpdateSuccessMessage =
+    "updateSchedulePolicy() success";
+const String _schedulePolicyUpdateFailureMessage =
+    "updateSchedulePolicy() failed";
+const String _staffCapacityStartMessage = "fetchStaffCapacity() start";
+const String _staffCapacitySuccessMessage = "fetchStaffCapacity() success";
+const String _staffCapacityFailureMessage = "fetchStaffCapacity() failed";
+const String _planPreorderStartMessage = "updatePlanPreorder() start";
+const String _planPreorderSuccessMessage = "updatePlanPreorder() success";
+const String _planPreorderFailureMessage = "updatePlanPreorder() failed";
+const String _preorderReservationsStartMessage =
+    "listPreorderReservations() start";
+const String _preorderReservationsSuccessMessage =
+    "listPreorderReservations() success";
+const String _preorderReservationsFailureMessage =
+    "listPreorderReservations() failed";
+const String _preorderReconcileStartMessage =
+    "reconcileExpiredPreorders() start";
+const String _preorderReconcileSuccessMessage =
+    "reconcileExpiredPreorders() success";
+const String _preorderReconcileFailureMessage =
+    "reconcileExpiredPreorders() failed";
 const String _taskStatusStartMessage = "updateTaskStatus() start";
 const String _taskStatusSuccessMessage = "updateTaskStatus() success";
 const String _taskStatusFailureMessage = "updateTaskStatus() failed";
+const String _taskAssignStartMessage = "assignTaskStaffProfiles() start";
+const String _taskAssignSuccessMessage = "assignTaskStaffProfiles() success";
+const String _taskAssignFailureMessage = "assignTaskStaffProfiles() failed";
+const String _taskProgressStartMessage = "logTaskProgress() start";
+const String _taskProgressSuccessMessage = "logTaskProgress() success";
+const String _taskProgressFailureMessage = "logTaskProgress() failed";
+const String _taskProgressBatchStartMessage = "logTaskProgressBatch() start";
+const String _taskProgressBatchSuccessMessage =
+    "logTaskProgressBatch() success";
+const String _taskProgressBatchFailureMessage = "logTaskProgressBatch() failed";
+const String _taskProgressApproveStartMessage = "approveTaskProgress() start";
+const String _taskProgressApproveSuccessMessage =
+    "approveTaskProgress() success";
+const String _taskProgressApproveFailureMessage =
+    "approveTaskProgress() failed";
+const String _taskProgressRejectStartMessage = "rejectTaskProgress() start";
+const String _taskProgressRejectSuccessMessage = "rejectTaskProgress() success";
+const String _taskProgressRejectFailureMessage = "rejectTaskProgress() failed";
 const String _taskApproveStartMessage = "approveTask() start";
 const String _taskApproveSuccessMessage = "approveTask() success";
 const String _taskApproveFailureMessage = "approveTask() failed";
@@ -93,8 +193,14 @@ const String _extraReasonKey = "reason";
 const String _extraCountKey = "count";
 const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
+const String _extraProgressIdKey = "progressId";
+const String _extraFromKey = "from";
+const String _extraToKey = "to";
+const String _extraEstateAssetIdKey = "estateAssetId";
 const String _extraStaffCountKey = "staffCount";
 const String _extraPhaseCountKey = "phaseCount";
+const String _extraDraftStatusKey = "draftStatus";
+const String _extraIssueTypeKey = "issueType";
 const String _extraClassificationKey = "classification";
 const String _extraErrorCodeKey = "errorCode";
 const String _extraResolutionHintKey = "resolutionHint";
@@ -185,6 +291,263 @@ class ProductionApi {
           _extraServiceKey: _serviceName,
           _extraOperationKey: _operationPlans,
           _extraIntentKey: _intentPlans,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// CALENDAR
+  /// ------------------------------------------------------
+  Future<ProductionCalendarResponse> fetchCalendar({
+    required String? token,
+    required DateTime fromDate,
+    required DateTime toDate,
+  }) async {
+    final from = formatDateInput(fromDate);
+    final to = formatDateInput(toDate);
+    AppDebug.log(
+      _logTag,
+      _calendarStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationCalendar,
+        _extraIntentKey: _intentCalendar,
+        _extraFromKey: from,
+        _extraToKey: to,
+      },
+    );
+
+    try {
+      final resp = await _dio.get(
+        _calendarPath,
+        queryParameters: {_keyFrom: from, _keyTo: to},
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionCalendarResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _calendarSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationCalendar,
+          _extraIntentKey: _intentCalendar,
+          _extraFromKey: from,
+          _extraToKey: to,
+          _extraCountKey: parsed.items.length,
+        },
+      );
+
+      return parsed;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _calendarFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationCalendar,
+          _extraIntentKey: _intentCalendar,
+          _extraFromKey: from,
+          _extraToKey: to,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// SCHEDULE POLICY
+  /// ------------------------------------------------------
+  Future<ProductionSchedulePolicyResponse> fetchSchedulePolicy({
+    required String? token,
+    String? estateAssetId,
+  }) async {
+    final scopedEstateId = estateAssetId?.trim() ?? "";
+    AppDebug.log(
+      _logTag,
+      _schedulePolicyStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationSchedulePolicy,
+        _extraIntentKey: _intentSchedulePolicy,
+        _extraEstateAssetIdKey: scopedEstateId,
+      },
+    );
+
+    try {
+      final resp = await _dio.get(
+        _schedulePolicyPath,
+        queryParameters: scopedEstateId.isEmpty
+            ? null
+            : {_keyEstateAssetId: scopedEstateId},
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final policy = ProductionSchedulePolicyResponse.fromJson(data);
+      AppDebug.log(
+        _logTag,
+        _schedulePolicySuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationSchedulePolicy,
+          _extraIntentKey: _intentSchedulePolicy,
+          _extraEstateAssetIdKey: scopedEstateId,
+          _extraCountKey: policy.policy.blocks.length,
+        },
+      );
+      return policy;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _schedulePolicyFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationSchedulePolicy,
+          _extraIntentKey: _intentSchedulePolicy,
+          _extraEstateAssetIdKey: scopedEstateId,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ProductionSchedulePolicyResponse> updateSchedulePolicy({
+    required String? token,
+    String? estateAssetId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final scopedEstateId = estateAssetId?.trim() ?? "";
+    AppDebug.log(
+      _logTag,
+      _schedulePolicyUpdateStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationSchedulePolicyUpdate,
+        _extraIntentKey: _intentSchedulePolicyUpdate,
+        _extraEstateAssetIdKey: scopedEstateId,
+      },
+    );
+
+    try {
+      final resp = await _dio.put(
+        _schedulePolicyPath,
+        queryParameters: scopedEstateId.isEmpty
+            ? null
+            : {_keyEstateAssetId: scopedEstateId},
+        data: payload,
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final policy = ProductionSchedulePolicyResponse.fromJson(data);
+      AppDebug.log(
+        _logTag,
+        _schedulePolicyUpdateSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationSchedulePolicyUpdate,
+          _extraIntentKey: _intentSchedulePolicyUpdate,
+          _extraEstateAssetIdKey: scopedEstateId,
+          _extraCountKey: policy.policy.blocks.length,
+        },
+      );
+      return policy;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _schedulePolicyUpdateFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationSchedulePolicyUpdate,
+          _extraIntentKey: _intentSchedulePolicyUpdate,
+          _extraEstateAssetIdKey: scopedEstateId,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ProductionStaffCapacitySummary> fetchStaffCapacity({
+    required String? token,
+    String? estateAssetId,
+  }) async {
+    final scopedEstateId = estateAssetId?.trim() ?? "";
+    AppDebug.log(
+      _logTag,
+      _staffCapacityStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationStaffCapacity,
+        _extraIntentKey: _intentStaffCapacity,
+        _extraEstateAssetIdKey: scopedEstateId,
+      },
+    );
+
+    try {
+      final resp = await _dio.get(
+        _staffCapacityPath,
+        queryParameters: scopedEstateId.isEmpty
+            ? null
+            : {_keyEstateAssetId: scopedEstateId},
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final capacity = ProductionStaffCapacitySummary.fromJson(data);
+      AppDebug.log(
+        _logTag,
+        _staffCapacitySuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationStaffCapacity,
+          _extraIntentKey: _intentStaffCapacity,
+          _extraEstateAssetIdKey: scopedEstateId,
+          _extraCountKey: capacity.roles.length,
+        },
+      );
+      return capacity;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _staffCapacityFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationStaffCapacity,
+          _extraIntentKey: _intentStaffCapacity,
+          _extraEstateAssetIdKey: scopedEstateId,
           _extraStatusKey: status,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,
@@ -318,9 +681,292 @@ class ProductionApi {
   }
 
   /// ------------------------------------------------------
+  /// UPDATE PREORDER STATE
+  /// ------------------------------------------------------
+  Future<ProductionPreorderSummary> updatePlanPreorder({
+    required String? token,
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _planPreorderStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationPlanPreorder,
+        _extraIntentKey: _intentPlanPreorder,
+        _extraPlanIdKey: planId,
+      },
+    );
+
+    try {
+      final resp = await _dio.patch(
+        "$_plansPath/$planId/preorder",
+        data: payload,
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final summaryMap =
+          (data[_keyPreorderSummary] ?? {}) as Map<String, dynamic>;
+      final summary = ProductionPreorderSummary.fromJson(summaryMap);
+
+      AppDebug.log(
+        _logTag,
+        _planPreorderSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanPreorder,
+          _extraIntentKey: _intentPlanPreorder,
+          _extraPlanIdKey: planId,
+          _extraStatusKey: summary.productionState,
+        },
+      );
+
+      return summary;
+    } on DioException catch (error) {
+      final rawData = error.response?.data;
+      final responseMap = rawData is Map<String, dynamic>
+          ? rawData
+          : <String, dynamic>{};
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      final classification =
+          responseMap[_responseClassificationKey]?.toString() ??
+          _fallbackErrorReason;
+      final errorCode =
+          responseMap[_responseErrorCodeKey]?.toString() ??
+          _fallbackErrorReason;
+      final resolutionHint =
+          responseMap[_responseResolutionHintKey]?.toString() ??
+          _nextActionRetry;
+      AppDebug.log(
+        _logTag,
+        _planPreorderFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanPreorder,
+          _extraIntentKey: _intentPlanPreorder,
+          _extraPlanIdKey: planId,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraClassificationKey: classification,
+          _extraErrorCodeKey: errorCode,
+          _extraResolutionHintKey: resolutionHint,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// LIST PREORDER RESERVATIONS
+  /// ------------------------------------------------------
+  Future<ProductionPreorderReservationListResponse> listPreorderReservations({
+    required String? token,
+    String? status,
+    String? planId,
+    int page = 1,
+    int limit = 20,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _preorderReservationsStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationPreorderReservations,
+        _extraIntentKey: _intentPreorderReservations,
+        _extraPlanIdKey: (planId ?? "").trim(),
+        _extraStatusKey: (status ?? "").trim(),
+      },
+    );
+
+    try {
+      final normalizedStatus = (status ?? "").trim();
+      final normalizedPlanId = (planId ?? "").trim();
+      final queryParameters = <String, dynamic>{"page": page, "limit": limit};
+      if (normalizedStatus.isNotEmpty) {
+        queryParameters["status"] = normalizedStatus;
+      }
+      if (normalizedPlanId.isNotEmpty) {
+        queryParameters["planId"] = normalizedPlanId;
+      }
+
+      final resp = await _dio.get(
+        _preorderReservationsPath,
+        queryParameters: queryParameters,
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionPreorderReservationListResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _preorderReservationsSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPreorderReservations,
+          _extraIntentKey: _intentPreorderReservations,
+          _extraCountKey: parsed.reservations.length,
+          _extraStatusKey: parsed.filters.status,
+        },
+      );
+
+      return parsed;
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _preorderReservationsFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPreorderReservations,
+          _extraIntentKey: _intentPreorderReservations,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// RECONCILE EXPIRED PREORDER HOLDS
+  /// ------------------------------------------------------
+  Future<ProductionPreorderReconcileSummary> reconcileExpiredPreorders({
+    required String? token,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _preorderReconcileStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationPreorderReconcile,
+        _extraIntentKey: _intentPreorderReconcile,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        _preorderReconcilePath,
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final summaryMap = (data[_keySummary] ?? {}) as Map<String, dynamic>;
+      final summary = ProductionPreorderReconcileSummary.fromJson(summaryMap);
+
+      AppDebug.log(
+        _logTag,
+        _preorderReconcileSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPreorderReconcile,
+          _extraIntentKey: _intentPreorderReconcile,
+          _extraCountKey: summary.expiredCount,
+        },
+      );
+
+      return summary;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _preorderReconcileFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPreorderReconcile,
+          _extraIntentKey: _intentPreorderReconcile,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// PLAN ASSISTANT TURN
+  /// ------------------------------------------------------
+  Future<ProductionAssistantTurnResponse> assistantTurn({
+    required String? token,
+    required Map<String, dynamic> payload,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _assistantTurnStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationAssistantTurn,
+        _extraIntentKey: _intentAssistantTurn,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        _assistantTurnPath,
+        data: payload,
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionAssistantTurnResponse.fromJson(data);
+      AppDebug.log(
+        _logTag,
+        _assistantTurnSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationAssistantTurn,
+          _extraIntentKey: _intentAssistantTurn,
+          "action": parsed.turn.action,
+        },
+      );
+      return parsed;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _assistantTurnFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationAssistantTurn,
+          _extraIntentKey: _intentAssistantTurn,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
   /// PLAN AI DRAFT
   /// ------------------------------------------------------
-  Future<ProductionPlanDraftState> generatePlanDraft({
+  Future<ProductionAiDraftResult> fetchAiDraftPlan({
+    required String? token,
+    required Map<String, dynamic> payload,
+  }) {
+    // WHY: Alias keeps naming aligned with create-screen draft preview intent.
+    return generatePlanDraft(token: token, payload: payload);
+  }
+
+  Future<ProductionAiDraftResult> generatePlanDraft({
     required String? token,
     required Map<String, dynamic> payload,
   }) async {
@@ -345,7 +991,7 @@ class ProductionApi {
 
       // WHY: Parse response into draft state for UI use.
       final data = resp.data as Map<String, dynamic>;
-      final draftState = parseProductionPlanDraftResponse(data);
+      final draftResult = parseProductionPlanDraftResponse(data);
 
       // WHY: Log phase counts to validate draft completeness.
       AppDebug.log(
@@ -355,11 +1001,14 @@ class ProductionApi {
           _extraServiceKey: _serviceName,
           _extraOperationKey: _operationPlanDraft,
           _extraIntentKey: _intentPlanDraft,
-          _extraPhaseCountKey: draftState.phases.length,
+          _extraPhaseCountKey: draftResult.draft.phases.length,
+          _extraDraftStatusKey: draftResult.status,
+          _extraIssueTypeKey:
+              draftResult.partialIssue?.issueType ?? _fallbackErrorReason,
         },
       );
 
-      return draftState;
+      return draftResult;
     } on DioException catch (error) {
       // WHY: Capture status + response for debugging AI failures.
       final status = error.response?.statusCode ?? _fallbackStatusCode;
@@ -482,6 +1131,401 @@ class ProductionApi {
           _extraTaskIdKey: taskId,
           _extraStatusKey: statusCode,
           _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ProductionTask> assignTaskStaffProfiles({
+    required String? token,
+    required String taskId,
+    required List<String> assignedStaffProfileIds,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskAssignStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskAssign,
+        _extraIntentKey: _intentTaskAssign,
+        _extraTaskIdKey: taskId,
+        _extraCountKey: assignedStaffProfileIds.length,
+      },
+    );
+
+    try {
+      final resp = await _dio.put(
+        "$_tasksPath/$taskId/assign",
+        data: {_keyAssignedStaffProfileIds: assignedStaffProfileIds},
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final taskMap = (data[_keyTask] ?? {}) as Map<String, dynamic>;
+      final task = ProductionTask.fromJson(taskMap);
+      AppDebug.log(
+        _logTag,
+        _taskAssignSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskAssign,
+          _extraIntentKey: _intentTaskAssign,
+          _extraTaskIdKey: taskId,
+        },
+      );
+      return task;
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskAssignFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskAssign,
+          _extraIntentKey: _intentTaskAssign,
+          _extraTaskIdKey: taskId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// LOG TASK PROGRESS
+  /// ------------------------------------------------------
+  Future<ProductionTaskProgressRecord> logTaskProgress({
+    required String? token,
+    required String taskId,
+    required DateTime workDate,
+    String? staffId,
+    required num actualPlots,
+    required String delayReason,
+    required String notes,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskProgressStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskProgress,
+        _extraIntentKey: _intentTaskProgress,
+        _extraTaskIdKey: taskId,
+      },
+    );
+
+    try {
+      final normalizedStaffId = staffId?.trim() ?? "";
+      final payload = {
+        _keyWorkDate: workDate.toIso8601String().split("T").first,
+        _keyActualPlots: actualPlots,
+        _keyDelayReason: delayReason,
+        _keyNotes: notes,
+      };
+      if (normalizedStaffId.isNotEmpty) {
+        payload[_keyStaffId] = normalizedStaffId;
+      }
+      final resp = await _dio.post(
+        "$_tasksPath/$taskId/progress",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionTaskProgressResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _taskProgressSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgress,
+          _extraIntentKey: _intentTaskProgress,
+          _extraTaskIdKey: taskId,
+        },
+      );
+
+      return parsed.progress;
+    } on DioException catch (error) {
+      final rawData = error.response?.data;
+      final responseMap = rawData is Map<String, dynamic>
+          ? rawData
+          : <String, dynamic>{};
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      final classification =
+          responseMap[_responseClassificationKey]?.toString() ??
+          _fallbackErrorReason;
+      final errorCode =
+          responseMap[_responseErrorCodeKey]?.toString() ??
+          _fallbackErrorReason;
+      final resolutionHint =
+          responseMap[_responseResolutionHintKey]?.toString() ??
+          _nextActionRetry;
+      AppDebug.log(
+        _logTag,
+        _taskProgressFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgress,
+          _extraIntentKey: _intentTaskProgress,
+          _extraTaskIdKey: taskId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraClassificationKey: classification,
+          _extraErrorCodeKey: errorCode,
+          _extraResolutionHintKey: resolutionHint,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// BATCH LOG TASK PROGRESS
+  /// ------------------------------------------------------
+  Future<ProductionTaskProgressBatchResponse> logTaskProgressBatch({
+    required String? token,
+    required DateTime workDate,
+    required List<ProductionTaskProgressBatchEntryInput> entries,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskProgressBatchStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskProgressBatch,
+        _extraIntentKey: _intentTaskProgressBatch,
+        _extraCountKey: entries.length,
+      },
+    );
+
+    try {
+      final payload = {
+        _keyWorkDate: workDate.toIso8601String().split("T").first,
+        _keyEntries: entries.map((entry) => entry.toJson()).toList(),
+      };
+      final resp = await _dio.post(
+        "$_tasksPath/progress/batch",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionTaskProgressBatchResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _taskProgressBatchSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgressBatch,
+          _extraIntentKey: _intentTaskProgressBatch,
+          _extraCountKey: parsed.summary.successCount,
+        },
+      );
+
+      return parsed;
+    } on DioException catch (error) {
+      final rawData = error.response?.data;
+      final responseMap = rawData is Map<String, dynamic>
+          ? rawData
+          : <String, dynamic>{};
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      final classification =
+          responseMap[_responseClassificationKey]?.toString() ??
+          _fallbackErrorReason;
+      final errorCode =
+          responseMap[_responseErrorCodeKey]?.toString() ??
+          _fallbackErrorReason;
+      final resolutionHint =
+          responseMap[_responseResolutionHintKey]?.toString() ??
+          _nextActionRetry;
+      AppDebug.log(
+        _logTag,
+        _taskProgressBatchFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgressBatch,
+          _extraIntentKey: _intentTaskProgressBatch,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraClassificationKey: classification,
+          _extraErrorCodeKey: errorCode,
+          _extraResolutionHintKey: resolutionHint,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// APPROVE TASK PROGRESS
+  /// ------------------------------------------------------
+  Future<ProductionTaskProgressRecord> approveTaskProgress({
+    required String? token,
+    required String progressId,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskProgressApproveStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskProgressApprove,
+        _extraIntentKey: _intentTaskProgressApprove,
+        _extraProgressIdKey: progressId,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_taskProgressPath/$progressId/approve",
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionTaskProgressResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _taskProgressApproveSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgressApprove,
+          _extraIntentKey: _intentTaskProgressApprove,
+          _extraProgressIdKey: progressId,
+        },
+      );
+
+      return parsed.progress;
+    } on DioException catch (error) {
+      final rawData = error.response?.data;
+      final responseMap = rawData is Map<String, dynamic>
+          ? rawData
+          : <String, dynamic>{};
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      final classification =
+          responseMap[_responseClassificationKey]?.toString() ??
+          _fallbackErrorReason;
+      final errorCode =
+          responseMap[_responseErrorCodeKey]?.toString() ??
+          _fallbackErrorReason;
+      final resolutionHint =
+          responseMap[_responseResolutionHintKey]?.toString() ??
+          _nextActionRetry;
+      AppDebug.log(
+        _logTag,
+        _taskProgressApproveFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgressApprove,
+          _extraIntentKey: _intentTaskProgressApprove,
+          _extraProgressIdKey: progressId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraClassificationKey: classification,
+          _extraErrorCodeKey: errorCode,
+          _extraResolutionHintKey: resolutionHint,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// REJECT TASK PROGRESS
+  /// ------------------------------------------------------
+  Future<ProductionTaskProgressRecord> rejectTaskProgress({
+    required String? token,
+    required String progressId,
+    required String reason,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskProgressRejectStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskProgressReject,
+        _extraIntentKey: _intentTaskProgressReject,
+        _extraProgressIdKey: progressId,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_taskProgressPath/$progressId/reject",
+        data: {_keyReason: reason},
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final parsed = ProductionTaskProgressResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _taskProgressRejectSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgressReject,
+          _extraIntentKey: _intentTaskProgressReject,
+          _extraProgressIdKey: progressId,
+        },
+      );
+
+      return parsed.progress;
+    } on DioException catch (error) {
+      final rawData = error.response?.data;
+      final responseMap = rawData is Map<String, dynamic>
+          ? rawData
+          : <String, dynamic>{};
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      final classification =
+          responseMap[_responseClassificationKey]?.toString() ??
+          _fallbackErrorReason;
+      final errorCode =
+          responseMap[_responseErrorCodeKey]?.toString() ??
+          _fallbackErrorReason;
+      final resolutionHint =
+          responseMap[_responseResolutionHintKey]?.toString() ??
+          _nextActionRetry;
+      AppDebug.log(
+        _logTag,
+        _taskProgressRejectFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskProgressReject,
+          _extraIntentKey: _intentTaskProgressReject,
+          _extraProgressIdKey: progressId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraClassificationKey: classification,
+          _extraErrorCodeKey: errorCode,
+          _extraResolutionHintKey: resolutionHint,
           _extraNextActionKey: _nextActionRetry,
         },
       );

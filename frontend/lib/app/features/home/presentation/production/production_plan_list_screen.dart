@@ -22,19 +22,24 @@ import 'package:frontend/app/features/home/presentation/production/production_mo
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
 const String _logTag = "PRODUCTION_LIST";
 const String _buildMessage = "build()";
 const String _refreshAction = "refresh_action";
 const String _refreshPull = "refresh_pull";
 const String _openCreate = "open_create";
+const String _openCalendar = "open_calendar";
 const String _openDetail = "open_detail";
+const String _openPreorderMonitoring = "open_preorder_monitoring";
 const String _backTap = "back_tap";
 const String _screenTitle = "Production plans";
 const String _emptyTitle = "No production plans yet";
 const String _emptyMessage =
     "Create a plan to organize phases, tasks, and KPI tracking.";
 const String _refreshTooltip = "Refresh";
+const String _calendarTooltip = "Calendar";
+const String _monitorTooltip = "Reservations";
 const String _createButtonLabel = "Create plan";
 const String _businessDashboardRoute = "/business-dashboard";
 const String _startLabel = "Start:";
@@ -54,6 +59,8 @@ class ProductionPlanListScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     AppDebug.log(_logTag, _buildMessage);
     final plansAsync = ref.watch(productionPlansProvider);
+    final role = ref.read(authSessionProvider)?.user.role ?? "";
+    final canOpenMonitoring = role == "business_owner";
 
     return Scaffold(
       appBar: AppBar(
@@ -72,6 +79,23 @@ class ProductionPlanListScreen extends ConsumerWidget {
         actions: [
           IconButton(
             onPressed: () {
+              AppDebug.log(_logTag, _openCalendar);
+              context.push(productionCalendarRoute);
+            },
+            icon: const Icon(Icons.calendar_month_outlined),
+            tooltip: _calendarTooltip,
+          ),
+          if (canOpenMonitoring)
+            IconButton(
+              onPressed: () {
+                AppDebug.log(_logTag, _openPreorderMonitoring);
+                context.push(productionPreorderReservationsRoute);
+              },
+              icon: const Icon(Icons.list_alt_outlined),
+              tooltip: _monitorTooltip,
+            ),
+          IconButton(
+            onPressed: () {
               AppDebug.log(_logTag, _refreshAction);
               ref.invalidate(productionPlansProvider);
             },
@@ -83,7 +107,7 @@ class ProductionPlanListScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           AppDebug.log(_logTag, _openCreate);
-          context.push(productionPlanCreateRoute);
+          context.push(productionPlanAssistantRoute);
         },
         icon: const Icon(Icons.add),
         label: const Text(_createButtonLabel),
@@ -120,7 +144,7 @@ class ProductionPlanListScreen extends ConsumerWidget {
                   },
                 );
               },
-              separatorBuilder: (_, __) =>
+              separatorBuilder: (context, index) =>
                   const SizedBox(height: _cardSpacing),
               itemCount: plans.length,
             );
@@ -142,10 +166,7 @@ class _PlanCard extends StatelessWidget {
   final ProductionPlan plan;
   final VoidCallback onTap;
 
-  const _PlanCard({
-    required this.plan,
-    required this.onTap,
-  });
+  const _PlanCard({required this.plan, required this.onTap});
 
   @override
   Widget build(BuildContext context) {

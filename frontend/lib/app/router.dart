@@ -62,8 +62,11 @@ import 'package:frontend/app/features/home/presentation/product_detail_screen.da
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_list_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_calendar_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_plan_assistant_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_create_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/theme/business_theme_wrapper.dart';
 
@@ -72,7 +75,12 @@ const String _tenantNameExtraKey = "tenantName";
 const String _productionPlanIdParam = "id";
 const String _staffProfileIdParam = "id";
 const String _routeProductionListLog = "-> /business-production";
+const String _routeProductionCalendarLog = "-> /business-production/calendar";
+const String _routeProductionAssistantLog =
+    "-> /business-production/create-assistant";
 const String _routeProductionCreateLog = "-> /business-production/create";
+const String _routeProductionPreorderReservationsLog =
+    "-> /business-production/preorder-reservations";
 const String _routeProductionDetailLog = "-> /business-production/:id";
 const String _routeStaffDirectoryLog = "-> /business-staff-directory";
 const String _routeStaffDetailLog = "-> /business-staff/:id";
@@ -112,8 +120,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           path.startsWith(businessStaffDirectoryRoute) ||
           path.startsWith(businessStaffDetailBaseRoute);
       // WHY: Tenant receipts should be guarded the same as tenant dashboards.
-      final bool isTenantPayments =
-          path.startsWith('/tenant-payments');
+      final bool isTenantPayments = path.startsWith('/tenant-payments');
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
@@ -128,10 +135,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         final decodedNext = nextParam == null || nextParam.trim().isEmpty
             ? null
             : Uri.decodeComponent(nextParam.trim());
-        String? nextTarget =
-            decodedNext != null && decodedNext.startsWith('/')
-                ? decodedNext
-                : null;
+        String? nextTarget = decodedNext != null && decodedNext.startsWith('/')
+            ? decodedNext
+            : null;
         // WHY: Recover invite token when next params are not encoded properly.
         if ((nextTarget == null || nextTarget.isEmpty) &&
             tokenParam != null &&
@@ -148,8 +154,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             pendingInvite != null && pendingInvite.trim().isNotEmpty
             ? '/business-invite?token=${pendingInvite.trim()}'
             : nextTarget ?? '/home';
-        final safeTarget =
-            resolvedTarget.startsWith('/business-invite')
+        final safeTarget = resolvedTarget.startsWith('/business-invite')
             ? '/business-invite?token=***'
             : resolvedTarget;
 
@@ -159,8 +164,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           extra: {
             "from": path,
             "to": safeTarget,
-            "hasPendingInvite": pendingInvite != null &&
-                pendingInvite.trim().isNotEmpty,
+            "hasPendingInvite":
+                pendingInvite != null && pendingInvite.trim().isNotEmpty,
           },
         );
         return resolvedTarget;
@@ -256,12 +261,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           final args = extra is ChatThreadArgs
               ? extra
               : extra is ChatConversation
-                  ? ChatThreadArgs(conversation: extra)
-                  : null;
-          return ChatThreadScreen(
-            conversationId: conversationId,
-            args: args,
-          );
+              ? ChatThreadArgs(conversation: extra)
+              : null;
+          return ChatThreadScreen(conversationId: conversationId, args: args);
         },
       ),
       GoRoute(
@@ -310,18 +312,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /tenant-verification");
           // WHY: Tenant onboarding should inherit business theme styles.
-          return const BusinessThemeWrapper(
-            child: TenantVerificationScreen(),
-          );
+          return const BusinessThemeWrapper(child: TenantVerificationScreen());
         },
       ),
       GoRoute(
         path: '/tenant-dashboard',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /tenant-dashboard");
-          return const BusinessThemeWrapper(
-            child: TenantDashboardScreen(),
-          );
+          return const BusinessThemeWrapper(child: TenantDashboardScreen());
         },
       ),
       GoRoute(
@@ -349,18 +347,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/business-dashboard',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-dashboard");
-          return const BusinessThemeWrapper(
-            child: BusinessDashboardScreen(),
-          );
+          return const BusinessThemeWrapper(child: BusinessDashboardScreen());
         },
       ),
       GoRoute(
         path: '/business-products',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-products");
-          return const BusinessThemeWrapper(
-            child: BusinessProductsScreen(),
-          );
+          return const BusinessThemeWrapper(child: BusinessProductsScreen());
         },
       ),
       GoRoute(
@@ -381,49 +375,35 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/business-orders',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-orders");
-          return const BusinessThemeWrapper(
-            child: BusinessOrdersScreen(),
-          );
+          return const BusinessThemeWrapper(child: BusinessOrdersScreen());
         },
       ),
       GoRoute(
         path: '/business-orders/:id',
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
-          AppDebug.log(
-            "ROUTER",
-            "-> /business-orders/:id",
-            extra: {"id": id},
-          );
+          AppDebug.log("ROUTER", "-> /business-orders/:id", extra: {"id": id});
           final extra = state.extra;
           if (extra is BusinessOrder) {
             return BusinessThemeWrapper(
               child: BusinessOrderDetailScreen(order: extra),
             );
           }
-          return const BusinessThemeWrapper(
-            child: BusinessOrdersScreen(),
-          );
+          return const BusinessThemeWrapper(child: BusinessOrdersScreen());
         },
       ),
       GoRoute(
         path: '/business-assets',
         builder: (context, state) {
           AppDebug.log("ROUTER", "-> /business-assets");
-          return const BusinessThemeWrapper(
-            child: BusinessAssetsScreen(),
-          );
+          return const BusinessThemeWrapper(child: BusinessAssetsScreen());
         },
       ),
       GoRoute(
         path: '/business-assets/:id',
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
-          AppDebug.log(
-            "ROUTER",
-            "-> /business-assets/:id",
-            extra: {"id": id},
-          );
+          AppDebug.log("ROUTER", "-> /business-assets/:id", extra: {"id": id});
           final extra = state.extra;
           if (extra is BusinessAsset) {
             return BusinessThemeWrapper(
@@ -436,9 +416,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             "Asset detail missing extra",
             extra: {"id": id},
           );
-          return const BusinessThemeWrapper(
-            child: BusinessAssetsScreen(),
-          );
+          return const BusinessThemeWrapper(child: BusinessAssetsScreen());
         },
       ),
       GoRoute(
@@ -463,11 +441,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tenant-review/:id',
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
-          AppDebug.log(
-            "ROUTER",
-            "-> /tenant-review/:id",
-            extra: {"id": id},
-          );
+          AppDebug.log("ROUTER", "-> /tenant-review/:id", extra: {"id": id});
           return BusinessThemeWrapper(
             child: BusinessTenantReviewScreen(applicationId: id),
           );
@@ -476,14 +450,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/business-tenant-payments/:tenantId',
         builder: (context, state) {
-          final tenantId =
-              state.pathParameters['tenantId'] ?? '';
+          final tenantId = state.pathParameters['tenantId'] ?? '';
           final extra = state.extra;
           // WHY: Tenant name is optional; fall back to id-only display.
-          final tenantName =
-              extra is Map<String, dynamic>
-                  ? extra[_tenantNameExtraKey] as String?
-                  : null;
+          final tenantName = extra is Map<String, dynamic>
+              ? extra[_tenantNameExtraKey] as String?
+              : null;
           AppDebug.log(
             "ROUTER",
             "-> /business-tenant-payments/:tenantId",
@@ -520,9 +492,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             extra: {_staffProfileIdParam: staffProfileId},
           );
           return BusinessThemeWrapper(
-            child: BusinessStaffDetailScreen(
-              staffProfileId: staffProfileId,
-            ),
+            child: BusinessStaffDetailScreen(staffProfileId: staffProfileId),
           );
         },
       ),
@@ -530,8 +500,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: productionPlansRoute,
         builder: (context, state) {
           AppDebug.log("ROUTER", _routeProductionListLog);
+          return const BusinessThemeWrapper(child: ProductionPlanListScreen());
+        },
+      ),
+      GoRoute(
+        path: productionCalendarRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionCalendarLog);
+          return const BusinessThemeWrapper(child: ProductionCalendarScreen());
+        },
+      ),
+      GoRoute(
+        path: productionPlanAssistantRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionAssistantLog);
           return const BusinessThemeWrapper(
-            child: ProductionPlanListScreen(),
+            child: ProductionPlanAssistantScreen(),
           );
         },
       ),
@@ -545,10 +529,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: productionPreorderReservationsRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionPreorderReservationsLog);
+          return const BusinessThemeWrapper(
+            child: ProductionPreorderReservationsScreen(),
+          );
+        },
+      ),
+      GoRoute(
         path: productionPlanDetailRoute,
         builder: (context, state) {
-          final planId =
-              state.pathParameters[_productionPlanIdParam] ?? '';
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
           AppDebug.log(
             "ROUTER",
             _routeProductionDetailLog,

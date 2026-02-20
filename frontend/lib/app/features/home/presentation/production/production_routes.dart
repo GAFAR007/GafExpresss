@@ -11,8 +11,13 @@
 library;
 
 const String productionPlansRoute = "/business-production";
+const String productionPlanAssistantRoute =
+    "/business-production/create-assistant";
 const String productionPlanCreateRoute = "/business-production/create";
 const String productionPlanDetailRoute = "/business-production/:id";
+const String productionCalendarRoute = "/business-production/calendar";
+const String productionPreorderReservationsRoute =
+    "/business-production/preorder-reservations";
 
 String productionPlanDetailPath(String id) {
   // WHY: Detail routes need to embed the plan id in the path.
