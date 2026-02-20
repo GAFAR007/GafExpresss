@@ -15,15 +15,23 @@ async function createOrder(req, res) {
   debug('ORDER CONTROLLER: createOrder - entry');
 
   try {
-    const { items, deliveryAddress } = req.body;
+    const {
+      items,
+      deliveryAddress,
+      reservationId,
+    } = req.body;
     debug('ORDER CONTROLLER: delivery address', {
       source: deliveryAddress?.source,
+      hasReservationId: Boolean(
+        reservationId,
+      ),
     });
 
     const order = await orderService.createOrder(
       req.user.sub,
       items,
-      deliveryAddress
+      deliveryAddress,
+      reservationId
     );
 
     return res.status(201).json({

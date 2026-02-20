@@ -26,6 +26,7 @@ const debug = require("../utils/debug");
 const Payment = require("../models/Payment");
 const Order = require("../models/Order");
 const User = require("../models/User");
+const PreorderReservation = require("../models/PreorderReservation");
 const BusinessTenantApplication = require("../models/BusinessTenantApplication");
 const paystackService = require("./paystack.service");
 const {
@@ -45,6 +46,10 @@ const PAYMENT_EVENTS = {
     "tenant_payment_intent",
   DEV_MARK_PAID: "dev_mark_paid",
 };
+const PREORDER_STATUS_RESERVED =
+  "reserved";
+const PREORDER_STATUS_CONFIRMED =
+  "confirmed";
 
 // WHY: Enforce per-payment rent coverage caps by rent cadence.
 const RENT_PERIOD_LIMITS = {
@@ -395,6 +400,10 @@ function extractPaystackInfo(event) {
       metadata?.orderId ||
       metadata?.order_id ||
       null,
+    reservationId:
+      metadata?.reservationId ||
+      metadata?.reservation_id ||
+      null,
     tenantApplicationId:
       metadata?.tenantApplicationId ||
       metadata?.tenant_application_id ||
@@ -411,6 +420,84 @@ function extractPaystackInfo(event) {
       metadata?.paymentId ||
       metadata?.payment_id ||
       null,
+  };
+}
+
+async function confirmLinkedPreorderReservation({
+  reservationId,
+  order,
+  session,
+}) {
+  if (!reservationId) {
+    return {
+      applied: false,
+      idempotent: false,
+      skipped: true,
+    };
+  }
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      reservationId,
+    )
+  ) {
+    throw new Error(
+      "Linked pre-order reservation id is invalid",
+    );
+  }
+
+  const reservation =
+    await PreorderReservation.findOne({
+      _id: reservationId,
+      userId: order.user,
+    }).session(session);
+  if (!reservation) {
+    throw new Error(
+      "Linked pre-order reservation not found for order",
+    );
+  }
+
+  const orderScopedToBusiness =
+    Array.isArray(order.businessIds) &&
+    order.businessIds.some(
+      (businessId) =>
+        businessId?.toString() ===
+        reservation.businessId?.toString(),
+    );
+  if (!orderScopedToBusiness) {
+    throw new Error(
+      "Linked pre-order reservation business scope mismatch",
+    );
+  }
+
+  if (
+    reservation.status ===
+    PREORDER_STATUS_CONFIRMED
+  ) {
+    return {
+      applied: false,
+      idempotent: true,
+      skipped: false,
+      status: reservation.status,
+    };
+  }
+  if (
+    reservation.status !==
+    PREORDER_STATUS_RESERVED
+  ) {
+    throw new Error(
+      `Linked pre-order reservation is not confirmable (${reservation.status})`,
+    );
+  }
+
+  reservation.status =
+    PREORDER_STATUS_CONFIRMED;
+  await reservation.save({ session });
+
+  return {
+    applied: true,
+    idempotent: false,
+    skipped: false,
+    status: reservation.status,
   };
 }
 
@@ -437,6 +524,7 @@ async function processPaystackEvent(
     amount,
     currency,
     orderId,
+    reservationId,
     tenantApplicationId,
     tenantUserId,
     businessId,
@@ -478,6 +566,9 @@ async function processPaystackEvent(
       providerTransactionId,
       status,
       orderId,
+      hasReservationId: Boolean(
+        reservationId,
+      ),
     },
   );
 
@@ -1067,6 +1158,61 @@ async function processPaystackEvent(
         reason:
           "Order already paid/beyond",
       };
+    }
+
+    const effectiveReservationId =
+      reservationId ||
+      order.reservationId
+        ?.toString() ||
+      null;
+    if (effectiveReservationId) {
+      try {
+        const reservationResult =
+          await confirmLinkedPreorderReservation(
+            {
+              reservationId:
+                effectiveReservationId,
+              order,
+              session,
+            },
+          );
+        debug(
+          "PAYMENT SERVICE: linked preorder reservation confirm",
+          {
+            orderId: order._id,
+            reservationId:
+              effectiveReservationId,
+            applied:
+              reservationResult.applied,
+            idempotent:
+              reservationResult.idempotent,
+            status:
+              reservationResult.status ||
+              null,
+          },
+        );
+      } catch (reservationError) {
+        debug(
+          "PAYMENT SERVICE: linked preorder reservation confirm failed",
+          {
+            orderId: order._id,
+            reservationId:
+              effectiveReservationId,
+            reason:
+              reservationError.message,
+          },
+        );
+        payment.processedAt =
+          new Date();
+        await payment.save({ session });
+        await session.commitTransaction();
+        return {
+          ok: true,
+          applied: false,
+          reason:
+            "Linked pre-order reservation confirmation failed",
+        };
+      }
     }
 
     // 6) Enforce transition + apply stock change (pending -> paid)

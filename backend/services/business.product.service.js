@@ -126,7 +126,23 @@ async function updateProduct({ businessId, id, updates, actor }) {
     throw new Error('Business scope is required');
   }
 
-  const allowedFields = ['name', 'description', 'price', 'stock', 'imageUrl', 'isActive'];
+  const allowedFields = [
+    'name',
+    'description',
+    'price',
+    'stock',
+    'imageUrl',
+    'isActive',
+    'productionState',
+    'productionPlanId',
+    'conservativeYieldQuantity',
+    'conservativeYieldUnit',
+    'preorderEnabled',
+    'preorderStartDate',
+    'preorderCapQuantity',
+    'preorderReservedQuantity',
+    'preorderReleasedQuantity',
+  ];
   const filteredUpdates = {};
 
   for (const field of allowedFields) {
@@ -152,6 +168,15 @@ async function updateProduct({ businessId, id, updates, actor }) {
     stock: product.stock,
     imageUrl: product.imageUrl,
     isActive: product.isActive,
+    productionState: product.productionState,
+    productionPlanId: product.productionPlanId,
+    conservativeYieldQuantity: product.conservativeYieldQuantity,
+    conservativeYieldUnit: product.conservativeYieldUnit,
+    preorderEnabled: product.preorderEnabled,
+    preorderStartDate: product.preorderStartDate,
+    preorderCapQuantity: product.preorderCapQuantity,
+    preorderReservedQuantity: product.preorderReservedQuantity,
+    preorderReleasedQuantity: product.preorderReleasedQuantity,
   };
 
   Object.assign(product, filteredUpdates);
@@ -190,6 +215,15 @@ async function updateProduct({ businessId, id, updates, actor }) {
         stock: product.stock,
         imageUrl: product.imageUrl,
         isActive: product.isActive,
+        productionState: product.productionState,
+        productionPlanId: product.productionPlanId,
+        conservativeYieldQuantity: product.conservativeYieldQuantity,
+        conservativeYieldUnit: product.conservativeYieldUnit,
+        preorderEnabled: product.preorderEnabled,
+        preorderStartDate: product.preorderStartDate,
+        preorderCapQuantity: product.preorderCapQuantity,
+        preorderReservedQuantity: product.preorderReservedQuantity,
+        preorderReleasedQuantity: product.preorderReleasedQuantity,
       },
     },
   });
@@ -206,6 +240,10 @@ async function updateProduct({ businessId, id, updates, actor }) {
       price: product.price,
       stock: product.stock,
       isActive: product.isActive,
+      productionState: product.productionState,
+      preorderEnabled: product.preorderEnabled,
+      preorderCapQuantity: product.preorderCapQuantity,
+      preorderReservedQuantity: product.preorderReservedQuantity,
     },
   });
 

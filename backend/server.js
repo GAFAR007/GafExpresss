@@ -34,6 +34,9 @@ const registerRoutes = require('./routes');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 const { registerChatSocket } = require('./services/chat_socket.service');
+const {
+  startPreorderReconcileWorker,
+} = require('./services/preorder_reservation_reconciler.worker');
 
 /**
  * --------------------------------------------------
@@ -112,4 +115,12 @@ registerChatSocket(io);
 server.listen(PORT, () => {
   console.log(`🟢 Server running on http://localhost:${PORT}`);
   debug('Server successfully listening');
+
+  // WHY: Background reconciliation keeps expired pre-order holds from blocking capacity.
+  const workerState =
+    startPreorderReconcileWorker();
+  debug(
+    'Pre-order reconcile worker boot status',
+    workerState,
+  );
 });

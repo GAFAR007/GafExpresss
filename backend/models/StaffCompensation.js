@@ -20,8 +20,16 @@ debug("Loading StaffCompensation model...");
 
 // WHY: Limit cadence to known payroll cycles.
 const COMPENSATION_CADENCE = [
+  "daily",
   "weekly",
   "monthly",
+  "profit_share",
+];
+// WHY: Payout triggers define when compensation can be settled.
+const COMPENSATION_PAYOUT_TRIGGERS = [
+  "attendance",
+  "harvest",
+  "sale",
 ];
 
 const staffCompensationSchema = new mongoose.Schema(
@@ -43,7 +51,7 @@ const staffCompensationSchema = new mongoose.Schema(
     salaryAmountKobo: {
       type: Number,
       min: 0,
-      required: true,
+      default: null,
     },
     // WHY: Cadence defines how often salary is paid.
     salaryCadence: {
@@ -57,6 +65,28 @@ const staffCompensationSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+    // WHY: Profit-share plans need a capped percentage for transparent payouts.
+    profitSharePercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
+    },
+    // WHY: Housing/feeding flags support mixed farm compensation agreements.
+    includesHousing: {
+      type: Boolean,
+      default: false,
+    },
+    includesFeeding: {
+      type: Boolean,
+      default: false,
+    },
+    // WHY: Trigger clarifies when payouts should be computed.
+    payoutTrigger: {
+      type: String,
+      enum: COMPENSATION_PAYOUT_TRIGGERS,
+      default: "attendance",
     },
     // WHY: Track last editor for audit trails.
     lastUpdatedBy: {
@@ -94,3 +124,5 @@ const StaffCompensation = mongoose.model(
 module.exports = StaffCompensation;
 module.exports.COMPENSATION_CADENCE =
   COMPENSATION_CADENCE;
+module.exports.COMPENSATION_PAYOUT_TRIGGERS =
+  COMPENSATION_PAYOUT_TRIGGERS;

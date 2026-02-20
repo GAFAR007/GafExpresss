@@ -36,6 +36,47 @@ const ACCOUNT_TYPES = [
   'incorporated_trustees',
 ];
 
+// WHY: Schedule policy is configurable per business and used by production planners.
+const workScheduleBlockSchema = new mongoose.Schema(
+  {
+    start: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    end: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false },
+);
+
+// WHY: Store business-level production scheduling defaults for all estates.
+const productionSchedulePolicySchema = new mongoose.Schema(
+  {
+    workWeekDays: {
+      type: [Number],
+      default: undefined,
+    },
+    blocks: {
+      type: [workScheduleBlockSchema],
+      default: undefined,
+    },
+    minSlotMinutes: {
+      type: Number,
+      default: undefined,
+    },
+    timezone: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false },
+);
+
 debug('Loading User model...');
 
 // ✅ Structured address payload for verification + delivery.
@@ -282,6 +323,11 @@ const userSchema = new mongoose.Schema(
         },
       ],
       default: [],
+    },
+    // WHY: Business default schedule policy is the fallback for estate planning.
+    productionSchedulePolicy: {
+      type: productionSchedulePolicySchema,
+      default: null,
     },
 
     // ✅ Simple account status control (can expand later)

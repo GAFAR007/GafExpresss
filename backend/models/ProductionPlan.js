@@ -2,7 +2,7 @@
  * apps/backend/models/ProductionPlan.js
  * ------------------------------------------------
  * WHAT:
- * - Stores production plans for farm/estate operations.
+ * - Stores domain-agnostic production plans (inputs -> outputs over time).
  *
  * WHY:
  * - Gives owners/managers a single record for product production cycles.
@@ -15,6 +15,10 @@
 
 const mongoose = require('mongoose');
 const debug = require('../utils/debug');
+const {
+  PRODUCTION_DOMAIN_CONTEXTS,
+  DEFAULT_PRODUCTION_DOMAIN_CONTEXT,
+} = require('../utils/production_engine.config');
 
 debug('Loading ProductionPlan model...');
 
@@ -87,6 +91,13 @@ const productionPlanSchema = new mongoose.Schema(
     aiGenerated: {
       type: Boolean,
       default: false,
+    },
+    // WHY: Optional domain context biases AI planning without changing engine rules.
+    domainContext: {
+      type: String,
+      enum: PRODUCTION_DOMAIN_CONTEXTS,
+      default: DEFAULT_PRODUCTION_DOMAIN_CONTEXT,
+      index: true,
     },
   },
   {

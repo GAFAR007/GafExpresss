@@ -86,12 +86,21 @@ async function initPaystackTransaction({
     debug("PAYSTACK SERVICE: Invalid order amount", { orderId, amount });
     throw new Error("Invalid order amount");
   }
+  const reservationId =
+    order.reservationId ?
+      order.reservationId.toString()
+    : "";
 
   const payload = {
     email: user.email,
     amount,
     currency: "NGN",
-    metadata: { orderId },
+    metadata: {
+      orderId,
+      ...(reservationId ?
+        { reservationId }
+      : {}),
+    },
   };
 
   // WHY: Paystack expects callback_url when provided.
@@ -102,6 +111,8 @@ async function initPaystackTransaction({
   debug("PAYSTACK SERVICE: Calling Paystack initialize", {
     orderId,
     amount,
+    hasReservationId:
+      Boolean(reservationId),
   });
 
   const resp = await fetch(

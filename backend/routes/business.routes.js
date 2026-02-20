@@ -292,6 +292,16 @@ router.get(
 );
 
 router.get(
+  "/staff/capacity",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getStaffCapacity,
+);
+
+router.get(
   "/staff/:id",
   requireAuth,
   requireAnyRole([
@@ -363,6 +373,16 @@ router.get(
  * PRODUCTION PLANS (OWNER + STAFF)
  */
 router.post(
+  "/production/plans/assistant-turn",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.productionPlanAssistantTurnHandler,
+);
+
+router.post(
   "/production/plans/ai-draft",
   requireAuth,
   requireAnyRole([
@@ -370,6 +390,26 @@ router.post(
     "staff",
   ]),
   businessController.generateProductionPlanDraftHandler,
+);
+
+router.get(
+  "/production/schedule-policy",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.getProductionSchedulePolicy,
+);
+
+router.put(
+  "/production/schedule-policy",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.updateProductionSchedulePolicy,
 );
 
 router.post(
@@ -393,6 +433,16 @@ router.get(
 );
 
 router.get(
+  "/production/calendar",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.listProductionCalendar,
+);
+
+router.get(
   "/production/plans/:id",
   requireAuth,
   requireAnyRole([
@@ -403,6 +453,64 @@ router.get(
 );
 
 router.patch(
+  "/production/plans/:id/preorder",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.updateProductionPlanPreorder,
+);
+
+router.post(
+  "/production/plans/:planId/preorder/reserve",
+  requireAuth,
+  requireAnyRole([
+    "customer",
+    "business_owner",
+  ]),
+  businessController.reserveProductionPlanPreorder,
+);
+
+router.get(
+  "/preorder/reservations",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+  ]),
+  businessController.listPreorderReservations,
+);
+
+router.post(
+  "/preorder/reservations/:id/release",
+  requireAuth,
+  requireAnyRole([
+    "customer",
+    "business_owner",
+  ]),
+  businessController.releasePreorderReservation,
+);
+
+router.post(
+  "/preorder/reservations/:id/confirm",
+  requireAuth,
+  requireAnyRole([
+    "customer",
+    "business_owner",
+  ]),
+  businessController.confirmPreorderReservation,
+);
+
+router.post(
+  "/preorder/reservations/reconcile-expired",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+  ]),
+  businessController.reconcileExpiredPreorderReservationsHandler,
+);
+
+router.patch(
   "/production/tasks/:id/status",
   requireAuth,
   requireAnyRole([
@@ -410,6 +518,56 @@ router.patch(
     "staff",
   ]),
   businessController.updateProductionTaskStatus,
+);
+
+router.put(
+  "/production/tasks/:taskId/assign",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.assignProductionTaskStaffProfiles,
+);
+
+router.post(
+  "/production/tasks/progress/batch",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.logProductionTaskProgressBatch,
+);
+
+router.post(
+  "/production/tasks/:taskId/progress",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.logProductionTaskProgress,
+);
+
+router.post(
+  "/production/task-progress/:id/approve",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.approveTaskProgress,
+);
+
+router.post(
+  "/production/task-progress/:id/reject",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.rejectTaskProgress,
 );
 
 router.post(

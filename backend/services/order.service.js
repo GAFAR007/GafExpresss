@@ -14,6 +14,8 @@
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
+const ProductionPlan = require("../models/ProductionPlan");
+const PreorderReservation = require("../models/PreorderReservation");
 const User = require("../models/User");
 const {
   verifyAddressPayload,
@@ -37,7 +39,12 @@ async function createOrder(
   userId,
   items,
   deliveryAddress,
+  reservationId = null,
 ) {
+  const normalizedReservationId =
+    reservationId == null ?
+      ""
+    : reservationId.toString().trim();
   debug("ORDER SERVICE: createOrder", {
     userId,
     itemsCount:
@@ -46,6 +53,9 @@ async function createOrder(
       : 0,
     addressSource:
       deliveryAddress?.source,
+    hasReservationId: Boolean(
+      normalizedReservationId,
+    ),
   });
 
   if (!items || items.length === 0) {
@@ -57,6 +67,16 @@ async function createOrder(
   if (!deliveryAddress) {
     throw new Error(
       "Delivery address is required",
+    );
+  }
+  if (
+    normalizedReservationId &&
+    !mongoose.Types.ObjectId.isValid(
+      normalizedReservationId,
+    )
+  ) {
+    throw new Error(
+      "Invalid pre-order reservation id",
     );
   }
 
@@ -82,6 +102,56 @@ async function createOrder(
     const orderItems = [];
     let deliveryAddressSnapshot = null;
     const businessIds = new Set();
+    let linkedReservation = null;
+    let linkedPlanProductId = null;
+    let linkedReservationQuantity = 0;
+    let linkedProductQuantity = 0;
+
+    if (normalizedReservationId) {
+      linkedReservation =
+        await PreorderReservation.findOne({
+          _id: normalizedReservationId,
+          userId,
+          status: "reserved",
+        }).session(session);
+      if (!linkedReservation) {
+        throw new Error(
+          "Pre-order reservation not found or not reserved",
+        );
+      }
+
+      const linkedPlan =
+        await ProductionPlan.findOne({
+          _id: linkedReservation.planId,
+          businessId:
+            linkedReservation.businessId,
+        })
+          .select({
+            productId: 1,
+          })
+          .session(session)
+          .lean();
+      if (!linkedPlan?.productId) {
+        throw new Error(
+          "Pre-order reservation plan is not linked to a product",
+        );
+      }
+      linkedPlanProductId =
+        linkedPlan.productId.toString();
+      linkedReservationQuantity = Number(
+        linkedReservation.quantity || 0,
+      );
+      if (
+        !Number.isFinite(
+          linkedReservationQuantity,
+        ) ||
+        linkedReservationQuantity <= 0
+      ) {
+        throw new Error(
+          "Pre-order reservation quantity is invalid",
+        );
+      }
+    }
 
     if (
       addressSource === "home" ||
@@ -212,10 +282,31 @@ async function createOrder(
           product.businessId.toString(),
         );
       }
+      if (
+        linkedPlanProductId &&
+        product._id.toString() ===
+          linkedPlanProductId
+      ) {
+        linkedProductQuantity += Number(
+          item.quantity || 0,
+        );
+      }
+    }
+
+    if (
+      linkedReservation &&
+      linkedProductQuantity !==
+        linkedReservationQuantity
+    ) {
+      throw new Error(
+        "Order quantity must match linked pre-order reservation quantity",
+      );
     }
 
     const order = new Order({
       user: userId,
+      reservationId:
+        linkedReservation?._id || null,
       items: orderItems,
       totalPrice,
       deliveryAddress:

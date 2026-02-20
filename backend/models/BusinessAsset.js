@@ -44,6 +44,47 @@ const DEPRECIATION_METHODS = ['straight_line'];
 const RENT_PERIODS = ['monthly', 'quarterly', 'yearly'];
 const FEE_PERIODS = ['monthly', 'quarterly', 'yearly'];
 
+// WHY: Estate-level schedule blocks override business defaults when configured.
+const estateWorkScheduleBlockSchema = new mongoose.Schema(
+  {
+    start: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    end: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
+// WHY: Estate-specific policy lets managers customize execution windows per estate.
+const estateProductionSchedulePolicySchema = new mongoose.Schema(
+  {
+    workWeekDays: {
+      type: [Number],
+      default: undefined,
+    },
+    blocks: {
+      type: [estateWorkScheduleBlockSchema],
+      default: undefined,
+    },
+    minSlotMinutes: {
+      type: Number,
+      default: undefined,
+    },
+    timezone: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
 // WHY: Help users who are unsure about fixed vs current.
 const ASSET_CLASS_BY_TYPE = {
   estate: 'fixed',
@@ -394,6 +435,11 @@ const assetSchema = new mongoose.Schema(
     // WHY: Estate holds rich metadata for mixed-unit properties.
     estate: {
       type: estateSchema,
+      default: null,
+    },
+    // WHY: Estate override policy allows per-location scheduling controls.
+    productionSchedulePolicy: {
+      type: estateProductionSchedulePolicySchema,
       default: null,
     },
     createdBy: {

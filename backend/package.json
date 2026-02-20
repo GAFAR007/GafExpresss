@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "test:production:ai-envelope": "node --test scripts/production-ai-envelope.test.js",
+    "test:preorder:regression": "node scripts/preorder-regression-suite.js",
+    "ops:preorder:reconcile:once": "node scripts/preorder-reservation-reconciler.js",
     "seed:staff-bots": "node scripts/seed-staff-bots.js",
     "cleanup:staff-bots": "node scripts/cleanup-staff-bots.js"
   },

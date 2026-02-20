@@ -10,7 +10,7 @@
  *
  * HOW:
  * - Each task references a plan + phase.
- * - Requires staff role and assigned staff profile.
+ * - Requires staff role with optional assignment metadata.
  * - Tracks approval status, timing, and completion.
  */
 
@@ -66,12 +66,28 @@ const productionTaskSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
-    // WHY: Tasks require a specific staff assignment.
+    // WHY: Keep single-assignee compatibility for existing flows.
     assignedStaffId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'BusinessStaffProfile',
-      required: true,
+      default: null,
       index: true,
+    },
+    // WHY: Multi-assign support lets managers fulfill required headcount over time.
+    assignedStaffProfileIds: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'BusinessStaffProfile',
+        },
+      ],
+      default: [],
+    },
+    // WHY: Headcount keeps staffing intent explicit before assignment is complete.
+    requiredHeadcount: {
+      type: Number,
+      min: 1,
+      default: 1,
     },
     // WHY: Weight drives auto-scheduling within a phase.
     weight: {

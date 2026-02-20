@@ -16,24 +16,11 @@
 
 const mongoose = require('mongoose');
 const debug = require('../utils/debug');
+const {
+  STAFF_ROLES,
+} = require('../utils/production_engine.config');
 
 debug('Loading BusinessStaffProfile model...');
-
-// WHY: Keep staff roles centralized so UI + permissions stay aligned.
-const STAFF_ROLES = [
-  'asset_manager',
-  'farm_manager',
-  'estate_manager',
-  'accountant',
-  'field_agent',
-  'cleaner',
-  'farmer',
-  'inventory_keeper',
-  'auditor',
-  'security',
-  'maintenance_technician',
-  'logistics_driver',
-];
 
 // WHY: Track staff lifecycle states without deleting profiles.
 const STAFF_STATUSES = [

@@ -52,6 +52,13 @@ const orderSchema = new mongoose.Schema(
       ref: 'User',
       required: [true, 'User is required for order'],
     },
+    // WHY: Optional reservation linkage keeps preorder payment confirmation deterministic.
+    reservationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PreorderReservation',
+      default: null,
+      index: true,
+    },
 
     // ✅ Order items (embedded array for simplicity)
     items: [

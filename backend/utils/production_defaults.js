@@ -12,13 +12,13 @@
  * - Exports the default ordered phase list used by scheduling.
  */
 
-// WHY: Default phase list keeps production plans consistent.
+// WHY: Generic engine phases avoid domain lock-in when users start manually.
 const DEFAULT_PRODUCTION_PHASES = [
   { name: "Planning", order: 1 },
-  { name: "Planting", order: 2 },
-  { name: "Irrigation", order: 3 },
-  { name: "Harvest", order: 4 },
-  { name: "Storage", order: 5 },
+  { name: "Execution", order: 2 },
+  { name: "Quality Control", order: 3 },
+  { name: "Output Preparation", order: 4 },
+  { name: "Distribution", order: 5 },
 ];
 
 module.exports = {
