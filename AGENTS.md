@@ -178,6 +178,44 @@ If a change risks any of the above → **STOP and ASK**.
 
 ---
 
+## Production Truth Rules
+
+- TaskProgress records represent daily execution truth.
+- Logging is allowed without approval.
+- Approval is a post-fact verification step.
+- AI MUST NOT:
+  - auto-approve progress
+  - infer approval from completion
+  - delete rejected progress
+- Downstream logic (KPIs, confidence, preorder) may only rely on:
+  - approved TaskProgress
+  - OR explicitly marked unapproved data
+
+---
+
+## Atomic Cap Enforcement
+
+- Pre-order cap enforcement must be atomic.
+- AI MUST NOT implement cap updates with read-then-write.
+- Use a single atomic DB update or transaction-safe pattern.
+
+---
+
+## Date & Time Handling
+
+- `workDate` represents a calendar farming day.
+- Backend normalizes dates to day boundaries.
+- AI must not introduce timezone conversions unless explicitly required.
+
+---
+
+## Flutter Warnings
+
+- `use_build_context_synchronously` warnings are acceptable.
+- AI should not refactor async UI flows unless requested.
+
+---
+
 ## AI-Assisted Business Philosophy (MANDATORY)
 
 This product uses AI as a **business assistant**, not a form filler.
@@ -514,6 +552,24 @@ When uncertain:
 4. Then write code.
 
 Skipping steps is not allowed.
+
+---
+
+## Reality-Based Production Engine Rule (MANDATORY)
+
+When implementing production features (farm first, then reusable domains), enforce:
+
+- Production work must be modeled as scheduled tasks (`once` / `daily` / `weekly`), not one-off status toggles.
+- Daily progress records are mandatory for real execution tracking (`date`, `task`, `farmer`, `plotsWorked`, `status`, `delayReason`, `notes`).
+- Workload must stay humane:
+  - recommended: `2` plots/farmer/day
+  - max: `4` plots/farmer/day
+  - plans above recommended must require manager review
+  - plans above max must not be auto-approved
+- Land calculations must use plots as the atomic unit (`1 acre = 10 plots`).
+- Delay reasons must use controlled taxonomy (rain, equipment failure, labour shortage, health, input unavailable, management delay).
+- Yield and stock promises must be conservative and tied to real progress records.
+- UX must expose timeline truth (who did what, when, expected vs actual, delays), not hide operational complexity.
 
 ---
 

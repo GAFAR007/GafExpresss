@@ -163,6 +163,44 @@ If a change risks any of the above → **STOP and ASK**.
 
 ---
 
+## Production Truth Rules
+
+- TaskProgress records represent daily execution truth.
+- Logging is allowed without approval.
+- Approval is a post-fact verification step.
+- AI MUST NOT:
+  - auto-approve progress
+  - infer approval from completion
+  - delete rejected progress
+- Downstream logic (KPIs, confidence, preorder) may only rely on:
+  - approved TaskProgress
+  - OR explicitly marked unapproved data
+
+---
+
+## Atomic Cap Enforcement
+
+- Pre-order cap enforcement must be atomic.
+- AI MUST NOT implement cap updates with read-then-write.
+- Use a single atomic DB update or transaction-safe pattern.
+
+---
+
+## Date & Time Handling
+
+- `workDate` represents a calendar farming day.
+- Backend normalizes dates to day boundaries.
+- AI must not introduce timezone conversions unless explicitly required.
+
+---
+
+## Flutter Warnings
+
+- `use_build_context_synchronously` warnings are acceptable.
+- AI should not refactor async UI flows unless requested.
+
+---
+
 ## AI-Assisted Business Philosophy (MANDATORY)
 
 This product uses AI as a **business assistant**, not a form filler.
