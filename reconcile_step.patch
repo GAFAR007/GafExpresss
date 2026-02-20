@@ -1,0 +1,4471 @@
+diff --git a/backend/controllers/business.controller.js b/backend/controllers/business.controller.js
+index b3944c7..30f9b8b 100644
+--- a/backend/controllers/business.controller.js
++++ b/backend/controllers/business.controller.js
+@@ -16,6 +16,7 @@ const debug = require("../utils/debug");
+ const mongoose = require("mongoose");
+ const User = require("../models/User");
+ const BusinessAsset = require("../models/BusinessAsset");
++const Product = require("../models/Product");
+ const businessProductService = require("../services/business.product.service");
+ const businessOrderService = require("../services/business.order.service");
+ const businessAssetService = require("../services/business.asset.service");
+@@ -42,6 +43,8 @@ const ProductionPlan = require("../models/ProductionPlan");
+ const ProductionPhase = require("../models/ProductionPhase");
+ const ProductionTask = require("../models/ProductionTask");
+ const ProductionOutput = require("../models/ProductionOutput");
++const TaskProgress = require("../models/TaskProgress");
++const PreorderReservation = require("../models/PreorderReservation");
+ const {
+   periodsPerYear,
+ } = require("../utils/rentCoverage");
+@@ -58,6 +61,20 @@ const {
+ const {
+   DEFAULT_PRODUCTION_PHASES,
+ } = require("../utils/production_defaults");
++const {
++  reconcileExpiredPreorderReservations,
++} = require("../services/preorder_reservation_reconciler.service");
++const {
++  STAFF_ROLES,
++  DEFAULT_PRODUCTION_DOMAIN_CONTEXT,
++  DEFAULT_PREORDER_CAP_RATIO,
++  PREORDER_CAP_RATIO_MIN,
++  PREORDER_CAP_RATIO_MAX,
++  HUMANE_WORKLOAD_LIMITS,
++  PRODUCTION_TASK_PROGRESS_DELAY_REASONS,
++  normalizeDomainContext,
++  isValidDomainContext,
++} = require("../utils/production_engine.config");
+ 
+ // WHY: Enforce the same yearly payment cap in summary calculations.
+ const MAX_TENANT_RENT_PAYMENTS_PER_YEAR = 3;
+@@ -211,6 +228,12 @@ const STAFF_COMPENSATION_COPY = {
+     "Salary cadence is required",
+   COMPENSATION_CADENCE_INVALID:
+     "Salary cadence is invalid",
++  COMPENSATION_PROFIT_SHARE_REQUIRED:
++    "Profit share percentage is required for profit-share compensation",
++  COMPENSATION_PROFIT_SHARE_INVALID:
++    "Profit share percentage must be between 0 and 100",
++  COMPENSATION_TRIGGER_INVALID:
++    "Payout trigger is invalid",
+   COMPENSATION_UPDATE_REQUIRED:
+     "Provide at least one compensation field to update",
+ };
+@@ -220,6 +243,14 @@ const STAFF_COMPENSATION_FIELDS = {
+   SALARY_AMOUNT: "salaryAmountKobo",
+   SALARY_CADENCE: "salaryCadence",
+   PAY_DAY: "payDay",
++  PROFIT_SHARE_PERCENTAGE:
++    "profitSharePercentage",
++  INCLUDES_HOUSING:
++    "includesHousing",
++  INCLUDES_FEEDING:
++    "includesFeeding",
++  PAYOUT_TRIGGER:
++    "payoutTrigger",
+   NOTES: "notes",
+ };
+ 
+@@ -273,6 +304,72 @@ const PRODUCTION_COPY = {
+     "Output quantity is required",
+   PRODUCT_NOT_FOUND:
+     "Product not found",
++  PREORDER_STATE_UPDATED:
++    "Pre-order state updated successfully",
++  PREORDER_FLAG_REQUIRED:
++    "allowPreorder flag is required",
++  PREORDER_YIELD_REQUIRED:
++    "Conservative yield quantity is required to open pre-orders",
++  PREORDER_YIELD_INVALID:
++    "Conservative yield quantity must be greater than zero",
++  PREORDER_CAP_RATIO_INVALID:
++    "Pre-order cap ratio must be between 0.1 and 0.9",
++  PREORDER_RESERVE_CREATED:
++    "Pre-order reservation created successfully",
++  PREORDER_RESERVE_QUANTITY_REQUIRED:
++    "Reservation quantity is required",
++  PREORDER_RESERVE_QUANTITY_INVALID:
++    "Reservation quantity must be greater than zero",
++  PREORDER_RESERVE_DISABLED:
++    "Pre-order is not enabled for this production plan",
++  PREORDER_RESERVE_CAP_EXCEEDED:
++    "Reservation quantity exceeds remaining pre-order capacity",
++  PREORDER_RECONCILE_COMPLETED:
++    "Expired pre-order reservations reconciled successfully",
++  PREORDER_RECONCILE_FORBIDDEN:
++    "You do not have permission to reconcile expired reservations",
++  TASK_PROGRESS_CREATED:
++    "Task daily progress saved successfully",
++  TASK_PROGRESS_DATE_REQUIRED:
++    "Work date is required",
++  TASK_PROGRESS_DATE_INVALID:
++    "Work date is invalid",
++  TASK_PROGRESS_ACTUAL_REQUIRED:
++    "Actual plots is required",
++  TASK_PROGRESS_ACTUAL_INVALID:
++    "Actual plots must be a valid non-negative number",
++  TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED:
++    "Actual plots exceeds humane daily workload limit",
++  TASK_PROGRESS_DELAY_REASON_INVALID:
++    "Delay reason is invalid",
++  TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
++    "Delay reason is required when actual plots is zero",
++  TASK_PROGRESS_STAFF_ID_INVALID:
++    "Staff id is invalid",
++  TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN:
++    "staffId is required when multiple farmers are assigned",
++  TASK_PROGRESS_STAFF_NOT_ASSIGNED:
++    "staffId is not assigned to this task",
++  TASK_PROGRESS_STAFF_SCOPE_INVALID:
++    "staffId must belong to the same business and estate",
++  TASK_PROGRESS_NOT_FOUND:
++    "Task progress record not found",
++  TASK_PROGRESS_REVIEW_FORBIDDEN:
++    "You do not have permission to review task progress",
++  TASK_PROGRESS_REJECT_REASON_REQUIRED:
++    "Reject reason is required",
++  TASK_PROGRESS_APPROVED:
++    "Task progress approved successfully",
++  TASK_PROGRESS_REJECTED:
++    "Task progress marked for review successfully",
++  TASK_PROGRESS_BATCH_PROCESSED:
++    "Batch task progress processed",
++  TASK_PROGRESS_BATCH_DATE_REQUIRED:
++    "Batch work date is required",
++  TASK_PROGRESS_BATCH_DATE_INVALID:
++    "Batch work date is invalid",
++  TASK_PROGRESS_BATCH_ENTRIES_REQUIRED:
++    "Batch entries are required",
+   STAFF_REQUIRED_FOR_DRAFT:
+     "Staff profiles are required to generate a draft",
+   ESTATE_REQUIRED:
+@@ -293,6 +390,8 @@ const PRODUCTION_COPY = {
+     "Only business owners can reject assignments",
+   STAFF_TASK_FORBIDDEN:
+     "You do not have permission to update this task",
++  DOMAIN_CONTEXT_INVALID:
++    "Domain context is invalid",
+   INVALID_UNIT_TYPE:
+     "Invalid unit type",
+   TASK_STATUS_UPDATED:
+@@ -327,7 +426,7 @@ const PRODUCT_AI_ERROR_HINT =
+ const PRODUCT_AI_ERROR_REASON =
+   "product_draft_failed";
+ 
+-// WHY: Standardize logs for production output → listing updates.
++// WHY: Standardize logs for production output -> listing updates.
+ const PRODUCTION_OUTPUT_LOG = {
+   LISTING_UPDATE_START:
+     "BUSINESS CONTROLLER: productionOutput listing update - start",
+@@ -368,12 +467,13 @@ const MS_PER_MINUTE = 60000;
+ const MS_PER_DAY = 86400000;
+ 
+ // WHY: Provide safe fallbacks for validation lists.
+-const STAFF_ROLE_VALUES =
+-  BusinessStaffProfile.STAFF_ROLES ||
+-  [];
++const STAFF_ROLE_VALUES = STAFF_ROLES;
+ const COMPENSATION_CADENCE_VALUES =
+   StaffCompensation.COMPENSATION_CADENCE ||
+   [];
++const COMPENSATION_PAYOUT_TRIGGER_VALUES =
++  StaffCompensation.COMPENSATION_PAYOUT_TRIGGERS ||
++  [];
+ const OUTPUT_UNIT_VALUES =
+   ProductionOutput.PRODUCTION_OUTPUT_UNITS ||
+   [];
+@@ -381,6 +481,68 @@ const TASK_STATUS_VALUES =
+   ProductionTask.PRODUCTION_TASK_STATUSES ||
+   [];
+ const OUTPUT_UNIT_FALLBACK = "units";
++const PRODUCT_STATE_IN_PRODUCTION =
++  "in_production";
++const PRODUCT_STATE_AVAILABLE_FOR_PREORDER =
++  "available_for_preorder";
++const PRODUCT_STATE_IN_STORAGE =
++  "in_storage";
++const PRODUCT_STATE_ACTIVE_STOCK =
++  "active_stock";
++const TASK_PROGRESS_STATUS_ON_TRACK =
++  "on_track";
++const TASK_PROGRESS_STATUS_BEHIND =
++  "behind";
++const TASK_PROGRESS_STATUS_BLOCKED =
++  "blocked";
++const TASK_PROGRESS_DELAY_ON_TIME =
++  "on_time";
++const TASK_PROGRESS_DELAY_LATE =
++  "late";
++const TASK_PROGRESS_APPROVAL_PENDING =
++  "pending_approval";
++const TASK_PROGRESS_APPROVAL_APPROVED =
++  "approved";
++const TASK_PROGRESS_APPROVAL_NEEDS_REVIEW =
++  "needs_review";
++const TASK_PROGRESS_REJECTION_NOTE_PREFIX =
++  "[TASK_PROGRESS_REJECTED]";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_ID_REQUIRED =
++  "TASK_ID_REQUIRED";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_ID_INVALID =
++  "TASK_ID_INVALID";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_NOT_FOUND =
++  "TASK_NOT_FOUND";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_PLAN_NOT_FOUND =
++  "PLAN_NOT_FOUND";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_ID_REQUIRED =
++  "STAFF_ID_REQUIRED";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_ID_INVALID =
++  "STAFF_ID_INVALID";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_NOT_ASSIGNED =
++  "STAFF_NOT_ASSIGNED";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_SCOPE_INVALID =
++  "STAFF_SCOPE_INVALID";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_REQUIRED =
++  "ACTUAL_PLOTS_REQUIRED";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_INVALID =
++  "ACTUAL_PLOTS_INVALID";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_HUMANE_LIMIT_EXCEEDED =
++  "HUMANE_LIMIT_EXCEEDED";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_DELAY_REASON_INVALID =
++  "DELAY_REASON_INVALID";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_ZERO_DELAY_REQUIRED =
++  "ZERO_OUTPUT_DELAY_REQUIRED";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_FORBIDDEN =
++  "FORBIDDEN";
++const TASK_PROGRESS_BATCH_ENTRY_CODE_UNKNOWN =
++  "UNKNOWN_ERROR";
++const STAFF_PROGRESS_ON_TRACK =
++  "on_track";
++const STAFF_PROGRESS_NEEDS_ATTENTION =
++  "needs_attention";
++const STAFF_PROGRESS_OFF_TRACK =
++  "off_track";
+ 
+ // WHY: Resolve actor + businessId once per request.
+ async function getBusinessContext(
+@@ -540,6 +702,22 @@ function canAssignProductionTasks({
+   );
+ }
+ 
++// WHY: TaskProgress review authority is restricted to owners + estate managers.
++function canReviewTaskProgress({
++  actorRole,
++  staffRole,
++}) {
++  if (actorRole === "business_owner") {
++    return true;
++  }
++
++  return (
++    actorRole === "staff" &&
++    staffRole ===
++      STAFF_ROLE_ESTATE_MANAGER
++  );
++}
++
+ // WHY: Normalize date inputs and guard against invalid values.
+ function parseDateInput(value) {
+   if (!value) return null;
+@@ -550,6 +728,449 @@ function parseDateInput(value) {
+   return date;
+ }
+ 
++// WHY: Keep domain context optional while enforcing safe normalized values.
++function parseDomainContextInput(value) {
++  const raw =
++    value == null ?
++      ""
++    : value.toString().trim();
++  if (!raw) {
++    return {
++      value:
++        DEFAULT_PRODUCTION_DOMAIN_CONTEXT,
++      provided: false,
++      isValid: true,
++      wasNormalized: false,
++      raw: "",
++    };
++  }
++
++  const normalizedValue =
++    normalizeDomainContext(raw);
++  const normalizedRaw = raw
++    .toLowerCase()
++    .replace(/[^a-z0-9]+/g, "_")
++    .replace(/^_+|_+$/g, "");
++  const isValid = isValidDomainContext(raw);
++
++  return {
++    value: normalizedValue,
++    provided: true,
++    isValid,
++    wasNormalized:
++      normalizedRaw !==
++      normalizedValue,
++    raw,
++  };
++}
++
++// WHY: Numeric parsing helper keeps validation logic consistent across endpoints.
++function parsePositiveNumberInput(value) {
++  if (value == null || value === "") {
++    return null;
++  }
++  const parsed = Number(value);
++  if (!Number.isFinite(parsed) || parsed <= 0) {
++    return null;
++  }
++  return parsed;
++}
++
++// WHY: Daily records must be normalized to a stable calendar day key.
++function normalizeWorkDateToDayStart(value) {
++  const parsed = parseDateInput(value);
++  if (!parsed) {
++    return null;
++  }
++  return new Date(
++    Date.UTC(
++      parsed.getUTCFullYear(),
++      parsed.getUTCMonth(),
++      parsed.getUTCDate(),
++    ),
++  );
++}
++
++// WHY: Keep delay reasons constrained to the controlled taxonomy.
++function normalizeTaskProgressDelayReason(value) {
++  const raw =
++    value == null ?
++      "none"
++    : value.toString().trim().toLowerCase();
++  if (!raw) {
++    return "none";
++  }
++  return raw;
++}
++
++// WHY: Rejection reasons should be normalized for consistent storage and logs.
++function normalizeTaskProgressRejectReason(
++  value,
++) {
++  if (value == null) {
++    return "";
++  }
++  return value.toString().trim();
++}
++
++// WHY: Staff ids from payload/task need stable string normalization for checks.
++function normalizeStaffIdInput(value) {
++  if (value == null) {
++    return "";
++  }
++  return value.toString().trim();
++}
++
++// WHY: Task progress must support single and multi-assignee tasks without ambiguity.
++function resolveTaskAssignedStaffIds(task) {
++  const assignedFromArray =
++    Array.isArray(task?.assignedStaffIds) ?
++      task.assignedStaffIds
++    : [];
++  const resolvedIds = [
++    ...assignedFromArray,
++    task?.assignedStaffId,
++  ]
++    .map((staffId) =>
++      normalizeStaffIdInput(staffId),
++    )
++    .filter(Boolean);
++
++  return Array.from(new Set(resolvedIds));
++}
++
++// WHY: Notes keep a reversible audit trail for review actions without data loss.
++function buildTaskProgressRejectNote({
++  reason,
++  actorId,
++  rejectedAt,
++}) {
++  return `${TASK_PROGRESS_REJECTION_NOTE_PREFIX} ${rejectedAt.toISOString()} reviewer=${actorId?.toString() || "unknown"} reason=${reason}`;
++}
++
++// WHY: Timeline indicators must distinguish pending vs approved vs reviewed issues.
++function resolveTaskProgressApprovalState(
++  record,
++) {
++  if (record?.approvedAt) {
++    return TASK_PROGRESS_APPROVAL_APPROVED;
++  }
++
++  const notes =
++    record?.notes
++      ?.toString() || "";
++  if (
++    notes.includes(
++      TASK_PROGRESS_REJECTION_NOTE_PREFIX,
++    )
++  ) {
++    return TASK_PROGRESS_APPROVAL_NEEDS_REVIEW;
++  }
++
++  return TASK_PROGRESS_APPROVAL_PENDING;
++}
++
++// WHY: Review actions must stay tenant-scoped and plan-aware.
++async function loadTaskProgressInBusinessScope({
++  progressId,
++  businessId,
++}) {
++  const progress =
++    await TaskProgress.findById(progressId);
++  if (!progress) {
++    return {
++      progress: null,
++      plan: null,
++    };
++  }
++
++  const plan =
++    await ProductionPlan.findOne({
++      _id: progress.planId,
++      businessId,
++    }).lean();
++
++  if (!plan) {
++    return {
++      progress: null,
++      plan: null,
++    };
++  }
++
++  return {
++    progress,
++    plan,
++  };
++}
++
++// WHY: Batch responses must preserve per-entry diagnostics without aborting the full request.
++function buildBatchTaskProgressError({
++  index,
++  taskId,
++  staffId,
++  errorCode,
++  error,
++}) {
++  return {
++    index,
++    taskId: taskId || "",
++    staffId: staffId || "",
++    errorCode,
++    error,
++  };
++}
++
++// WHY: Pre-order cap ratio must remain conservative to protect delivery trust.
++function parsePreorderCapRatio(value) {
++  if (value == null || value === "") {
++    return DEFAULT_PREORDER_CAP_RATIO;
++  }
++  const parsed = Number(value);
++  if (!Number.isFinite(parsed)) {
++    return null;
++  }
++  if (
++    parsed < PREORDER_CAP_RATIO_MIN ||
++    parsed > PREORDER_CAP_RATIO_MAX
++  ) {
++    return null;
++  }
++  return parsed;
++}
++
++// WHY: Keep pre-order summary shape consistent for detail and update responses.
++function buildPreorderSummary(product) {
++  const cap = Math.max(
++    0,
++    Number(product?.preorderCapQuantity || 0),
++  );
++  const reserved = Math.max(
++    0,
++    Number(product?.preorderReservedQuantity || 0),
++  );
++  const remaining = Math.max(
++    0,
++    cap - reserved,
++  );
++
++  return {
++    productionState:
++      product?.productionState ||
++      null,
++    preorderEnabled:
++      product?.preorderEnabled ===
++      true,
++    preorderCapQuantity: cap,
++    preorderReservedQuantity:
++      reserved,
++    preorderRemainingQuantity:
++      remaining,
++    conservativeYieldQuantity:
++      product
++        ?.conservativeYieldQuantity ??
++      null,
++    conservativeYieldUnit:
++      product?.conservativeYieldUnit ||
++      "",
++  };
++}
++
++// WHY: Reservation responses need simple capacity numbers for immediate UX feedback.
++function buildReservationSummary(product) {
++  const cap = Math.max(
++    0,
++    Number(product?.preorderCapQuantity || 0),
++  );
++  const reserved = Math.max(
++    0,
++    Number(product?.preorderReservedQuantity || 0),
++  );
++  const remaining = Math.max(
++    0,
++    cap - reserved,
++  );
++
++  return {
++    cap,
++    reserved,
++    remaining,
++  };
++}
++
++// WHY: Timeline rows must represent real logged execution, not static task plans.
++function buildTimelineRows({
++  progressRecords,
++  tasks,
++  phases,
++  staffProfiles,
++}) {
++  const taskMap = new Map(
++    tasks.map((task) => [
++      task._id?.toString(),
++      task,
++    ]),
++  );
++  const phaseMap = new Map(
++    phases.map((phase) => [
++      phase._id?.toString(),
++      phase,
++    ]),
++  );
++  const staffMap = new Map(
++    staffProfiles.map((profile) => [
++      profile._id?.toString(),
++      profile,
++    ]),
++  );
++
++  return progressRecords.map(
++    (record) => {
++      const task = taskMap.get(
++        record.taskId?.toString(),
++      );
++      const phase = phaseMap.get(
++        task?.phaseId?.toString(),
++      );
++      const staff = staffMap.get(
++        record.staffId?.toString(),
++      );
++      const expectedPlots = Number(
++        record.expectedPlots || 0,
++      );
++      const actualPlots = Number(
++        record.actualPlots || 0,
++      );
++      // WHY: Zero-output days are explicit blocked records, not implicit misses.
++      let status =
++        TASK_PROGRESS_STATUS_BEHIND;
++      if (actualPlots === 0) {
++        status =
++          TASK_PROGRESS_STATUS_BLOCKED;
++      } else if (
++        actualPlots >= expectedPlots
++      ) {
++        status =
++          TASK_PROGRESS_STATUS_ON_TRACK;
++      }
++      const delayReason =
++        record.delayReason ||
++        "none";
++      // WHY: Delay column reflects execution outcome rather than raw reason value.
++      const delay =
++        status ===
++          TASK_PROGRESS_STATUS_ON_TRACK ?
++          TASK_PROGRESS_DELAY_ON_TIME
++        : TASK_PROGRESS_DELAY_LATE;
++      const approvalState =
++        resolveTaskProgressApprovalState(
++          record,
++        );
++      const farmerName =
++        staff?.userId?.name ||
++        staff?.userId?.email ||
++        "";
++
++      return {
++        id: record._id,
++        workDate: record.workDate,
++        taskId: record.taskId,
++        planId: record.planId,
++        staffId: record.staffId,
++        taskTitle: task?.title || "",
++        phaseName: phase?.name || "",
++        farmerName,
++        expectedPlots,
++        actualPlots,
++        status,
++        delay,
++        delayReason,
++        approvalState,
++        approvedBy:
++          record.approvedBy || null,
++        approvedAt:
++          record.approvedAt || null,
++        notes: record.notes || "",
++      };
++    },
++  );
++}
++
++// WHY: Manager dashboards need support visibility, not punishment automation.
++function buildStaffProgressScores({
++  progressRecords,
++  staffProfiles,
++}) {
++  const staffMap = new Map(
++    staffProfiles.map((profile) => [
++      profile._id?.toString(),
++      profile,
++    ]),
++  );
++  const scoreByStaff = new Map();
++
++  progressRecords.forEach(
++    (record) => {
++      const staffId =
++        record.staffId?.toString();
++      if (!staffId) {
++        return;
++      }
++      const expected = Number(
++        record.expectedPlots || 0,
++      );
++      const actual = Number(
++        record.actualPlots || 0,
++      );
++      if (!scoreByStaff.has(staffId)) {
++        scoreByStaff.set(staffId, {
++          staffId: record.staffId,
++          totalExpected: 0,
++          totalActual: 0,
++        });
++      }
++      const score =
++        scoreByStaff.get(staffId);
++      score.totalExpected += expected;
++      score.totalActual += actual;
++    },
++  );
++
++  return Array.from(
++    scoreByStaff.values(),
++  ).map((score) => {
++    const denominator = Math.max(
++      1,
++      score.totalExpected,
++    );
++    const ratio =
++      score.totalActual /
++      denominator;
++    let status =
++      STAFF_PROGRESS_OFF_TRACK;
++    if (ratio >= 0.9) {
++      status =
++        STAFF_PROGRESS_ON_TRACK;
++    } else if (ratio >= 0.7) {
++      status =
++        STAFF_PROGRESS_NEEDS_ATTENTION;
++    }
++    const staff = staffMap.get(
++      score.staffId?.toString(),
++    );
++    return {
++      staffId: score.staffId,
++      farmerName:
++        staff?.userId?.name ||
++        staff?.userId?.email ||
++        "",
++      totalExpected: score.totalExpected,
++      totalActual: score.totalActual,
++      completionRatio: ratio,
++      status,
++    };
++  });
++}
++
+ // WHY: Auto-calculate phase dates across a plan duration.
+ function buildPhaseSchedule({
+   startDate,
+@@ -3037,6 +3658,18 @@ async function upsertStaffCompensation(
+           req.body || {},
+           STAFF_COMPENSATION_FIELDS.SALARY_CADENCE,
+         ),
++      hasProfitShare:
++        Object.prototype.hasOwnProperty.call(
++          req.body || {},
++          STAFF_COMPENSATION_FIELDS
++            .PROFIT_SHARE_PERCENTAGE,
++        ),
++      hasPayoutTrigger:
++        Object.prototype.hasOwnProperty.call(
++          req.body || {},
++          STAFF_COMPENSATION_FIELDS
++            .PAYOUT_TRIGGER,
++        ),
+     },
+   );
+ 
+@@ -3129,6 +3762,30 @@ async function upsertStaffCompensation(
+         body,
+         STAFF_COMPENSATION_FIELDS.PAY_DAY,
+       );
++    const hasProfitSharePercentage =
++      Object.prototype.hasOwnProperty.call(
++        body,
++        STAFF_COMPENSATION_FIELDS
++          .PROFIT_SHARE_PERCENTAGE,
++      );
++    const hasIncludesHousing =
++      Object.prototype.hasOwnProperty.call(
++        body,
++        STAFF_COMPENSATION_FIELDS
++          .INCLUDES_HOUSING,
++      );
++    const hasIncludesFeeding =
++      Object.prototype.hasOwnProperty.call(
++        body,
++        STAFF_COMPENSATION_FIELDS
++          .INCLUDES_FEEDING,
++      );
++    const hasPayoutTrigger =
++      Object.prototype.hasOwnProperty.call(
++        body,
++        STAFF_COMPENSATION_FIELDS
++          .PAYOUT_TRIGGER,
++      );
+     const hasNotes =
+       Object.prototype.hasOwnProperty.call(
+         body,
+@@ -3180,6 +3837,55 @@ async function upsertStaffCompensation(
+       });
+     }
+ 
++    const rawProfitSharePercentage =
++      hasProfitSharePercentage ?
++        body[
++          STAFF_COMPENSATION_FIELDS
++            .PROFIT_SHARE_PERCENTAGE
++        ]
++      : null;
++    const profitSharePercentage =
++      hasProfitSharePercentage ?
++        Number(
++          rawProfitSharePercentage,
++        )
++      : null;
++    if (
++      hasProfitSharePercentage &&
++      (!Number.isFinite(
++        profitSharePercentage,
++      ) ||
++        profitSharePercentage < 0 ||
++        profitSharePercentage > 100)
++    ) {
++      return res.status(400).json({
++        error:
++          STAFF_COMPENSATION_COPY.COMPENSATION_PROFIT_SHARE_INVALID,
++      });
++    }
++
++    const payoutTrigger =
++      hasPayoutTrigger ?
++        body[
++          STAFF_COMPENSATION_FIELDS
++            .PAYOUT_TRIGGER
++        ]
++          ?.toString()
++          .trim() || ""
++      : "";
++    if (
++      hasPayoutTrigger &&
++      (!payoutTrigger ||
++        !COMPENSATION_PAYOUT_TRIGGER_VALUES.includes(
++          payoutTrigger,
++        ))
++    ) {
++      return res.status(400).json({
++        error:
++          STAFF_COMPENSATION_COPY.COMPENSATION_TRIGGER_INVALID,
++      });
++    }
++
+     const existing =
+       await StaffCompensation.findOne({
+         staffProfileId:
+@@ -3188,16 +3894,31 @@ async function upsertStaffCompensation(
+       });
+ 
+     if (!existing) {
+-      if (!hasAmount) {
++      if (!hasCadence) {
+         return res.status(400).json({
+           error:
+-            STAFF_COMPENSATION_COPY.COMPENSATION_AMOUNT_REQUIRED,
++            STAFF_COMPENSATION_COPY.COMPENSATION_CADENCE_REQUIRED,
+         });
+       }
+-      if (!hasCadence) {
++      const isProfitShareCadence =
++        salaryCadence ===
++        "profit_share";
++      if (
++        isProfitShareCadence &&
++        !hasProfitSharePercentage
++      ) {
+         return res.status(400).json({
+           error:
+-            STAFF_COMPENSATION_COPY.COMPENSATION_CADENCE_REQUIRED,
++            STAFF_COMPENSATION_COPY.COMPENSATION_PROFIT_SHARE_REQUIRED,
++        });
++      }
++      if (
++        !isProfitShareCadence &&
++        !hasAmount
++      ) {
++        return res.status(400).json({
++          error:
++            STAFF_COMPENSATION_COPY.COMPENSATION_AMOUNT_REQUIRED,
+         });
+       }
+ 
+@@ -3206,9 +3927,12 @@ async function upsertStaffCompensation(
+           staffProfileId:
+             targetProfile._id,
+           businessId,
+-          salaryAmountKobo: Math.floor(
+-            salaryAmount || 0,
+-          ),
++          salaryAmountKobo:
++            isProfitShareCadence ?
++              null
++            : Math.floor(
++                salaryAmount || 0,
++              ),
+           salaryCadence,
+           payDay:
+             hasPayDay ?
+@@ -3219,6 +3943,30 @@ async function upsertStaffCompensation(
+                 ?.toString()
+                 .trim() || ""
+             : "",
++          profitSharePercentage:
++            isProfitShareCadence ?
++              Number(
++                profitSharePercentage,
++              )
++            : null,
++          includesHousing:
++            hasIncludesHousing &&
++            body[
++              STAFF_COMPENSATION_FIELDS
++                .INCLUDES_HOUSING
++            ] === true,
++          includesFeeding:
++            hasIncludesFeeding &&
++            body[
++              STAFF_COMPENSATION_FIELDS
++                .INCLUDES_FEEDING
++            ] === true,
++          payoutTrigger:
++            hasPayoutTrigger ?
++              payoutTrigger
++            : isProfitShareCadence ?
++              "sale"
++            : "attendance",
+           notes:
+             hasNotes ?
+               body[
+@@ -3252,6 +4000,45 @@ async function upsertStaffCompensation(
+     }
+ 
+     const updates = {};
++    const nextCadence =
++      hasCadence ?
++        salaryCadence
++      : existing.salaryCadence;
++    const nextIsProfitShare =
++      nextCadence ===
++      "profit_share";
++    if (
++      nextIsProfitShare &&
++      !hasProfitSharePercentage &&
++      !Number.isFinite(
++        Number(
++          existing.profitSharePercentage,
++        ),
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          STAFF_COMPENSATION_COPY.COMPENSATION_PROFIT_SHARE_REQUIRED,
++      });
++    }
++    if (
++      !nextIsProfitShare &&
++      hasCadence &&
++      existing.salaryCadence ===
++        "profit_share" &&
++      !hasAmount &&
++      !Number.isFinite(
++        Number(
++          existing.salaryAmountKobo,
++        ),
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          STAFF_COMPENSATION_COPY.COMPENSATION_AMOUNT_REQUIRED,
++      });
++    }
++
+     if (hasAmount) {
+       updates.salaryAmountKobo =
+         Math.floor(salaryAmount || 0);
+@@ -3260,15 +4047,58 @@ async function upsertStaffCompensation(
+       updates.salaryCadence =
+         salaryCadence;
+     }
+-    if (hasPayDay) {
+-      updates.payDay =
+-        body[
+-          STAFF_COMPENSATION_FIELDS
+-            .PAY_DAY
+-        ]
++    if (nextIsProfitShare) {
++      updates.salaryAmountKobo = null;
++    }
++    if (hasProfitSharePercentage) {
++      updates.profitSharePercentage =
++        Number(
++          profitSharePercentage,
++        );
++    }
++    if (
++      hasCadence &&
++      !nextIsProfitShare
++    ) {
++      updates.profitSharePercentage =
++        null;
++    }
++    if (hasPayDay) {
++      updates.payDay =
++        body[
++          STAFF_COMPENSATION_FIELDS
++            .PAY_DAY
++        ]
+           ?.toString()
+           .trim() || "";
+     }
++    if (hasIncludesHousing) {
++      updates.includesHousing =
++        body[
++          STAFF_COMPENSATION_FIELDS
++            .INCLUDES_HOUSING
++        ] === true;
++    }
++    if (hasIncludesFeeding) {
++      updates.includesFeeding =
++        body[
++          STAFF_COMPENSATION_FIELDS
++            .INCLUDES_FEEDING
++        ] === true;
++    }
++    if (hasPayoutTrigger) {
++      updates.payoutTrigger =
++        payoutTrigger;
++    }
++    if (
++      hasCadence &&
++      !hasPayoutTrigger
++    ) {
++      updates.payoutTrigger =
++        nextIsProfitShare ?
++          "sale"
++        : "attendance";
++    }
+     if (hasNotes) {
+       updates.notes =
+         body[
+@@ -3753,6 +4583,9 @@ async function generateProductionPlanDraftHandler(
+       hasPrompt: Boolean(
+         req.body?.prompt,
+       ),
++      hasDomainContext: Boolean(
++        req.body?.domainContext,
++      ),
+     },
+   );
+ 
+@@ -3811,6 +4644,12 @@ async function generateProductionPlanDraftHandler(
+       req.body?.prompt
+         ?.toString()
+         .trim() || "";
++    const domainContextInput =
++      parseDomainContextInput(
++        req.body?.domainContext,
++      );
++    const domainContext =
++      domainContextInput.value;
+ 
+     if (!estateAssetId) {
+       return res.status(400).json({
+@@ -3947,12 +4786,8 @@ async function generateProductionPlanDraftHandler(
+         )
+         .lean();
+ 
+-    if (staffProfiles.length === 0) {
+-      return res.status(400).json({
+-        error:
+-          PRODUCTION_COPY.STAFF_REQUIRED_FOR_DRAFT,
+-      });
+-    }
++    // WHY: Draft mode should still work even when staff directory is empty.
++    // Role assignment will normalize safely and final save remains strict.
+ 
+     const aiResult =
+       await generateProductionPlanDraft(
+@@ -3961,6 +4796,7 @@ async function generateProductionPlanDraftHandler(
+           productName:
+             product?.name || "",
+           estateName: estateAsset?.name,
++          domainContext,
+           estateAssetId,
+           productId,
+           startDate: startDateValue,
+@@ -3974,6 +4810,7 @@ async function generateProductionPlanDraftHandler(
+             userRole: actor.role,
+             businessId,
+             hasPrompt: Boolean(prompt),
++            domainContext,
+             country:
+               req.headers[
+                 COUNTRY_HEADER_KEY
+@@ -3981,6 +4818,31 @@ async function generateProductionPlanDraftHandler(
+           },
+         },
+       );
++    const isPartialDraft =
++      aiResult?.status ===
++      "ai_draft_partial";
++    const responseMessage =
++      isPartialDraft
++        ? aiResult?.message ||
++          PRODUCTION_COPY.PLAN_DRAFT_OK
++        : PRODUCTION_COPY.PLAN_DRAFT_OK;
++    const normalizedWarnings = [
++      ...(aiResult?.warnings || []),
++    ];
++    if (
++      domainContextInput.provided &&
++      !domainContextInput.isValid
++    ) {
++      // WHY: Draft mode should warn on unsupported domain context instead of blocking.
++      normalizedWarnings.push({
++        code:
++          "DOMAIN_CONTEXT_NORMALIZED",
++        path: "domainContext",
++        value: `${domainContextInput.raw} -> ${domainContext}`,
++        message:
++          "Domain context was normalized to a supported value for draft safety.",
++      });
++    }
+ 
+     debug(
+       "BUSINESS CONTROLLER: generateProductionPlanDraft - success",
+@@ -3995,15 +4857,43 @@ async function generateProductionPlanDraftHandler(
+         provider:
+           aiResult?.diagnostics
+             ?.provider || "unknown",
++        status:
++          aiResult?.status ||
++          "ai_draft_success",
++        issueType:
++          aiResult?.issueType ||
++          null,
++        domainContextProvided:
++          domainContextInput.provided,
++        domainContextValid:
++          domainContextInput.isValid,
++        domainContext:
++          aiResult?.draft
++            ?.domainContext ||
++          domainContext,
+         hasPrompt: Boolean(prompt),
+       },
+     );
+ 
+     return res.status(200).json({
++      status:
++        aiResult?.status ||
++        "ai_draft_success",
++      ...(isPartialDraft
++        ? {
++            issueType:
++              aiResult?.issueType ||
++              "INSUFFICIENT_CONTEXT",
++          }
++        : {}),
+       message:
+-        PRODUCTION_COPY.PLAN_DRAFT_OK,
++        responseMessage,
+       draft: {
+         ...aiResult.draft,
++        domainContext:
++          aiResult?.draft
++            ?.domainContext ||
++          domainContext,
+         estateAssetId,
+         ...(productId
+           ? { productId }
+@@ -4021,7 +4911,7 @@ async function generateProductionPlanDraftHandler(
+           : {}),
+       },
+       warnings:
+-        aiResult?.warnings || [],
++        normalizedWarnings,
+       diagnostics: {
+         provider:
+           aiResult?.diagnostics
+@@ -4147,6 +5037,9 @@ async function createProductionPlan(
+       hasEstate: Boolean(
+         req.body?.estateAssetId,
+       ),
++      hasDomainContext: Boolean(
++        req.body?.domainContext,
++      ),
+     },
+   );
+ 
+@@ -4195,6 +5088,12 @@ async function createProductionPlan(
+     const aiGenerated = Boolean(
+       req.body?.aiGenerated,
+     );
++    const domainContextInput =
++      parseDomainContextInput(
++        req.body?.domainContext,
++      );
++    const domainContext =
++      domainContextInput.value;
+ 
+     const startDate = parseDateInput(
+       req.body?.startDate,
+@@ -4227,6 +5126,15 @@ async function createProductionPlan(
+           PRODUCTION_COPY.DATE_RANGE_INVALID,
+       });
+     }
++    if (
++      domainContextInput.provided &&
++      !domainContextInput.isValid
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.DOMAIN_CONTEXT_INVALID,
++      });
++    }
+ 
+     // WHY: Estate-scoped managers can only create plans for their estate.
+     if (
+@@ -4245,6 +5153,20 @@ async function createProductionPlan(
+       estateAssetId,
+       businessId,
+     });
++    // WHY: Plan lifecycle is tied to an existing product record.
++    const product =
++      await businessProductService.getProductById(
++        {
++          businessId,
++          id: productId,
++        },
++      );
++    if (!product) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
++      });
++    }
+ 
+     const rawPhases =
+       Array.isArray(req.body?.phases) ?
+@@ -4411,6 +5333,7 @@ async function createProductionPlan(
+         createdBy: actor._id,
+         notes,
+         aiGenerated,
++        domainContext,
+       });
+ 
+     const createdPhases =
+@@ -4519,11 +5442,43 @@ async function createProductionPlan(
+         )
+       : [];
+ 
++    // WHY: Starting a production plan should move product out of sellable stock mode.
++    const lifecycleProduct =
++      await businessProductService.updateProduct(
++        {
++          businessId,
++          id: productId,
++          actor: {
++            id: actor._id,
++            role: actor.role,
++          },
++          updates: {
++            isActive: false,
++            productionState:
++              PRODUCT_STATE_IN_PRODUCTION,
++            productionPlanId:
++              plan._id,
++            preorderEnabled: false,
++            preorderStartDate: null,
++            preorderCapQuantity: 0,
++            preorderReservedQuantity: 0,
++            preorderReleasedQuantity: 0,
++            conservativeYieldQuantity:
++              null,
++            conservativeYieldUnit: "",
++          },
++        },
++      );
++
+     debug(
+       "BUSINESS CONTROLLER: createProductionPlan - success",
+       {
+         actorId: actor._id,
+         planId: plan._id,
++        domainContext:
++          plan.domainContext,
++        productState:
++          lifecycleProduct?.productionState,
+         phases: createdPhases.length,
+         tasks: createdTasks.length,
+       },
+@@ -4535,6 +5490,7 @@ async function createProductionPlan(
+       plan,
+       phases: createdPhases,
+       tasks: createdTasks,
++      product: lifecycleProduct,
+     });
+   } catch (err) {
+     debug(
+@@ -4712,6 +5668,12 @@ async function getProductionPlanDetail(
+       })
+         .sort({ startDate: 1 })
+         .lean();
++    const progressRecords =
++      await TaskProgress.find({
++        planId: plan._id,
++      })
++        .sort({ workDate: -1 })
++        .lean();
+ 
+     const outputs =
+       await ProductionOutput.find({
+@@ -4719,12 +5681,58 @@ async function getProductionPlanDetail(
+       })
+         .sort({ createdAt: -1 })
+         .lean();
++    const product =
++      await businessProductService.getProductById(
++        {
++          businessId,
++          id: plan.productId,
++        },
++      );
+ 
+     const kpis = computeProductionKpis({
+       phases,
+       tasks,
+       outputs,
+     });
++    const progressStaffIds = Array.from(
++      new Set(
++        progressRecords
++          .map((record) =>
++            record.staffId?.toString(),
++          )
++          .filter(Boolean),
++      ),
++    );
++    const progressStaffProfiles =
++      progressStaffIds.length > 0 ?
++        await BusinessStaffProfile.find(
++          {
++            _id: {
++              $in: progressStaffIds,
++            },
++            businessId,
++          },
++        )
++          .populate(
++            "userId",
++            "name email",
++          )
++          .lean()
++      : [];
++    const timelineRows =
++      buildTimelineRows({
++        progressRecords,
++        tasks,
++        phases,
++        staffProfiles:
++          progressStaffProfiles,
++      });
++    const staffProgressScores =
++      buildStaffProgressScores({
++        progressRecords,
++        staffProfiles:
++          progressStaffProfiles,
++      });
+ 
+     debug(
+       "BUSINESS CONTROLLER: getProductionPlanDetail - success",
+@@ -4733,7 +5741,12 @@ async function getProductionPlanDetail(
+         planId: plan._id,
+         phases: phases.length,
+         tasks: tasks.length,
++        progressRows:
++          timelineRows.length,
+         outputs: outputs.length,
++        productState:
++          product?.productionState ||
++          null,
+       },
+     );
+ 
+@@ -4745,6 +5758,11 @@ async function getProductionPlanDetail(
+       tasks,
+       outputs,
+       kpis,
++      product,
++      preorderSummary:
++        buildPreorderSummary(product),
++      timelineRows,
++      staffProgressScores,
+     });
+   } catch (err) {
+     debug(
+@@ -4758,51 +5776,97 @@ async function getProductionPlanDetail(
+ }
+ 
+ /**
+- * PATCH /business/production/tasks/:id/status
+- * Staff: update task status (own tasks only).
++ * PATCH /business/production/plans/:id/preorder
++ * Owner + estate manager: open/close conservative pre-orders for a production plan.
+  */
+-async function updateProductionTaskStatus(
++async function updateProductionPlanPreorder(
+   req,
+   res,
+ ) {
+   debug(
+-    "BUSINESS CONTROLLER: updateProductionTaskStatus - entry",
++    "BUSINESS CONTROLLER: updateProductionPlanPreorder - entry",
+     {
+       actorId: req.user?.sub,
+-      taskId: req.params?.id,
+-      status: req.body?.status,
++      planId: req.params?.id,
++      hasAllowPreorder:
++        Object.prototype.hasOwnProperty.call(
++          req.body || {},
++          "allowPreorder",
++        ),
+     },
+   );
+ 
+   try {
+-    const taskId = req.params?.id
++    const planId = req.params?.id
+       ?.toString()
+       .trim();
+-    const nextStatus =
+-      req.body?.status
++    if (!planId) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.PLAN_ID_REQUIRED,
++      });
++    }
++
++    const hasAllowPreorder =
++      Object.prototype.hasOwnProperty.call(
++        req.body || {},
++        "allowPreorder",
++      );
++    if (!hasAllowPreorder) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.PREORDER_FLAG_REQUIRED,
++      });
++    }
++
++    const allowPreorder =
++      req.body?.allowPreorder === true;
++    const hasConservativeYieldQuantity =
++      Object.prototype.hasOwnProperty.call(
++        req.body || {},
++        "conservativeYieldQuantity",
++      );
++    const conservativeYieldQuantity =
++      parsePositiveNumberInput(
++        req.body
++          ?.conservativeYieldQuantity,
++      );
++    const capRatio =
++      parsePreorderCapRatio(
++        req.body?.preorderCapRatio,
++      );
++    const conservativeYieldUnit =
++      req.body
++        ?.conservativeYieldUnit
+         ?.toString()
+-        .trim() || "";
++        .trim() || OUTPUT_UNIT_FALLBACK;
+ 
+-    if (!taskId) {
++    if (
++      allowPreorder &&
++      !hasConservativeYieldQuantity
++    ) {
+       return res.status(400).json({
+         error:
+-          PRODUCTION_COPY.TASK_NOT_FOUND,
++          PRODUCTION_COPY.PREORDER_YIELD_REQUIRED,
+       });
+     }
+-    if (!nextStatus) {
++    if (
++      allowPreorder &&
++      conservativeYieldQuantity ==
++        null
++    ) {
+       return res.status(400).json({
+         error:
+-          PRODUCTION_COPY.TASK_STATUS_REQUIRED,
++          PRODUCTION_COPY.PREORDER_YIELD_INVALID,
+       });
+     }
+     if (
+-      !TASK_STATUS_VALUES.includes(
+-        nextStatus,
+-      )
++      allowPreorder &&
++      capRatio == null
+     ) {
+       return res.status(400).json({
+         error:
+-          PRODUCTION_COPY.TASK_STATUS_REQUIRED,
++          PRODUCTION_COPY.PREORDER_CAP_RATIO_INVALID,
+       });
+     }
+ 
+@@ -4810,28 +5874,29 @@ async function updateProductionTaskStatus(
+       await getBusinessContext(
+         req.user.sub,
+       );
+-
+     const staffProfile =
+       await getStaffProfileForActor({
+         actor,
+         businessId,
++        allowMissing: true,
+       });
+ 
+-    const task =
+-      await ProductionTask.findById(
+-        taskId,
+-      );
+-
+-    if (!task) {
+-      return res.status(404).json({
++    if (
++      !canCreateProductionPlan({
++        actorRole: actor.role,
++        staffRole:
++          staffProfile?.staffRole,
++      })
++    ) {
++      return res.status(403).json({
+         error:
+-          PRODUCTION_COPY.TASK_NOT_FOUND,
++          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+       });
+     }
+ 
+     const plan =
+       await ProductionPlan.findOne({
+-        _id: task.planId,
++        _id: planId,
+         businessId,
+       }).lean();
+     if (!plan) {
+@@ -4841,11 +5906,11 @@ async function updateProductionTaskStatus(
+       });
+     }
+ 
+-    // WHY: Staff can only update tasks assigned to them.
+     if (
+       actor.role === "staff" &&
+-      staffProfile?._id?.toString() !==
+-        task.assignedStaffId?.toString()
++      actor.estateAssetId &&
++      plan.estateAssetId?.toString() !==
++        actor.estateAssetId.toString()
+     ) {
+       return res.status(403).json({
+         error:
+@@ -4853,32 +5918,102 @@ async function updateProductionTaskStatus(
+       });
+     }
+ 
+-    task.status = nextStatus;
+-    if (
+-      nextStatus ===
+-      PRODUCTION_TASK_STATUS_DONE
+-    ) {
+-      task.completedAt = new Date();
++    const product =
++      await businessProductService.getProductById(
++        {
++          businessId,
++          id: plan.productId,
++        },
++      );
++    if (!product) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
++      });
+     }
+-    await task.save();
++
++    const updates = {};
++    if (allowPreorder) {
++      const preorderCapQuantity =
++        Math.max(
++          1,
++          Math.floor(
++            conservativeYieldQuantity *
++              capRatio,
++          ),
++        );
++      updates.productionState =
++        PRODUCT_STATE_AVAILABLE_FOR_PREORDER;
++      updates.preorderEnabled = true;
++      updates.preorderStartDate =
++        new Date();
++      updates.preorderCapQuantity =
++        preorderCapQuantity;
++      updates.preorderReservedQuantity = 0;
++      updates.conservativeYieldQuantity =
++        conservativeYieldQuantity;
++      updates.conservativeYieldUnit =
++        conservativeYieldUnit;
++      // WHY: Pre-orders reserve future stock; active stock remains false.
++      updates.isActive = false;
++    } else {
++      const fallbackState =
++        product.productionState ===
++        PRODUCT_STATE_ACTIVE_STOCK ?
++          PRODUCT_STATE_ACTIVE_STOCK
++        : PRODUCT_STATE_IN_PRODUCTION;
++      updates.productionState =
++        fallbackState;
++      updates.preorderEnabled = false;
++      updates.preorderStartDate =
++        null;
++      updates.preorderCapQuantity = 0;
++      updates.preorderReservedQuantity = 0;
++      updates.isActive =
++        fallbackState ===
++        PRODUCT_STATE_ACTIVE_STOCK;
++    }
++
++    const updatedProduct =
++      await businessProductService.updateProduct(
++        {
++          businessId,
++          id: product._id,
++          actor: {
++            id: actor._id,
++            role: actor.role,
++          },
++          updates,
++        },
++      );
+ 
+     debug(
+-      "BUSINESS CONTROLLER: updateProductionTaskStatus - success",
++      "BUSINESS CONTROLLER: updateProductionPlanPreorder - success",
+       {
+         actorId: actor._id,
+-        taskId: task._id,
+-        status: task.status,
++        planId: plan._id,
++        productId: product._id,
++        productionState:
++          updatedProduct?.productionState,
++        preorderEnabled:
++          updatedProduct?.preorderEnabled ===
++          true,
+       },
+     );
+ 
+     return res.status(200).json({
+       message:
+-        PRODUCTION_COPY.TASK_STATUS_UPDATED,
+-      task,
++        PRODUCTION_COPY.PREORDER_STATE_UPDATED,
++      planId: plan._id,
++      product: updatedProduct,
++      preorderSummary:
++        buildPreorderSummary(
++          updatedProduct,
++        ),
+     });
+   } catch (err) {
+     debug(
+-      "BUSINESS CONTROLLER: updateProductionTaskStatus - error",
++      "BUSINESS CONTROLLER: updateProductionPlanPreorder - error",
+       err.message,
+     );
+     return res
+@@ -4888,60 +6023,77 @@ async function updateProductionTaskStatus(
+ }
+ 
+ /**
+- * POST /business/production/tasks/:id/approve
+- * Business owner: approve task assignment.
++ * POST /business/production/plans/:planId/preorder/reserve
++ * Customer + owner: reserve quantity from conservative pre-order capacity.
+  */
+-async function approveProductionTask(
++async function reserveProductionPlanPreorder(
+   req,
+   res,
+ ) {
+   debug(
+-    "BUSINESS CONTROLLER: approveProductionTask - entry",
++    "BUSINESS CONTROLLER: reserveProductionPlanPreorder - entry",
+     {
+       actorId: req.user?.sub,
+-      taskId: req.params?.id,
++      planId:
++        req.params?.planId ||
++        req.params?.id,
++      hasQuantity:
++        Object.prototype.hasOwnProperty.call(
++          req.body || {},
++          "quantity",
++        ),
+     },
+   );
+ 
+   try {
+-    const taskId = req.params?.id
+-      ?.toString()
++    const planId = (
++      req.params?.planId ||
++      req.params?.id ||
++      ""
++    )
++      .toString()
+       .trim();
+-    if (!taskId) {
++    if (!planId) {
+       return res.status(400).json({
+         error:
+-          PRODUCTION_COPY.TASK_NOT_FOUND,
++          PRODUCTION_COPY.PLAN_ID_REQUIRED,
+       });
+     }
+ 
+-    const { actor, businessId } =
+-      await getBusinessContext(
+-        req.user.sub,
++    const hasQuantity =
++      Object.prototype.hasOwnProperty.call(
++        req.body || {},
++        "quantity",
+       );
++    if (!hasQuantity) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.PREORDER_RESERVE_QUANTITY_REQUIRED,
++      });
++    }
+ 
++    const quantity = Number(
++      req.body?.quantity,
++    );
+     if (
+-      actor.role !== "business_owner"
++      !Number.isFinite(quantity) ||
++      quantity <= 0
+     ) {
+-      return res.status(403).json({
++      return res.status(400).json({
+         error:
+-          PRODUCTION_COPY.STAFF_ASSIGN_APPROVAL_REQUIRED,
++          PRODUCTION_COPY.PREORDER_RESERVE_QUANTITY_INVALID,
+       });
+     }
+ 
+-    const task =
+-      await ProductionTask.findById(
+-        taskId,
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
+       );
+-    if (!task) {
+-      return res.status(404).json({
+-        error:
+-          PRODUCTION_COPY.TASK_NOT_FOUND,
+-      });
+-    }
+ 
++    // WHY: Reservations must stay tenant-scoped to the same plan owner business.
+     const plan =
+       await ProductionPlan.findOne({
+-        _id: task.planId,
++        _id: planId,
+         businessId,
+       }).lean();
+     if (!plan) {
+@@ -4951,7 +6103,1527 @@ async function approveProductionTask(
+       });
+     }
+ 
+-    task.approvalStatus =
++    const product =
++      await Product.findOne({
++        _id: plan.productId,
++        businessId,
++      })
++        .select({
++          preorderEnabled: 1,
++          preorderCapQuantity: 1,
++          preorderReservedQuantity: 1,
++        })
++        .lean();
++    if (!product) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
++      });
++    }
++    if (
++      product.preorderEnabled !==
++      true
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.PREORDER_RESERVE_DISABLED,
++      });
++    }
++
++    // WHY: Cap enforcement is atomic; DB evaluates reserved + quantity <= cap in one write.
++    const updatedProduct =
++      await Product.findOneAndUpdate(
++        {
++          _id: product._id,
++          businessId,
++          preorderEnabled: true,
++          $expr: {
++            $lte: [
++              {
++                $add: [
++                  "$preorderReservedQuantity",
++                  quantity,
++                ],
++              },
++              "$preorderCapQuantity",
++            ],
++          },
++        },
++        {
++          $inc: {
++            preorderReservedQuantity:
++              quantity,
++          },
++        },
++        {
++          new: true,
++        },
++      ).lean();
++
++    if (!updatedProduct) {
++      return res.status(409).json({
++        error:
++          PRODUCTION_COPY.PREORDER_RESERVE_CAP_EXCEEDED,
++      });
++    }
++
++    // WHY: Reservation record provides auditable hold-level traceability.
++    const reservation =
++      await PreorderReservation.create({
++        businessId,
++        planId: plan._id,
++        userId: actor._id,
++        quantity,
++        status: "reserved",
++      });
++
++    const preorderSummary =
++      buildReservationSummary(
++        updatedProduct,
++      );
++
++    debug(
++      "BUSINESS CONTROLLER: reserveProductionPlanPreorder - success",
++      {
++        actorId: actor._id,
++        planId: plan._id,
++        reservationId:
++          reservation._id,
++        quantity,
++        cap: preorderSummary.cap,
++        reserved:
++          preorderSummary.reserved,
++        remaining:
++          preorderSummary.remaining,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.PREORDER_RESERVE_CREATED,
++      reservation,
++      preorderSummary,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: reserveProductionPlanPreorder - error",
++      {
++        actorId: req.user?.sub,
++        planId:
++          req.params?.planId ||
++          req.params?.id,
++        reason: err.message,
++        next: "Validate preorder state, quantity, and cap before retrying",
++      },
++    );
++    return res.status(400).json({
++      error: err.message,
++    });
++  }
++}
++
++/**
++ * POST /business/preorder/reservations/reconcile-expired
++ * Owner: reconcile expired reservation holds to release blocked pre-order capacity.
++ */
++async function reconcileExpiredPreorderReservationsHandler(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: reconcileExpiredPreorderReservations - entry",
++    {
++      actorId: req.user?.sub,
++      intent:
++        "expire stale holds and release reserved preorder quantity",
++    },
++  );
++
++  try {
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++
++    // WHY: Only owner reconciliation is supported in this step to keep authority explicit.
++    if (
++      actor?.role !== "business_owner"
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.PREORDER_RECONCILE_FORBIDDEN,
++      });
++    }
++
++    const summary =
++      await reconcileExpiredPreorderReservations(
++        {
++          businessId,
++          now: new Date(),
++        },
++      );
++
++    debug(
++      "BUSINESS CONTROLLER: reconcileExpiredPreorderReservations - success",
++      {
++        actorId: actor._id,
++        businessId:
++          businessId.toString(),
++        scannedCount:
++          summary.scannedCount,
++        expiredCount:
++          summary.expiredCount,
++        skippedCount:
++          summary.skippedCount,
++        errorCount:
++          summary.errorCount,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.PREORDER_RECONCILE_COMPLETED,
++      summary,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: reconcileExpiredPreorderReservations - error",
++      {
++        actorId: req.user?.sub,
++        reason: err.message,
++        next: "Validate business scope and retry reconciliation",
++      },
++    );
++    return res.status(400).json({
++      error: err.message,
++    });
++  }
++}
++
++/**
++ * PATCH /business/production/tasks/:id/status
++ * Staff: update task status (own tasks only).
++ */
++async function updateProductionTaskStatus(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: updateProductionTaskStatus - entry",
++    {
++      actorId: req.user?.sub,
++      taskId: req.params?.id,
++      status: req.body?.status,
++    },
++  );
++
++  try {
++    const taskId = req.params?.id
++      ?.toString()
++      .trim();
++    const nextStatus =
++      req.body?.status
++        ?.toString()
++        .trim() || "";
++
++    if (!taskId) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_NOT_FOUND,
++      });
++    }
++    if (!nextStatus) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_STATUS_REQUIRED,
++      });
++    }
++    if (
++      !TASK_STATUS_VALUES.includes(
++        nextStatus,
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_STATUS_REQUIRED,
++      });
++    }
++
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++
++    const staffProfile =
++      await getStaffProfileForActor({
++        actor,
++        businessId,
++      });
++
++    const task =
++      await ProductionTask.findById(
++        taskId,
++      );
++
++    if (!task) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.TASK_NOT_FOUND,
++      });
++    }
++
++    const plan =
++      await ProductionPlan.findOne({
++        _id: task.planId,
++        businessId,
++      }).lean();
++    if (!plan) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.PLAN_NOT_FOUND,
++      });
++    }
++
++    // WHY: Staff can only update tasks assigned to them.
++    if (
++      actor.role === "staff" &&
++      staffProfile?._id?.toString() !==
++        task.assignedStaffId?.toString()
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
++      });
++    }
++
++    task.status = nextStatus;
++    if (
++      nextStatus ===
++      PRODUCTION_TASK_STATUS_DONE
++    ) {
++      task.completedAt = new Date();
++    }
++    await task.save();
++
++    debug(
++      "BUSINESS CONTROLLER: updateProductionTaskStatus - success",
++      {
++        actorId: actor._id,
++        taskId: task._id,
++        status: task.status,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.TASK_STATUS_UPDATED,
++      task,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: updateProductionTaskStatus - error",
++      err.message,
++    );
++    return res
++      .status(400)
++      .json({ error: err.message });
++  }
++}
++
++/**
++ * POST /business/production/tasks/:taskId/progress
++ * Owner + managers: record or update daily task execution truth.
++ */
++async function logProductionTaskProgress(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: logProductionTaskProgress - entry",
++    {
++      actorId: req.user?.sub,
++      taskId:
++        req.params?.taskId ||
++        req.params?.id,
++      hasWorkDate: Boolean(
++        req.body?.workDate,
++      ),
++      hasActualPlots:
++        Object.prototype.hasOwnProperty.call(
++          req.body || {},
++          "actualPlots",
++        ),
++      hasStaffId:
++        Object.prototype.hasOwnProperty.call(
++          req.body || {},
++          "staffId",
++        ),
++    },
++  );
++
++  try {
++    const taskId = (
++      req.params?.taskId ||
++      req.params?.id ||
++      ""
++    )
++      ?.toString()
++      .trim();
++    if (!taskId) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_NOT_FOUND,
++      });
++    }
++
++    const hasActualPlots =
++      Object.prototype.hasOwnProperty.call(
++        req.body || {},
++        "actualPlots",
++      );
++    if (!hasActualPlots) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_REQUIRED,
++      });
++    }
++
++    const workDateRaw =
++      req.body?.workDate
++        ?.toString()
++        .trim() || "";
++    if (!workDateRaw) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_DATE_REQUIRED,
++      });
++    }
++
++    const normalizedWorkDate =
++      normalizeWorkDateToDayStart(
++        workDateRaw,
++      );
++    if (!normalizedWorkDate) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_DATE_INVALID,
++      });
++    }
++
++    const actualPlots = Number(
++      req.body?.actualPlots,
++    );
++    if (
++      !Number.isFinite(actualPlots) ||
++      actualPlots < 0
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_INVALID,
++      });
++    }
++    if (
++      actualPlots >
++      HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED,
++        maxAllowedPlots:
++          HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay,
++      });
++    }
++
++    const delayReason =
++      normalizeTaskProgressDelayReason(
++        req.body?.delayReason,
++      );
++    if (
++      !PRODUCTION_TASK_PROGRESS_DELAY_REASONS.includes(
++        delayReason,
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_DELAY_REASON_INVALID,
++      });
++    }
++    if (
++      actualPlots === 0 &&
++      delayReason === "none"
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED,
++      });
++    }
++    const notes =
++      req.body?.notes
++        ?.toString()
++        .trim() || "";
++    const requestedStaffId =
++      normalizeStaffIdInput(
++        req.body?.staffId,
++      );
++    if (
++      requestedStaffId &&
++      !mongoose.Types.ObjectId.isValid(
++        requestedStaffId,
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_STAFF_ID_INVALID,
++      });
++    }
++
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++    const staffProfile =
++      await getStaffProfileForActor({
++        actor,
++        businessId,
++        allowMissing: true,
++      });
++
++    if (
++      !canAssignProductionTasks({
++        actorRole: actor.role,
++        staffRole:
++          staffProfile?.staffRole,
++      })
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
++      });
++    }
++
++    const task =
++      await ProductionTask.findById(
++        taskId,
++      ).lean();
++    if (!task) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.TASK_NOT_FOUND,
++      });
++    }
++
++    const plan =
++      await ProductionPlan.findOne({
++        _id: task.planId,
++        businessId,
++      }).lean();
++    if (!plan) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.PLAN_NOT_FOUND,
++      });
++    }
++
++    if (
++      actor.role === "staff" &&
++      actor.estateAssetId &&
++      plan.estateAssetId?.toString() !==
++        actor.estateAssetId.toString()
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
++      });
++    }
++
++    const assignedStaffIds =
++      resolveTaskAssignedStaffIds(task);
++    if (assignedStaffIds.length === 0) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.STAFF_ASSIGN_REQUIRED,
++      });
++    }
++
++    let effectiveStaffId =
++      assignedStaffIds[0];
++    if (
++      assignedStaffIds.length > 1 &&
++      !requestedStaffId
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN,
++      });
++    }
++    if (requestedStaffId) {
++      if (
++        !assignedStaffIds.includes(
++          requestedStaffId,
++        )
++      ) {
++        return res.status(400).json({
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_STAFF_NOT_ASSIGNED,
++        });
++      }
++      effectiveStaffId =
++        requestedStaffId;
++    }
++    if (
++      !mongoose.Types.ObjectId.isValid(
++        effectiveStaffId,
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_STAFF_ID_INVALID,
++      });
++    }
++
++    const effectiveStaffProfile =
++      await BusinessStaffProfile.findOne({
++        _id: effectiveStaffId,
++        businessId,
++      }).lean();
++    const planEstateId =
++      normalizeStaffIdInput(
++        plan.estateAssetId,
++      );
++    const staffEstateId =
++      normalizeStaffIdInput(
++        effectiveStaffProfile?.estateAssetId,
++      );
++    if (
++      !effectiveStaffProfile ||
++      (planEstateId &&
++        planEstateId !==
++          staffEstateId)
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
++      });
++    }
++
++    const expectedPlots =
++      Math.max(
++        0,
++        Number(task.weight || 0),
++      );
++    const progress =
++      await TaskProgress.findOneAndUpdate(
++        {
++          taskId: task._id,
++          staffId:
++            effectiveStaffId,
++          workDate:
++            normalizedWorkDate,
++        },
++        {
++          $set: {
++            planId: plan._id,
++            expectedPlots,
++            actualPlots,
++            delayReason,
++            notes,
++          },
++          $setOnInsert: {
++            createdBy: actor._id,
++          },
++        },
++        {
++          new: true,
++          upsert: true,
++          setDefaultsOnInsert: true,
++        },
++      ).lean();
++
++    debug(
++      "BUSINESS CONTROLLER: logProductionTaskProgress - success",
++      {
++        actorId: actor._id,
++        taskId: task._id,
++        planId: plan._id,
++        staffId:
++          effectiveStaffId,
++        assignedStaffCount:
++          assignedStaffIds.length,
++        requestedStaffId,
++        workDate:
++          normalizedWorkDate,
++        actualPlots,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.TASK_PROGRESS_CREATED,
++      progress,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: logProductionTaskProgress - error",
++      err.message,
++    );
++    return res
++      .status(400)
++      .json({ error: err.message });
++  }
++}
++
++/**
++ * POST /business/production/tasks/progress/batch
++ * Owner + managers: record multiple daily task progress rows in one request.
++ */
++async function logProductionTaskProgressBatch(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: logProductionTaskProgressBatch - entry",
++    {
++      actorId: req.user?.sub,
++      hasWorkDate: Boolean(
++        req.body?.workDate,
++      ),
++      entryCount: Array.isArray(
++        req.body?.entries,
++      ) ?
++        req.body.entries.length
++      : 0,
++    },
++  );
++
++  try {
++    const workDateRaw =
++      req.body?.workDate
++        ?.toString()
++        .trim() || "";
++    if (!workDateRaw) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_BATCH_DATE_REQUIRED,
++      });
++    }
++
++    const normalizedWorkDate =
++      normalizeWorkDateToDayStart(
++        workDateRaw,
++      );
++    if (!normalizedWorkDate) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_BATCH_DATE_INVALID,
++      });
++    }
++
++    const entries =
++      Array.isArray(req.body?.entries) ?
++        req.body.entries
++      : [];
++    if (entries.length === 0) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_BATCH_ENTRIES_REQUIRED,
++      });
++    }
++
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++    const staffProfile =
++      await getStaffProfileForActor({
++        actor,
++        businessId,
++        allowMissing: true,
++      });
++
++    if (
++      !canAssignProductionTasks({
++        actorRole: actor.role,
++        staffRole:
++          staffProfile?.staffRole,
++      })
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
++      });
++    }
++
++    const taskIdsForLookup = Array.from(
++      new Set(
++        entries
++          .map((entry) =>
++            normalizeStaffIdInput(
++              entry?.taskId,
++            ),
++          )
++          .filter((taskId) =>
++            mongoose.Types.ObjectId.isValid(
++              taskId,
++            ),
++          ),
++      ),
++    );
++    const tasks =
++      taskIdsForLookup.length > 0 ?
++        await ProductionTask.find({
++          _id: {
++            $in: taskIdsForLookup,
++          },
++        }).lean()
++      : [];
++    const taskMap = new Map(
++      tasks.map((task) => [
++        task._id.toString(),
++        task,
++      ]),
++    );
++
++    const planIdsForLookup = Array.from(
++      new Set(
++        tasks
++          .map((task) =>
++            normalizeStaffIdInput(
++              task?.planId,
++            ),
++          )
++          .filter(Boolean),
++      ),
++    );
++    const plans =
++      planIdsForLookup.length > 0 ?
++        await ProductionPlan.find({
++          _id: {
++            $in: planIdsForLookup,
++          },
++          businessId,
++        }).lean()
++      : [];
++    const planMap = new Map(
++      plans.map((plan) => [
++        plan._id.toString(),
++        plan,
++      ]),
++    );
++
++    const staffIdsForLookup = Array.from(
++      new Set(
++        entries
++          .map((entry) =>
++            normalizeStaffIdInput(
++              entry?.staffId,
++            ),
++          )
++          .filter((staffId) =>
++            mongoose.Types.ObjectId.isValid(
++              staffId,
++            ),
++          ),
++      ),
++    );
++    const entryStaffProfiles =
++      staffIdsForLookup.length > 0 ?
++        await BusinessStaffProfile.find({
++          _id: {
++            $in: staffIdsForLookup,
++          },
++          businessId,
++        }).lean()
++      : [];
++    const entryStaffProfileMap =
++      new Map(
++        entryStaffProfiles.map(
++          (profile) => [
++            profile._id.toString(),
++            profile,
++          ],
++        ),
++      );
++
++    const successes = [];
++    const errors = [];
++
++    for (
++      let index = 0;
++      index < entries.length;
++      index += 1
++    ) {
++      const entry = entries[index] || {};
++      const taskId =
++        normalizeStaffIdInput(
++          entry?.taskId,
++        );
++      const staffId =
++        normalizeStaffIdInput(
++          entry?.staffId,
++        );
++
++      const pushEntryError = ({
++        errorCode,
++        error,
++      }) => {
++        errors.push(
++          buildBatchTaskProgressError({
++            index,
++            taskId,
++            staffId,
++            errorCode,
++            error,
++          }),
++        );
++      };
++
++      if (!taskId) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_ID_REQUIRED,
++          error:
++            PRODUCTION_COPY.TASK_NOT_FOUND,
++        });
++        continue;
++      }
++      if (
++        !mongoose.Types.ObjectId.isValid(
++          taskId,
++        )
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_ID_INVALID,
++          error:
++            PRODUCTION_COPY.TASK_NOT_FOUND,
++        });
++        continue;
++      }
++
++      const task =
++        taskMap.get(taskId);
++      if (!task) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_NOT_FOUND,
++          error:
++            PRODUCTION_COPY.TASK_NOT_FOUND,
++        });
++        continue;
++      }
++
++      const plan = planMap.get(
++        normalizeStaffIdInput(
++          task?.planId,
++        ),
++      );
++      if (!plan) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_PLAN_NOT_FOUND,
++          error:
++            PRODUCTION_COPY.PLAN_NOT_FOUND,
++        });
++        continue;
++      }
++
++      if (
++        actor.role === "staff" &&
++        actor.estateAssetId &&
++        plan.estateAssetId?.toString() !==
++          actor.estateAssetId.toString()
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_FORBIDDEN,
++          error:
++            PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
++        });
++        continue;
++      }
++
++      if (!staffId) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_ID_REQUIRED,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_STAFF_ID_INVALID,
++        });
++        continue;
++      }
++      if (
++        !mongoose.Types.ObjectId.isValid(
++          staffId,
++        )
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_ID_INVALID,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_STAFF_ID_INVALID,
++        });
++        continue;
++      }
++
++      const assignedStaffIds =
++        resolveTaskAssignedStaffIds(
++          task,
++        );
++      if (
++        !assignedStaffIds.includes(
++          staffId,
++        )
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_NOT_ASSIGNED,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_STAFF_NOT_ASSIGNED,
++        });
++        continue;
++      }
++
++      const effectiveStaffProfile =
++        entryStaffProfileMap.get(
++          staffId,
++        );
++      const planEstateId =
++        normalizeStaffIdInput(
++          plan.estateAssetId,
++        );
++      const staffEstateId =
++        normalizeStaffIdInput(
++          effectiveStaffProfile?.estateAssetId,
++        );
++      if (
++        !effectiveStaffProfile ||
++        (planEstateId &&
++          planEstateId !==
++            staffEstateId)
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_SCOPE_INVALID,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
++        });
++        continue;
++      }
++
++      const hasActualPlots =
++        Object.prototype.hasOwnProperty.call(
++          entry,
++          "actualPlots",
++        );
++      if (!hasActualPlots) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_REQUIRED,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_REQUIRED,
++        });
++        continue;
++      }
++
++      const actualPlots = Number(
++        entry?.actualPlots,
++      );
++      if (
++        !Number.isFinite(actualPlots) ||
++        actualPlots < 0
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_INVALID,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_INVALID,
++        });
++        continue;
++      }
++      if (
++        actualPlots >
++        HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_HUMANE_LIMIT_EXCEEDED,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED,
++        });
++        continue;
++      }
++
++      const delayReason =
++        normalizeTaskProgressDelayReason(
++          entry?.delayReason,
++        );
++      if (
++        !PRODUCTION_TASK_PROGRESS_DELAY_REASONS.includes(
++          delayReason,
++        )
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_DELAY_REASON_INVALID,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_DELAY_REASON_INVALID,
++        });
++        continue;
++      }
++      if (
++        actualPlots === 0 &&
++        delayReason === "none"
++      ) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_ZERO_DELAY_REQUIRED,
++          error:
++            PRODUCTION_COPY.TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED,
++        });
++        continue;
++      }
++
++      const notes =
++        entry?.notes
++          ?.toString()
++          .trim() || "";
++      const expectedPlots =
++        Math.max(
++          0,
++          Number(task.weight || 0),
++        );
++
++      try {
++        const progress =
++          await TaskProgress.findOneAndUpdate(
++            {
++              taskId: task._id,
++              staffId,
++              workDate:
++                normalizedWorkDate,
++            },
++            {
++              $set: {
++                planId: plan._id,
++                expectedPlots,
++                actualPlots,
++                delayReason,
++                notes,
++              },
++              $setOnInsert: {
++                createdBy: actor._id,
++              },
++            },
++            {
++              new: true,
++              upsert: true,
++              setDefaultsOnInsert: true,
++            },
++          ).lean();
++
++        successes.push({
++          index,
++          taskId,
++          staffId,
++          progress,
++        });
++      } catch (entryError) {
++        pushEntryError({
++          errorCode:
++            TASK_PROGRESS_BATCH_ENTRY_CODE_UNKNOWN,
++          error:
++            entryError.message,
++        });
++      }
++    }
++
++    const summary = {
++      totalEntries: entries.length,
++      successCount:
++        successes.length,
++      errorCount: errors.length,
++    };
++
++    debug(
++      "BUSINESS CONTROLLER: logProductionTaskProgressBatch - success",
++      {
++        actorId: actor._id,
++        workDate:
++          normalizedWorkDate,
++        totalEntries:
++          summary.totalEntries,
++        successCount:
++          summary.successCount,
++        errorCount:
++          summary.errorCount,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.TASK_PROGRESS_BATCH_PROCESSED,
++      workDate:
++        normalizedWorkDate,
++      summary,
++      successes,
++      errors,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: logProductionTaskProgressBatch - error",
++      {
++        actorId: req.user?.sub,
++        reason: err.message,
++        next: "Validate batch payload and business scope before retrying",
++      },
++    );
++    return res.status(400).json({
++      error: err.message,
++    });
++  }
++}
++
++/**
++ * POST /business/production/task-progress/:id/approve
++ * Owner + estate manager: verify a daily progress record.
++ */
++async function approveTaskProgress(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: approveTaskProgress - entry",
++    {
++      actorId: req.user?.sub,
++      progressId:
++        req.params?.id,
++    },
++  );
++
++  try {
++    const progressId = (
++      req.params?.id || ""
++    )
++      .toString()
++      .trim();
++    if (
++      !progressId ||
++      !mongoose.Types.ObjectId.isValid(
++        progressId,
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_NOT_FOUND,
++      });
++    }
++
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++    const staffProfile =
++      await getStaffProfileForActor({
++        actor,
++        businessId,
++        allowMissing: true,
++      });
++    if (
++      !canReviewTaskProgress({
++        actorRole: actor.role,
++        staffRole:
++          staffProfile?.staffRole,
++      })
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_REVIEW_FORBIDDEN,
++      });
++    }
++
++    const { progress, plan } =
++      await loadTaskProgressInBusinessScope(
++        {
++          progressId,
++          businessId,
++        },
++      );
++    if (!progress || !plan) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_NOT_FOUND,
++      });
++    }
++
++    if (
++      actor.role === "staff" &&
++      actor.estateAssetId &&
++      plan.estateAssetId?.toString() !==
++        actor.estateAssetId.toString()
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_REVIEW_FORBIDDEN,
++      });
++    }
++
++    const alreadyApproved =
++      Boolean(progress.approvedAt) &&
++      Boolean(progress.approvedBy);
++    if (!alreadyApproved) {
++      progress.approvedBy = actor._id;
++      progress.approvedAt = new Date();
++      await progress.save();
++    }
++
++    debug(
++      "BUSINESS CONTROLLER: approveTaskProgress - success",
++      {
++        actorId: actor._id,
++        progressId: progress._id,
++        planId: progress.planId,
++        taskId: progress.taskId,
++        alreadyApproved,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.TASK_PROGRESS_APPROVED,
++      progress,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: approveTaskProgress - error",
++      {
++        actorId: req.user?.sub,
++        progressId:
++          req.params?.id,
++        reason: err.message,
++        next: "Confirm review role and progress ownership before retrying",
++      },
++    );
++    return res.status(400).json({
++      error: err.message,
++    });
++  }
++}
++
++/**
++ * POST /business/production/task-progress/:id/reject
++ * Owner + estate manager: mark a progress row for review without deleting it.
++ */
++async function rejectTaskProgress(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: rejectTaskProgress - entry",
++    {
++      actorId: req.user?.sub,
++      progressId:
++        req.params?.id,
++      hasReason: Boolean(
++        req.body?.reason,
++      ),
++    },
++  );
++
++  try {
++    const progressId = (
++      req.params?.id || ""
++    )
++      .toString()
++      .trim();
++    if (
++      !progressId ||
++      !mongoose.Types.ObjectId.isValid(
++        progressId,
++      )
++    ) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_NOT_FOUND,
++      });
++    }
++
++    const reason =
++      normalizeTaskProgressRejectReason(
++        req.body?.reason,
++      );
++    if (!reason) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_REJECT_REASON_REQUIRED,
++      });
++    }
++
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++    const staffProfile =
++      await getStaffProfileForActor({
++        actor,
++        businessId,
++        allowMissing: true,
++      });
++    if (
++      !canReviewTaskProgress({
++        actorRole: actor.role,
++        staffRole:
++          staffProfile?.staffRole,
++      })
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_REVIEW_FORBIDDEN,
++      });
++    }
++
++    const { progress, plan } =
++      await loadTaskProgressInBusinessScope(
++        {
++          progressId,
++          businessId,
++        },
++      );
++    if (!progress || !plan) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_NOT_FOUND,
++      });
++    }
++
++    if (
++      actor.role === "staff" &&
++      actor.estateAssetId &&
++      plan.estateAssetId?.toString() !==
++        actor.estateAssetId.toString()
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.TASK_PROGRESS_REVIEW_FORBIDDEN,
++      });
++    }
++
++    const rejectedAt = new Date();
++    const rejectionNote =
++      buildTaskProgressRejectNote({
++        reason,
++        actorId: actor._id,
++        rejectedAt,
++      });
++    const existingNotes =
++      progress.notes
++        ?.toString()
++        .trim() || "";
++    progress.notes =
++      existingNotes ?
++        `${existingNotes}\n${rejectionNote}`
++      : rejectionNote;
++    progress.approvedBy = null;
++    progress.approvedAt = null;
++    await progress.save();
++
++    debug(
++      "BUSINESS CONTROLLER: rejectTaskProgress - success",
++      {
++        actorId: actor._id,
++        progressId: progress._id,
++        planId: progress.planId,
++        taskId: progress.taskId,
++        reasonLength: reason.length,
++      },
++    );
++
++    return res.status(200).json({
++      message:
++        PRODUCTION_COPY.TASK_PROGRESS_REJECTED,
++      progress,
++    });
++  } catch (err) {
++    debug(
++      "BUSINESS CONTROLLER: rejectTaskProgress - error",
++      {
++        actorId: req.user?.sub,
++        progressId:
++          req.params?.id,
++        reason: err.message,
++        next: "Provide a reject reason and confirm review permissions before retrying",
++      },
++    );
++    return res.status(400).json({
++      error: err.message,
++    });
++  }
++}
++
++/**
++ * POST /business/production/tasks/:id/approve
++ * Business owner: approve task assignment.
++ */
++async function approveProductionTask(
++  req,
++  res,
++) {
++  debug(
++    "BUSINESS CONTROLLER: approveProductionTask - entry",
++    {
++      actorId: req.user?.sub,
++      taskId: req.params?.id,
++    },
++  );
++
++  try {
++    const taskId = req.params?.id
++      ?.toString()
++      .trim();
++    if (!taskId) {
++      return res.status(400).json({
++        error:
++          PRODUCTION_COPY.TASK_NOT_FOUND,
++      });
++    }
++
++    const { actor, businessId } =
++      await getBusinessContext(
++        req.user.sub,
++      );
++
++    if (
++      actor.role !== "business_owner"
++    ) {
++      return res.status(403).json({
++        error:
++          PRODUCTION_COPY.STAFF_ASSIGN_APPROVAL_REQUIRED,
++      });
++    }
++
++    const task =
++      await ProductionTask.findById(
++        taskId,
++      );
++    if (!task) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.TASK_NOT_FOUND,
++      });
++    }
++
++    const plan =
++      await ProductionPlan.findOne({
++        _id: task.planId,
++        businessId,
++      }).lean();
++    if (!plan) {
++      return res.status(404).json({
++        error:
++          PRODUCTION_COPY.PLAN_NOT_FOUND,
++      });
++    }
++
++    task.approvalStatus =
+       PRODUCTION_TASK_APPROVAL_APPROVED;
+     task.reviewedBy = actor._id;
+     task.reviewedAt = new Date();
+@@ -5224,6 +7896,10 @@ async function createProductionOutput(
+     let listingUpdated = false;
+     let listingError = null;
+     let updatedProduct = null;
++    const actorForProductUpdate = {
++      id: actor._id,
++      role: actor.role,
++    };
+     if (readyForSale) {
+       debug(
+         PRODUCTION_OUTPUT_LOG.LISTING_UPDATE_START,
+@@ -5240,9 +7916,25 @@ async function createProductionOutput(
+         );
+         const nextStock =
+           currentStock + quantity;
++        const currentReserved =
++          Math.max(
++            0,
++            Number(
++              product.preorderReservedQuantity ||
++                0,
++            ),
++          );
+         const updates = {
+           stock: nextStock,
+           isActive: true,
++          productionState:
++            PRODUCT_STATE_ACTIVE_STOCK,
++          preorderEnabled: false,
++          preorderStartDate: null,
++          preorderCapQuantity: 0,
++          preorderReleasedQuantity:
++            currentReserved,
++          preorderReservedQuantity: 0,
+         };
+         if (
+           Number.isFinite(pricePerUnit)
+@@ -5256,7 +7948,8 @@ async function createProductionOutput(
+               businessId,
+               id: productId,
+               updates,
+-              actor,
++              actor:
++                actorForProductUpdate,
+             },
+           );
+ 
+@@ -5268,8 +7961,44 @@ async function createProductionOutput(
+             productId,
+             outputId: output._id,
+             nextStock,
++            preorderReleasedQuantity:
++              currentReserved,
++          },
++        );
++      } catch (err) {
++        listingError = err.message;
++        debug(
++          PRODUCTION_OUTPUT_LOG.LISTING_UPDATE_ERROR,
++          {
++            actorId: actor._id,
++            productId,
++            outputId: output._id,
++            reason:
++              PRODUCTION_OUTPUT_LISTING_REASON,
++            resolution_hint:
++              PRODUCTION_OUTPUT_LISTING_HINT,
++            error: err.message,
+           },
+         );
++      }
++    } else {
++      // WHY: Storage outputs keep product inactive until manager explicitly activates stock.
++      try {
++        updatedProduct =
++          await businessProductService.updateProduct(
++            {
++              businessId,
++              id: productId,
++              updates: {
++                isActive: false,
++                productionState:
++                  PRODUCT_STATE_IN_STORAGE,
++              },
++              actor:
++                actorForProductUpdate,
++            },
++          );
++        listingUpdated = true;
+       } catch (err) {
+         listingError = err.message;
+         debug(
+@@ -8265,7 +10994,14 @@ module.exports = {
+   createProductionPlan,
+   listProductionPlans,
+   getProductionPlanDetail,
++  updateProductionPlanPreorder,
++  reserveProductionPlanPreorder,
++  reconcileExpiredPreorderReservationsHandler,
+   updateProductionTaskStatus,
++  logProductionTaskProgress,
++  logProductionTaskProgressBatch,
++  approveTaskProgress,
++  rejectTaskProgress,
+   approveProductionTask,
+   rejectProductionTask,
+   createProductionOutput,
+diff --git a/backend/routes/business.routes.js b/backend/routes/business.routes.js
+index 7aac377..efa02a4 100644
+--- a/backend/routes/business.routes.js
++++ b/backend/routes/business.routes.js
+@@ -402,6 +402,35 @@ router.get(
+   businessController.getProductionPlanDetail,
+ );
+ 
++router.patch(
++  "/production/plans/:id/preorder",
++  requireAuth,
++  requireAnyRole([
++    "business_owner",
++    "staff",
++  ]),
++  businessController.updateProductionPlanPreorder,
++);
++
++router.post(
++  "/production/plans/:planId/preorder/reserve",
++  requireAuth,
++  requireAnyRole([
++    "customer",
++    "business_owner",
++  ]),
++  businessController.reserveProductionPlanPreorder,
++);
++
++router.post(
++  "/preorder/reservations/reconcile-expired",
++  requireAuth,
++  requireAnyRole([
++    "business_owner",
++  ]),
++  businessController.reconcileExpiredPreorderReservationsHandler,
++);
++
+ router.patch(
+   "/production/tasks/:id/status",
+   requireAuth,
+@@ -412,6 +441,46 @@ router.patch(
+   businessController.updateProductionTaskStatus,
+ );
+ 
++router.post(
++  "/production/tasks/progress/batch",
++  requireAuth,
++  requireAnyRole([
++    "business_owner",
++    "staff",
++  ]),
++  businessController.logProductionTaskProgressBatch,
++);
++
++router.post(
++  "/production/tasks/:taskId/progress",
++  requireAuth,
++  requireAnyRole([
++    "business_owner",
++    "staff",
++  ]),
++  businessController.logProductionTaskProgress,
++);
++
++router.post(
++  "/production/task-progress/:id/approve",
++  requireAuth,
++  requireAnyRole([
++    "business_owner",
++    "staff",
++  ]),
++  businessController.approveTaskProgress,
++);
++
++router.post(
++  "/production/task-progress/:id/reject",
++  requireAuth,
++  requireAnyRole([
++    "business_owner",
++    "staff",
++  ]),
++  businessController.rejectTaskProgress,
++);
++
+ router.post(
+   "/production/tasks/:id/approve",
+   requireAuth,
+diff --git a/backend/models/PreorderReservation.js b/backend/models/PreorderReservation.js
+new file mode 100644
+index 0000000..a5f8114
+--- /dev/null
++++ b/backend/models/PreorderReservation.js
+@@ -0,0 +1,105 @@
++/**
++ * apps/backend/models/PreorderReservation.js
++ * ------------------------------------------
++ * WHAT:
++ * - Stores temporary pre-order reservation holds for production plans.
++ *
++ * WHY:
++ * - Prevents overselling by recording each hold against capped pre-order stock.
++ * - Preserves auditability for reservation lifecycle transitions.
++ *
++ * HOW:
++ * - Links reservation to business, plan, and requesting user.
++ * - Keeps expired rows for reconciliation + audit history.
++ */
++
++const mongoose = require("mongoose");
++const debug = require("../utils/debug");
++
++debug("Loading PreorderReservation model...");
++
++const PREORDER_RESERVATION_STATUSES = [
++  "reserved",
++  "confirmed",
++  "released",
++  "expired",
++];
++const DEFAULT_RESERVATION_TTL_MS =
++  15 * 60 * 1000;
++
++const preorderReservationSchema = new mongoose.Schema(
++  {
++    // WHY: Business scope prevents cross-tenant reservation leaks.
++    businessId: {
++      type: mongoose.Schema.Types.ObjectId,
++      ref: "User",
++      required: true,
++      index: true,
++    },
++    // WHY: Reservation must always tie to one production plan.
++    planId: {
++      type: mongoose.Schema.Types.ObjectId,
++      ref: "ProductionPlan",
++      required: true,
++      index: true,
++    },
++    // WHY: User link supports customer-specific reservation ownership.
++    userId: {
++      type: mongoose.Schema.Types.ObjectId,
++      ref: "User",
++      required: true,
++      index: true,
++    },
++    // WHY: Quantity must be a positive reservation request.
++    quantity: {
++      type: Number,
++      required: true,
++      validate: {
++        validator(value) {
++          return Number.isFinite(value) && value > 0;
++        },
++        message:
++          "Reservation quantity must be greater than zero",
++      },
++    },
++    // WHY: Status tracks where each hold is in fulfillment lifecycle.
++    status: {
++      type: String,
++      enum: PREORDER_RESERVATION_STATUSES,
++      default: "reserved",
++      required: true,
++      index: true,
++    },
++    // WHY: Reservations should auto-expire if not confirmed in time.
++    expiresAt: {
++      type: Date,
++      required: true,
++      default() {
++        return new Date(
++          Date.now() +
++            DEFAULT_RESERVATION_TTL_MS,
++        );
++      },
++    },
++    // WHY: Reconciler stamps this moment so release actions are auditable.
++    expiredAt: {
++      type: Date,
++      default: null,
++      index: true,
++    },
++  },
++  {
++    timestamps: true,
++  },
++);
++
++const PreorderReservation = mongoose.model(
++  "PreorderReservation",
++  preorderReservationSchema,
++);
++
++module.exports = PreorderReservation;
++module.exports.PREORDER_RESERVATION_STATUSES =
++  PREORDER_RESERVATION_STATUSES;
++module.exports.DEFAULT_RESERVATION_TTL_MS =
++  DEFAULT_RESERVATION_TTL_MS;
+diff --git a/backend/services/preorder_reservation_reconciler.service.js b/backend/services/preorder_reservation_reconciler.service.js
+new file mode 100644
+index 0000000..2c707b8
+--- /dev/null
++++ b/backend/services/preorder_reservation_reconciler.service.js
+@@ -0,0 +1,355 @@
++/**
++ * apps/backend/services/preorder_reservation_reconciler.service.js
++ * ----------------------------------------------------------------
++ * WHAT:
++ * - Reconciles expired pre-order reservations into released product capacity.
++ *
++ * WHY:
++ * - TTL deletion alone cannot decrement reserved counters, so capacity would drift.
++ * - Reconciliation keeps Product.preorderReservedQuantity aligned with active holds.
++ *
++ * HOW:
++ * - Finds still-reserved holds that are past expiresAt.
++ * - Processes each hold in a transaction so status + counter move together.
++ * - Marks reservation as expired with expiredAt for auditability.
++ */
++
++const mongoose = require("mongoose");
++const debug = require("../utils/debug");
++const Product = require("../models/Product");
++const ProductionPlan = require("../models/ProductionPlan");
++const PreorderReservation = require("../models/PreorderReservation");
++
++const PREORDER_RECONCILE_DEFAULT_LIMIT =
++  500;
++const PREORDER_RECONCILE_STATUS_RESERVED =
++  "reserved";
++const PREORDER_RECONCILE_STATUS_EXPIRED =
++  "expired";
++const PREORDER_RECONCILE_ERROR_CODE =
++  "PREORDER_RECONCILE_FAILED";
++
++function normalizeReconcileDate(nowInput) {
++  const nowValue =
++    nowInput instanceof Date ?
++      nowInput
++    : new Date(nowInput || Date.now());
++  if (Number.isNaN(nowValue.getTime())) {
++    throw new Error(
++      "Invalid reconciliation date",
++    );
++  }
++  return nowValue;
++}
++
++function normalizeReconcileLimit(limitInput) {
++  const parsedLimit = Number(limitInput);
++  if (
++    !Number.isFinite(parsedLimit) ||
++    parsedLimit <= 0
++  ) {
++    return PREORDER_RECONCILE_DEFAULT_LIMIT;
++  }
++  return Math.floor(parsedLimit);
++}
++
++async function reconcileExpiredPreorderReservations(
++  {
++    businessId = null,
++    now = new Date(),
++    limit = PREORDER_RECONCILE_DEFAULT_LIMIT,
++  } = {},
++) {
++  const normalizedNow =
++    normalizeReconcileDate(now);
++  const normalizedLimit =
++    normalizeReconcileLimit(limit);
++
++  const candidateFilter = {
++    status:
++      PREORDER_RECONCILE_STATUS_RESERVED,
++    expiresAt: { $lt: normalizedNow },
++  };
++  if (businessId) {
++    // WHY: Tenant scope keeps one business from touching another's holds.
++    candidateFilter.businessId = businessId;
++  }
++
++  debug(
++    "PREORDER RECONCILER: start",
++    {
++      businessId:
++        businessId ?
++          businessId.toString()
++        : null,
++      now: normalizedNow.toISOString(),
++      limit: normalizedLimit,
++      intent:
++        "release expired reservation capacity into preorder counters",
++    },
++  );
++
++  const candidates =
++    await PreorderReservation.find(
++      candidateFilter,
++    )
++      .sort({ expiresAt: 1, _id: 1 })
++      .limit(normalizedLimit)
++      .select({
++        _id: 1,
++        planId: 1,
++        businessId: 1,
++        quantity: 1,
++      })
++      .lean();
++
++  const summary = {
++    businessId:
++      businessId ?
++        businessId.toString()
++      : null,
++    now: normalizedNow.toISOString(),
++    scannedCount: candidates.length,
++    expiredCount: 0,
++    skippedCount: 0,
++    errorCount: 0,
++    processedReservationIds: [],
++    skippedReservationIds: [],
++    errors: [],
++  };
++
++  debug(
++    "PREORDER RECONCILER: candidates loaded",
++    {
++      businessId:
++        summary.businessId,
++      scannedCount:
++        summary.scannedCount,
++      reservationIds:
++        candidates.map((entry) =>
++          entry._id.toString(),
++        ),
++    },
++  );
++
++  for (const candidate of candidates) {
++    const reservationId =
++      candidate._id.toString();
++    let session;
++    try {
++      session =
++        await mongoose.startSession();
++
++      let transactionResult = null;
++      await session.withTransaction(
++        async () => {
++          // WHY: State transition is inside transaction so idempotency is guaranteed.
++          const reservation =
++            await PreorderReservation.findOneAndUpdate(
++              {
++                _id: candidate._id,
++                status:
++                  PREORDER_RECONCILE_STATUS_RESERVED,
++                expiresAt: {
++                  $lt: normalizedNow,
++                },
++              },
++              {
++                $set: {
++                  status:
++                    PREORDER_RECONCILE_STATUS_EXPIRED,
++                  expiredAt: normalizedNow,
++                },
++              },
++              {
++                new: false,
++                session,
++              },
++            );
++
++          if (!reservation) {
++            transactionResult = {
++              skipped: true,
++              reason:
++                "ALREADY_RECONCILED_OR_NOT_EXPIRED",
++            };
++            return;
++          }
++
++          const plan =
++            await ProductionPlan.findOne({
++              _id: reservation.planId,
++              businessId:
++                reservation.businessId,
++            })
++              .select({ productId: 1 })
++              .session(session)
++              .lean();
++          if (!plan?.productId) {
++            throw new Error(
++              "Missing product link for expired reservation",
++            );
++          }
++
++          const productBefore =
++            await Product.findOne({
++              _id: plan.productId,
++              businessId:
++                reservation.businessId,
++            })
++              .select({
++                preorderReservedQuantity: 1,
++              })
++              .session(session)
++              .lean();
++          if (!productBefore) {
++            throw new Error(
++              "Product not found for expired reservation",
++            );
++          }
++
++          const beforeReserved = Number(
++            productBefore.preorderReservedQuantity ||
++              0,
++          );
++          const decrementBy = Math.min(
++            beforeReserved,
++            Number(
++              reservation.quantity || 0,
++            ),
++          );
++
++          // WHY: Bounded decrement + transaction keeps counter non-negative and atomic.
++          const productAfter =
++            await Product.findOneAndUpdate(
++              {
++                _id: plan.productId,
++                businessId:
++                  reservation.businessId,
++              },
++              {
++                $inc: {
++                  preorderReservedQuantity:
++                    -decrementBy,
++                },
++              },
++              {
++                new: true,
++                session,
++              },
++            )
++              .select({
++                preorderReservedQuantity: 1,
++              })
++              .lean();
++
++          if (!productAfter) {
++            throw new Error(
++              "Unable to decrement reserved capacity for expired reservation",
++            );
++          }
++
++          transactionResult = {
++            skipped: false,
++            businessId:
++              reservation.businessId.toString(),
++            planId:
++              reservation.planId.toString(),
++            quantity: Number(
++              reservation.quantity || 0,
++            ),
++            beforeReserved,
++            afterReserved: Number(
++              productAfter.preorderReservedQuantity ||
++                0,
++            ),
++          };
++        },
++      );
++
++      if (transactionResult?.skipped) {
++        summary.skippedCount += 1;
++        summary.skippedReservationIds.push(
++          reservationId,
++        );
++        debug(
++          "PREORDER RECONCILER: reservation skipped",
++          {
++            reservationId,
++            reason:
++              transactionResult.reason,
++          },
++        );
++        continue;
++      }
++
++      summary.expiredCount += 1;
++      summary.processedReservationIds.push(
++        reservationId,
++      );
++      debug(
++        "PREORDER RECONCILER: reservation reconciled",
++        {
++          reservationId,
++          businessId:
++            transactionResult?.businessId,
++          planId:
++            transactionResult?.planId,
++          quantity:
++            transactionResult?.quantity,
++          reservedBefore:
++            transactionResult?.beforeReserved,
++          reservedAfter:
++            transactionResult?.afterReserved,
++        },
++      );
++    } catch (error) {
++      summary.errorCount += 1;
++      summary.errors.push({
++        reservationId,
++        errorCode:
++          PREORDER_RECONCILE_ERROR_CODE,
++        message: error.message,
++      });
++      debug(
++        "PREORDER RECONCILER: reservation failed",
++        {
++          reservationId,
++          errorCode:
++            PREORDER_RECONCILE_ERROR_CODE,
++          reason: error.message,
++          next: "Inspect reservation linkage and retry reconciliation",
++        },
++      );
++    } finally {
++      if (session) {
++        await session.endSession();
++      }
++    }
++  }
++
++  debug(
++    "PREORDER RECONCILER: complete",
++    {
++      businessId:
++        summary.businessId,
++      scannedCount:
++        summary.scannedCount,
++      expiredCount:
++        summary.expiredCount,
++      skippedCount:
++        summary.skippedCount,
++      errorCount:
++        summary.errorCount,
++      processedReservationIds:
++        summary.processedReservationIds,
++    },
++  );
++
++  return summary;
++}
++
++module.exports = {
++  PREORDER_RECONCILE_DEFAULT_LIMIT,
++  reconcileExpiredPreorderReservations,
++};
+diff --git a/backend/scripts/preorder-reservation-reconciler.js b/backend/scripts/preorder-reservation-reconciler.js
+new file mode 100644
+index 0000000..29a9aa9
+--- /dev/null
++++ b/backend/scripts/preorder-reservation-reconciler.js
+@@ -0,0 +1,126 @@
++/**
++ * backend/scripts/preorder-reservation-reconciler.js
++ * --------------------------------------------------
++ * WHAT:
++ * - Runs expired pre-order reservation reconciliation from CLI.
++ *
++ * WHY:
++ * - Releases stuck reserved capacity when reservation holds pass expiresAt.
++ *
++ * HOW:
++ * - Connects to MongoDB.
++ * - Calls the shared reconciler service with optional business scope.
++ * - Prints a deterministic summary for ops monitoring.
++ */
++
++const path = require("node:path");
++const mongoose = require("mongoose");
++const debug = require("../utils/debug");
++const {
++  reconcileExpiredPreorderReservations,
++} = require("../services/preorder_reservation_reconciler.service");
++
++require("dotenv").config({
++  path: path.resolve(__dirname, "../.env"),
++});
++
++function parseCliArgs(argv) {
++  const parsed = {
++    businessId: null,
++    limit: null,
++  };
++
++  for (const arg of argv) {
++    // WHY: Allow safe scoped reconciliation without changing script code.
++    if (arg.startsWith("--businessId=")) {
++      parsed.businessId = arg
++        .replace("--businessId=", "")
++        .trim();
++    }
++    if (arg.startsWith("--limit=")) {
++      parsed.limit = Number(
++        arg.replace("--limit=", "").trim(),
++      );
++    }
++  }
++
++  return parsed;
++}
++
++async function run() {
++  const mongoUri = (
++    process.env.MONGO_URI || ""
++  ).trim();
++  if (!mongoUri) {
++    throw new Error(
++      "MONGO_URI is required to run preorder reservation reconciler",
++    );
++  }
++
++  const args = parseCliArgs(
++    process.argv.slice(2),
++  );
++  const startedAt = new Date();
++
++  debug(
++    "PREORDER RECONCILER SCRIPT: start",
++    {
++      businessId:
++        args.businessId || null,
++      limit: args.limit || null,
++      intent:
++        "expire stale reservations and release reserved preorder capacity",
++    },
++  );
++
++  await mongoose.connect(mongoUri);
++  try {
++    const summary =
++      await reconcileExpiredPreorderReservations(
++        {
++          businessId:
++            args.businessId || null,
++          limit: args.limit || undefined,
++          now: startedAt,
++        },
++      );
++
++    debug(
++      "PREORDER RECONCILER SCRIPT: success",
++      {
++        businessId:
++          summary.businessId,
++        scannedCount:
++          summary.scannedCount,
++        expiredCount:
++          summary.expiredCount,
++        skippedCount:
++          summary.skippedCount,
++        errorCount:
++          summary.errorCount,
++      },
++    );
++
++    // WHY: Keep script output machine-readable for cron/ops tooling.
++    process.stdout.write(
++      `${JSON.stringify(summary, null, 2)}\n`,
++    );
++  } finally {
++    await mongoose.disconnect();
++  }
++}
++
++run().catch((error) => {
++  debug(
++    "PREORDER RECONCILER SCRIPT: failure",
++    {
++      reason: error.message,
++      next: "Validate Mongo connection and retry reconciliation",
++    },
++  );
++  process.stderr.write(
++    `${error.message}\n`,
++  );
++  process.exitCode = 1;
++});
++
+diff --git a/backend/scripts/preorder-reconcile.test.js b/backend/scripts/preorder-reconcile.test.js
+new file mode 100644
+index 0000000..6571439
+--- /dev/null
++++ b/backend/scripts/preorder-reconcile.test.js
+@@ -0,0 +1,371 @@
++/**
++ * backend/scripts/preorder-reconcile.test.js
++ * ------------------------------------------
++ * WHAT:
++ * - Integration tests for expired pre-order reservation reconciliation.
++ *
++ * WHY:
++ * - Ensures reserved counters are released deterministically when holds expire.
++ *
++ * HOW:
++ * - Uses isolated Mongo test DB with direct service invocation for deterministic checks.
++ * - Seeds realistic business + plan + product + reservation fixtures per test.
++ */
++
++const path = require("node:path");
++const test = require("node:test");
++const assert = require("node:assert/strict");
++const mongoose = require("mongoose");
++
++require("dotenv").config({
++  path: path.resolve(__dirname, "../.env"),
++});
++
++const debug = require("../utils/debug");
++const {
++  reconcileExpiredPreorderReservations,
++} = require("../services/preorder_reservation_reconciler.service");
++const User = require("../models/User");
++const BusinessAsset = require("../models/BusinessAsset");
++const Product = require("../models/Product");
++const ProductionPlan = require("../models/ProductionPlan");
++const PreorderReservation = require("../models/PreorderReservation");
++
++const TEST_LOG_TAG =
++  "PREORDER_RECONCILE_TEST";
++const OWNER_ROLE = "business_owner";
++const RECONCILE_NOW = new Date(
++  "2026-03-25T09:00:00.000Z",
++);
++const PAST_EXPIRES_AT = new Date(
++  "2026-03-25T08:00:00.000Z",
++);
++const FUTURE_EXPIRES_AT = new Date(
++  "2026-03-25T18:00:00.000Z",
++);
++
++const RESET_MODELS = [
++  PreorderReservation,
++  ProductionPlan,
++  Product,
++  BusinessAsset,
++  User,
++];
++
++let testDbUri = "";
++
++function buildTestDbUri(baseUri) {
++  const uri = (baseUri || "").trim();
++  if (!uri) {
++    throw new Error(
++      "MONGO_URI is required for preorder reconcile tests",
++    );
++  }
++
++  // WHY: Keep test writes isolated to avoid polluting shared databases.
++  const parsed = new URL(uri);
++  const dbName = `prc_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
++  parsed.pathname = `/${dbName}`;
++  return parsed.toString();
++}
++
++async function purgeTestData() {
++  for (const model of RESET_MODELS) {
++    await model.deleteMany({});
++  }
++}
++
++async function seedBusinessWithReservation({
++  reservedQuantity = 5,
++  reservationQuantity = 2,
++  expiresAt = PAST_EXPIRES_AT,
++  reservationStatus = "reserved",
++}) {
++  const ownerId =
++    new mongoose.Types.ObjectId();
++  const businessId = ownerId;
++  const estateAssetId =
++    new mongoose.Types.ObjectId();
++  const productId =
++    new mongoose.Types.ObjectId();
++  const planId =
++    new mongoose.Types.ObjectId();
++  const reservationId =
++    new mongoose.Types.ObjectId();
++
++  await User.create({
++    _id: ownerId,
++    name: `owner-${ownerId.toString().slice(-6)}`,
++    email: `owner_${ownerId.toString().slice(-6)}@test.local`,
++    passwordHash: "hashed_for_tests",
++    role: OWNER_ROLE,
++    businessId,
++  });
++
++  await BusinessAsset.create({
++    _id: estateAssetId,
++    businessId,
++    assetType: "equipment",
++    ownershipType: "owned",
++    assetClass: "current",
++    name: `estate-${estateAssetId.toString().slice(-6)}`,
++    createdBy: ownerId,
++  });
++
++  await Product.create({
++    _id: productId,
++    businessId,
++    createdBy: ownerId,
++    updatedBy: ownerId,
++    name: `Rice ${productId.toString().slice(-6)}`,
++    description: "reconcile test product",
++    price: 1000,
++    stock: 0,
++    isActive: false,
++    productionState: "available_for_preorder",
++    productionPlanId: planId,
++    conservativeYieldQuantity: 20,
++    conservativeYieldUnit: "bags",
++    preorderEnabled: true,
++    preorderStartDate: new Date(
++      "2026-03-01T00:00:00.000Z",
++    ),
++    preorderCapQuantity: 20,
++    preorderReservedQuantity:
++      reservedQuantity,
++    preorderReleasedQuantity: 0,
++  });
++
++  await ProductionPlan.create({
++    _id: planId,
++    businessId,
++    estateAssetId,
++    productId,
++    title: "Reconcile Plan",
++    startDate: new Date(
++      "2026-03-01T00:00:00.000Z",
++    ),
++    endDate: new Date(
++      "2026-04-30T00:00:00.000Z",
++    ),
++    status: "active",
++    createdBy: ownerId,
++    notes: "reconcile test plan",
++    aiGenerated: false,
++    domainContext: "farm",
++  });
++
++  await PreorderReservation.create({
++    _id: reservationId,
++    businessId,
++    planId,
++    userId: ownerId,
++    quantity: reservationQuantity,
++    status: reservationStatus,
++    expiresAt,
++  });
++
++  return {
++    businessId,
++    productId,
++    planId,
++    reservationId,
++  };
++}
++
++test.before(async () => {
++  testDbUri = buildTestDbUri(
++    process.env.MONGO_URI,
++  );
++  debug(
++    TEST_LOG_TAG,
++    "Connecting reconcile test database",
++    {
++      hasMongoUri: Boolean(
++        process.env.MONGO_URI,
++      ),
++    },
++  );
++  await mongoose.connect(testDbUri);
++});
++
++test.after(async () => {
++  await purgeTestData();
++  await mongoose.disconnect();
++  debug(
++    TEST_LOG_TAG,
++    "Reconcile tests disconnected",
++    {
++      disconnected: true,
++    },
++  );
++});
++
++test.beforeEach(async () => {
++  await purgeTestData();
++});
++
++test("expired reservation decrements reserved quantity (tenant-scoped)", async () => {
++  const scoped =
++    await seedBusinessWithReservation({
++      reservedQuantity: 6,
++      reservationQuantity: 2,
++      expiresAt: PAST_EXPIRES_AT,
++    });
++  const outsideScope =
++    await seedBusinessWithReservation({
++      reservedQuantity: 5,
++      reservationQuantity: 3,
++      expiresAt: PAST_EXPIRES_AT,
++    });
++
++  debug(
++    TEST_LOG_TAG,
++    "Running scoped reconcile",
++    {
++      scopedBusinessId:
++        scoped.businessId.toString(),
++    },
++  );
++
++  const summary =
++    await reconcileExpiredPreorderReservations(
++      {
++        businessId: scoped.businessId,
++        now: RECONCILE_NOW,
++      },
++    );
++
++  assert.equal(summary.errorCount, 0);
++  assert.equal(summary.expiredCount, 1);
++
++  const scopedProduct =
++    await Product.findById(
++      scoped.productId,
++    ).lean();
++  assert.equal(
++    scopedProduct.preorderReservedQuantity,
++    4,
++  );
++
++  const scopedReservation =
++    await PreorderReservation.findById(
++      scoped.reservationId,
++    ).lean();
++  assert.equal(
++    scopedReservation.status,
++    "expired",
++  );
++  assert.equal(
++    new Date(
++      scopedReservation.expiredAt,
++    ).toISOString(),
++    RECONCILE_NOW.toISOString(),
++  );
++
++  const outsideProduct =
++    await Product.findById(
++      outsideScope.productId,
++    ).lean();
++  const outsideReservation =
++    await PreorderReservation.findById(
++      outsideScope.reservationId,
++    ).lean();
++  assert.equal(
++    outsideProduct.preorderReservedQuantity,
++    5,
++  );
++  assert.equal(
++    outsideReservation.status,
++    "reserved",
++  );
++});
++
++test("running reconcile twice is idempotent", async () => {
++  const scenario =
++    await seedBusinessWithReservation({
++      reservedQuantity: 5,
++      reservationQuantity: 2,
++      expiresAt: PAST_EXPIRES_AT,
++    });
++
++  const firstRun =
++    await reconcileExpiredPreorderReservations(
++      {
++        businessId: scenario.businessId,
++        now: RECONCILE_NOW,
++      },
++    );
++  const secondRun =
++    await reconcileExpiredPreorderReservations(
++      {
++        businessId: scenario.businessId,
++        now: RECONCILE_NOW,
++      },
++    );
++
++  assert.equal(firstRun.expiredCount, 1);
++  assert.equal(secondRun.expiredCount, 0);
++  assert.equal(secondRun.errorCount, 0);
++
++  const updatedProduct =
++    await Product.findById(
++      scenario.productId,
++    ).lean();
++  assert.equal(
++    updatedProduct.preorderReservedQuantity,
++    3,
++  );
++
++  const updatedReservation =
++    await PreorderReservation.findById(
++      scenario.reservationId,
++    ).lean();
++  assert.equal(
++    updatedReservation.status,
++    "expired",
++  );
++});
++
++test("non-expired reservation remains untouched", async () => {
++  const scenario =
++    await seedBusinessWithReservation({
++      reservedQuantity: 4,
++      reservationQuantity: 1,
++      expiresAt: FUTURE_EXPIRES_AT,
++    });
++
++  const summary =
++    await reconcileExpiredPreorderReservations(
++      {
++        businessId: scenario.businessId,
++        now: RECONCILE_NOW,
++      },
++    );
++
++  assert.equal(summary.expiredCount, 0);
++  assert.equal(summary.errorCount, 0);
++
++  const product =
++    await Product.findById(
++      scenario.productId,
++    ).lean();
++  const reservation =
++    await PreorderReservation.findById(
++      scenario.reservationId,
++    ).lean();
++
++  assert.equal(
++    product.preorderReservedQuantity,
++    4,
++  );
++  assert.equal(
++    reservation.status,
++    "reserved",
++  );
++  assert.equal(
++    reservation.expiredAt,
++    null,
++  );
++});
++

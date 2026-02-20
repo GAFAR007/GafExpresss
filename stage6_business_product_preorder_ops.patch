@@ -1,0 +1,551 @@
+diff --git a/frontend/lib/app/features/home/presentation/business_product_detail_screen.dart b/frontend/lib/app/features/home/presentation/business_product_detail_screen.dart
+index 291658e..62d1bc9 100644
+--- a/frontend/lib/app/features/home/presentation/business_product_detail_screen.dart
++++ b/frontend/lib/app/features/home/presentation/business_product_detail_screen.dart
+@@ -29,6 +29,9 @@ import 'package:frontend/app/features/home/presentation/app_refresh.dart';
+ import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
+ import 'package:frontend/app/features/home/presentation/product_model.dart';
+ import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
++import 'package:frontend/app/features/home/presentation/production/production_models.dart';
++import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
++import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+ 
+ class BusinessProductDetailScreen extends ConsumerStatefulWidget {
+   final String productId;
+@@ -42,6 +45,26 @@ class BusinessProductDetailScreen extends ConsumerStatefulWidget {
+ 
+ class _BusinessProductDetailScreenState
+     extends ConsumerState<BusinessProductDetailScreen> {
++  static const String _ownerRole = "business_owner";
++  static const String _preorderSectionTitle = "Linked production pre-order";
++  static const String _preorderSectionHint =
++      "Configure conservative pre-order controls for this product's linked plan.";
++  static const String _preorderNoPlanTitle = "No linked production plan";
++  static const String _preorderNoPlanMessage =
++      "Create or attach a production plan to manage pre-order controls.";
++  static const String _configurePreorderLabel = "Configure pre-order";
++  static const String _reconcilePreorderLabel = "Reconcile expired holds";
++  static const String _openPlanLabel = "Open plan detail";
++  static const String _preorderConfigTitle = "Pre-order settings";
++  static const String _preorderEnableLabel = "Enable pre-order";
++  static const String _preorderYieldLabel = "Conservative yield quantity";
++  static const String _preorderYieldUnitLabel = "Yield unit";
++  static const String _preorderCapRatioLabel = "Cap ratio (0.1 - 0.9)";
++  static const String _preorderConfigSaveLabel = "Save";
++  static const String _preorderConfigCancelLabel = "Cancel";
++  static const String _preorderConfigValidation =
++      "Provide positive yield quantity and cap ratio between 0.1 and 0.9.";
++
+   // WHY: Controllers keep form values stable across rebuilds.
+   final _nameCtrl = TextEditingController();
+   final _descCtrl = TextEditingController();
+@@ -90,6 +113,226 @@ class _BusinessProductDetailScreenState
+     return int.tryParse(trimmed);
+   }
+ 
++  double _derivePreorderCapRatio(ProductionPreorderSummary? summary) {
++    if (summary == null) {
++      return 0.5;
++    }
++    final cap = summary.preorderCapQuantity;
++    final yield = summary.conservativeYieldQuantity;
++    if (yield == null || yield <= 0 || cap <= 0) {
++      return 0.5;
++    }
++    return (cap / yield).clamp(0.1, 0.9).toDouble();
++  }
++
++  Future<Map<String, dynamic>?> _showPreorderConfigDialog({
++    required ProductionPreorderSummary? summary,
++  }) async {
++    bool allowPreorder = summary?.preorderEnabled == true;
++    final yieldController = TextEditingController(
++      text: summary?.conservativeYieldQuantity?.toString() ?? "",
++    );
++    final yieldUnitController = TextEditingController(
++      text: (summary?.conservativeYieldUnit ?? "").trim().isEmpty
++          ? "units"
++          : summary!.conservativeYieldUnit,
++    );
++    final capRatioController = TextEditingController(
++      text: _derivePreorderCapRatio(summary).toStringAsFixed(2),
++    );
++    String validationError = "";
++
++    final payload = await showDialog<Map<String, dynamic>>(
++      context: context,
++      builder: (dialogContext) {
++        return StatefulBuilder(
++          builder: (statefulContext, setDialogState) {
++            return AlertDialog(
++              title: const Text(_preorderConfigTitle),
++              content: Column(
++                mainAxisSize: MainAxisSize.min,
++                crossAxisAlignment: CrossAxisAlignment.start,
++                children: [
++                  SwitchListTile.adaptive(
++                    contentPadding: EdgeInsets.zero,
++                    title: const Text(_preorderEnableLabel),
++                    value: allowPreorder,
++                    onChanged: (value) {
++                      setDialogState(() {
++                        allowPreorder = value;
++                        validationError = "";
++                      });
++                    },
++                  ),
++                  if (allowPreorder) ...[
++                    TextField(
++                      controller: yieldController,
++                      keyboardType: const TextInputType.numberWithOptions(
++                        decimal: true,
++                      ),
++                      decoration: const InputDecoration(
++                        labelText: _preorderYieldLabel,
++                      ),
++                    ),
++                    const SizedBox(height: 8),
++                    TextField(
++                      controller: yieldUnitController,
++                      decoration: const InputDecoration(
++                        labelText: _preorderYieldUnitLabel,
++                      ),
++                    ),
++                    const SizedBox(height: 8),
++                    TextField(
++                      controller: capRatioController,
++                      keyboardType: const TextInputType.numberWithOptions(
++                        decimal: true,
++                      ),
++                      decoration: const InputDecoration(
++                        labelText: _preorderCapRatioLabel,
++                      ),
++                    ),
++                  ],
++                  if (validationError.isNotEmpty) ...[
++                    const SizedBox(height: 8),
++                    Text(
++                      validationError,
++                      style: Theme.of(statefulContext).textTheme.bodySmall
++                          ?.copyWith(
++                            color: Theme.of(statefulContext).colorScheme.error,
++                          ),
++                    ),
++                  ],
++                ],
++              ),
++              actions: [
++                TextButton(
++                  onPressed: () => Navigator.of(dialogContext).pop(null),
++                  child: const Text(_preorderConfigCancelLabel),
++                ),
++                TextButton(
++                  onPressed: () {
++                    if (!allowPreorder) {
++                      Navigator.of(dialogContext).pop({"allowPreorder": false});
++                      return;
++                    }
++
++                    final yieldQuantity = num.tryParse(
++                      yieldController.text.trim(),
++                    );
++                    final capRatio = num.tryParse(
++                      capRatioController.text.trim(),
++                    );
++                    final yieldUnit = yieldUnitController.text.trim().isEmpty
++                        ? "units"
++                        : yieldUnitController.text.trim();
++
++                    final validYield =
++                        yieldQuantity != null && yieldQuantity > 0;
++                    final validRatio =
++                        capRatio != null && capRatio >= 0.1 && capRatio <= 0.9;
++                    if (!validYield || !validRatio) {
++                      setDialogState(() {
++                        validationError = _preorderConfigValidation;
++                      });
++                      return;
++                    }
++
++                    Navigator.of(dialogContext).pop({
++                      "allowPreorder": true,
++                      "conservativeYieldQuantity": yieldQuantity,
++                      "conservativeYieldUnit": yieldUnit,
++                      "preorderCapRatio": capRatio,
++                    });
++                  },
++                  child: const Text(_preorderConfigSaveLabel),
++                ),
++              ],
++            );
++          },
++        );
++      },
++    );
++
++    yieldController.dispose();
++    yieldUnitController.dispose();
++    capRatioController.dispose();
++    return payload;
++  }
++
++  Future<void> _updatePlanPreorder({
++    required String planId,
++    required Map<String, dynamic> payload,
++  }) async {
++    try {
++      await ref
++          .read(productionPlanActionsProvider)
++          .updatePlanPreorder(planId: planId, payload: payload);
++      ref.invalidate(productionPlanDetailProvider(planId));
++      ref.invalidate(businessProductByIdProvider(widget.productId));
++      _showSnack("Pre-order settings updated.");
++    } catch (error) {
++      _logFlow(
++        "PREORDER_UPDATE_FAIL",
++        "Unable to update linked plan preorder settings",
++        extra: {"planId": planId, "error": error.toString()},
++      );
++      _showSnack("Unable to update pre-order settings.");
++    }
++  }
++
++  Future<void> _reconcileExpiredPreorders({required String planId}) async {
++    try {
++      final summary = await ref
++          .read(productionPlanActionsProvider)
++          .reconcileExpiredPreorders(planId: planId);
++      ref.invalidate(productionPlanDetailProvider(planId));
++      ref.invalidate(businessProductByIdProvider(widget.productId));
++      _showSnack(
++        "Reconcile complete: expired ${summary.expiredCount}, errors ${summary.errorCount}.",
++      );
++    } catch (error) {
++      _logFlow(
++        "PREORDER_RECONCILE_FAIL",
++        "Unable to reconcile linked plan preorder holds",
++        extra: {"planId": planId, "error": error.toString()},
++      );
++      _showSnack("Unable to reconcile expired holds.");
++    }
++  }
++
++  Widget _buildPreorderSummaryRows(ProductionPreorderSummary summary) {
++    final confidencePercent = (summary.confidenceScore * 100).clamp(0, 100);
++    final coveragePercent = (summary.approvedProgressCoverage * 100).clamp(
++      0,
++      100,
++    );
++
++    return Column(
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        _buildAuditRow(
++          "State",
++          summary.productionState.trim().isEmpty
++              ? "—"
++              : summary.productionState,
++        ),
++        _buildAuditRow("Enabled", summary.preorderEnabled ? "Yes" : "No"),
++        _buildAuditRow("Cap", "${summary.preorderCapQuantity}"),
++        _buildAuditRow("Effective cap", "${summary.effectiveCap}"),
++        _buildAuditRow("Reserved", "${summary.preorderReservedQuantity}"),
++        _buildAuditRow("Remaining", "${summary.preorderRemainingQuantity}"),
++        _buildAuditRow(
++          "Confidence",
++          "${confidencePercent.toStringAsFixed(0)}% (coverage ${coveragePercent.toStringAsFixed(0)}%)",
++        ),
++        _buildAuditRow(
++          "Conservative yield",
++          "${summary.conservativeYieldQuantity ?? "—"} ${summary.conservativeYieldUnit}",
++        ),
++      ],
++    );
++  }
++
+   Future<void> _saveProduct(Product product) async {
+     if (_isSaving) return;
+ 
+@@ -160,7 +403,9 @@ class _BusinessProductDetailScreenState
+ 
+   void _showSnack(String message) {
+     if (!mounted) return;
+-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
++    ScaffoldMessenger.of(
++      context,
++    ).showSnackBar(SnackBar(content: Text(message)));
+   }
+ 
+   Widget _buildTextField({
+@@ -191,18 +436,17 @@ class _BusinessProductDetailScreenState
+             child: Text(
+               label,
+               style: Theme.of(context).textTheme.bodySmall?.copyWith(
+-                    color: colorScheme.onSurfaceVariant,
+-                    fontWeight: FontWeight.w600,
+-                  ),
++                color: colorScheme.onSurfaceVariant,
++                fontWeight: FontWeight.w600,
++              ),
+             ),
+           ),
+           Expanded(
+             child: Text(
+               value,
+-              style: Theme.of(context)
+-                  .textTheme
+-                  .bodySmall
+-                  ?.copyWith(color: colorScheme.onSurface),
++              style: Theme.of(
++                context,
++              ).textTheme.bodySmall?.copyWith(color: colorScheme.onSurface),
+             ),
+           ),
+         ],
+@@ -218,9 +462,12 @@ class _BusinessProductDetailScreenState
+       extra: {"productId": widget.productId, "isSaving": _isSaving},
+     );
+     final colorScheme = Theme.of(context).colorScheme;
++    final session = ref.watch(authSessionProvider);
++    final isOwner = session?.user.role == _ownerRole;
+ 
+-    final productAsync =
+-        ref.watch(businessProductByIdProvider(widget.productId));
++    final productAsync = ref.watch(
++      businessProductByIdProvider(widget.productId),
++    );
+ 
+     return Scaffold(
+       appBar: AppBar(
+@@ -249,6 +496,11 @@ class _BusinessProductDetailScreenState
+         child: productAsync.when(
+           data: (product) {
+             _applyProduct(product);
++            final linkedPlanId = (product.productionPlanId ?? "").trim();
++            final hasLinkedPlan = linkedPlanId.isNotEmpty;
++            final linkedPlanAsync = hasLinkedPlan
++                ? ref.watch(productionPlanDetailProvider(linkedPlanId))
++                : null;
+ 
+             return ListView(
+               padding: const EdgeInsets.all(16),
+@@ -256,16 +508,15 @@ class _BusinessProductDetailScreenState
+                 Text(
+                   "Editable fields",
+                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
+-                        fontWeight: FontWeight.w700,
+-                      ),
++                    fontWeight: FontWeight.w700,
++                  ),
+                 ),
+                 const SizedBox(height: 6),
+                 Text(
+                   "Update the product details below. Audit info is read-only.",
+-                  style: Theme.of(context)
+-                      .textTheme
+-                      .bodySmall
+-                      ?.copyWith(color: colorScheme.onSurfaceVariant),
++                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
++                    color: colorScheme.onSurfaceVariant,
++                  ),
+                 ),
+                 const SizedBox(height: 16),
+                 _buildTextField(
+@@ -284,12 +535,11 @@ class _BusinessProductDetailScreenState
+                   controller: _priceCtrl,
+                   label: "Price (NGN)",
+                   hint: "129000",
+-                  keyboardType:
+-                      const TextInputType.numberWithOptions(decimal: true),
++                  keyboardType: const TextInputType.numberWithOptions(
++                    decimal: true,
++                  ),
+                   // WHY: Auto-format NGN values as the user types.
+-                  inputFormatters: const [
+-                    NgnInputFormatter(),
+-                  ],
++                  inputFormatters: const [NgnInputFormatter()],
+                 ),
+                 const SizedBox(height: 12),
+                 _buildTextField(
+@@ -302,9 +552,11 @@ class _BusinessProductDetailScreenState
+                 SwitchListTile.adaptive(
+                   value: _isActive,
+                   onChanged: (value) {
+-                    _logFlow("TOGGLE_ACTIVE", "Status toggled", extra: {
+-                      "value": value,
+-                    });
++                    _logFlow(
++                      "TOGGLE_ACTIVE",
++                      "Status toggled",
++                      extra: {"value": value},
++                    );
+                     setState(() => _isActive = value);
+                   },
+                   title: const Text("Active listing"),
+@@ -319,11 +571,125 @@ class _BusinessProductDetailScreenState
+                   ),
+                 ),
+                 const SizedBox(height: 24),
++                Text(
++                  _preorderSectionTitle,
++                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
++                    fontWeight: FontWeight.w700,
++                  ),
++                ),
++                const SizedBox(height: 6),
++                Text(
++                  _preorderSectionHint,
++                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
++                    color: colorScheme.onSurfaceVariant,
++                  ),
++                ),
++                const SizedBox(height: 12),
++                Container(
++                  padding: const EdgeInsets.all(16),
++                  decoration: BoxDecoration(
++                    color: colorScheme.surfaceContainerHighest,
++                    borderRadius: BorderRadius.circular(16),
++                    border: Border.all(color: colorScheme.outlineVariant),
++                  ),
++                  child: !hasLinkedPlan
++                      ? Column(
++                          crossAxisAlignment: CrossAxisAlignment.start,
++                          children: [
++                            Text(
++                              _preorderNoPlanTitle,
++                              style: Theme.of(context).textTheme.titleSmall,
++                            ),
++                            const SizedBox(height: 4),
++                            Text(
++                              _preorderNoPlanMessage,
++                              style: Theme.of(context).textTheme.bodySmall,
++                            ),
++                          ],
++                        )
++                      : linkedPlanAsync!.when(
++                          data: (planDetail) {
++                            final summary = planDetail.preorderSummary;
++                            if (summary == null) {
++                              return const Text(
++                                "Pre-order summary is unavailable for this plan.",
++                              );
++                            }
++
++                            return Column(
++                              crossAxisAlignment: CrossAxisAlignment.start,
++                              children: [
++                                _buildPreorderSummaryRows(summary),
++                                const SizedBox(height: 8),
++                                Wrap(
++                                  spacing: 8,
++                                  runSpacing: 8,
++                                  children: [
++                                    OutlinedButton.icon(
++                                      onPressed: () async {
++                                        final payload =
++                                            await _showPreorderConfigDialog(
++                                              summary: summary,
++                                            );
++                                        if (payload == null) {
++                                          return;
++                                        }
++                                        await _updatePlanPreorder(
++                                          planId: linkedPlanId,
++                                          payload: payload,
++                                        );
++                                      },
++                                      icon: const Icon(Icons.tune),
++                                      label: const Text(
++                                        _configurePreorderLabel,
++                                      ),
++                                    ),
++                                    OutlinedButton.icon(
++                                      onPressed: !isOwner
++                                          ? null
++                                          : () async {
++                                              await _reconcileExpiredPreorders(
++                                                planId: linkedPlanId,
++                                              );
++                                            },
++                                      icon: const Icon(
++                                        Icons.restore_from_trash_outlined,
++                                      ),
++                                      label: const Text(
++                                        _reconcilePreorderLabel,
++                                      ),
++                                    ),
++                                    TextButton.icon(
++                                      onPressed: () {
++                                        context.push(
++                                          productionPlanDetailPath(
++                                            linkedPlanId,
++                                          ),
++                                        );
++                                      },
++                                      icon: const Icon(Icons.open_in_new),
++                                      label: const Text(_openPlanLabel),
++                                    ),
++                                  ],
++                                ),
++                              ],
++                            );
++                          },
++                          loading: () =>
++                              const Center(child: CircularProgressIndicator()),
++                          error: (error, _) => Text(
++                            "Unable to load linked plan details.",
++                            style: Theme.of(context).textTheme.bodySmall
++                                ?.copyWith(color: colorScheme.error),
++                          ),
++                        ),
++                ),
++                const SizedBox(height: 24),
+                 Text(
+                   "Audit snapshot",
+                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
+-                        fontWeight: FontWeight.w700,
+-                      ),
++                    fontWeight: FontWeight.w700,
++                  ),
+                 ),
+                 const SizedBox(height: 12),
+                 Container(
+@@ -338,10 +704,7 @@ class _BusinessProductDetailScreenState
+                     crossAxisAlignment: CrossAxisAlignment.start,
+                     children: [
+                       _buildAuditRow("Product ID", product.id),
+-                      _buildAuditRow(
+-                        "Business ID",
+-                        product.businessId ?? "—",
+-                      ),
++                      _buildAuditRow("Business ID", product.businessId ?? "—"),
+                       _buildAuditRow(
+                         "Created at",
+                         _formatDate(product.createdAt),
+@@ -350,22 +713,13 @@ class _BusinessProductDetailScreenState
+                         "Updated at",
+                         _formatDate(product.updatedAt),
+                       ),
+-                      _buildAuditRow(
+-                        "Created by",
+-                        product.createdBy ?? "—",
+-                      ),
+-                      _buildAuditRow(
+-                        "Updated by",
+-                        product.updatedBy ?? "—",
+-                      ),
++                      _buildAuditRow("Created by", product.createdBy ?? "—"),
++                      _buildAuditRow("Updated by", product.updatedBy ?? "—"),
+                       _buildAuditRow(
+                         "Deleted at",
+                         _formatDate(product.deletedAt),
+                       ),
+-                      _buildAuditRow(
+-                        "Deleted by",
+-                        product.deletedBy ?? "—",
+-                      ),
++                      _buildAuditRow("Deleted by", product.deletedBy ?? "—"),
+                       _buildAuditRow(
+                         "Gallery images",
+                         product.imageUrls.length.toString(),
