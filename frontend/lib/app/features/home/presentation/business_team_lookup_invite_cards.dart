@@ -158,54 +158,21 @@ class _StaffRoleOption {
 }
 
 const List<_StaffRoleOption> _staffRoleOptions = [
-  _StaffRoleOption(
-    staffRoleEstateManager,
-    _Copy.staffRoleEstateManager,
-  ),
-  _StaffRoleOption(
-    staffRoleFarmManager,
-    _Copy.staffRoleFarmManager,
-  ),
-  _StaffRoleOption(
-    staffRoleAssetManager,
-    _Copy.staffRoleAssetManager,
-  ),
-  _StaffRoleOption(
-    staffRoleAccountant,
-    _Copy.staffRoleAccountant,
-  ),
-  _StaffRoleOption(
-    staffRoleFieldAgent,
-    _Copy.staffRoleFieldAgent,
-  ),
-  _StaffRoleOption(
-    staffRoleInventoryKeeper,
-    _Copy.staffRoleInventoryKeeper,
-  ),
-  _StaffRoleOption(
-    staffRoleFarmer,
-    _Copy.staffRoleFarmer,
-  ),
-  _StaffRoleOption(
-    staffRoleCleaner,
-    _Copy.staffRoleCleaner,
-  ),
-  _StaffRoleOption(
-    staffRoleAuditor,
-    _Copy.staffRoleAuditor,
-  ),
-  _StaffRoleOption(
-    staffRoleSecurity,
-    _Copy.staffRoleSecurity,
-  ),
+  _StaffRoleOption(staffRoleEstateManager, _Copy.staffRoleEstateManager),
+  _StaffRoleOption(staffRoleFarmManager, _Copy.staffRoleFarmManager),
+  _StaffRoleOption(staffRoleAssetManager, _Copy.staffRoleAssetManager),
+  _StaffRoleOption(staffRoleAccountant, _Copy.staffRoleAccountant),
+  _StaffRoleOption(staffRoleFieldAgent, _Copy.staffRoleFieldAgent),
+  _StaffRoleOption(staffRoleInventoryKeeper, _Copy.staffRoleInventoryKeeper),
+  _StaffRoleOption(staffRoleFarmer, _Copy.staffRoleFarmer),
+  _StaffRoleOption(staffRoleCleaner, _Copy.staffRoleCleaner),
+  _StaffRoleOption(staffRoleAuditor, _Copy.staffRoleAuditor),
+  _StaffRoleOption(staffRoleSecurity, _Copy.staffRoleSecurity),
   _StaffRoleOption(
     staffRoleMaintenanceTechnician,
     _Copy.staffRoleMaintenanceTechnician,
   ),
-  _StaffRoleOption(
-    staffRoleLogisticsDriver,
-    _Copy.staffRoleLogisticsDriver,
-  ),
+  _StaffRoleOption(staffRoleLogisticsDriver, _Copy.staffRoleLogisticsDriver),
 ];
 
 // WHY: Centralize multi-line text input sizing.
@@ -1005,10 +972,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
           _InviteErrorText(message: error!),
         ],
         const SizedBox(height: _UiSpacing.sectionGap),
-        _InviteSendButton(
-          isSending: isSending,
-          onSendInvite: onSendInvite,
-        ),
+        _InviteSendButton(isSending: isSending, onSendInvite: onSendInvite),
       ],
     );
 
@@ -1092,9 +1056,7 @@ class _InviteRoleField extends StatelessWidget {
     // WHY: Role selection controls which tenant-specific inputs appear.
     return DropdownButtonFormField<String>(
       initialValue: role,
-      decoration: const InputDecoration(
-        labelText: _Copy.inviteRoleLabel,
-      ),
+      decoration: const InputDecoration(labelText: _Copy.inviteRoleLabel),
       items: const [
         DropdownMenuItem(
           value: _kRoleStaff,
@@ -1125,11 +1087,9 @@ class _InviteStaffRoleField extends StatelessWidget {
   Widget build(BuildContext context) {
     // WHY: Staff role selection is required for staff invites.
     return DropdownButtonFormField<String>(
-      value: staffRole,
+      initialValue: staffRole,
       onChanged: isSending ? null : onStaffRoleChanged,
-      decoration: const InputDecoration(
-        labelText: _Copy.inviteStaffRoleLabel,
-      ),
+      decoration: const InputDecoration(labelText: _Copy.inviteStaffRoleLabel),
       items: _staffRoleOptions
           .map(
             (option) => DropdownMenuItem<String>(
@@ -1170,15 +1130,11 @@ class _InviteTenantFields extends StatelessWidget {
       children: [
         DropdownButtonFormField<String>(
           initialValue: estateAssetId,
-          decoration: const InputDecoration(
-            labelText: _Copy.inviteEstateLabel,
-          ),
+          decoration: const InputDecoration(labelText: _Copy.inviteEstateLabel),
           items: estateAssets
               .map(
-                (asset) => DropdownMenuItem(
-                  value: asset.id,
-                  child: Text(asset.name),
-                ),
+                (asset) =>
+                    DropdownMenuItem(value: asset.id, child: Text(asset.name)),
               )
               .toList(),
           onChanged: isSending ? null : onEstateChanged,
@@ -1254,9 +1210,7 @@ class _InviteSendButton extends StatelessWidget {
             ? const SizedBox(
                 width: _kLoaderSize,
                 height: _kLoaderSize,
-                child: CircularProgressIndicator(
-                  strokeWidth: _kLoaderStroke,
-                ),
+                child: CircularProgressIndicator(strokeWidth: _kLoaderStroke),
               )
             : const Text(_Copy.inviteSend),
       ),

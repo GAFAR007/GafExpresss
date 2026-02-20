@@ -25,6 +25,14 @@ class ProductApi {
 
   ProductApi({required Dio dio}) : _dio = dio;
 
+  Options _authOptions(String? token) {
+    if (token == null || token.isEmpty) {
+      AppDebug.log("PRODUCT_API", "Missing auth token");
+      throw Exception("Missing auth token");
+    }
+    return Options(headers: {"Authorization": "Bearer $token"});
+  }
+
   Future<List<Product>> fetchProducts({
     int page = 1,
     int limit = 10,
@@ -48,10 +56,7 @@ class ProductApi {
     );
 
     // WHY: Only send params that the backend understands.
-    final queryParameters = <String, dynamic>{
-      "page": page,
-      "limit": limit,
-    };
+    final queryParameters = <String, dynamic>{"page": page, "limit": limit};
     if (trimmedQuery != null && trimmedQuery.isNotEmpty) {
       queryParameters["q"] = trimmedQuery;
     }
@@ -62,10 +67,7 @@ class ProductApi {
       queryParameters["inStock"] = true;
     }
 
-    final resp = await _dio.get(
-      "/products",
-      queryParameters: queryParameters,
-    );
+    final resp = await _dio.get("/products", queryParameters: queryParameters);
 
     final data = resp.data as Map<String, dynamic>;
     final rawList = (data["products"] ?? []) as List<dynamic>;
@@ -104,5 +106,107 @@ class ProductApi {
     );
 
     return product;
+  }
+
+  /// ------------------------------------------------------
+  /// FETCH PREORDER AVAILABILITY
+  /// ------------------------------------------------------
+  Future<PreorderAvailability> fetchPreorderAvailability(
+    String productId,
+  ) async {
+    AppDebug.log(
+      "PRODUCT_API",
+      "fetchPreorderAvailability() start",
+      extra: {"id": productId},
+    );
+
+    final resp = await _dio.get("/products/$productId/preorder-availability");
+    final data = resp.data as Map<String, dynamic>;
+    final availabilityMap =
+        (data["availability"] ?? {}) as Map<String, dynamic>;
+    final availability = PreorderAvailability.fromJson(availabilityMap);
+
+    AppDebug.log(
+      "PRODUCT_API",
+      "fetchPreorderAvailability() success",
+      extra: {
+        "id": productId,
+        "enabled": availability.preorderEnabled,
+        "remaining": availability.preorderRemainingQuantity,
+        "effectiveCap": availability.effectiveCap,
+      },
+    );
+
+    return availability;
+  }
+
+  /// ------------------------------------------------------
+  /// RESERVE PREORDER QUANTITY
+  /// ------------------------------------------------------
+  Future<PreorderReserveResult> reservePreorder({
+    required String? token,
+    required String planId,
+    required int quantity,
+  }) async {
+    AppDebug.log(
+      "PRODUCT_API",
+      "reservePreorder() start",
+      extra: {"planId": planId, "quantity": quantity},
+    );
+
+    final resp = await _dio.post(
+      "/business/production/plans/$planId/preorder/reserve",
+      data: {"quantity": quantity},
+      options: _authOptions(token),
+    );
+    final data = resp.data as Map<String, dynamic>;
+    final result = PreorderReserveResult.fromJson(data);
+
+    AppDebug.log(
+      "PRODUCT_API",
+      "reservePreorder() success",
+      extra: {
+        "planId": planId,
+        "reservationId": result.reservationId,
+        "remaining": result.remaining,
+        "effectiveCap": result.effectiveCap,
+      },
+    );
+
+    return result;
+  }
+
+  /// ------------------------------------------------------
+  /// RELEASE PREORDER RESERVATION
+  /// ------------------------------------------------------
+  Future<PreorderReleaseResult> releasePreorderReservation({
+    required String? token,
+    required String reservationId,
+  }) async {
+    AppDebug.log(
+      "PRODUCT_API",
+      "releasePreorderReservation() start",
+      extra: {"reservationId": reservationId},
+    );
+
+    final resp = await _dio.post(
+      "/business/preorder/reservations/$reservationId/release",
+      options: _authOptions(token),
+    );
+    final data = resp.data as Map<String, dynamic>;
+    final result = PreorderReleaseResult.fromJson(data);
+
+    AppDebug.log(
+      "PRODUCT_API",
+      "releasePreorderReservation() success",
+      extra: {
+        "reservationId": result.reservationId,
+        "status": result.status,
+        "idempotent": result.idempotent,
+        "remaining": result.remaining,
+      },
+    );
+
+    return result;
   }
 }

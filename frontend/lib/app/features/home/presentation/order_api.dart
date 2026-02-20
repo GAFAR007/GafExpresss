@@ -33,6 +33,90 @@ class PaystackInitResult {
   });
 }
 
+class PaystackVerifyResult {
+  final String reference;
+  final String status;
+  final bool applied;
+  final bool idempotent;
+  final bool processed;
+  final String? orderId;
+  final String? orderStatus;
+  final String? reservationId;
+  final String? reservationStatus;
+
+  const PaystackVerifyResult({
+    required this.reference,
+    required this.status,
+    required this.applied,
+    required this.idempotent,
+    required this.processed,
+    this.orderId,
+    this.orderStatus,
+    this.reservationId,
+    this.reservationStatus,
+  });
+
+  static const List<String> _terminalOrderStatuses = [
+    "paid",
+    "shipped",
+    "delivered",
+  ];
+
+  bool get isOrderConfirmed =>
+      _terminalOrderStatuses.contains((orderStatus ?? "").toLowerCase());
+
+  bool get isReservationConfirmed {
+    final id = reservationId?.trim() ?? "";
+    if (id.isEmpty) {
+      return true;
+    }
+    return (reservationStatus ?? "").toLowerCase() == "confirmed";
+  }
+
+  bool get isFullyConfirmed => isOrderConfirmed && isReservationConfirmed;
+}
+
+class PreorderConfirmResult {
+  final String reservationId;
+  final String status;
+  final bool idempotent;
+  final int cap;
+  final int reserved;
+  final int remaining;
+
+  const PreorderConfirmResult({
+    required this.reservationId,
+    required this.status,
+    required this.idempotent,
+    required this.cap,
+    required this.reserved,
+    required this.remaining,
+  });
+
+  factory PreorderConfirmResult.fromJson(Map<String, dynamic> json) {
+    final reservation = (json["reservation"] is Map<String, dynamic>)
+        ? json["reservation"] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final summary = (json["preorderSummary"] is Map<String, dynamic>)
+        ? json["preorderSummary"] as Map<String, dynamic>
+        : const <String, dynamic>{};
+
+    return PreorderConfirmResult(
+      reservationId: (reservation["_id"] ?? reservation["id"] ?? "").toString(),
+      status: (reservation["status"] ?? "").toString(),
+      idempotent: json["idempotent"] == true,
+      cap: _parseInt(summary["cap"]),
+      reserved: _parseInt(summary["reserved"]),
+      remaining: _parseInt(summary["remaining"]),
+    );
+  }
+
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse((value ?? 0).toString()) ?? 0;
+  }
+}
+
 class OrderApi {
   final Dio _dio;
 
@@ -45,11 +129,7 @@ class OrderApi {
       throw Exception("Missing auth token");
     }
 
-    return Options(
-      headers: {
-        "Authorization": "Bearer $token",
-      },
-    );
+    return Options(headers: {"Authorization": "Bearer $token"});
   }
 
   /// ------------------------------------------------------
@@ -59,18 +139,33 @@ class OrderApi {
     required String? token,
     required List<CartItem> items,
     required Map<String, dynamic> deliveryAddress,
+    String? reservationId,
   }) async {
+    final normalizedReservationId = reservationId?.trim();
     AppDebug.log(
       "ORDER_API",
       "createOrder() start",
-      extra: {"items": items.length, "source": deliveryAddress["source"]},
+      extra: {
+        "items": items.length,
+        "source": deliveryAddress["source"],
+        "hasReservationId":
+            normalizedReservationId != null &&
+            normalizedReservationId.isNotEmpty,
+      },
     );
 
     final payloadItems = items.map((item) => item.toOrderItemJson()).toList();
+    final payload = <String, dynamic>{
+      "items": payloadItems,
+      "deliveryAddress": deliveryAddress,
+    };
+    if (normalizedReservationId != null && normalizedReservationId.isNotEmpty) {
+      payload["reservationId"] = normalizedReservationId;
+    }
 
     final resp = await _dio.post(
       "/orders",
-      data: {"items": payloadItems, "deliveryAddress": deliveryAddress},
+      data: payload,
       options: _authOptions(token),
     );
 
@@ -212,5 +307,111 @@ class OrderApi {
       authorizationUrl: authorizationUrl,
       reference: reference,
     );
+  }
+
+  /// ------------------------------------------------------
+  /// PAYSTACK VERIFY
+  /// ------------------------------------------------------
+  Future<PaystackVerifyResult> verifyPaystackCheckout({
+    required String? token,
+    required String reference,
+  }) async {
+    final normalizedReference = reference.trim();
+    if (normalizedReference.isEmpty) {
+      throw Exception("reference is required");
+    }
+
+    AppDebug.log(
+      "ORDER_API",
+      "verifyPaystackCheckout() start",
+      extra: {
+        "referenceSuffix": normalizedReference.substring(
+          normalizedReference.length > 6 ? normalizedReference.length - 6 : 0,
+        ),
+      },
+    );
+
+    final resp = await _dio.get(
+      "/payments/paystack/verify",
+      queryParameters: {"reference": normalizedReference},
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final order = (data["order"] is Map<String, dynamic>)
+        ? data["order"] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final reservation = (data["reservation"] is Map<String, dynamic>)
+        ? data["reservation"] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final result = PaystackVerifyResult(
+      reference: (data["reference"] ?? normalizedReference).toString(),
+      status: (data["status"] ?? "unknown").toString(),
+      applied: data["applied"] == true,
+      idempotent: data["idempotent"] == true,
+      processed: data["processed"] == true,
+      orderId: _parseNullableString(order["id"]),
+      orderStatus: _parseNullableString(order["status"]),
+      reservationId: _parseNullableString(reservation["id"]),
+      reservationStatus: _parseNullableString(reservation["status"]),
+    );
+
+    AppDebug.log(
+      "ORDER_API",
+      "verifyPaystackCheckout() success",
+      extra: {
+        "status": result.status,
+        "applied": result.applied,
+        "idempotent": result.idempotent,
+      },
+    );
+
+    return result;
+  }
+
+  /// ------------------------------------------------------
+  /// PREORDER CONFIRM (MANUAL FALLBACK)
+  /// ------------------------------------------------------
+  Future<PreorderConfirmResult> confirmPreorderReservation({
+    required String? token,
+    required String reservationId,
+  }) async {
+    final normalizedReservationId = reservationId.trim();
+    if (normalizedReservationId.isEmpty) {
+      throw Exception("reservationId is required");
+    }
+
+    AppDebug.log(
+      "ORDER_API",
+      "confirmPreorderReservation() start",
+      extra: {"reservationId": normalizedReservationId},
+    );
+
+    final resp = await _dio.post(
+      "/business/preorder/reservations/$normalizedReservationId/confirm",
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final result = PreorderConfirmResult.fromJson(data);
+
+    AppDebug.log(
+      "ORDER_API",
+      "confirmPreorderReservation() success",
+      extra: {
+        "reservationId": result.reservationId,
+        "status": result.status,
+        "idempotent": result.idempotent,
+      },
+    );
+
+    return result;
+  }
+
+  static String? _parseNullableString(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+    return text;
   }
 }

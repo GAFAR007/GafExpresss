@@ -600,7 +600,7 @@ class _TenantVerificationScreenState
         ? basePath
         : basePath.isEmpty || basePath == "/"
         ? "/payment-success"
-        : "${basePath}/payment-success";
+        : "$basePath/payment-success";
     return baseUri
         .replace(path: callbackPath, queryParameters: {"next": nextRoute})
         .toString();

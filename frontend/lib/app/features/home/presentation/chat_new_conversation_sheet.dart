@@ -172,7 +172,7 @@ class _ChatNewConversationSheetState
                     setState(() {
                       _isGroup = value;
                       if (!_isGroup && _selected.length > 1) {
-                        _selected..removeWhere((id) => id != _selected.first);
+                        _selected.removeWhere((id) => id != _selected.first);
                       }
                     });
                   },
@@ -211,7 +211,7 @@ class _ChatNewConversationSheetState
                         value: isSelected,
                         onChanged: isSelectable
                             ? (value) =>
-                                _toggleSelection(userId, value ?? false)
+                                  _toggleSelection(userId, value ?? false)
                             : null,
                         title: Text(_displayName(entry)),
                         subtitle: Text(

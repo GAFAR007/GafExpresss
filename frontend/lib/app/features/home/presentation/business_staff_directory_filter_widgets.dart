@@ -38,14 +38,12 @@ class StaffRoleDropdown extends StatelessWidget {
   Widget build(BuildContext context) {
     // WHY: Offer an "All roles" option to reset role filtering.
     return DropdownButtonFormField<String>(
-      value: selected ?? allRolesLabel,
+      initialValue: selected ?? allRolesLabel,
       decoration: InputDecoration(labelText: label),
       items: <String>[allRolesLabel, ...roles]
           .map(
-            (value) => DropdownMenuItem(
-              value: value,
-              child: Text(formatLabel(value)),
-            ),
+            (value) =>
+                DropdownMenuItem(value: value, child: Text(formatLabel(value))),
           )
           .toList(),
       onChanged: (value) {
@@ -78,14 +76,12 @@ class StaffStatusDropdown extends StatelessWidget {
   Widget build(BuildContext context) {
     // WHY: Offer an "All statuses" option to reset status filtering.
     return DropdownButtonFormField<String>(
-      value: selected ?? allStatusesLabel,
+      initialValue: selected ?? allStatusesLabel,
       decoration: InputDecoration(labelText: label),
       items: <String>[allStatusesLabel, ...statuses]
           .map(
-            (value) => DropdownMenuItem(
-              value: value,
-              child: Text(formatLabel(value)),
-            ),
+            (value) =>
+                DropdownMenuItem(value: value, child: Text(formatLabel(value))),
           )
           .toList(),
       onChanged: (value) {
@@ -115,23 +111,16 @@ class StaffEstateDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // WHY: Show estate choices only when assets are available.
-    final sortedAssets = [...assets]
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final sortedAssets = [...assets]..sort((a, b) => a.name.compareTo(b.name));
     final hasSelection =
         selected != null && sortedAssets.any((asset) => asset.id == selected);
     return DropdownButtonFormField<String>(
-      value: hasSelection ? selected : allEstatesLabel,
+      initialValue: hasSelection ? selected : allEstatesLabel,
       decoration: InputDecoration(labelText: label),
       items: <DropdownMenuItem<String>>[
-        DropdownMenuItem(
-          value: allEstatesLabel,
-          child: Text(allEstatesLabel),
-        ),
+        DropdownMenuItem(value: allEstatesLabel, child: Text(allEstatesLabel)),
         ...sortedAssets.map(
-          (asset) => DropdownMenuItem(
-            value: asset.id,
-            child: Text(asset.name),
-          ),
+          (asset) => DropdownMenuItem(value: asset.id, child: Text(asset.name)),
         ),
       ],
       onChanged: (value) {
@@ -155,14 +144,9 @@ class StaffEstateLoadingDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
-      value: valueLabel,
+      initialValue: valueLabel,
       decoration: InputDecoration(labelText: label),
-      items: [
-        DropdownMenuItem(
-          value: valueLabel,
-          child: Text(valueLabel),
-        ),
-      ],
+      items: [DropdownMenuItem(value: valueLabel, child: Text(valueLabel))],
       onChanged: null,
     );
   }
@@ -204,10 +188,7 @@ class StaffEstateErrorState extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.xs),
-        TextButton(
-          onPressed: onRetry,
-          child: Text(retryLabel),
-        ),
+        TextButton(onPressed: onRetry, child: Text(retryLabel)),
       ],
     );
   }

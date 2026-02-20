@@ -49,8 +49,8 @@ const int _kPinnedCount = 2;
 class _ChatInboxCopy {
   static const String title = "Chat";
   static const String searchHint = "Search messages or people";
-  static const String directLabel = "Direct";
-  static const String groupLabel = "Group";
+  // static const String directLabel = "Direct";
+  // static const String groupLabel = "Group";
   static const String recentLabel = "Pinned";
   static const String allLabel = "All messages";
   static const String emptyTitle = "No conversations yet";
@@ -94,7 +94,7 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
           ref.invalidate(chatInboxProvider);
           context.pop();
           context.go(
-            "${chatThreadRouteBase}/${conversation.id}",
+            "$chatThreadRouteBase/${conversation.id}",
             extra: conversation,
           );
         },
@@ -105,10 +105,7 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
   void _handleOpenThread(ChatConversation conversation) {
     _log(_logOpenThread, extra: {"id": conversation.id});
     // WHY: Pass conversation data to avoid refetching on open.
-    context.go(
-      "${chatThreadRouteBase}/${conversation.id}",
-      extra: conversation,
-    );
+    context.go("$chatThreadRouteBase/${conversation.id}", extra: conversation);
   }
 
   @override
@@ -121,15 +118,14 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
     final canCreate = isBusiness;
     final isTenant = role == "tenant";
     final cartState = ref.watch(cartProvider);
-    final cartBadgeCount =
-        cartState.hasUnseenChanges ? cartState.totalItems : 0;
+    final cartBadgeCount = cartState.hasUnseenChanges
+        ? cartState.totalItems
+        : 0;
 
     final conversationsAsync = ref.watch(chatInboxProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(_ChatInboxCopy.title),
-      ),
+      appBar: AppBar(title: const Text(_ChatInboxCopy.title)),
       floatingActionButton: canCreate
           ? FloatingActionButton(
               onPressed: () => _openNewChat(context),
@@ -219,12 +215,9 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
               _handleOpenThread(conversation);
             },
           ),
-          loading: () => const Center(
-            child: CircularProgressIndicator(),
-          ),
-          error: (error, _) => const Center(
-            child: Text("Unable to load conversations"),
-          ),
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, _) =>
+              const Center(child: Text("Unable to load conversations")),
         ),
       ),
     );
@@ -276,10 +269,7 @@ class _ChatInboxContent extends StatelessWidget {
           groupCount: groupChats.length,
         ),
         const SizedBox(height: _kSectionSpacing),
-        ChatInboxContactStrip(
-          conversations: directChats,
-          onTap: onContactTap,
-        ),
+        ChatInboxContactStrip(conversations: directChats, onTap: onContactTap),
         const SizedBox(height: _kSectionSpacing),
         ChatInboxSearchField(
           controller: searchController,

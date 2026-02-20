@@ -48,7 +48,7 @@ class StaffAttendanceActionsSection extends StatelessWidget {
           Text(staffAttendanceStaffLabel, style: textTheme.labelLarge),
           const SizedBox(height: AppSpacing.xs),
           DropdownButtonFormField<String>(
-            value: selectedStaffId,
+            initialValue: selectedStaffId,
             decoration: const InputDecoration(),
             items: [
               const DropdownMenuItem(

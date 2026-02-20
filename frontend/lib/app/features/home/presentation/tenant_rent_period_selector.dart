@@ -45,7 +45,10 @@ class TenantRentPeriodSelector extends StatelessWidget {
   }) {
     // WHY: Respect backend-provided remaining coverage without exceeding base max.
     if (override == null) return limit.maxPeriods;
-    final safeOverride = override.clamp(_minPeriodsPerPayment, limit.maxPeriods);
+    final safeOverride = override.clamp(
+      _minPeriodsPerPayment,
+      limit.maxPeriods,
+    );
     if (safeOverride == limit.maxPeriods) return limit.maxPeriods;
 
     AppDebug.log(
@@ -67,13 +70,15 @@ class TenantRentPeriodSelector extends StatelessWidget {
     if (limit == null) return const SizedBox.shrink();
 
     // WHY: Clamp UI options to backend max or remaining coverage override.
-    final effectiveMax =
-        _resolveMaxPeriods(limit: limit, override: maxPeriodsOverride);
+    final effectiveMax = _resolveMaxPeriods(
+      limit: limit,
+      override: maxPeriodsOverride,
+    );
     final options = List.generate(effectiveMax, (i) => i + 1);
     final safeValue = value.clamp(_minPeriodsPerPayment, effectiveMax);
 
     return DropdownButtonFormField<int>(
-      value: safeValue,
+      initialValue: safeValue,
       decoration: InputDecoration(
         labelText: "Number of ${limit.label}",
         border: const OutlineInputBorder(),

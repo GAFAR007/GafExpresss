@@ -47,6 +47,10 @@ class ProductDetailScreen extends ConsumerStatefulWidget {
 
 class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   bool _isPaying = false;
+  bool _isReserving = false;
+  bool _isReleasing = false;
+  String? _reservedReservationId;
+  int? _reservedQuantity;
   int _quantity = 1;
 
   void _addToCart(Product product) {
@@ -60,9 +64,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     // WHY: Use the current quantity so cart matches user intent.
     ref.read(cartProvider.notifier).addProduct(product, quantity: safeQty);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Added to cart")),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text("Added to cart")));
   }
 
   Future<DeliveryAddressSelection?> _selectDeliveryAddress() async {
@@ -79,6 +83,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         return null;
       }
 
+      if (!mounted) return null;
       return await DeliveryAddressSheet.open(
         context: context,
         profile: profile,
@@ -91,7 +96,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       );
       if (!mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to load delivery address options")),
+        const SnackBar(
+          content: Text("Failed to load delivery address options"),
+        ),
       );
       return null;
     }
@@ -109,11 +116,12 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       return;
     }
 
-    if (product.stock <= 0) {
+    final hasReservedHold = (_reservedReservationId ?? "").trim().isNotEmpty;
+    if (product.stock <= 0 && !hasReservedHold) {
       AppDebug.log("PRODUCT_DETAIL", "Checkout blocked (out of stock)");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Product is out of stock")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Product is out of stock")));
       return;
     }
 
@@ -121,7 +129,14 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
     try {
       // WHY: Clamp quantity to available stock before creating the order.
-      final safeQty = _quantity.clamp(1, product.stock);
+      final safeQty = product.stock > 0
+          ? _quantity.clamp(1, product.stock).toInt()
+          : _quantity;
+      final normalizedReservationId = (_reservedReservationId ?? "").trim();
+      final hasReservationId = normalizedReservationId.isNotEmpty;
+      final checkoutQuantity = hasReservationId
+          ? (_reservedQuantity ?? safeQty)
+          : safeQty;
 
       final session = ref.read(authSessionProvider);
       if (session == null) {
@@ -130,7 +145,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
       final selection = await _selectDeliveryAddress();
       if (selection == null) {
-        AppDebug.log("PRODUCT_DETAIL", "Checkout cancelled (no address selected)");
+        AppDebug.log(
+          "PRODUCT_DETAIL",
+          "Checkout cancelled (no address selected)",
+        );
         if (mounted) setState(() => _isPaying = false);
         return;
       }
@@ -140,13 +158,18 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       AppDebug.log(
         "PRODUCT_DETAIL",
         "initPaystackCheckout() start",
-        extra: {"productId": product.id},
+        extra: {
+          "productId": product.id,
+          "hasReservationId": hasReservationId,
+          "quantity": checkoutQuantity,
+        },
       );
 
       final order = await api.createOrder(
         token: session.token,
-        items: [CartItem.fromProduct(product, quantity: safeQty)],
+        items: [CartItem.fromProduct(product, quantity: checkoutQuantity)],
         deliveryAddress: selection.toPayload(),
+        reservationId: hasReservationId ? normalizedReservationId : null,
       );
 
       // WHY: Refresh shared data so order lists update after creation.
@@ -183,9 +206,179 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       if (mounted) setState(() => _isPaying = false);
 
       if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Checkout failed: $e")));
+    }
+  }
+
+  Future<void> _releasePreorderReservation({
+    String? reservationId,
+    bool showFeedback = true,
+  }) async {
+    final targetReservationId = (reservationId ?? _reservedReservationId ?? "")
+        .trim();
+    if (targetReservationId.isEmpty || _isReleasing) {
+      return;
+    }
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      if (!mounted || !showFeedback) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Checkout failed: $e")),
+        const SnackBar(
+          content: Text("Please sign in to release pre-order hold"),
+        ),
       );
+      return;
+    }
+
+    setState(() => _isReleasing = true);
+    try {
+      final api = ref.read(productApiProvider);
+      final result = await api.releasePreorderReservation(
+        token: session.token,
+        reservationId: targetReservationId,
+      );
+      if (!mounted) return;
+
+      setState(() {
+        _reservedReservationId = null;
+        _reservedQuantity = null;
+      });
+      ref.invalidate(productPreorderAvailabilityProvider(widget.productId));
+
+      if (!showFeedback) {
+        return;
+      }
+      final message = result.idempotent
+          ? "Reservation already released"
+          : "Reservation released. Remaining: ${result.remaining}";
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Release preorder failed",
+        extra: {
+          "error": error.toString(),
+          "reservationId": targetReservationId,
+        },
+      );
+      if (!mounted || !showFeedback) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Release failed: $error")));
+    } finally {
+      if (mounted) {
+        setState(() => _isReleasing = false);
+      }
+    }
+  }
+
+  Future<void> _reservePreorder(Product product) async {
+    AppDebug.log(
+      "PRODUCT_DETAIL",
+      "Reserve preorder tapped",
+      extra: {"id": product.id, "qty": _quantity},
+    );
+
+    if (_isReserving) {
+      AppDebug.log("PRODUCT_DETAIL", "Ignored reserve tap (_isReserving=true)");
+      return;
+    }
+
+    final availability = ref
+        .read(productPreorderAvailabilityProvider(widget.productId))
+        .valueOrNull;
+    if (availability == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Pre-order availability is still loading"),
+        ),
+      );
+      return;
+    }
+    if (!availability.preorderEnabled) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Pre-order is not enabled for this product"),
+        ),
+      );
+      return;
+    }
+
+    final planId = (product.productionPlanId ?? "").trim();
+    if (planId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("This product is not linked to a production plan"),
+        ),
+      );
+      return;
+    }
+
+    final effectiveRemaining = availability.effectiveRemainingQuantity;
+    if (effectiveRemaining <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No pre-order capacity available")),
+      );
+      return;
+    }
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please sign in to reserve pre-order quantity"),
+        ),
+      );
+      return;
+    }
+
+    final safeQuantity = _quantity.clamp(1, effectiveRemaining);
+    setState(() => _isReserving = true);
+    try {
+      final api = ref.read(productApiProvider);
+      final result = await api.reservePreorder(
+        token: session.token,
+        planId: planId,
+        quantity: safeQuantity,
+      );
+      if (!mounted) return;
+      setState(() {
+        _reservedReservationId = result.reservationId;
+        _reservedQuantity = result.quantity;
+        _quantity = result.quantity;
+      });
+      ref.invalidate(productPreorderAvailabilityProvider(widget.productId));
+
+      final remaining = result.remaining;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Reserved ${result.quantity}. Remaining: $remaining"),
+        ),
+      );
+    } catch (error) {
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Reserve preorder failed",
+        extra: {"error": error.toString()},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Reserve failed: $error")));
+    } finally {
+      if (mounted) {
+        setState(() => _isReserving = false);
+      }
     }
   }
 
@@ -236,7 +429,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
   void _cancelProcessing() {
     AppDebug.log("PRODUCT_DETAIL", "Cancel tapped");
+    final reservationId = (_reservedReservationId ?? "").trim();
     setState(() => _isPaying = false);
+    if (reservationId.isNotEmpty) {
+      _releasePreorderReservation(reservationId: reservationId);
+    }
   }
 
   void _increaseQuantity(Product product) {
@@ -246,21 +443,50 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       extra: {"id": product.id, "qty": _quantity},
     );
 
-    // WHY: Prevent increasing when stock is unavailable.
-    if (product.stock <= 0) return;
-
-    final nextQty = _quantity + 1;
-    if (nextQty > product.stock) {
-      // WHY: Avoid exceeding available stock.
+    if ((_reservedReservationId ?? "").trim().isNotEmpty) {
       AppDebug.log(
         "PRODUCT_DETAIL",
-        "Quantity max reached",
-        extra: {"qty": _quantity, "stock": product.stock},
+        "Quantity change blocked (active reserved hold)",
+        extra: {"reservationId": _reservedReservationId},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Release reserved hold before changing quantity"),
+        ),
       );
       return;
     }
 
-    setState(() => _quantity = nextQty);
+    final maxSelectable = _resolveMaxSelectableQuantity(product);
+    final nextQty = _quantity + 1;
+    if (nextQty > maxSelectable) {
+      // WHY: Avoid exceeding the current stock/preorder selectable limit.
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Quantity max reached",
+        extra: {"qty": _quantity, "maxSelectable": maxSelectable},
+      );
+      return;
+    }
+
+    setState(() {
+      _quantity = nextQty;
+    });
+  }
+
+  int _resolveMaxSelectableQuantity(Product product) {
+    final stockLimit = product.stock > 0 ? product.stock : 0;
+    final availability = ref
+        .read(productPreorderAvailabilityProvider(widget.productId))
+        .valueOrNull;
+    final preorderLimit = availability?.preorderEnabled == true
+        ? availability!.effectiveRemainingQuantity
+        : 0;
+    final maxSelectable = stockLimit > preorderLimit
+        ? stockLimit
+        : preorderLimit;
+    return maxSelectable > 0 ? maxSelectable : 1;
   }
 
   void _decreaseQuantity(Product product) {
@@ -270,13 +496,34 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       extra: {"id": product.id, "qty": _quantity},
     );
 
-    // WHY: Minimum quantity is 1 for checkout/cart.
-    if (_quantity <= 1) {
-      AppDebug.log("PRODUCT_DETAIL", "Quantity min reached", extra: {"qty": _quantity});
+    if ((_reservedReservationId ?? "").trim().isNotEmpty) {
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Quantity change blocked (active reserved hold)",
+        extra: {"reservationId": _reservedReservationId},
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Release reserved hold before changing quantity"),
+        ),
+      );
       return;
     }
 
-    setState(() => _quantity -= 1);
+    // WHY: Minimum quantity is 1 for checkout/cart.
+    if (_quantity <= 1) {
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Quantity min reached",
+        extra: {"qty": _quantity},
+      );
+      return;
+    }
+
+    setState(() {
+      _quantity -= 1;
+    });
   }
 
   @override
@@ -288,9 +535,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
     );
 
     final productAsync = ref.watch(productByIdProvider(widget.productId));
+    final preorderAvailabilityAsync = ref.watch(
+      productPreorderAvailabilityProvider(widget.productId),
+    );
     final cart = ref.watch(cartProvider);
-    final cartBadgeCount =
-        cart.hasUnseenChanges ? cart.totalItems : 0;
+    final cartBadgeCount = cart.hasUnseenChanges ? cart.totalItems : 0;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -332,8 +581,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                         color: scheme.error,
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      constraints:
-                          const BoxConstraints(minWidth: 16, minHeight: 16),
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
                       child: Text(
                         cartBadgeCount > 99 ? "99+" : "$cartBadgeCount",
                         style: TextStyle(
@@ -351,20 +602,30 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
         ],
       ),
       body: productAsync.when(
-        data: (product) => _ProductDetailBody(
-          product: product,
-          isPaying: _isPaying,
-          quantity: _quantity,
-          onAddToCart: () => _addToCart(product),
-          onGoToCart: () {
-            AppDebug.log("PRODUCT_DETAIL", "View cart tapped");
-            context.go("/cart");
-          },
-          onPayWithPaystack: () => _startPaystackCheckout(product),
-          onCancelPay: _cancelProcessing,
-          onIncreaseQty: () => _increaseQuantity(product),
-          onDecreaseQty: () => _decreaseQuantity(product),
-        ),
+        data: (product) {
+          final maxSelectableQuantity = _resolveMaxSelectableQuantity(product);
+          return _ProductDetailBody(
+            product: product,
+            preorderAvailabilityAsync: preorderAvailabilityAsync,
+            isPaying: _isPaying,
+            isReserving: _isReserving,
+            isReleasing: _isReleasing,
+            reservedReservationId: _reservedReservationId,
+            quantity: _quantity,
+            maxSelectableQuantity: maxSelectableQuantity,
+            onAddToCart: () => _addToCart(product),
+            onGoToCart: () {
+              AppDebug.log("PRODUCT_DETAIL", "View cart tapped");
+              context.go("/cart");
+            },
+            onPayWithPaystack: () => _startPaystackCheckout(product),
+            onReservePreorder: () => _reservePreorder(product),
+            onReleasePreorder: _releasePreorderReservation,
+            onCancelPay: _cancelProcessing,
+            onIncreaseQty: () => _increaseQuantity(product),
+            onDecreaseQty: () => _decreaseQuantity(product),
+          );
+        },
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) {
           AppDebug.log(
@@ -381,22 +642,36 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
 
 class _ProductDetailBody extends StatelessWidget {
   final Product product;
+  final AsyncValue<PreorderAvailability> preorderAvailabilityAsync;
   final bool isPaying;
+  final bool isReserving;
+  final bool isReleasing;
+  final String? reservedReservationId;
   final int quantity;
+  final int maxSelectableQuantity;
   final VoidCallback onAddToCart;
   final VoidCallback onGoToCart;
   final VoidCallback onPayWithPaystack;
+  final VoidCallback onReservePreorder;
+  final Future<void> Function() onReleasePreorder;
   final VoidCallback onCancelPay;
   final VoidCallback onIncreaseQty;
   final VoidCallback onDecreaseQty;
 
   const _ProductDetailBody({
     required this.product,
+    required this.preorderAvailabilityAsync,
     required this.isPaying,
+    required this.isReserving,
+    required this.isReleasing,
+    required this.reservedReservationId,
     required this.quantity,
+    required this.maxSelectableQuantity,
     required this.onAddToCart,
     required this.onGoToCart,
     required this.onPayWithPaystack,
+    required this.onReservePreorder,
+    required this.onReleasePreorder,
     required this.onCancelPay,
     required this.onIncreaseQty,
     required this.onDecreaseQty,
@@ -408,9 +683,25 @@ class _ProductDetailBody extends StatelessWidget {
     final stockText = product.stock > 0 ? "In stock" : "Out of stock";
     final canBuy = product.stock > 0;
     final canDecrease = quantity > 1;
-    final canIncrease = quantity < product.stock;
+    final canIncrease = quantity < maxSelectableQuantity;
     final totalText = formatNgnFromCents(product.priceCents * quantity);
     final scheme = Theme.of(context).colorScheme;
+    final hasReservedHold =
+        reservedReservationId != null && reservedReservationId!.isNotEmpty;
+    final preorderAvailability = preorderAvailabilityAsync.valueOrNull;
+    final effectiveRemaining =
+        preorderAvailability?.effectiveRemainingQuantity ?? 0;
+    final canReserve =
+        preorderAvailability?.preorderEnabled == true &&
+        effectiveRemaining > 0 &&
+        !isReserving;
+    final canAdjustQuantity =
+        !hasReservedHold &&
+        (canBuy ||
+            (preorderAvailability?.preorderEnabled == true &&
+                effectiveRemaining > 0));
+    final canCheckout = (canBuy || hasReservedHold) && !isPaying;
+    final canReleaseReservedHold = hasReservedHold && !isReleasing;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -452,6 +743,12 @@ class _ProductDetailBody extends StatelessWidget {
           _InfoRow(label: "Stock", value: "${product.stock} ($stockText)"),
           _InfoRow(label: "Active", value: product.isActive ? "Yes" : "No"),
           _InfoRow(
+            label: "Production",
+            value: product.productionState.isEmpty
+                ? "-"
+                : product.productionState,
+          ),
+          _InfoRow(
             label: "Created",
             // WHY: Keep product audit dates consistent with shared helpers.
             value: formatDateLabel(product.createdAt),
@@ -462,24 +759,109 @@ class _ProductDetailBody extends StatelessWidget {
             value: formatDateLabel(product.updatedAt),
           ),
           const SizedBox(height: 16),
+          Text(
+            "Pre-order availability",
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          preorderAvailabilityAsync.when(
+            data: (availability) {
+              final confidencePercent = (availability.confidenceScore * 100)
+                  .toStringAsFixed(0);
+              final coveragePercent =
+                  (availability.approvedProgressCoverage * 100).toStringAsFixed(
+                    0,
+                  );
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _InfoRow(
+                    label: "Enabled",
+                    value: availability.preorderEnabled ? "Yes" : "No",
+                  ),
+                  _InfoRow(
+                    label: "Cap",
+                    value: availability.preorderCapQuantity.toString(),
+                  ),
+                  _InfoRow(
+                    label: "Reserved",
+                    value: availability.preorderReservedQuantity.toString(),
+                  ),
+                  _InfoRow(
+                    label: "Remaining",
+                    value: availability.preorderRemainingQuantity.toString(),
+                  ),
+                  _InfoRow(
+                    label: "Effective cap",
+                    value: availability.effectiveCap.toString(),
+                  ),
+                  _InfoRow(
+                    label: "Effective remaining",
+                    value: availability.effectiveRemainingQuantity.toString(),
+                  ),
+                  _InfoRow(
+                    label: "Confidence",
+                    value: "$confidencePercent% (coverage $coveragePercent%)",
+                  ),
+                ],
+              );
+            },
+            loading: () => const Text("Loading pre-order availability..."),
+            error: (error, _) => Text(
+              "Failed to load pre-order availability: $error",
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.error),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: canReserve ? onReservePreorder : null,
+            child: Text(
+              isReserving
+                  ? "Reserving pre-order..."
+                  : "Reserve pre-order quantity",
+            ),
+          ),
+          if (reservedReservationId != null &&
+              reservedReservationId!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              "Reserved hold: $reservedReservationId",
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: canReleaseReservedHold
+                  ? () {
+                      onReleasePreorder();
+                    }
+                  : null,
+              child: Text(
+                isReleasing ? "Releasing hold..." : "Release reserved hold",
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
           // WHY: Let users pick quantity before adding to cart or paying.
           Row(
             children: [
-              Text(
-                "Quantity",
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
+              Text("Quantity", style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(width: 8),
               // WHY: Show live total beside quantity for quick price clarity.
               Text(
                 "Total: $totalText",
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
               ),
               const Spacer(),
               IconButton(
-                onPressed: canBuy && canDecrease ? onDecreaseQty : null,
+                onPressed: canAdjustQuantity && canDecrease
+                    ? onDecreaseQty
+                    : null,
                 icon: const Icon(Icons.remove_circle_outline),
                 tooltip: "Decrease quantity",
               ),
@@ -488,7 +870,9 @@ class _ProductDetailBody extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               IconButton(
-                onPressed: canBuy && canIncrease ? onIncreaseQty : null,
+                onPressed: canAdjustQuantity && canIncrease
+                    ? onIncreaseQty
+                    : null,
                 icon: const Icon(Icons.add_circle_outline),
                 tooltip: "Increase quantity",
               ),
@@ -514,23 +898,19 @@ class _ProductDetailBody extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           ElevatedButton(
-            onPressed: canBuy && !isPaying ? onPayWithPaystack : null,
+            onPressed: canCheckout ? onPayWithPaystack : null,
             child: Text(
               isPaying ? "Processing payment..." : "Pay with Paystack",
             ),
           ),
           if (isPaying) ...[
             const SizedBox(height: 8),
-            TextButton(
-              onPressed: onCancelPay,
-              child: const Text("Cancel"),
-            ),
+            TextButton(onPressed: onCancelPay, child: const Text("Cancel")),
           ],
         ],
       ),
     );
   }
-
 }
 
 class _InfoRow extends StatelessWidget {

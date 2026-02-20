@@ -47,13 +47,10 @@ class StaffAttendanceFiltersSection extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // WHY: Scope switch lets managers toggle between self/all views.
-        Text(
-          staffAttendanceScopeLabel,
-          style: textTheme.labelLarge,
-        ),
+        Text(staffAttendanceScopeLabel, style: textTheme.labelLarge),
         const SizedBox(height: AppSpacing.xs),
         DropdownButtonFormField<String>(
-          value: canViewAll ? filters.scope : _scopeSelfValue,
+          initialValue: canViewAll ? filters.scope : _scopeSelfValue,
           decoration: const InputDecoration(),
           items: [
             DropdownMenuItem(
@@ -73,10 +70,7 @@ class StaffAttendanceFiltersSection extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         // WHY: Date range filter helps slice attendance windows.
-        Text(
-          staffAttendanceDateLabel,
-          style: textTheme.labelLarge,
-        ),
+        Text(staffAttendanceDateLabel, style: textTheme.labelLarge),
         const SizedBox(height: AppSpacing.xs),
         OutlinedButton.icon(
           onPressed: () async {
@@ -98,16 +92,13 @@ class StaffAttendanceFiltersSection extends ConsumerWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         // WHY: Estate filter groups attendance by asset ownership.
-        Text(
-          staffAttendanceEstateLabel,
-          style: textTheme.labelLarge,
-        ),
+        Text(staffAttendanceEstateLabel, style: textTheme.labelLarge),
         const SizedBox(height: AppSpacing.xs),
         assetsAsync.when(
           data: (assets) {
             // WHY: Show estate dropdown once assets are available.
             return DropdownButtonFormField<String>(
-              value: filters.estateAssetId,
+              initialValue: filters.estateAssetId,
               decoration: const InputDecoration(),
               items: [
                 const DropdownMenuItem(
@@ -127,15 +118,11 @@ class StaffAttendanceFiltersSection extends ConsumerWidget {
             );
           },
           // WHY: Provide quick feedback while estates load.
-          loading: () => LinearProgressIndicator(
-            color: colorScheme.primary,
-          ),
+          loading: () => LinearProgressIndicator(color: colorScheme.primary),
           // WHY: Explain failures so managers can retry later.
           error: (err, _) => Text(
             staffAttendanceErrorHelper,
-            style: textTheme.bodySmall?.copyWith(
-              color: colorScheme.error,
-            ),
+            style: textTheme.bodySmall?.copyWith(color: colorScheme.error),
           ),
         ),
       ],

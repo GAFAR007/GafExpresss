@@ -79,47 +79,67 @@ final productsProvider = FutureProvider<List<Product>>((ref) async {
 });
 
 /// Fetch products with a search query.
-final productsSearchProvider =
-    FutureProvider.family<List<Product>, String>((ref, query) async {
-      // WHY: Normalize query so backend receives clean input.
-      final trimmed = query.trim();
-      AppDebug.log(
-        "PROVIDERS",
-        "productsSearchProvider fetch start",
-        extra: {"q": trimmed},
-      );
-      final api = ref.read(productApiProvider);
-      return api.fetchProducts(searchQuery: trimmed);
-    });
+final productsSearchProvider = FutureProvider.family<List<Product>, String>((
+  ref,
+  query,
+) async {
+  // WHY: Normalize query so backend receives clean input.
+  final trimmed = query.trim();
+  AppDebug.log(
+    "PROVIDERS",
+    "productsSearchProvider fetch start",
+    extra: {"q": trimmed},
+  );
+  final api = ref.read(productApiProvider);
+  return api.fetchProducts(searchQuery: trimmed);
+});
 
 /// Fetch products with search + sort.
 final productsQueryProvider =
     FutureProvider.family<List<Product>, ProductsQuery>((ref, query) async {
-  AppDebug.log(
-    "PROVIDERS",
-    "productsQueryProvider fetch start",
-    extra: {
-      "q": query.search,
-      "sort": query.sort,
-      "page": query.page,
-      "limit": query.limit,
-      "inStockOnly": query.inStockOnly,
-    },
-  );
-  final api = ref.read(productApiProvider);
-  return api.fetchProducts(
-    page: query.page,
-    limit: query.limit,
-    searchQuery: query.search,
-    sort: query.sort,
-    inStockOnly: query.inStockOnly,
-  );
-});
+      AppDebug.log(
+        "PROVIDERS",
+        "productsQueryProvider fetch start",
+        extra: {
+          "q": query.search,
+          "sort": query.sort,
+          "page": query.page,
+          "limit": query.limit,
+          "inStockOnly": query.inStockOnly,
+        },
+      );
+      final api = ref.read(productApiProvider);
+      return api.fetchProducts(
+        page: query.page,
+        limit: query.limit,
+        searchQuery: query.search,
+        sort: query.sort,
+        inStockOnly: query.inStockOnly,
+      );
+    });
 
 /// Fetch single product by id (detail page).
-final productByIdProvider =
-    FutureProvider.family<Product, String>((ref, id) async {
-      AppDebug.log("PROVIDERS", "productByIdProvider fetch start", extra: {"id": id});
+final productByIdProvider = FutureProvider.family<Product, String>((
+  ref,
+  id,
+) async {
+  AppDebug.log(
+    "PROVIDERS",
+    "productByIdProvider fetch start",
+    extra: {"id": id},
+  );
+  final api = ref.read(productApiProvider);
+  return api.fetchProductById(id);
+});
+
+/// Fetch preorder availability summary for a product.
+final productPreorderAvailabilityProvider =
+    FutureProvider.family<PreorderAvailability, String>((ref, id) async {
+      AppDebug.log(
+        "PROVIDERS",
+        "productPreorderAvailabilityProvider fetch start",
+        extra: {"id": id},
+      );
       final api = ref.read(productApiProvider);
-      return api.fetchProductById(id);
+      return api.fetchPreorderAvailability(id);
     });

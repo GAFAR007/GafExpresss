@@ -14,10 +14,12 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
+import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_staff_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/theme/theme_mode_toggle.dart';
@@ -29,8 +31,11 @@ const String _productionActionTap = "production_quick";
 const String _staffActionLabel = "Staff";
 const String _staffActionHelper = "Directory";
 const String _staffActionTap = "staff_directory_quick";
+const String _preorderOpsActionLabel = "Pre-order Ops";
+const String _preorderOpsActionHelper = "Monitor holds";
+const String _preorderOpsActionTap = "preorder_ops_quick";
 
-class BusinessDashboardScreen extends StatelessWidget {
+class BusinessDashboardScreen extends ConsumerWidget {
   const BusinessDashboardScreen({super.key});
 
   void _logTap(String action) {
@@ -39,8 +44,10 @@ class BusinessDashboardScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     AppDebug.log("BUSINESS_DASH", "build()");
+    final role = ref.read(authSessionProvider)?.user.role ?? "";
+    final showOwnerPreorderOps = role == "business_owner";
 
     return Scaffold(
       appBar: AppBar(
@@ -83,9 +90,9 @@ class BusinessDashboardScreen extends StatelessWidget {
         children: [
           Text(
             "Business analytics",
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -157,6 +164,11 @@ class BusinessDashboardScreen extends StatelessWidget {
               _logTap(_staffActionTap);
               context.go(businessStaffDirectoryRoute);
             },
+            showPreorderMonitoring: showOwnerPreorderOps,
+            onPreorderMonitoringTap: () {
+              _logTap(_preorderOpsActionTap);
+              context.go(productionPreorderReservationsRoute);
+            },
           ),
         ],
       ),
@@ -214,11 +226,11 @@ class _DashboardChip extends StatelessWidget {
       selectedColor: colorScheme.secondaryContainer,
       backgroundColor: colorScheme.surfaceContainerHighest,
       labelStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: isActive
-                ? colorScheme.onSecondaryContainer
-                : colorScheme.onSurfaceVariant,
-            fontWeight: FontWeight.w600,
-          ),
+        color: isActive
+            ? colorScheme.onSecondaryContainer
+            : colorScheme.onSurfaceVariant,
+        fontWeight: FontWeight.w600,
+      ),
     );
   }
 }
@@ -253,22 +265,22 @@ class _AnalyticsCard extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                ),
+              color: colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 12),
           Text(
             metric,
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           Text(
             subtitle,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 16),
           Container(
@@ -282,8 +294,8 @@ class _AnalyticsCard extends StatelessWidget {
               child: Text(
                 "Chart data coming soon",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
@@ -292,7 +304,9 @@ class _AnalyticsCard extends StatelessWidget {
             onPressed: onDetailsTap,
             style: OutlinedButton.styleFrom(
               foregroundColor: colorScheme.primary,
-              side: BorderSide(color: colorScheme.primary.withOpacity(0.4)),
+              side: BorderSide(
+                color: colorScheme.primary.withValues(alpha: 0.4),
+              ),
             ),
             child: const Text("See more insight"),
           ),
@@ -309,6 +323,8 @@ class _ActionStrip extends StatelessWidget {
   final VoidCallback onTenantsTap;
   final VoidCallback onProductionTap;
   final VoidCallback onStaffTap;
+  final bool showPreorderMonitoring;
+  final VoidCallback onPreorderMonitoringTap;
 
   const _ActionStrip({
     required this.onProductsTap,
@@ -317,13 +333,15 @@ class _ActionStrip extends StatelessWidget {
     required this.onTenantsTap,
     required this.onProductionTap,
     required this.onStaffTap,
+    required this.showPreorderMonitoring,
+    required this.onPreorderMonitoringTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     // WHY: Keep actions in a single list so we can render a scrollable loop.
-    final actions = [
+    final actions = <_ActionItem>[
       _ActionItem(
         icon: Icons.groups_outlined,
         label: _staffActionLabel,
@@ -361,6 +379,16 @@ class _ActionStrip extends StatelessWidget {
         onTap: onProductionTap,
       ),
     ];
+    if (showPreorderMonitoring) {
+      actions.add(
+        _ActionItem(
+          icon: Icons.fact_check_outlined,
+          label: _preorderOpsActionLabel,
+          helper: _preorderOpsActionHelper,
+          onTap: onPreorderMonitoringTap,
+        ),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -376,7 +404,7 @@ class _ActionStrip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           physics: const BouncingScrollPhysics(),
           itemCount: actions.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 14),
+          separatorBuilder: (context, index) => const SizedBox(width: 14),
           itemBuilder: (context, index) {
             return _ActionCircle(action: actions[index]);
           },
@@ -427,7 +455,7 @@ class _ActionCircle extends StatelessWidget {
                 boxShadow: [
                   BoxShadow(
                     // WHY: Theme shadow keeps contrast consistent in dark mode.
-                    color: colorScheme.shadow.withOpacity(0.08),
+                    color: colorScheme.shadow.withValues(alpha: 0.08),
                     blurRadius: 8,
                     offset: const Offset(0, 3),
                   ),
@@ -439,18 +467,18 @@ class _ActionCircle extends StatelessWidget {
             Text(
               action.label,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 2),
             Text(
               action.helper,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                    fontSize: 11,
-                  ),
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 11,
+              ),
             ),
           ],
         ),

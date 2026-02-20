@@ -33,8 +33,7 @@ const String _summaryPaidTotalAllTimeLabel = "Total paid (all time)";
 const String _summaryTotalAmountLabel = "Rent per year (all units)";
 const String _summaryPerUnitAmountLabel = "Rent per year (per unit)";
 const String _listTitle = "Payment history";
-const String _emptyStateMessage =
-    "No rent payments have been recorded yet.";
+const String _emptyStateMessage = "No rent payments have been recorded yet.";
 const String _receiptUnavailableLabel = "Receipt unavailable";
 const String _viewReceiptLabel = "View receipt";
 const String _amountLabel = "Amount";
@@ -47,10 +46,8 @@ const String _statusFailed = "FAILED";
 const String _statusPending = "PENDING";
 const String _errorTitle = "Unable to load payments";
 const String _errorActionLabel = "Try again";
-const String _errorGenericHint =
-    "Please refresh to check again.";
-const String _errorSupportHint =
-    "If this persists, contact support.";
+const String _errorGenericHint = "Please refresh to check again.";
+const String _errorSupportHint = "If this persists, contact support.";
 const String _logTag = "PAYMENT_WIDGETS";
 const String _errorLogMessage = "payment history load failed";
 const String _errorReasonDio = "dio_error";
@@ -82,22 +79,18 @@ class PaymentSummaryCard extends StatelessWidget {
   final PaymentHistorySummary summary;
   final String? title;
 
-  const PaymentSummaryCard({
-    super.key,
-    required this.summary,
-    this.title,
-  });
+  const PaymentSummaryCard({super.key, required this.summary, this.title});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     // WHY: Overdue states should use a warning tone for clarity.
-    final statusTone =
-        summary.isOverdue ? AppStatusTone.warning : AppStatusTone.success;
+    final statusTone = summary.isOverdue
+        ? AppStatusTone.warning
+        : AppStatusTone.success;
     // WHY: Derive total periods from paid + remaining to avoid extra API fields.
-    final totalPeriods =
-        (summary.paidPeriodsYtd + summary.remainingPeriodsYtd)
-            .clamp(_zeroValue, _maxPeriodsClamp);
+    final totalPeriods = (summary.paidPeriodsYtd + summary.remainingPeriodsYtd)
+        .clamp(_zeroValue, _maxPeriodsClamp);
     // WHY: Show yearly total only when backend supplies a value.
     final yearlyAmountLabel = summary.yearlyRentTotalKobo == null
         ? _emptyValue
@@ -224,18 +217,15 @@ class PaymentHistoryList extends StatelessWidget {
       children: [
         Text(
           _listTitle,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: _cardSpacing),
         ...items.map(
           (item) => Padding(
             padding: const EdgeInsets.only(bottom: _cardSpacing),
-            child: PaymentHistoryCard(
-              item: item,
-              onViewReceipt: onViewReceipt,
-            ),
+            child: PaymentHistoryCard(item: item, onViewReceipt: onViewReceipt),
           ),
         ),
       ],
@@ -247,11 +237,7 @@ class PaymentHistoryCard extends StatelessWidget {
   final PaymentHistoryItem item;
   final ValueChanged<PaymentHistoryItem>? onViewReceipt;
 
-  const PaymentHistoryCard({
-    super.key,
-    required this.item,
-    this.onViewReceipt,
-  });
+  const PaymentHistoryCard({super.key, required this.item, this.onViewReceipt});
 
   @override
   Widget build(BuildContext context) {
@@ -266,8 +252,7 @@ class PaymentHistoryCard extends StatelessWidget {
     final paidFrom = _formatDate(item.paidFrom);
     final paidThrough = _formatDate(item.paidThrough);
     // WHY: Disable the receipt button when no receipt URL exists.
-    final canViewReceipt =
-        onViewReceipt != null && item.receiptUrl != null;
+    final canViewReceipt = onViewReceipt != null && item.receiptUrl != null;
 
     return Container(
       padding: const EdgeInsets.all(_cardPadding),
@@ -283,7 +268,7 @@ class PaymentHistoryCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  "${_amountLabel}: ${_formatMoney(item.amountKobo)}",
+                  "$_amountLabel: ${_formatMoney(item.amountKobo)}",
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -408,17 +393,14 @@ class PaymentHistoryErrorState extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: _cardSpacing),
-            Text(
-              resolved.message,
-              textAlign: TextAlign.center,
-            ),
+            Text(resolved.message, textAlign: TextAlign.center),
             const SizedBox(height: _cardSpacing),
             Text(
               resolved.nextAction,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             if (onRetry != null) ...[
               const SizedBox(height: _cardSpacing),
@@ -557,8 +539,8 @@ class _EmptyState extends StatelessWidget {
             message,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),

@@ -392,8 +392,9 @@ class _StaffCompensationSheetState
                   // WHY: Allow retrying the fetch from inside the sheet.
                   AppDebug.log(_logTag, _staffCompRetryLog);
                   // WHY: Consume refresh result to satisfy @useResult linting.
-                  final _ =
-                      ref.refresh(staffCompensationProvider(widget.profile.id));
+                  final _ = ref.refresh(
+                    staffCompensationProvider(widget.profile.id),
+                  );
                 },
               ),
               data: (compensation) => _CompensationForm(
@@ -517,7 +518,7 @@ class _CompensationForm extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         DropdownButtonFormField<String>(
-          value: cadence,
+          initialValue: cadence,
           decoration: const InputDecoration(labelText: _cadenceLabel),
           items: _cadenceOptions
               .map(
