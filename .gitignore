@@ -1,0 +1,10 @@
+# OS metadata
+.DS_Store
+**/.DS_Store
+
+# Local backup / duplicate workspace folders
+/apps copy/
+
+# Local archive and patch artifacts kept outside version control
+/apps/**/*.zip
+/apps/**/*.patch
