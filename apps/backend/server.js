@@ -18,19 +18,30 @@
 // --------------------------------------------------
 // ENVIRONMENT VARIABLES
 // --------------------------------------------------
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 // --------------------------------------------------
 // IMPORTS
 // --------------------------------------------------
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const debug = require('./utils/debug');
 const connectDB = require('./config/db');
+const {
+  getDatabaseStatus,
+  isDatabaseReady,
+  isDatabaseConnectivityError,
+} = connectDB;
 const registerRoutes = require('./routes');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
+const { registerChatSocket } = require('./services/chat_socket.service');
+const {
+  startPreorderReconcileWorker,
+} = require('./services/preorder_reservation_reconciler.worker');
 
 /**
  * --------------------------------------------------
@@ -39,6 +50,9 @@ const swaggerSpec = require('./config/swagger');
  */
 debug('Creating Express app instance');
 const app = express();
+
+// WHY: Create a shared HTTP server for Express + Socket.IO.
+const server = http.createServer(app);
 
 
 // BEFORE express.json() important — raw body for webhooks
@@ -65,14 +79,38 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 /**
  * --------------------------------------------------
- * DATABASE CONNECTION
+ * DATABASE READINESS GUARD
  * --------------------------------------------------
  * NOTE:
- * - Establishes MongoDB connection at startup
- * - App will EXIT if connection fails
+ * - Allows health checks to report degraded state
+ * - Rejects application traffic quickly if MongoDB drops after startup
  */
-debug('Initializing database connection');
-connectDB();
+app.use((req, res, next) => {
+  // WHY: Health must stay reachable even when the database is down.
+  if (req.path === '/health') {
+    return next();
+  }
+
+  // WHY: Docs remain useful during outages and do not require MongoDB.
+  if (req.path === '/docs' || req.path.startsWith('/docs/')) {
+    return next();
+  }
+
+  if (isDatabaseReady()) {
+    return next();
+  }
+
+  debug('Rejecting request because MongoDB is unavailable', {
+    method: req.method,
+    path: req.originalUrl,
+    databaseStatus: getDatabaseStatus(),
+  });
+
+  return res.status(503).json({
+    error: 'Database unavailable',
+    resolutionHint: 'Restore MongoDB connectivity and retry the request.',
+  });
+});
 
 /**
  * --------------------------------------------------
@@ -90,8 +128,128 @@ registerRoutes(app);
  * --------------------------------------------------
  */
 const PORT = process.env.PORT || 4000;
+const MONGO_RETRY_DELAY_MS = Number(
+  process.env.MONGO_RETRY_DELAY_MS || 5000,
+);
 
-app.listen(PORT, () => {
-  console.log(`🟢 Server running on http://localhost:${PORT}`);
-  debug('Server successfully listening');
+let mongoReconnectTimer = null;
+let isMongoConnectAttemptInFlight = false;
+
+// WHY: Allow Socket.IO to reuse the same server + port.
+const SOCKET_ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN || '*';
+const io = new Server(server, {
+  cors: {
+    origin: SOCKET_ALLOWED_ORIGIN,
+    methods: ['GET', 'POST'],
+  },
 });
+
+// WHY: Register chat socket events after server initialization.
+registerChatSocket(io);
+
+function scheduleMongoReconnect(reason) {
+  if (isDatabaseReady() || mongoReconnectTimer) {
+    return;
+  }
+
+  debug('Scheduling MongoDB reconnect attempt', {
+    reason,
+    retryDelayMs: MONGO_RETRY_DELAY_MS,
+  });
+
+  mongoReconnectTimer = setTimeout(() => {
+    mongoReconnectTimer = null;
+    void connectDatabaseInBackground({
+      reason: 'scheduled_retry',
+    });
+  }, MONGO_RETRY_DELAY_MS);
+
+  if (typeof mongoReconnectTimer.unref === 'function') {
+    mongoReconnectTimer.unref();
+  }
+}
+
+async function connectDatabaseInBackground({
+  reason = 'startup',
+} = {}) {
+  if (isDatabaseReady() || isMongoConnectAttemptInFlight) {
+    return;
+  }
+
+  isMongoConnectAttemptInFlight = true;
+
+  try {
+    debug('Initializing database connection', {
+      reason,
+    });
+    await connectDB();
+    debug('MongoDB is ready for application traffic', {
+      reason,
+      databaseStatus: getDatabaseStatus(),
+    });
+  } catch (error) {
+    const retryable =
+      isDatabaseConnectivityError(error);
+
+    debug('MongoDB connection attempt failed', {
+      reason,
+      retryable,
+      error,
+      databaseStatus: getDatabaseStatus(),
+    });
+
+    if (!retryable) {
+      console.error('❌ Backend startup failed');
+      console.error(error.message);
+      process.exit(1);
+    }
+
+    console.error(
+      `⚠️ MongoDB unavailable; API is running in degraded mode and will retry in ${MONGO_RETRY_DELAY_MS}ms`,
+    );
+    scheduleMongoReconnect(reason);
+  } finally {
+    isMongoConnectAttemptInFlight = false;
+  }
+}
+
+function listenOnPort(port) {
+  return new Promise((resolve, reject) => {
+    const handleListening = () => {
+      server.off('error', handleError);
+      resolve();
+    };
+    const handleError = (error) => {
+      server.off('listening', handleListening);
+      reject(error);
+    };
+
+    server.once('listening', handleListening);
+    server.once('error', handleError);
+    server.listen(port);
+  });
+}
+
+async function startServer() {
+  try {
+    await listenOnPort(PORT);
+
+    console.log(`🟢 Server running on http://localhost:${PORT}`);
+    debug('Server successfully listening');
+
+    // WHY: Background reconciliation keeps expired pre-order holds from blocking capacity.
+    startPreorderReconcileWorker();
+
+    void connectDatabaseInBackground();
+  } catch (error) {
+    console.error('❌ Backend startup failed');
+    console.error(error.message);
+    debug('Backend startup failed before listen', {
+      error,
+      databaseStatus: getDatabaseStatus(),
+    });
+    process.exit(1);
+  }
+}
+
+startServer();

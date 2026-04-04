@@ -9,23 +9,63 @@ const User = require('../models/User');
 const USER_ROLES = User.USER_ROLES;
 const { signToken } = require('../config/jwt');
 
+// WHY: Basic validation rules keep registration consistent and secure.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASSWORD_REGEX =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 
 
-async function registerUser({ name, email, password, role }) {
+async function registerUser({
+  firstName,
+  lastName,
+  name,
+  email,
+  password,
+  confirmPassword,
+  role,
+}) {
   debug('================ REGISTER FLOW START ================');
 
   // 1️⃣ Validate input
-  if (!email || !password) {
-    throw new Error('Email and password are required');
+  if (!email || !password || !confirmPassword) {
+    throw new Error('First name, last name, email, and passwords are required');
   }
 
   const normalizedEmail = email.toLowerCase().trim();
-  const finalName = typeof name === 'string' ? name.trim() : '';
+  const cleanFirstName =
+    typeof firstName === 'string' ? firstName.trim() : '';
+  const cleanLastName =
+    typeof lastName === 'string' ? lastName.trim() : '';
+  const fallbackName = typeof name === 'string' ? name.trim() : '';
+  const finalName =
+    cleanFirstName && cleanLastName
+      ? `${cleanFirstName} ${cleanLastName}`
+      : fallbackName;
   const finalRole = role && USER_ROLES.includes(role) ? role : 'customer';
+
+  if (!cleanFirstName || !cleanLastName) {
+    throw new Error('First name and last name are required');
+  }
+
+  if (!EMAIL_REGEX.test(normalizedEmail)) {
+    throw new Error('Please provide a valid email address');
+  }
+
+  if (password !== confirmPassword) {
+    throw new Error('Passwords do not match');
+  }
+
+  if (!PASSWORD_REGEX.test(password)) {
+    throw new Error(
+      'Password must be 8+ chars with upper, lower, number, and symbol',
+    );
+  }
 
   debug('Incoming payload:', {
     name: finalName,
+    firstName: cleanFirstName,
+    lastName: cleanLastName,
     email: normalizedEmail,
     password: '[RAW]',
     role: finalRole,
@@ -46,6 +86,9 @@ async function registerUser({ name, email, password, role }) {
   // 4️⃣ Build user object (THIS IS WHAT GOES TO MONGO)
   const mongoPayload = {
     name: finalName,
+    // WHY: Store split names for profile editing UI.
+    firstName: cleanFirstName,
+    lastName: cleanLastName,
     email: normalizedEmail,
     passwordHash,
     role: finalRole,
@@ -53,6 +96,8 @@ async function registerUser({ name, email, password, role }) {
 
   debug('Mongo payload (FINAL):', {
     name: mongoPayload.name,
+    firstName: mongoPayload.firstName,
+    lastName: mongoPayload.lastName,
     email: mongoPayload.email,
     passwordHash: '[HASHED]',
     role: mongoPayload.role,

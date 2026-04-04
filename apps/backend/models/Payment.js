@@ -18,6 +18,13 @@ const debug = require("../utils/debug");
 
 debug("Loading Payment model...");
 
+// WHY: Rent payments share the same period values as estate units.
+const RENT_PERIODS = [
+  "monthly",
+  "quarterly",
+  "yearly",
+];
+
 const paymentSchema = new mongoose.Schema(
   {
     provider: {
@@ -74,6 +81,46 @@ const paymentSchema = new mongoose.Schema(
       default: null,
     },
 
+    // WHY: Tenant rent payments link back to the tenant application for audits.
+    tenantApplication: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessTenantApplication",
+      default: null,
+    },
+
+    // WHY: Business context is needed for tenant rent + staff audit trails.
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    // WHY: Distinguish order vs tenant rent flows in analytics/filters.
+    purpose: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    // WHY: Tenant rent coverage period (used only for tenant_rent payments).
+    coversFrom: {
+      type: Date,
+      default: null,
+    },
+    coversTo: {
+      type: Date,
+      default: null,
+    },
+    rentPeriod: {
+      type: String,
+      enum: RENT_PERIODS,
+      default: null,
+    },
+    periodCount: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
+
     // When we have fully applied effects (mark order paid, stock adjusted, etc.)
     processedAt: {
       type: Date,
@@ -86,15 +133,18 @@ const paymentSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // ✅ CRITICAL: This is what enforces idempotency at DB level
 paymentSchema.index(
   { provider: 1, reference: 1 },
-  { unique: true }
+  { unique: true },
 );
 
-const Payment = mongoose.model("Payment", paymentSchema);
+const Payment = mongoose.model(
+  "Payment",
+  paymentSchema,
+);
 
 module.exports = Payment;

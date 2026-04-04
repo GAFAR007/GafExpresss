@@ -9,26 +9,88 @@
  * - Centralises database access
  */
 
-const User = require('../models/User');
+const User = require("../models/User");
 const USER_ROLES = User.USER_ROLES;
-const debug = require('../utils/debug');
+const debug = require("../utils/debug");
+const {
+  getPagination,
+} = require("../utils/pagination");
+const { getFilter } = require("../utils/filter");
 
 /**
  * Fetch all users (admin only)
  *
  * @returns {Array} list of users
  */
-async function getAllUsers() {
-  debug('ADMIN SERVICE: Fetching all users');
+async function getAllUsers(query = {}) {
+  debug("ADMIN SERVICE: Fetching all users");
 
-  const users = await User.find({}).select({
-    passwordHash: 0, // ❌ never expose passwords
-    __v: 0,
+  // WHY: keep pagination consistent with other list endpoints.
+  const { page, limit, skip } =
+    getPagination(query);
+
+  // WHY: only allow safe filters (role + isActive).
+  const baseFilter = getFilter(query, {
+    role: { type: "enum", values: USER_ROLES },
+    isActive: { type: "boolean" },
   });
 
-  debug(`ADMIN SERVICE: ${users.length} users found`);
+  // WHY: optional search for admin UX (email/name/role).
+  const search = query.q?.trim();
+  const searchFilter = search
+    ? {
+        $or: [
+          {
+            email: {
+              $regex: search,
+              $options: "i",
+            },
+          },
+          {
+            name: {
+              $regex: search,
+              $options: "i",
+            },
+          },
+          {
+            role: {
+              $regex: search,
+              $options: "i",
+            },
+          },
+        ],
+      }
+    : null;
 
-  return users;
+  // WHY: preserve base filters while applying search.
+  const filter =
+    searchFilter &&
+    Object.keys(baseFilter).length > 0
+      ? { $and: [baseFilter, searchFilter] }
+      : searchFilter || baseFilter;
+
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select({
+        passwordHash: 0, // ❌ never expose passwords
+        __v: 0,
+      })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    User.countDocuments(filter),
+  ]);
+
+  debug(
+    `ADMIN SERVICE: ${users.length} users found`,
+  );
+
+  return {
+    users,
+    total,
+    page,
+    limit,
+  };
 }
 /**
  * Fetch single user by ID (admin only)
@@ -37,18 +99,21 @@ async function getAllUsers() {
  * @returns {Object|null} user object or null if not found
  */
 async function getUserById(id) {
-  debug('ADMIN SERVICE: Fetching user by ID', { id });
+  debug("ADMIN SERVICE: Fetching user by ID", {
+    id,
+  });
 
   const user = await User.findById(id).select({
     passwordHash: 0, // ❌ never expose passwords
     __v: 0,
   });
 
-  debug('ADMIN SERVICE: User fetch result', { found: !!user });
+  debug("ADMIN SERVICE: User fetch result", {
+    found: !!user,
+  });
 
   return user;
 }
-
 
 /**
  * Update user role or isActive status (admin only)
@@ -58,11 +123,14 @@ async function getUserById(id) {
  * @returns {Object|null} updated user or null if not found
  */
 async function updateUser(id, updates) {
-  debug('ADMIN SERVICE: Updating user', { id, updates });
+  debug("ADMIN SERVICE: Updating user", {
+    id,
+    updates,
+  });
 
-  const allowedFields = ['role', 'isActive'];
+  const allowedFields = ["role", "isActive"];
   const filteredUpdates = {};
-
+  S;
   // Only allow specific fields
   for (const field of allowedFields) {
     if (updates[field] !== undefined) {
@@ -71,27 +139,37 @@ async function updateUser(id, updates) {
   }
 
   if (Object.keys(filteredUpdates).length === 0) {
-    throw new Error('No valid fields provided for update');
+    throw new Error(
+      "No valid fields provided for update",
+    );
   }
 
   // Validate role if being changed
   if (filteredUpdates.role) {
-    const { USER_ROLES } = require('../models/User');
-    if (!USER_ROLES.includes(filteredUpdates.role)) {
-      throw new Error(`Invalid role. Must be one of: ${USER_ROLES.join(', ')}`);
+    const {
+      USER_ROLES,
+    } = require("../models/User");
+    if (
+      !USER_ROLES.includes(filteredUpdates.role)
+    ) {
+      throw new Error(
+        `Invalid role. Must be one of: ${USER_ROLES.join(", ")}`,
+      );
     }
   }
 
   const user = await User.findByIdAndUpdate(
     id,
     filteredUpdates,
-    { new: true, runValidators: true } // return updated doc
+    { new: true, runValidators: true }, // return updated doc
   ).select({
     passwordHash: 0,
     __v: 0,
   });
 
-  debug('ADMIN SERVICE: Update result', { found: !!user });
+  debug("ADMIN SERVICE: Update result", {
+    found: !!user,
+  });
 
   return user;
 }
@@ -104,7 +182,10 @@ async function updateUser(id, updates) {
  * @returns {Object|null} updated user
  */
 async function softDeleteUser(id, deletedById) {
-  debug('ADMIN SERVICE: Soft deleting user', { id, deletedById });
+  debug("ADMIN SERVICE: Soft deleting user", {
+    id,
+    deletedById,
+  });
 
   const user = await User.findByIdAndUpdate(
     id,
@@ -113,13 +194,15 @@ async function softDeleteUser(id, deletedById) {
       deletedAt: new Date(),
       deletedBy: deletedById,
     },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   ).select({
     passwordHash: 0,
     __v: 0,
   });
 
-  debug('ADMIN SERVICE: Soft delete result', { found: !!user });
+  debug("ADMIN SERVICE: Soft delete result", {
+    found: !!user,
+  });
 
   return user;
 }
@@ -134,28 +217,43 @@ async function softDeleteUser(id, deletedById) {
  * @param {string} params.role
  * @returns {Object} updated user
  */
-async function updateUserRole({ adminId, targetUserId, role }) {
-  debug('ADMIN SERVICE: updateUserRole', { adminId, targetUserId, role });
+async function updateUserRole({
+  adminId,
+  targetUserId,
+  role,
+}) {
+  debug("ADMIN SERVICE: updateUserRole", {
+    adminId,
+    targetUserId,
+    role,
+  });
 
   if (!USER_ROLES.includes(role)) {
-    throw new Error(`Invalid role: ${role}. Must be one of: ${USER_ROLES.join(', ')}`);
+    throw new Error(
+      `Invalid role: ${role}. Must be one of: ${USER_ROLES.join(", ")}`,
+    );
   }
 
   const user = await User.findById(targetUserId);
 
   if (!user) {
-    throw new Error('User not found');
+    throw new Error("User not found");
   }
 
   // Prevent self-demote
-  if (targetUserId === adminId && role !== 'admin') {
-    throw new Error('Admins cannot demote themselves');
+  if (
+    targetUserId === adminId &&
+    role !== "admin"
+  ) {
+    throw new Error(
+      "Admins cannot demote themselves",
+    );
   }
 
   user.role = role;
   await user.save();
 
-  return user.toObject();  // Clean object without mongoose extras
+  return user.toObject(); // Clean object without mongoose extras
 }
 
 /**
@@ -167,8 +265,14 @@ async function updateUserRole({ adminId, targetUserId, role }) {
  * @param {string} params.targetUserId
  * @returns {Object} restored user
  */
-async function restoreUser({ adminId, targetUserId }) {
-  debug('ADMIN SERVICE: restoreUser', { adminId, targetUserId });
+async function restoreUser({
+  adminId,
+  targetUserId,
+}) {
+  debug("ADMIN SERVICE: restoreUser", {
+    adminId,
+    targetUserId,
+  });
 
   const user = await User.findByIdAndUpdate(
     targetUserId,
@@ -177,14 +281,14 @@ async function restoreUser({ adminId, targetUserId }) {
       deletedAt: null,
       deletedBy: null,
     },
-    { new: true }
+    { new: true },
   ).select({
     passwordHash: 0,
     __v: 0,
   });
 
   if (!user) {
-    throw new Error('User not found');
+    throw new Error("User not found");
   }
 
   // Optional: could add restore logging if needed later
@@ -201,28 +305,43 @@ async function restoreUser({ adminId, targetUserId }) {
  * @param {string} params.role
  * @returns {Object} updated user
  */
-async function updateUserRole({ adminId, targetUserId, role }) {
-  debug('ADMIN SERVICE: updateUserRole', { adminId, targetUserId, role });
+async function updateUserRole({
+  adminId,
+  targetUserId,
+  role,
+}) {
+  debug("ADMIN SERVICE: updateUserRole", {
+    adminId,
+    targetUserId,
+    role,
+  });
 
   if (!USER_ROLES.includes(role)) {
-    throw new Error(`Invalid role: ${role}. Must be one of: ${USER_ROLES.join(', ')}`);
+    throw new Error(
+      `Invalid role: ${role}. Must be one of: ${USER_ROLES.join(", ")}`,
+    );
   }
 
   const user = await User.findById(targetUserId);
 
   if (!user) {
-    throw new Error('User not found');
+    throw new Error("User not found");
   }
 
   // Prevent self-demote
-  if (targetUserId === adminId && role !== 'admin') {
-    throw new Error('Admins cannot demote themselves');
+  if (
+    targetUserId === adminId &&
+    role !== "admin"
+  ) {
+    throw new Error(
+      "Admins cannot demote themselves",
+    );
   }
 
   user.role = role;
   await user.save();
 
-  return user.toObject();  // Clean object without mongoose extras
+  return user.toObject(); // Clean object without mongoose extras
 }
 
 /**
@@ -234,8 +353,14 @@ async function updateUserRole({ adminId, targetUserId, role }) {
  * @param {string} params.targetUserId
  * @returns {Object} restored user
  */
-async function restoreUser({ adminId, targetUserId }) {
-  debug('ADMIN SERVICE: restoreUser', { adminId, targetUserId });
+async function restoreUser({
+  adminId,
+  targetUserId,
+}) {
+  debug("ADMIN SERVICE: restoreUser", {
+    adminId,
+    targetUserId,
+  });
 
   const user = await User.findByIdAndUpdate(
     targetUserId,
@@ -244,14 +369,14 @@ async function restoreUser({ adminId, targetUserId }) {
       deletedAt: null,
       deletedBy: null,
     },
-    { new: true }
+    { new: true },
   ).select({
     passwordHash: 0,
     __v: 0,
   });
 
   if (!user) {
-    throw new Error('User not found');
+    throw new Error("User not found");
   }
 
   // Optional: could add restore logging if needed later
@@ -264,6 +389,6 @@ module.exports = {
   getUserById,
   updateUser,
   softDeleteUser,
-  updateUserRole,  // NEW
-  restoreUser,     // NEW
+  updateUserRole, // NEW
+  restoreUser, // NEW
 };

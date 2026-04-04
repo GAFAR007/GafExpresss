@@ -12,6 +12,7 @@
 
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
+const InventoryEvent = require('../models/InventoryEvent');
 const debug = require('./debug');
 
 /**
@@ -20,8 +21,9 @@ const debug = require('./debug');
  * @param {Object} order - Full order document (with items array)
  * @param {string} action - 'decrease' (for paid) or 'restore' (for cancelled)
  * @param {Object} session - Active MongoDB session for atomicity
+ * @param {Object} context - Actor + metadata for audit trails
  */
-async function adjustOrderStock(order, action, session) {
+async function adjustOrderStock(order, action, session, context = {}) {
   if (!order || !order.items || order.items.length === 0) {
     return;
   }
@@ -31,6 +33,9 @@ async function adjustOrderStock(order, action, session) {
     itemCount: order.items.length,
   });
 
+  const fallbackActorId = context.actorId || order.user;
+  const fallbackActorRole = context.actorRole || 'system';
+
   for (const item of order.items) {
     const product = await Product.findById(item.product).session(session);
     if (!product) {
@@ -39,6 +44,7 @@ async function adjustOrderStock(order, action, session) {
 
     const quantity = item.quantity;
     const delta = action === 'decrease' ? -quantity : +quantity;
+    const before = product.stock;
 
     if (action === 'decrease' && product.stock < quantity) {
       throw new Error(
@@ -47,12 +53,32 @@ async function adjustOrderStock(order, action, session) {
     }
 
     product.stock += delta;
+    product.updatedBy = fallbackActorId || product.updatedBy;
     await product.save({ session });
 
     debug(
       `STOCK: ${product.name} → ${product.stock} (${
         delta > 0 ? '+' : ''
       }${delta})`
+    );
+
+    // WHY: Persist inventory history for audits and troubleshooting.
+    await InventoryEvent.create(
+      [
+        {
+          businessId: context.businessId || product.businessId || null,
+          product: product._id,
+          delta,
+          before,
+          after: product.stock,
+          reason: context.reason || `order_${action}`,
+          source: context.source || 'order_status',
+          orderId: order._id,
+          actor: fallbackActorId,
+          actorRole: fallbackActorRole,
+        },
+      ],
+      { session }
     );
   }
 }

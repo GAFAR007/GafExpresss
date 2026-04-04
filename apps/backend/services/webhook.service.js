@@ -19,22 +19,25 @@ const crypto = require("crypto");
 const debug = require("../utils/debug");
 const paymentService = require("./payment.service");
 
-const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
+const PAYSTACK_SECRET =
+  process.env.PAYSTACK_SECRET_KEY;
 
 // --------------------------------------------------
 // STARTUP DEBUG (SAFE)
 // --------------------------------------------------
 debug(
   "Paystack secret loaded:",
-  PAYSTACK_SECRET ? "YES" : "NO"
+  PAYSTACK_SECRET ? "YES" : "NO",
 );
 
-if (process.env.NODE_ENV !== "production") {
+if (
+  process.env.NODE_ENV !== "production"
+) {
   debug(
     "Paystack secret suffix (dev only):",
-    PAYSTACK_SECRET
-      ? `****${PAYSTACK_SECRET.slice(-4)}`
-      : "No secret"
+    PAYSTACK_SECRET ?
+      `****${PAYSTACK_SECRET.slice(-4)}`
+    : "No secret",
   );
 }
 
@@ -49,25 +52,49 @@ if (process.env.NODE_ENV !== "production") {
  * 2) Parse event JSON (raw body)
  * 3) Delegate to payment.service (idempotency + DB writes)
  */
-async function handlePaystackWebhook(req) {
+async function handlePaystackWebhook(
+  req,
+) {
   debug("WEBHOOK SERVICE: Entry");
 
   // 1️⃣ Verify signature FIRST
   verifyPaystackSignature(req);
 
   // 2️⃣ Parse raw body → JSON
-  const event = JSON.parse(req.body.toString("utf8"));
+  const event = JSON.parse(
+    req.body.toString("utf8"),
+  );
 
-  debug("WEBHOOK SERVICE: Signature verified ✅");
-  debug("WEBHOOK SERVICE: Event received", {
-    event: event?.event,
-    reference: event?.data?.reference,
-  });
+  debug(
+    "WEBHOOK SERVICE: Signature verified ✅",
+  );
+  debug(
+    "WEBHOOK SERVICE: Event received",
+    {
+      event: event?.event,
+      reference: event?.data?.reference,
+    },
+  );
+  debug(
+    "WEBHOOK SERVICE: Dispatching to payment service",
+    {
+      source: "paystack_webhook",
+      eventType: event?.event,
+      referenceSuffix:
+        event?.data?.reference ?
+          event.data.reference.slice(-6)
+        : null,
+    },
+  );
 
   // 3️⃣ Delegate ALL business logic
-  await paymentService.processPaystackEvent(event);
+  await paymentService.processPaystackEvent(
+    event,
+  );
 
-  debug("WEBHOOK SERVICE: Completed safely ✅");
+  debug(
+    "WEBHOOK SERVICE: Completed safely ✅",
+  );
 }
 
 // --------------------------------------------------
@@ -86,28 +113,40 @@ async function handlePaystackWebhook(req) {
 function verifyPaystackSignature(req) {
   if (!PAYSTACK_SECRET) {
     debug(
-      "WEBHOOK SERVICE: PAYSTACK_SECRET_KEY missing ❌"
+      "WEBHOOK SERVICE: PAYSTACK_SECRET_KEY missing ❌",
     );
-    throw new Error("Invalid Paystack signature");
+    throw new Error(
+      "Invalid Paystack signature",
+    );
   }
 
-  const signature = req.headers["x-paystack-signature"];
+  const signature =
+    req.headers["x-paystack-signature"];
 
   if (!signature) {
     debug(
-      "WEBHOOK SERVICE: Missing Paystack signature header ❌"
+      "WEBHOOK SERVICE: Missing Paystack signature header ❌",
     );
-    throw new Error("Invalid Paystack signature");
+    throw new Error(
+      "Invalid Paystack signature",
+    );
   }
 
   const hash = crypto
-    .createHmac("sha512", PAYSTACK_SECRET)
+    .createHmac(
+      "sha512",
+      PAYSTACK_SECRET,
+    )
     .update(req.body)
     .digest("hex");
 
   if (hash !== signature) {
-    debug("WEBHOOK SERVICE: Signature mismatch ❌");
-    throw new Error("Invalid Paystack signature");
+    debug(
+      "WEBHOOK SERVICE: Signature mismatch ❌",
+    );
+    throw new Error(
+      "Invalid Paystack signature",
+    );
   }
 }
 

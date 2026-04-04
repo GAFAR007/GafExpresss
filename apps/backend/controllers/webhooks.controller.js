@@ -9,6 +9,9 @@
  * - Keeps services free of Express response logic
  * - Ensures consistent error handling + fast responses
  *
+ * HOW:
+ * - Delegates to webhook service and maps errors to HTTP responses
+ *
  * IMPORTANT:
  * - Webhooks must return 200 quickly to prevent repeated retries
  * - Only return 401 when signature is invalid (security)
@@ -22,13 +25,11 @@ const webhookService = require("../services/webhook.service");
  *
  * FLOW:
  * 1) Log entry
- * 2) Call service (does signature verification + event routing)
+ * 2) Call service (does event routing / DB updates)
  * 3) Return HTTP status safely
  */
 async function handlePaystackWebhook(req, res) {
-  debug(
-    "WEBHOOK CONTROLLER: handlePaystackWebhook - entry"
-  );
+  debug("WEBHOOK CONTROLLER: handlePaystackWebhook - entry");
 
   try {
     await webhookService.handlePaystackWebhook(req);
@@ -45,13 +46,11 @@ async function handlePaystackWebhook(req, res) {
     }
 
     /**
-     * ✅ Acknowledge everything else to avoid webhook retries.
+     * ✅ For processing errors, return 500 so Paystack retries.
      * We LOG failures so you can inspect later.
      */
-    debug(
-      "WEBHOOK CONTROLLER: non-signature error → ACK 200 to prevent retries"
-    );
-    return res.sendStatus(200);
+    debug("WEBHOOK CONTROLLER: non-signature error → 500 for retry");
+    return res.sendStatus(500);
   }
 }
 

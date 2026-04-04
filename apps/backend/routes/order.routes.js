@@ -42,7 +42,7 @@ debug('Order routes initialized');
  *         application/json:
  *           schema:
  *             type: object
- *             required: [items]
+ *             required: [items, deliveryAddress]
  *             properties:
  *               items:
  *                 type: array
@@ -54,6 +54,29 @@ debug('Order routes initialized');
  *                       type: string
  *                     quantity:
  *                       type: integer
+ *               deliveryAddress:
+ *                 type: object
+ *                 required: [source]
+ *                 properties:
+ *                   source:
+ *                     type: string
+ *                     enum: [home, company, custom]
+ *                   houseNumber:
+ *                     type: string
+ *                   street:
+ *                     type: string
+ *                   city:
+ *                     type: string
+ *                   state:
+ *                     type: string
+ *                   postalCode:
+ *                     type: string
+ *                   lga:
+ *                     type: string
+ *                   country:
+ *                     type: string
+ *                   landmark:
+ *                     type: string
  *     responses:
  *       201:
  *         description: Order created successfully

@@ -5,77 +5,356 @@
  * - Business logic for user orders
  *
  * WHY:
- * - Handles checkout, stock deduction, and user order history
+ * - Handles checkout, stock validation, and user order history
+ *
+ * HOW:
+ * - Validates items + stock, snapshots price, creates order in a transaction
  */
 
-const mongoose = require('mongoose');
-const Order = require('../models/Order');
-const Product = require('../models/Product');
-const debug = require('../utils/debug');
+const mongoose = require("mongoose");
+const Order = require("../models/Order");
+const Product = require("../models/Product");
+const ProductionPlan = require("../models/ProductionPlan");
+const PreorderReservation = require("../models/PreorderReservation");
+const User = require("../models/User");
+const {
+  verifyAddressPayload,
+} = require("./address_verification.service");
+const {
+  writeAuditLog,
+} = require("../utils/audit");
+const {
+  writeAnalyticsEvent,
+} = require("../utils/analytics");
+const debug = require("../utils/debug");
 
 /**
  * Create a new order (checkout)
  * @param {string} userId
  * @param {Array} items - [{productId, quantity}]
+ * @param {Object} deliveryAddress
  * @returns {Object} created order
  */
-async function createOrder(userId, items) {
-  debug('ORDER SERVICE: createOrder', { userId, items });
+async function createOrder(
+  userId,
+  items,
+  deliveryAddress,
+  reservationId = null,
+) {
+  const normalizedReservationId =
+    reservationId == null ?
+      ""
+    : reservationId.toString().trim();
+  debug("ORDER SERVICE: createOrder", {
+    userId,
+    itemsCount:
+      Array.isArray(items) ?
+        items.length
+      : 0,
+    addressSource:
+      deliveryAddress?.source,
+    hasReservationId: Boolean(
+      normalizedReservationId,
+    ),
+  });
 
   if (!items || items.length === 0) {
-    throw new Error('Order must have at least one item');
+    throw new Error(
+      "Order must have at least one item",
+    );
   }
 
-  const session = await mongoose.startSession();
+  if (!deliveryAddress) {
+    throw new Error(
+      "Delivery address is required",
+    );
+  }
+  if (
+    normalizedReservationId &&
+    !mongoose.Types.ObjectId.isValid(
+      normalizedReservationId,
+    )
+  ) {
+    throw new Error(
+      "Invalid pre-order reservation id",
+    );
+  }
+
+  const addressSource =
+    deliveryAddress.source;
+
+  if (
+    addressSource !== "home" &&
+    addressSource !== "company" &&
+    addressSource !== "custom"
+  ) {
+    throw new Error(
+      "Invalid delivery address source",
+    );
+  }
+
+  const session =
+    await mongoose.startSession();
   session.startTransaction();
 
   try {
     let totalPrice = 0;
     const orderItems = [];
+    let deliveryAddressSnapshot = null;
+    const businessIds = new Set();
+    let linkedReservation = null;
+    let linkedPlanProductId = null;
+    let linkedReservationQuantity = 0;
+    let linkedProductQuantity = 0;
+
+    if (normalizedReservationId) {
+      linkedReservation =
+        await PreorderReservation.findOne({
+          _id: normalizedReservationId,
+          userId,
+          status: "reserved",
+        }).session(session);
+      if (!linkedReservation) {
+        throw new Error(
+          "Pre-order reservation not found or not reserved",
+        );
+      }
+
+      const linkedPlan =
+        await ProductionPlan.findOne({
+          _id: linkedReservation.planId,
+          businessId:
+            linkedReservation.businessId,
+        })
+          .select({
+            productId: 1,
+          })
+          .session(session)
+          .lean();
+      if (!linkedPlan?.productId) {
+        throw new Error(
+          "Pre-order reservation plan is not linked to a product",
+        );
+      }
+      linkedPlanProductId =
+        linkedPlan.productId.toString();
+      linkedReservationQuantity = Number(
+        linkedReservation.quantity || 0,
+      );
+      if (
+        !Number.isFinite(
+          linkedReservationQuantity,
+        ) ||
+        linkedReservationQuantity <= 0
+      ) {
+        throw new Error(
+          "Pre-order reservation quantity is invalid",
+        );
+      }
+    }
+
+    if (
+      addressSource === "home" ||
+      addressSource === "company"
+    ) {
+      // WHY: Snapshot verified profile address to keep orders immutable.
+      const user = await User.findById(
+        userId,
+      )
+        .select(
+          "homeAddress companyAddress",
+        )
+        .lean();
+
+      if (!user) {
+        throw new Error(
+          "User not found",
+        );
+      }
+
+      const selected =
+        addressSource === "home" ?
+          user.homeAddress
+        : user.companyAddress;
+
+      if (!selected) {
+        throw new Error(
+          "Selected delivery address is missing",
+        );
+      }
+
+      if (!selected.isVerified) {
+        throw new Error(
+          "Selected delivery address is not verified",
+        );
+      }
+
+      deliveryAddressSnapshot = {
+        source: addressSource,
+        ...selected,
+      };
+    }
+
+    if (addressSource === "custom") {
+      // WHY: Custom addresses must be verified before checkout completes.
+      const {
+        source,
+        placeId,
+        ...rawAddress
+      } = deliveryAddress;
+      const result =
+        await verifyAddressPayload({
+          address: rawAddress,
+          source: "custom",
+          placeId,
+        });
+
+      if (!result.address?.isVerified) {
+        throw new Error(
+          "Delivery address must be verified",
+        );
+      }
+
+      deliveryAddressSnapshot = {
+        source: "custom",
+        ...result.address,
+      };
+    }
+
+    if (!deliveryAddressSnapshot) {
+      throw new Error(
+        "Delivery address snapshot could not be created",
+      );
+    }
 
     for (const item of items) {
-      const product = await Product.findById(item.productId).session(session);
+      const product =
+        await Product.findById(
+          item.productId,
+        ).session(session);
 
       if (!product) {
-        throw new Error(`Product not found: ${item.productId}`);
+        throw new Error(
+          `Product not found: ${item.productId}`,
+        );
       }
 
       // Enhanced checks
       if (product.deletedAt) {
-        throw new Error(`Product is deleted: ${item.productId}`);
+        throw new Error(
+          `Product is deleted: ${item.productId}`,
+        );
       }
       if (!product.isActive) {
-        throw new Error(`Product is inactive: ${item.productId}`);
+        throw new Error(
+          `Product is inactive: ${item.productId}`,
+        );
       }
       if (item.quantity <= 0) {
-        throw new Error(`Invalid quantity for product: ${item.productId}`);
+        throw new Error(
+          `Invalid quantity for product: ${item.productId}`,
+        );
       }
-      if (product.stock < item.quantity) {
-        throw new Error(`Insufficient stock for product: ${item.productId}`);
+      if (
+        product.stock < item.quantity
+      ) {
+        throw new Error(
+          `Insufficient stock for product: ${item.productId}`,
+        );
       }
 
-      // Snapshot price and deduct stock
-      const itemPrice = product.price * item.quantity;
+      // WHY: Snapshot price now; stock is deducted ONLY on payment success.
+      const itemPrice =
+        product.price * item.quantity;
       totalPrice += itemPrice;
-      product.stock -= item.quantity;
-      await product.save({ session });
 
       orderItems.push({
         product: item.productId,
+        businessId:
+          product.businessId || null,
         quantity: item.quantity,
         price: product.price, // per unit snapshot
       });
+
+      // WHY: Collect business scopes for filtering order history.
+      if (product.businessId) {
+        businessIds.add(
+          product.businessId.toString(),
+        );
+      }
+      if (
+        linkedPlanProductId &&
+        product._id.toString() ===
+          linkedPlanProductId
+      ) {
+        linkedProductQuantity += Number(
+          item.quantity || 0,
+        );
+      }
+    }
+
+    if (
+      linkedReservation &&
+      linkedProductQuantity !==
+        linkedReservationQuantity
+    ) {
+      throw new Error(
+        "Order quantity must match linked pre-order reservation quantity",
+      );
     }
 
     const order = new Order({
       user: userId,
+      reservationId:
+        linkedReservation?._id || null,
       items: orderItems,
       totalPrice,
+      deliveryAddress:
+        deliveryAddressSnapshot,
+      businessIds: Array.from(
+        businessIds,
+      ).map(
+        (id) =>
+          new mongoose.Types.ObjectId(
+            id,
+          ),
+      ),
+      // WHY: Seed status history for audit visibility.
+      statusHistory: [
+        {
+          status: "pending",
+          changedAt: new Date(),
+          changedBy: userId,
+          changedByRole: "customer",
+          note: "order_created",
+        },
+      ],
     });
     await order.save({ session });
 
     await session.commitTransaction();
-    debug('ORDER SERVICE: Order created successfully');
+    debug(
+      "ORDER SERVICE: Order created successfully",
+    );
+
+    // WHY: Record analytics for each business included in the order.
+    await Promise.all(
+      (order.businessIds || []).map((businessId) =>
+        writeAnalyticsEvent({
+          businessId,
+          actorId: userId,
+          actorRole: "customer",
+          eventType: "order_created",
+          entityType: "order",
+          entityId: order._id,
+          metadata: {
+            totalPrice: order.totalPrice,
+            itemCount: order.items?.length || 0,
+            status: order.status,
+          },
+        })
+      )
+    );
 
     return order;
   } catch (err) {
@@ -98,15 +377,22 @@ async function createOrder(userId, items) {
  * - Enables search and pagination
  * - Matches product & admin patterns
  */
-async function getUserOrders(userId, query) {
-  debug('ORDER SERVICE: getUserOrders - entry', { userId, query });
+async function getUserOrders(
+  userId,
+  query,
+) {
+  debug(
+    "ORDER SERVICE: getUserOrders - entry",
+    { userId, query },
+  );
 
   /**
    * ------------------------------------
    * STEP 1: PAGINATION
    * ------------------------------------
    */
-  const { page, limit, skip } = getPagination(query);
+  const { page, limit, skip } =
+    getPagination(query);
 
   /**
    * ------------------------------------
@@ -137,31 +423,45 @@ async function getUserOrders(userId, query) {
     filter.$text = { $search: search };
   }
 
-  debug('ORDER SERVICE: filter built', filter);
+  debug(
+    "ORDER SERVICE: filter built",
+    filter,
+  );
 
   /**
    * ------------------------------------
    * STEP 4: QUERY DATABASE
    * ------------------------------------
    */
-  const [orders, total] = await Promise.all([
-    Order.find(filter)
-      .populate('items.product', 'name imageUrl')
-      .select({ deletedAt: 0, deletedBy: 0, __v: 0 })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
+  const [orders, total] =
+    await Promise.all([
+      Order.find(filter)
+        .populate(
+          "items.product",
+          "name imageUrl",
+        )
+        .select({
+          deletedAt: 0,
+          deletedBy: 0,
+          __v: 0,
+        })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
 
-    Order.countDocuments(filter),
-  ]);
+      Order.countDocuments(filter),
+    ]);
 
-  debug('ORDER SERVICE: orders fetched', {
-    total,
-    returned: orders.length,
-    page,
-    limit,
-  });
+  debug(
+    "ORDER SERVICE: orders fetched",
+    {
+      total,
+      returned: orders.length,
+      page,
+      limit,
+    },
+  );
 
   /**
    * ------------------------------------
@@ -186,45 +486,83 @@ async function getUserOrders(userId, query) {
  * @param {string} userId - To verify ownership
  * @returns {Object} updated cancelled order
  */
-async function cancelOrder(orderId, userId) {
-  debug('ORDER SERVICE: cancelOrder', { orderId, userId });
+async function cancelOrder(
+  orderId,
+  userId,
+) {
+  debug("ORDER SERVICE: cancelOrder", {
+    orderId,
+    userId,
+  });
 
-  const session = await mongoose.startSession();
+  const session =
+    await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const order = await Order.findById(orderId).session(session);
+    const order =
+      await Order.findById(
+        orderId,
+      ).session(session);
 
     if (!order) {
-      throw new Error('Order not found');
+      throw new Error(
+        "Order not found",
+      );
     }
 
-    if (order.user.toString() !== userId) {
-      throw new Error('Not authorized: This is not your order');
+    if (
+      order.user.toString() !== userId
+    ) {
+      throw new Error(
+        "Not authorized: This is not your order",
+      );
     }
 
-    if (order.status !== 'pending') {
-      throw new Error('Can only cancel pending orders');
+    if (order.status !== "pending") {
+      throw new Error(
+        "Can only cancel pending orders",
+      );
     }
 
-    // Restore stock for each item
-    for (const item of order.items) {
-      const product = await Product.findById(item.product).session(session);
-      if (product) {
-        product.stock += item.quantity;
-        await product.save({ session });
-      }
-    }
+    // WHY: Stock is only adjusted on payment success, so cancel should NOT change stock.
 
     // Update order status
-    order.status = 'cancelled';
+    order.status = "cancelled";
+    order.statusHistory.push({
+      status: "cancelled",
+      changedAt: new Date(),
+      changedBy: userId,
+      changedByRole: "customer",
+      note: "customer_cancel",
+    });
     await order.save({ session });
 
     // Placeholder for real refund processing
-    debug('REFUND PLACEHOLDER: Initiate refund for order', orderId);
+    debug(
+      "REFUND PLACEHOLDER: Initiate refund for order",
+      orderId,
+    );
 
     await session.commitTransaction();
-    debug('ORDER SERVICE: Order cancelled and stock restored');
+    debug(
+      "ORDER SERVICE: Order cancelled (no stock change)",
+    );
+
+    await writeAuditLog({
+      businessId: null,
+      actorId: userId,
+      actorRole: "customer",
+      action: "order_status_update",
+      entityType: "order",
+      entityId: order._id,
+      message:
+        "Order cancelled by customer",
+      changes: {
+        from: "pending",
+        to: "cancelled",
+      },
+    });
 
     return order;
   } catch (err) {

@@ -16,7 +16,6 @@
  */
 
 const path = require('path');
-const fs = require('fs'); // Built-in for debug logging (no extra install needed)
 const swaggerJsdoc = require('swagger-jsdoc');
 
 const options = {
@@ -52,26 +51,5 @@ const options = {
 };
 
 const swaggerSpec = swaggerJsdoc(options);
-
-// Development debug: Shows exactly what files Swagger found
-if (process.env.NODE_ENV !== 'production') {
-  console.log('\nSwagger File Scanning Debug:');
-  options.apis.forEach((pattern) => {
-    const dir = path.dirname(pattern);
-    console.log(`Scanning: ${pattern}`);
-    if (fs.existsSync(dir)) {
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js'));
-      if (files.length > 0) {
-        console.log('   Found files:');
-        files.forEach((f) => console.log(`     • ${f}`));
-      } else {
-        console.log('   No .js files found in this folder!');
-      }
-    } else {
-      console.log(`   Directory does not exist: ${dir}`);
-    }
-  });
-  console.log('');
-}
 
 module.exports = swaggerSpec;

@@ -14,6 +14,7 @@
 
 const express = require('express');
 const debug = require('../utils/debug');
+const multer = require('multer');
 const authController = require('../controllers/auth.controller');
 // ✅ Import the authentication middleware
 const { requireAuth } = require('../middlewares/auth.middleware');
@@ -21,6 +22,12 @@ const { requireRole } = require('../middlewares/requireRole.middleware');
 const router = express.Router();
 
 debug('Auth routes initialized');
+
+// WHY: Store uploads in memory for direct Cloudinary streaming.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+});
 
 /**
  * Register a new user
@@ -48,13 +55,19 @@ debug('Auth routes initialized');
  *             type: object
  *             required: [email, password]
  *             properties:
- *               name:
+ *               firstName:
  *                 type: string
- *                 example: John Doe
+ *                 example: John
+ *               lastName:
+ *                 type: string
+ *                 example: Doe
  *               email:
  *                 type: string
  *                 example: user@test.com
  *               password:
+ *                 type: string
+ *                 example: password123
+ *               confirmPassword:
  *                 type: string
  *                 example: password123
  *               role:
@@ -105,6 +118,20 @@ router.post('/register', authController.register);
 router.post('/login', authController.login);
 
 /**
+ * Request password reset code
+ * POST /auth/password-reset/request
+ * Public route - no auth required
+ */
+router.post('/password-reset/request', authController.requestPasswordReset);
+
+/**
+ * Confirm password reset code + set new password
+ * POST /auth/password-reset/confirm
+ * Public route - no auth required
+ */
+router.post('/password-reset/confirm', authController.confirmPasswordReset);
+
+/**
  * Get current authenticated user
  * GET /auth/me
  * Protected route - requires valid JWT
@@ -132,6 +159,119 @@ router.get('/me', requireAuth, (req, res) => {
     user: req.user,
   });
 });
+
+/**
+ * Get current user profile (full profile from DB)
+ * GET /auth/profile
+ * Protected route - requires valid JWT
+ */
+router.get('/profile', requireAuth, authController.getProfile);
+
+/**
+ * Update current user profile
+ * PATCH /auth/profile
+ * Protected route - requires valid JWT
+ */
+router.patch('/profile', requireAuth, authController.updateProfile);
+
+/**
+ * Request email verification code
+ * POST /auth/email-verification/request
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/email-verification/request',
+  requireAuth,
+  authController.requestEmailVerification,
+);
+
+/**
+ * Confirm email verification code
+ * POST /auth/email-verification/confirm
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/email-verification/confirm',
+  requireAuth,
+  authController.confirmEmailVerification,
+);
+
+/**
+ * Request phone verification OTP
+ * POST /auth/phone-verification/request
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/phone-verification/request',
+  requireAuth,
+  authController.requestPhoneVerification,
+);
+
+/**
+ * Confirm phone verification OTP
+ * POST /auth/phone-verification/confirm
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/phone-verification/confirm',
+  requireAuth,
+  authController.confirmPhoneVerification,
+);
+
+/**
+ * Verify NIN (simulated)
+ * POST /auth/nin/verify
+ * Protected route - requires valid JWT
+ */
+router.post('/nin/verify', requireAuth, authController.verifyNin);
+
+/**
+ * Verify business registration (Dojah)
+ * POST /auth/business/verify
+ * Protected route - requires valid JWT
+ */
+router.post('/business/verify', requireAuth, authController.verifyBusiness);
+
+/**
+ * Verify address (Google Address Validation)
+ * POST /auth/address/verify
+ * Protected route - requires valid JWT
+ */
+router.post('/address/verify', requireAuth, authController.verifyAddress);
+
+/**
+ * Address autocomplete (Google Places)
+ * GET /auth/address/autocomplete?query=...
+ * Protected route - requires valid JWT
+ */
+router.get(
+  '/address/autocomplete',
+  requireAuth,
+  authController.addressAutocomplete,
+);
+
+/**
+ * Address place details (Google Places)
+ * GET /auth/address/place-details?placeId=...
+ * Protected route - requires valid JWT
+ */
+router.get(
+  '/address/place-details',
+  requireAuth,
+  authController.addressPlaceDetails,
+);
+
+/**
+ * Upload profile image
+ * POST /auth/profile-image
+ * Protected route - requires valid JWT
+ */
+router.post(
+  '/profile-image',
+  requireAuth,
+  upload.single('image'),
+  authController.uploadProfileImage,
+);
 
 /**
  * Admin-only test route

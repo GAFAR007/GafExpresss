@@ -319,6 +319,30 @@ router.get(
  * GET /admin/products/:id
  * Admin-only: View single product
  */
+/**
+ * @swagger
+ * /admin/products/{id}:
+ *   get:
+ *     summary: Get a single product by id (admin)
+ *     tags: [Admin - Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Product fetched successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (admin only)
+ *       404:
+ *         description: Product not found
+ */
 router.get(
   '/products/:id',
   requireAuth,

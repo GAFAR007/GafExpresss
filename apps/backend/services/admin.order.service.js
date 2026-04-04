@@ -6,6 +6,9 @@
  *
  * WHY:
  * - Centralizes admin access to orders
+ *
+ * HOW:
+ * - Uses pagination helpers + status transitions in a transaction
  */
 
 const Order = require('../models/Order');
@@ -15,6 +18,7 @@ const mongoose = require('mongoose');
 const { getPagination } = require('../utils/pagination');
 const { assertTransition } = require('../utils/orderStatus');
 const { adjustOrderStock } = require('../utils/stock'); // ← New import
+const { writeAuditLog } = require('../utils/audit');
 
 /**
  * Get all orders (admin view)
@@ -140,10 +144,16 @@ async function getAllOrders(query) {
  *
  * @param {string} id     - Order ID
  * @param {string} status - New status
+ * @param {Object} actor  - Actor metadata for audit
  * @returns {Object}      - Fully populated updated order
  */
-async function updateOrderStatus(id, status) {
-  debug('ADMIN ORDER SERVICE: updateOrderStatus', { id, status });
+async function updateOrderStatus(id, status, actor) {
+  debug('ADMIN ORDER SERVICE: updateOrderStatus', {
+    id,
+    status,
+    actorId: actor?.id,
+    actorRole: actor?.role,
+  });
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -162,17 +172,36 @@ async function updateOrderStatus(id, status) {
 
     // 3. Apply stock adjustments (only when needed)
     if (oldStatus === 'pending' && status === 'paid') {
-      await adjustOrderStock(order, 'decrease', session);
-    } else if (
-      (oldStatus === 'pending' || oldStatus === 'paid') &&
-      status === 'cancelled'
-    ) {
-      await adjustOrderStock(order, 'restore', session);
+      await adjustOrderStock(order, 'decrease', session, {
+        actorId: actor?.id,
+        actorRole: actor?.role,
+        businessId: null,
+        reason: 'order_paid',
+        source: 'admin',
+      });
+    } else if (oldStatus === 'paid' && status === 'cancelled') {
+      // WHY: Only restore stock if it was previously decreased on payment success.
+      await adjustOrderStock(order, 'restore', session, {
+        actorId: actor?.id,
+        actorRole: actor?.role,
+        businessId: null,
+        reason: 'order_cancelled',
+        source: 'admin',
+      });
     }
-    // No stock change for shipped → delivered or terminal states
+    // WHY: Pending cancel does not touch stock because we don't reserve on order creation.
+    // No stock change for shipped → delivered or terminal states.
 
     // 4. Update status
     order.status = status;
+    // WHY: Keep an immutable trail of order status changes.
+    order.statusHistory.push({
+      status,
+      changedAt: new Date(),
+      changedBy: actor?.id,
+      changedByRole: actor?.role,
+      note: 'admin_status_update',
+    });
     await order.save({ session });
 
     // 5. Commit everything atomically
@@ -182,6 +211,18 @@ async function updateOrderStatus(id, status) {
       orderId: id,
       from: oldStatus,
       to: status,
+    });
+
+    // WHY: Persist audit logs for sensitive order changes.
+    await writeAuditLog({
+      businessId: null,
+      actorId: actor?.id,
+      actorRole: actor?.role || 'admin',
+      action: 'order_status_update',
+      entityType: 'order',
+      entityId: order._id,
+      message: `Order status changed from ${oldStatus} to ${status}`,
+      changes: { from: oldStatus, to: status },
     });
 
     // 6. Return fresh, populated order for frontend
