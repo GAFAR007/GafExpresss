@@ -13,6 +13,9 @@
 /// - Reuses existing production actions for task status, staff assignment, and progress logging.
 library;
 
+import 'dart:math' as math;
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,6 +24,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
@@ -52,8 +56,16 @@ const String _monthEmptyTitle = "No scheduled work this month";
 const String _monthEmptyMessage =
     "Move to another month or start assigning tasks from the selected day.";
 const String _viewInsightsLabel = "View insights";
+const String _openDraftLabel = "Open draft";
+const String _returnToDraftLabel = "Return to draft";
 const String _viewInsightsTooltip = "Open plan insights";
 const String _refreshTooltip = "Refresh";
+const String _returnToDraftSuccess = "Production plan returned to draft.";
+const String _returnToDraftFailure = "Unable to return the plan to draft.";
+const String _returnToDraftConfirmTitle = "Return this plan to draft?";
+const String _returnToDraftConfirmMessage =
+    "This stops the live production lifecycle and reopens the same plan in draft mode so you can edit the saved schedule directly.";
+const String _returnToDraftConfirmLabel = "Return to draft";
 const String _todayLabel = "Today";
 const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
@@ -131,6 +143,10 @@ const String _logDialogActualLabel =
 const String _logDialogDelayLabel = "Delay reason";
 const String _logDialogDelayHelper =
     "Use None when work was completed. Choose the real reason only if this staff completed 0 today.";
+const String _logDialogQuantityActivityLabel = "Farm production activity";
+const String _logDialogQuantityAmountLabel = "Quantity completed today";
+const String _logDialogQuantityHelper =
+    "Track planting, transplant, or harvest quantities against the farm estimate. This updates the remaining target immediately.";
 const String _logDialogNotesLabel = "Daily notes";
 const String _logDialogWorkflowHint =
     "Record what one assigned staff actually completed on this date. This is not the total for the whole task. Example: if 6 plots are planned and Aisha completed 2.7, enter 2.7 here.";
@@ -154,6 +170,10 @@ const String _delayReasonLabourShortage = "labour_shortage";
 const String _delayReasonHealth = "health";
 const String _delayReasonInputUnavailable = "input_unavailable";
 const String _delayReasonManagementDelay = "management_delay";
+const String _quantityActivityNone = "none";
+const String _quantityActivityPlanting = "planting";
+const String _quantityActivityTransplant = "transplant";
+const String _quantityActivityHarvest = "harvest";
 const List<String> _delayReasonOptions = [
   _delayReasonNone,
   _delayReasonRain,
@@ -162,6 +182,12 @@ const List<String> _delayReasonOptions = [
   _delayReasonHealth,
   _delayReasonInputUnavailable,
   _delayReasonManagementDelay,
+];
+const List<String> _quantityActivityOptions = [
+  _quantityActivityNone,
+  _quantityActivityPlanting,
+  _quantityActivityTransplant,
+  _quantityActivityHarvest,
 ];
 const List<String> _weekdayLabels = [
   "Mon",
@@ -180,6 +206,10 @@ const double _calendarSpacing = 8;
 const double _dayTileRadius = 14;
 const double _dayTilePadding = 10;
 const double _agendaCardPadding = 14;
+final RegExp _importedProjectDayPattern = RegExp(
+  r"Project day\s+\d+\s+\((\d{4}-\d{2}-\d{2})\)\.",
+  caseSensitive: false,
+);
 
 enum _WorkspaceCalendarMode { day, month, year }
 
@@ -204,6 +234,33 @@ class _ProductionPlanWorkspaceScreenState
       return;
     }
     _showSnack(context, message);
+  }
+
+  Future<bool> _confirmAction({
+    required String title,
+    required String message,
+    required String confirmLabel,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(confirmLabel),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed == true;
   }
 
   @override
@@ -265,10 +322,20 @@ class _ProductionPlanWorkspaceScreenState
               staffList: staffList,
               userEmail: session?.user.email,
             );
+            final selfStaffId = _resolveSelfStaffId(
+              staffList: staffList,
+              userEmail: session?.user.email,
+            );
             final canManageCalendar = _canManageCalendar(
               actorRole: actorRole,
               staffRole: selfStaffRole,
             );
+            final canManageLifecycle = _canManagePlanLifecycle(
+              actorRole: actorRole,
+              staffRole: selfStaffRole,
+            );
+            final canSubmitOwnProgress =
+                actorRole == "staff" && selfStaffId.trim().isNotEmpty;
             final canReviewProgress = _canReviewProgress(
               actorRole: actorRole,
               staffRole: selfStaffRole,
@@ -312,9 +379,58 @@ class _ProductionPlanWorkspaceScreenState
                   plan: detail.plan,
                   selectedDay: selectedDay,
                   scheduledTaskCount: tasksForDay.length,
+                  timelineRows: detail.timelineRows,
+                  onOpenDraft: () {
+                    context.push(
+                      productionPlanDraftStudioPath(planId: widget.planId),
+                    );
+                  },
                   onViewInsights: () {
                     context.push(productionPlanInsightsPath(widget.planId));
                   },
+                  onReturnToDraft:
+                      canManageLifecycle &&
+                          (detail.plan.status == "active" ||
+                              detail.plan.status == "paused")
+                      ? () async {
+                          final confirmed = await _confirmAction(
+                            title: _returnToDraftConfirmTitle,
+                            message: _returnToDraftConfirmMessage,
+                            confirmLabel: _returnToDraftConfirmLabel,
+                          );
+                          if (!confirmed) {
+                            return;
+                          }
+                          try {
+                            await ref
+                                .read(productionPlanActionsProvider)
+                                .updatePlanStatus(
+                                  planId: widget.planId,
+                                  status: "draft",
+                                );
+                            if (!mounted || !this.context.mounted) {
+                              return;
+                            }
+                            setState(() {
+                              _visibleMonth = null;
+                              _selectedDay = null;
+                            });
+                            _showSnackSafe(_returnToDraftSuccess);
+                            GoRouter.of(this.context).go(
+                              productionPlanDraftStudioPath(
+                                planId: widget.planId,
+                              ),
+                            );
+                          } catch (error) {
+                            _showSnackSafe(
+                              _resolveProductionWorkspaceErrorMessage(
+                                error,
+                                fallback: _returnToDraftFailure,
+                              ),
+                            );
+                          }
+                        }
+                      : null,
                 ),
                 const SizedBox(height: _sectionSpacing),
                 const ProductionSectionHeader(
@@ -479,6 +595,12 @@ class _ProductionPlanWorkspaceScreenState
                     final rowsForTask = rowsForDay
                         .where((row) => row.taskId == task.id)
                         .toList();
+                    final canLogProgressForTask =
+                        canManageCalendar ||
+                        (canSubmitOwnProgress &&
+                            _resolveAssignedStaffIds(
+                              task,
+                            ).contains(selfStaffId));
                     return Padding(
                       padding: const EdgeInsets.only(bottom: _cardSpacing),
                       child: _AgendaTaskCard(
@@ -649,15 +771,20 @@ class _ProductionPlanWorkspaceScreenState
                                 }
                               }
                             : null,
-                        onLogProgress: canManageCalendar
+                        onLogProgress: canLogProgressForTask
                             ? () async {
                                 final input = await _showWorkspaceLogDialog(
                                   context,
                                   workDate: selectedDay,
                                   task: task,
+                                  plan: detail.plan,
                                   timelineRows: detail.timelineRows,
                                   staffMap: staffMap,
                                   planUnitLabelById: planUnitLabelById,
+                                  actorStaffId: selfStaffId.trim().isEmpty
+                                      ? null
+                                      : selfStaffId,
+                                  canPickAnyAssignedStaff: canManageCalendar,
                                 );
                                 if (input == null) {
                                   return;
@@ -679,6 +806,10 @@ class _ProductionPlanWorkspaceScreenState
                                         staffId: input.staffId,
                                         unitId: input.unitId,
                                         actualPlots: input.actualPlots,
+                                        quantityActivityType:
+                                            input.quantityActivityType,
+                                        quantityAmount: input.quantityAmount,
+                                        quantityUnit: input.quantityUnit,
                                         delayReason: input.delayReason,
                                         notes: input.notes,
                                         planId: widget.planId,
@@ -819,19 +950,29 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   final ProductionPlan plan;
   final DateTime selectedDay;
   final int scheduledTaskCount;
+  final List<ProductionTimelineRow> timelineRows;
+  final VoidCallback onOpenDraft;
   final VoidCallback onViewInsights;
+  final VoidCallback? onReturnToDraft;
 
   const _WorkspaceSummaryCard({
     required this.plan,
     required this.selectedDay,
     required this.scheduledTaskCount,
+    required this.timelineRows,
+    required this.onOpenDraft,
     required this.onViewInsights,
+    this.onReturnToDraft,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final farmQuantitySummary = _summarizeFarmQuantities(
+      plan: plan,
+      timelineRows: timelineRows,
+    );
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -883,20 +1024,48 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 icon: Icons.event_note_outlined,
                 label: "$scheduledTaskCount scheduled tasks",
               ),
+              if (farmQuantitySummary != null) ...[
+                _SummaryPill(
+                  icon: Icons.grass_outlined,
+                  label:
+                      "Planted left ${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} ${farmQuantitySummary.plantingUnit}",
+                ),
+                _SummaryPill(
+                  icon: Icons.swap_horiz_outlined,
+                  label:
+                      "Transplant left ${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} ${farmQuantitySummary.plantingUnit}",
+                ),
+                _SummaryPill(
+                  icon: Icons.agriculture_outlined,
+                  label:
+                      "Harvest left ${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} ${farmQuantitySummary.harvestUnit}",
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 14),
-          Row(
+          Text(
+            "Keep this screen operational. Open draft to compare or update the saved draft, and use insights for KPIs, governance, and long-form reporting.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Expanded(
-                child: Text(
-                  "Keep this screen operational. Use the insights screen for KPIs, governance, and long-form reporting.",
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
+              OutlinedButton.icon(
+                onPressed: onOpenDraft,
+                icon: const Icon(Icons.edit_note_outlined),
+                label: const Text(_openDraftLabel),
               ),
-              const SizedBox(width: 12),
+              if (onReturnToDraft != null)
+                OutlinedButton.icon(
+                  onPressed: onReturnToDraft,
+                  icon: const Icon(Icons.edit_calendar_outlined),
+                  label: const Text(_returnToDraftLabel),
+                ),
               OutlinedButton.icon(
                 onPressed: onViewInsights,
                 icon: const Icon(Icons.insights_outlined),
@@ -1665,7 +1834,7 @@ class _AgendaTaskCard extends StatelessWidget {
             children: [
               _InfoChip(
                 label:
-                    "$_scheduleLabel: ${_formatTaskWindow(task.startDate, task.dueDate)}",
+                    "$_scheduleLabel: ${_formatTaskWindow(startDate: _resolveEffectiveTaskWindow(task).startDate, dueDate: _resolveEffectiveTaskWindow(task).dueDate)}",
               ),
               _InfoChip(
                 label:
@@ -1710,8 +1879,8 @@ class _AgendaTaskCard extends StatelessWidget {
                   child: _AssignedStaffAttendanceRow(
                     staffLabel: _resolveStaffDisplayName(staffId, staffMap),
                     estimatedWindow: _formatTaskWindow(
-                      task.startDate,
-                      task.dueDate,
+                      startDate: _resolveEffectiveTaskWindow(task).startDate,
+                      dueDate: _resolveEffectiveTaskWindow(task).dueDate,
                     ),
                     actualWindow: _formatAttendanceWindow(attendance),
                     hasClockIn: attendance?.clockInAt != null,
@@ -1972,6 +2141,13 @@ class _TimelineLogRow extends StatelessWidget {
                 label:
                     "$_approvalLabel: ${_formatProgressApproval(row.approvalState)}",
               ),
+              if (row.quantityAmount > 0 &&
+                  row.quantityActivityType.trim().isNotEmpty &&
+                  row.quantityActivityType != _quantityActivityNone)
+                _InfoChip(
+                  label:
+                      "${_formatQuantityActivityLabel(row.quantityActivityType)}: ${_formatProgressAmount(row.quantityAmount)} ${row.quantityUnit}",
+                ),
             ],
           ),
           if (row.notes.trim().isNotEmpty) ...[
@@ -2011,6 +2187,9 @@ class _WorkspaceLogProgressInput {
   final String? staffId;
   final String? unitId;
   final num actualPlots;
+  final String quantityActivityType;
+  final num quantityAmount;
+  final String quantityUnit;
   final String delayReason;
   final String notes;
 
@@ -2018,8 +2197,33 @@ class _WorkspaceLogProgressInput {
     required this.staffId,
     required this.unitId,
     required this.actualPlots,
+    required this.quantityActivityType,
+    required this.quantityAmount,
+    required this.quantityUnit,
     required this.delayReason,
     required this.notes,
+  });
+}
+
+class _FarmQuantitySummary {
+  final String plantingUnit;
+  final String harvestUnit;
+  final num plantingLogged;
+  final num transplantLogged;
+  final num harvestLogged;
+  final num plantingRemaining;
+  final num transplantRemaining;
+  final num harvestRemaining;
+
+  const _FarmQuantitySummary({
+    required this.plantingUnit,
+    required this.harvestUnit,
+    required this.plantingLogged,
+    required this.transplantLogged,
+    required this.harvestLogged,
+    required this.plantingRemaining,
+    required this.transplantRemaining,
+    required this.harvestRemaining,
   });
 }
 
@@ -2200,10 +2404,13 @@ bool _taskTouchesMonth({
 }) {
   final monthStart = DateTime(month.year, month.month, 1);
   final nextMonthStart = DateTime(month.year, month.month + 1, 1);
-  final taskStart = task.startDate != null
-      ? _toDayStart(task.startDate!)
+  final effectiveWindow = _resolveEffectiveTaskWindow(task);
+  final taskStart = effectiveWindow.startDate != null
+      ? _toDayStart(effectiveWindow.startDate!)
       : monthStart;
-  final taskEnd = task.dueDate != null ? _toDayStart(task.dueDate!) : taskStart;
+  final taskEnd = effectiveWindow.dueDate != null
+      ? _toDayStart(effectiveWindow.dueDate!)
+      : taskStart;
   return !taskEnd.isBefore(monthStart) && taskStart.isBefore(nextMonthStart);
 }
 
@@ -2212,8 +2419,10 @@ List<ProductionTask> _tasksForDay(List<ProductionTask> tasks, DateTime day) {
     return _isTaskScheduledForDate(task: task, workDate: day);
   }).toList();
   items.sort((left, right) {
-    final leftStart = left.startDate ?? left.dueDate ?? day;
-    final rightStart = right.startDate ?? right.dueDate ?? day;
+    final leftWindow = _resolveEffectiveTaskWindow(left);
+    final rightWindow = _resolveEffectiveTaskWindow(right);
+    final leftStart = leftWindow.startDate ?? leftWindow.dueDate ?? day;
+    final rightStart = rightWindow.startDate ?? rightWindow.dueDate ?? day;
     return leftStart.compareTo(rightStart);
   });
   return items;
@@ -2284,6 +2493,26 @@ String? _resolveSelfStaffRole({
   return null;
 }
 
+String _resolveSelfStaffId({
+  required List<BusinessStaffProfileSummary> staffList,
+  required String? userEmail,
+}) {
+  if (userEmail == null) {
+    return "";
+  }
+  final normalizedEmail = userEmail.toLowerCase().trim();
+  if (normalizedEmail.isEmpty) {
+    return "";
+  }
+  for (final profile in staffList) {
+    final profileEmail = (profile.userEmail ?? "").toLowerCase().trim();
+    if (profileEmail.isNotEmpty && profileEmail == normalizedEmail) {
+      return profile.id.trim();
+    }
+  }
+  return "";
+}
+
 bool _canReviewProgress({
   required String? actorRole,
   required String? staffRole,
@@ -2291,7 +2520,10 @@ bool _canReviewProgress({
   if (actorRole == "business_owner") {
     return true;
   }
-  return actorRole == "staff" && staffRole == staffRoleEstateManager;
+  return actorRole == "staff" &&
+      (staffRole == staffRoleEstateManager ||
+          staffRole == staffRoleFarmManager ||
+          staffRole == staffRoleAssetManager);
 }
 
 bool _canManageTaskAttendance({
@@ -2319,6 +2551,38 @@ bool _canManageCalendar({
           staffRole == staffRoleAssetManager);
 }
 
+bool _canManagePlanLifecycle({
+  required String? actorRole,
+  required String? staffRole,
+}) {
+  if (actorRole == "business_owner") {
+    return true;
+  }
+  return actorRole == "staff" && staffRole == staffRoleEstateManager;
+}
+
+String _resolveProductionWorkspaceErrorMessage(
+  Object error, {
+  required String fallback,
+}) {
+  final dioError = error is DioException ? error : null;
+  final responseData = dioError?.response?.data;
+  final responseMap = responseData is Map<String, dynamic>
+      ? responseData
+      : const <String, dynamic>{};
+  final backendError = (responseMap["error"] ?? responseMap["message"] ?? "")
+      .toString()
+      .trim();
+  if (backendError.isNotEmpty) {
+    return backendError;
+  }
+  final rawMessage = error.toString().trim();
+  if (rawMessage.isNotEmpty && rawMessage != "Exception") {
+    return rawMessage;
+  }
+  return fallback;
+}
+
 DateTime _toDayStart(DateTime date) {
   return DateTime(date.year, date.month, date.day);
 }
@@ -2328,8 +2592,9 @@ bool _isTaskScheduledForDate({
   required DateTime workDate,
 }) {
   final normalizedWorkDate = _toDayStart(workDate);
-  final startDate = task.startDate;
-  final dueDate = task.dueDate;
+  final effectiveWindow = _resolveEffectiveTaskWindow(task);
+  final startDate = effectiveWindow.startDate;
+  final dueDate = effectiveWindow.dueDate;
   if (startDate == null && dueDate == null) {
     return true;
   }
@@ -2341,6 +2606,37 @@ bool _isTaskScheduledForDate({
     return false;
   }
   return true;
+}
+
+DateTime? _resolveImportedPinnedDay(ProductionTask task) {
+  // WHY: Imported PDF tasks carry their canonical work date inside the
+  // instructions body. Use that as the single source of truth when present so
+  // the workspace agenda reflects the authored draft instead of a broad phase
+  // span left over from scheduling.
+  final sourceTemplateKey = task.sourceTemplateKey.trim().toLowerCase();
+  if (!sourceTemplateKey.startsWith("imported_source_day_")) {
+    return null;
+  }
+  final match = _importedProjectDayPattern.firstMatch(task.instructions);
+  final isoDate = match?.group(1)?.trim() ?? "";
+  if (isoDate.isEmpty) {
+    return null;
+  }
+  final parsed = DateTime.tryParse(isoDate);
+  if (parsed == null) {
+    return null;
+  }
+  return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+({DateTime? startDate, DateTime? dueDate}) _resolveEffectiveTaskWindow(
+  ProductionTask task,
+) {
+  final pinnedImportedDay = _resolveImportedPinnedDay(task);
+  if (pinnedImportedDay != null) {
+    return (startDate: pinnedImportedDay, dueDate: pinnedImportedDay);
+  }
+  return (startDate: task.startDate, dueDate: task.dueDate);
 }
 
 String _toWorkDateKey(DateTime? date) {
@@ -2399,6 +2695,97 @@ String _buildAssignedUnitLabel({
   return labels.join(", ");
 }
 
+bool _supportsFarmQuantityTracking(ProductionPlan plan) {
+  return productionDomainRequiresPlantingTargets(plan.domainContext) &&
+      plan.plantingTargets?.isConfigured == true;
+}
+
+String _formatQuantityActivityLabel(String value) {
+  switch (value.trim().toLowerCase()) {
+    case _quantityActivityPlanting:
+      return "Planted";
+    case _quantityActivityTransplant:
+      return "Transplanted";
+    case _quantityActivityHarvest:
+      return "Harvested";
+    default:
+      return "Quantity";
+  }
+}
+
+num _sumQuantityForActivity({
+  required List<ProductionTimelineRow> timelineRows,
+  required String activityType,
+}) {
+  return timelineRows
+      .where(
+        (row) =>
+            row.quantityActivityType.trim() == activityType &&
+            row.approvalState != "needs_review",
+      )
+      .fold<num>(0, (sum, row) => sum + row.quantityAmount);
+}
+
+_FarmQuantitySummary? _summarizeFarmQuantities({
+  required ProductionPlan plan,
+  required List<ProductionTimelineRow> timelineRows,
+}) {
+  final plantingTargets = plan.plantingTargets;
+  if (!_supportsFarmQuantityTracking(plan) || plantingTargets == null) {
+    return null;
+  }
+  final plantingLogged = _sumQuantityForActivity(
+    timelineRows: timelineRows,
+    activityType: _quantityActivityPlanting,
+  );
+  final transplantLogged = _sumQuantityForActivity(
+    timelineRows: timelineRows,
+    activityType: _quantityActivityTransplant,
+  );
+  final harvestLogged = _sumQuantityForActivity(
+    timelineRows: timelineRows,
+    activityType: _quantityActivityHarvest,
+  );
+  return _FarmQuantitySummary(
+    plantingUnit: plantingTargets.plannedPlantingUnit,
+    harvestUnit: plantingTargets.estimatedHarvestUnit,
+    plantingLogged: plantingLogged,
+    transplantLogged: transplantLogged,
+    harvestLogged: harvestLogged,
+    plantingRemaining: math.max(
+      0,
+      plantingTargets.plannedPlantingQuantity - plantingLogged,
+    ),
+    transplantRemaining: math.max(
+      0,
+      plantingTargets.plannedPlantingQuantity - transplantLogged,
+    ),
+    harvestRemaining: math.max(
+      0,
+      plantingTargets.estimatedHarvestQuantity - harvestLogged,
+    ),
+  );
+}
+
+String _suggestQuantityActivityType(ProductionTask task) {
+  final text = "${task.title} ${task.instructions} ${task.taskType}"
+      .toLowerCase();
+  if (text.contains("harvest")) {
+    return _quantityActivityHarvest;
+  }
+  if (text.contains("transplant")) {
+    return _quantityActivityTransplant;
+  }
+  if (text.contains("nursery") ||
+      text.contains("seed") ||
+      text.contains("seedling") ||
+      text.contains("sow") ||
+      text.contains("plant")) {
+    return _quantityActivityPlanting;
+  }
+  return _quantityActivityNone;
+}
+
 num _resolveTaskProgressTargetAmount({
   required ProductionTask task,
   required List<String> assignedUnitIds,
@@ -2441,6 +2828,34 @@ List<num> _buildProgressAmountOptions({required num maxAmount}) {
     values.add(normalizedMax);
   }
   return values;
+}
+
+List<num> _buildQuantityAmountOptions({required num maxAmount}) {
+  final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
+  if (normalizedMax <= 12) {
+    final values = List<num>.generate(
+      normalizedMax.floor() + 1,
+      (index) => index.toDouble(),
+    );
+    if (!_sameProgressAmount(values.last, normalizedMax)) {
+      values.add(normalizedMax);
+    }
+    return values;
+  }
+  final values = <num>{0};
+  var scale = 1.0;
+  while (scale <= normalizedMax) {
+    for (final seed in const <double>[1, 2, 5]) {
+      final nextValue = seed * scale;
+      if (nextValue <= normalizedMax) {
+        values.add(nextValue);
+      }
+    }
+    scale *= 10;
+  }
+  values.add(normalizedMax);
+  final ordered = values.toList()..sort((left, right) => left.compareTo(right));
+  return ordered;
 }
 
 ProductionTimelineRow? _findExistingProgressRowForSelection({
@@ -2528,7 +2943,10 @@ String _staffListLabel(BusinessStaffProfileSummary staff) {
   return staff.id;
 }
 
-String _formatTaskWindow(DateTime? startDate, DateTime? dueDate) {
+String _formatTaskWindow({
+  required DateTime? startDate,
+  required DateTime? dueDate,
+}) {
   if (startDate == null && dueDate == null) {
     return "-";
   }
@@ -2663,18 +3081,25 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   BuildContext context, {
   required DateTime workDate,
   required ProductionTask task,
+  required ProductionPlan plan,
   required List<ProductionTimelineRow> timelineRows,
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
+  String? actorStaffId,
+  required bool canPickAnyAssignedStaff,
 }) async {
   final assignedStaffIds = _resolveAssignedStaffIds(task);
   final assignedUnitIds = task.assignedUnitIds
       .map((value) => value.trim())
       .where((value) => value.isNotEmpty)
       .toList();
-  String? selectedStaffId = assignedStaffIds.isNotEmpty
-      ? assignedStaffIds.first
-      : null;
+  final normalizedActorStaffId = actorStaffId?.trim() ?? "";
+  String? selectedStaffId =
+      !canPickAnyAssignedStaff &&
+          normalizedActorStaffId.isNotEmpty &&
+          assignedStaffIds.contains(normalizedActorStaffId)
+      ? normalizedActorStaffId
+      : (assignedStaffIds.isNotEmpty ? assignedStaffIds.first : null);
   String? selectedUnitId = assignedUnitIds.isNotEmpty
       ? assignedUnitIds.first
       : null;
@@ -2682,12 +3107,68 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
     task: task,
     assignedUnitIds: assignedUnitIds,
   );
+  final farmQuantitySummary = _summarizeFarmQuantities(
+    plan: plan,
+    timelineRows: timelineRows,
+  );
+  final supportsFarmQuantityTracking = farmQuantitySummary != null;
+  final suggestedQuantityActivityType = supportsFarmQuantityTracking
+      ? _suggestQuantityActivityType(task)
+      : _quantityActivityNone;
   num selectedActualAmount = 0;
+  var selectedQuantityActivityType = suggestedQuantityActivityType;
+  num selectedQuantityAmount = 0;
   final notesController = TextEditingController();
   var selectedDelayReason = _delayReasonNone;
   var validationError = "";
 
-  void syncFromExistingSelection() {
+  String resolveQuantityUnit(String activityType) {
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return farmQuantitySummary?.plantingUnit ?? "";
+      case _quantityActivityHarvest:
+        return farmQuantitySummary?.harvestUnit ?? "";
+      default:
+        return "";
+    }
+  }
+
+  num resolveQuantityTarget(String activityType) {
+    final plantingTargets = plan.plantingTargets;
+    if (plantingTargets == null) {
+      return 0;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return plantingTargets.plannedPlantingQuantity;
+      case _quantityActivityHarvest:
+        return plantingTargets.estimatedHarvestQuantity;
+      default:
+        return 0;
+    }
+  }
+
+  num resolveQuantityLogged(String activityType) {
+    if (farmQuantitySummary == null) {
+      return 0;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+        return farmQuantitySummary.plantingLogged;
+      case _quantityActivityTransplant:
+        return farmQuantitySummary.transplantLogged;
+      case _quantityActivityHarvest:
+        return farmQuantitySummary.harvestLogged;
+      default:
+        return 0;
+    }
+  }
+
+  void syncFromExistingSelection({
+    bool preserveSelectedQuantityActivity = false,
+  }) {
     final existingRow = _findExistingProgressRowForSelection(
       timelineRows: timelineRows,
       taskId: task.id,
@@ -2701,6 +3182,22 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
         ? existingDelayReason
         : _delayReasonNone;
     notesController.text = existingRow?.notes ?? "";
+    if (supportsFarmQuantityTracking) {
+      final existingQuantityActivityType =
+          existingRow?.quantityActivityType.trim() ?? "";
+      if (existingRow != null &&
+          existingRow.quantityAmount > 0 &&
+          existingQuantityActivityType.isNotEmpty &&
+          existingQuantityActivityType != _quantityActivityNone) {
+        selectedQuantityActivityType = existingQuantityActivityType;
+        selectedQuantityAmount = existingRow.quantityAmount;
+      } else {
+        if (!preserveSelectedQuantityActivity) {
+          selectedQuantityActivityType = suggestedQuantityActivityType;
+        }
+        selectedQuantityAmount = 0;
+      }
+    }
   }
 
   syncFromExistingSelection();
@@ -2752,6 +3249,40 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               (selectedStaffId != null && selectedStaffId!.trim().isNotEmpty)
               ? _resolveStaffDisplayName(selectedStaffId!, staffMap)
               : _unassignedLabel;
+          final existingSelectionQuantityAmount =
+              existingSelectionRow?.quantityActivityType.trim() ==
+                  selectedQuantityActivityType
+              ? existingSelectionRow?.quantityAmount ?? 0
+              : 0;
+          final quantityTarget = resolveQuantityTarget(
+            selectedQuantityActivityType,
+          );
+          final quantityLogged = resolveQuantityLogged(
+            selectedQuantityActivityType,
+          );
+          final quantityRemaining =
+              quantityTarget -
+              (quantityLogged - existingSelectionQuantityAmount);
+          final cappedQuantityRemaining = quantityRemaining < 0
+              ? 0
+              : quantityRemaining;
+          final quantityUnit = resolveQuantityUnit(
+            selectedQuantityActivityType,
+          );
+          final quantityOptions =
+              selectedQuantityActivityType == _quantityActivityNone
+              ? const <num>[0]
+              : _buildQuantityAmountOptions(maxAmount: cappedQuantityRemaining);
+          if (quantityOptions.isNotEmpty &&
+              !quantityOptions.any(
+                (amount) => _sameProgressAmount(amount, selectedQuantityAmount),
+              )) {
+            selectedQuantityAmount = quantityOptions.last;
+          }
+          final quantityRemainingAfterSave =
+              (cappedQuantityRemaining - selectedQuantityAmount) < 0
+              ? 0
+              : (cappedQuantityRemaining - selectedQuantityAmount);
           return AlertDialog(
             title: const Text(_logDialogTitle),
             content: SizedBox(
@@ -2778,7 +3309,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                       ),
                     ),
                     const SizedBox(height: 12),
-                    if (assignedStaffIds.isNotEmpty)
+                    if (assignedStaffIds.isNotEmpty && canPickAnyAssignedStaff)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedStaffId,
                         decoration: const InputDecoration(
@@ -2801,11 +3332,27 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         onChanged: (value) {
                           setDialogState(() {
                             selectedStaffId = value;
-                            syncFromExistingSelection();
+                            syncFromExistingSelection(
+                              preserveSelectedQuantityActivity: true,
+                            );
                           });
                         },
                       ),
-                    if (assignedStaffIds.isNotEmpty) const SizedBox(height: 12),
+                    if (assignedStaffIds.isNotEmpty && canPickAnyAssignedStaff)
+                      const SizedBox(height: 12),
+                    if (assignedStaffIds.isNotEmpty && !canPickAnyAssignedStaff)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          "Logging as $selectedStaffLabel",
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ),
                     if (assignedUnitIds.isNotEmpty)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedUnitId,
@@ -2827,7 +3374,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         onChanged: (value) {
                           setDialogState(() {
                             selectedUnitId = value;
-                            syncFromExistingSelection();
+                            syncFromExistingSelection(
+                              preserveSelectedQuantityActivity: true,
+                            );
                           });
                         },
                       ),
@@ -2863,6 +3412,79 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
+                    if (supportsFarmQuantityTracking) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedQuantityActivityType,
+                        decoration: const InputDecoration(
+                          labelText: _logDialogQuantityActivityLabel,
+                          helperText: _logDialogQuantityHelper,
+                          helperMaxLines: 2,
+                        ),
+                        items: _quantityActivityOptions
+                            .map(
+                              (value) => DropdownMenuItem<String>(
+                                value: value,
+                                child: Text(
+                                  value == _quantityActivityNone
+                                      ? "No quantity update"
+                                      : _formatQuantityActivityLabel(value),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setDialogState(() {
+                            selectedQuantityActivityType = value;
+                            selectedQuantityAmount = 0;
+                          });
+                        },
+                      ),
+                      if (selectedQuantityActivityType !=
+                          _quantityActivityNone) ...[
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<num>(
+                          initialValue: selectedQuantityAmount,
+                          decoration: InputDecoration(
+                            labelText: _logDialogQuantityAmountLabel,
+                            helperText:
+                                "Target ${_formatProgressAmount(quantityTarget)} $quantityUnit • logged ${_formatProgressAmount(quantityLogged)} $quantityUnit • remaining ${_formatProgressAmount(cappedQuantityRemaining)} $quantityUnit",
+                            helperMaxLines: 2,
+                          ),
+                          items: quantityOptions
+                              .map(
+                                (amount) => DropdownMenuItem<num>(
+                                  value: amount,
+                                  child: Text(
+                                    "${_formatProgressAmount(amount)} $quantityUnit",
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setDialogState(() {
+                              selectedQuantityAmount = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "${_formatQuantityActivityLabel(selectedQuantityActivityType)} preview: ${_formatProgressAmount(selectedQuantityAmount)} $quantityUnit today • ${_formatProgressAmount(quantityRemainingAfterSave)} $quantityUnit left after save.",
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ],
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: selectedDelayReason,
@@ -2918,6 +3540,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               FilledButton(
                 onPressed: () {
                   if (selectedActualAmount == 0 &&
+                      selectedQuantityAmount == 0 &&
                       selectedDelayReason == _delayReasonNone) {
                     setDialogState(() {
                       validationError = _logDialogDelayRequired;
@@ -2929,6 +3552,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                       staffId: selectedStaffId,
                       unitId: selectedUnitId,
                       actualPlots: selectedActualAmount,
+                      quantityActivityType: selectedQuantityActivityType,
+                      quantityAmount: selectedQuantityAmount,
+                      quantityUnit:
+                          selectedQuantityActivityType == _quantityActivityNone
+                          ? ""
+                          : resolveQuantityUnit(selectedQuantityActivityType),
                       delayReason: selectedDelayReason,
                       notes: notesController.text.trim(),
                     ),

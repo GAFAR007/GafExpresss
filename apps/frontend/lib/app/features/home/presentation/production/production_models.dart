@@ -32,6 +32,13 @@ const String _keyCreatedBy = "createdBy";
 const String _keyApprovedBy = "approvedBy";
 const String _keyApprovedAt = "approvedAt";
 const String _keyNotes = "notes";
+const String _keyNote = "note";
+const String _keyPlantingTargets = "plantingTargets";
+const String _keyMaterialType = "materialType";
+const String _keyPlannedPlantingQuantity = "plannedPlantingQuantity";
+const String _keyPlannedPlantingUnit = "plannedPlantingUnit";
+const String _keyEstimatedHarvestQuantity = "estimatedHarvestQuantity";
+const String _keyEstimatedHarvestUnit = "estimatedHarvestUnit";
 const String _keyAiGenerated = "aiGenerated";
 const String _keyCreatedAt = "createdAt";
 const String _keyUpdatedAt = "updatedAt";
@@ -46,6 +53,11 @@ const String _keyUnitId = "unitId";
 const String _keyName = "name";
 const String _keyOrder = "order";
 const String _keyPhaseType = "phaseType";
+const String _keyRequiredUnits = "requiredUnits";
+const String _keyMinRatePerFarmerHour = "minRatePerFarmerHour";
+const String _keyTargetRatePerFarmerHour = "targetRatePerFarmerHour";
+const String _keyPlannedHoursPerDay = "plannedHoursPerDay";
+const String _keyBiologicalMinDays = "biologicalMinDays";
 const String _keyKpiTarget = "kpiTarget";
 const String _keyTasks = "tasks";
 const String _keyPhases = "phases";
@@ -96,6 +108,10 @@ const String _keyAssignedUnitIds = "assignedUnitIds";
 const String _keyRequiredHeadcount = "requiredHeadcount";
 const String _keyAssignedCount = "assignedCount";
 const String _keyWeight = "weight";
+const String _keyTaskType = "taskType";
+const String _keySourceTemplateKey = "sourceTemplateKey";
+const String _keyRecurrenceGroupKey = "recurrenceGroupKey";
+const String _keyOccurrenceIndex = "occurrenceIndex";
 const String _keyDueDate = "dueDate";
 const String _keyInstructions = "instructions";
 const String _keyDependencies = "dependencies";
@@ -147,6 +163,23 @@ const String _keyCapacity = "capacity";
 const String _keyScheduleStability = "scheduleStability";
 const String _keyHistoricalReliability = "historicalReliability";
 const String _keyComplexityRisk = "complexityRisk";
+const String _keyLastDraftSavedAt = "lastDraftSavedAt";
+const String _keyLastDraftSavedBy = "lastDraftSavedBy";
+const String _keyDraftRevisionCount = "draftRevisionCount";
+const String _keyDraftAuditTrailCount = "draftAuditTrailCount";
+const String _keyDraftAuditLog = "draftAuditLog";
+const String _keyDraftRevisions = "draftRevisions";
+const String _keyRevisionNumber = "revisionNumber";
+const String _keyAction = "action";
+const String _keyActor = "actor";
+const String _keyActorId = "actorId";
+const String _keyActorName = "actorName";
+const String _keyActorEmail = "actorEmail";
+const String _keyActorRole = "actorRole";
+const String _keyActorStaffRole = "actorStaffRole";
+const String _keySavedAt = "savedAt";
+const String _keyPhaseCount = "phaseCount";
+const String _keyTaskCount = "taskCount";
 const String _keyPlanCount = "planCount";
 const String _keyWeightedUnitCount = "weightedUnitCount";
 const String _keyScope = "scope";
@@ -161,11 +194,13 @@ const String _keyPhaseName = "phaseName";
 const String _keyFarmerName = "farmerName";
 const String _keyExpectedPlots = "expectedPlots";
 const String _keyActualPlots = "actualPlots";
+const String _keyQuantityActivityType = "quantityActivityType";
+const String _keyQuantityAmount = "quantityAmount";
+const String _keyQuantityUnit = "quantityUnit";
 const String _keyDelay = "delay";
 const String _keyDelayReason = "delayReason";
 const String _keyApprovalState = "approvalState";
 const String _keyCompletionRatio = "completionRatio";
-const String _keyRequiredUnits = "requiredUnits";
 const String _keyCompletedUnitCount = "completedUnitCount";
 const String _keyRemainingUnits = "remainingUnits";
 const String _keyIsLocked = "isLocked";
@@ -252,9 +287,14 @@ class ProductionPlan {
   final String status;
   final String createdBy;
   final String notes;
+  final ProductionPlantingTargets? plantingTargets;
   final bool aiGenerated;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  final DateTime? lastDraftSavedAt;
+  final ProductionDraftActor? lastDraftSavedBy;
+  final int draftRevisionCount;
+  final int draftAuditTrailCount;
   final ProductionPlanConfidence? confidence;
 
   const ProductionPlan({
@@ -269,9 +309,14 @@ class ProductionPlan {
     required this.status,
     required this.createdBy,
     required this.notes,
+    required this.plantingTargets,
     required this.aiGenerated,
     required this.createdAt,
     required this.updatedAt,
+    required this.lastDraftSavedAt,
+    required this.lastDraftSavedBy,
+    required this.draftRevisionCount,
+    required this.draftAuditTrailCount,
     required this.confidence,
   });
 
@@ -293,14 +338,185 @@ class ProductionPlan {
       status: _parseString(json[_keyStatus]),
       createdBy: _parseString(json[_keyCreatedBy]),
       notes: _parseString(json[_keyNotes]),
+      plantingTargets: json[_keyPlantingTargets] is Map<String, dynamic>
+          ? ProductionPlantingTargets.fromJson(
+              json[_keyPlantingTargets] as Map<String, dynamic>,
+            )
+          : null,
       aiGenerated: json[_keyAiGenerated] == true,
       createdAt: _parseDate(json[_keyCreatedAt]),
       updatedAt: _parseDate(json[_keyUpdatedAt]),
+      lastDraftSavedAt: _parseDate(json[_keyLastDraftSavedAt]),
+      lastDraftSavedBy: json[_keyLastDraftSavedBy] is Map<String, dynamic>
+          ? ProductionDraftActor.fromJson(
+              json[_keyLastDraftSavedBy] as Map<String, dynamic>,
+            )
+          : null,
+      draftRevisionCount: _parseInt(json[_keyDraftRevisionCount]),
+      draftAuditTrailCount: _parseInt(json[_keyDraftAuditTrailCount]),
       confidence: json[_keyConfidence] is Map<String, dynamic>
           ? ProductionPlanConfidence.fromJson(
               json[_keyConfidence] as Map<String, dynamic>,
             )
           : null,
+    );
+  }
+}
+
+class ProductionPlantingTargets {
+  final String materialType;
+  final double plannedPlantingQuantity;
+  final String plannedPlantingUnit;
+  final double estimatedHarvestQuantity;
+  final String estimatedHarvestUnit;
+
+  const ProductionPlantingTargets({
+    required this.materialType,
+    required this.plannedPlantingQuantity,
+    required this.plannedPlantingUnit,
+    required this.estimatedHarvestQuantity,
+    required this.estimatedHarvestUnit,
+  });
+
+  bool get isConfigured {
+    return materialType.trim().isNotEmpty &&
+        plannedPlantingQuantity > 0 &&
+        plannedPlantingUnit.trim().isNotEmpty &&
+        estimatedHarvestQuantity > 0 &&
+        estimatedHarvestUnit.trim().isNotEmpty;
+  }
+
+  factory ProductionPlantingTargets.fromJson(Map<String, dynamic> json) {
+    return ProductionPlantingTargets(
+      materialType: _parseString(json[_keyMaterialType]),
+      plannedPlantingQuantity: _parseDouble(json[_keyPlannedPlantingQuantity]),
+      plannedPlantingUnit: _parseString(json[_keyPlannedPlantingUnit]),
+      estimatedHarvestQuantity: _parseDouble(
+        json[_keyEstimatedHarvestQuantity],
+      ),
+      estimatedHarvestUnit: _parseString(json[_keyEstimatedHarvestUnit]),
+    );
+  }
+}
+
+class ProductionDraftActor {
+  final String actorId;
+  final String actorName;
+  final String actorEmail;
+  final String actorRole;
+  final String actorStaffRole;
+
+  const ProductionDraftActor({
+    required this.actorId,
+    required this.actorName,
+    required this.actorEmail,
+    required this.actorRole,
+    required this.actorStaffRole,
+  });
+
+  String get displayLabel {
+    if (actorName.trim().isNotEmpty) {
+      return actorName.trim();
+    }
+    if (actorEmail.trim().isNotEmpty) {
+      return actorEmail.trim();
+    }
+    return actorId.trim();
+  }
+
+  factory ProductionDraftActor.fromJson(Map<String, dynamic> json) {
+    return ProductionDraftActor(
+      actorId: _parseString(json[_keyActorId]),
+      actorName: _parseString(json[_keyActorName]),
+      actorEmail: _parseString(json[_keyActorEmail]),
+      actorRole: _parseString(json[_keyActorRole]),
+      actorStaffRole: _parseString(json[_keyActorStaffRole]),
+    );
+  }
+}
+
+class ProductionDraftAuditEntry {
+  final String id;
+  final String action;
+  final String note;
+  final int revisionNumber;
+  final DateTime? createdAt;
+  final ProductionDraftActor? actor;
+
+  const ProductionDraftAuditEntry({
+    required this.id,
+    required this.action,
+    required this.note,
+    required this.revisionNumber,
+    required this.createdAt,
+    required this.actor,
+  });
+
+  factory ProductionDraftAuditEntry.fromJson(Map<String, dynamic> json) {
+    final actorJson = json[_keyActor];
+    return ProductionDraftAuditEntry(
+      id: _parseId(json),
+      action: _parseString(json[_keyAction]),
+      note: _parseString(json[_keyNote]),
+      revisionNumber: _parseInt(json[_keyRevisionNumber]),
+      createdAt: _parseDate(json[_keyCreatedAt]),
+      actor: actorJson is Map<String, dynamic>
+          ? ProductionDraftActor.fromJson(actorJson)
+          : null,
+    );
+  }
+}
+
+class ProductionDraftRevisionSummary {
+  final String id;
+  final int revisionNumber;
+  final String action;
+  final String note;
+  final DateTime? savedAt;
+  final ProductionDraftActor? actor;
+  final String title;
+  final String status;
+  final int phaseCount;
+  final int taskCount;
+  final DateTime? startDate;
+  final DateTime? endDate;
+
+  const ProductionDraftRevisionSummary({
+    required this.id,
+    required this.revisionNumber,
+    required this.action,
+    required this.note,
+    required this.savedAt,
+    required this.actor,
+    required this.title,
+    required this.status,
+    required this.phaseCount,
+    required this.taskCount,
+    required this.startDate,
+    required this.endDate,
+  });
+
+  factory ProductionDraftRevisionSummary.fromJson(Map<String, dynamic> json) {
+    final actorJson = json[_keyActor];
+    final summaryJson = json[_keySummary];
+    final summaryMap = summaryJson is Map<String, dynamic>
+        ? summaryJson
+        : const <String, dynamic>{};
+    return ProductionDraftRevisionSummary(
+      id: _parseId(json),
+      revisionNumber: _parseInt(json[_keyRevisionNumber]),
+      action: _parseString(json[_keyAction]),
+      note: _parseString(json[_keyNote]),
+      savedAt: _parseDate(json[_keySavedAt]),
+      actor: actorJson is Map<String, dynamic>
+          ? ProductionDraftActor.fromJson(actorJson)
+          : null,
+      title: _parseString(summaryMap[_keyTitle]),
+      status: _parseString(summaryMap[_keyStatus]),
+      phaseCount: _parseInt(summaryMap[_keyPhaseCount]),
+      taskCount: _parseInt(summaryMap[_keyTaskCount]),
+      startDate: _parseDate(summaryMap[_keyStartDate]),
+      endDate: _parseDate(summaryMap[_keyEndDate]),
     );
   }
 }
@@ -388,6 +604,10 @@ class ProductionPhase {
   final int order;
   final String phaseType;
   final int requiredUnits;
+  final double minRatePerFarmerHour;
+  final double targetRatePerFarmerHour;
+  final double plannedHoursPerDay;
+  final int biologicalMinDays;
   final DateTime? startDate;
   final DateTime? endDate;
   final String status;
@@ -400,6 +620,10 @@ class ProductionPhase {
     required this.order,
     required this.phaseType,
     required this.requiredUnits,
+    required this.minRatePerFarmerHour,
+    required this.targetRatePerFarmerHour,
+    required this.plannedHoursPerDay,
+    required this.biologicalMinDays,
     required this.startDate,
     required this.endDate,
     required this.status,
@@ -417,6 +641,10 @@ class ProductionPhase {
       order: _parseInt(json[_keyOrder]),
       phaseType: _parseString(json[_keyPhaseType]),
       requiredUnits: _parseInt(json[_keyRequiredUnits]),
+      minRatePerFarmerHour: _parseDouble(json[_keyMinRatePerFarmerHour]),
+      targetRatePerFarmerHour: _parseDouble(json[_keyTargetRatePerFarmerHour]),
+      plannedHoursPerDay: _parseDouble(json[_keyPlannedHoursPerDay]),
+      biologicalMinDays: _parseInt(json[_keyBiologicalMinDays]),
       startDate: _parseDate(json[_keyStartDate]),
       endDate: _parseDate(json[_keyEndDate]),
       status: _parseString(json[_keyStatus]),
@@ -437,6 +665,10 @@ class ProductionTask {
   final int requiredHeadcount;
   final int assignedCount;
   final int weight;
+  final String taskType;
+  final String sourceTemplateKey;
+  final String recurrenceGroupKey;
+  final int occurrenceIndex;
   final DateTime? startDate;
   final DateTime? dueDate;
   final String status;
@@ -458,6 +690,10 @@ class ProductionTask {
     required this.requiredHeadcount,
     required this.assignedCount,
     required this.weight,
+    required this.taskType,
+    required this.sourceTemplateKey,
+    required this.recurrenceGroupKey,
+    required this.occurrenceIndex,
     required this.startDate,
     required this.dueDate,
     required this.status,
@@ -500,6 +736,10 @@ class ProductionTask {
         fallback: assignedStaffIds.length,
       ),
       weight: _parseInt(json[_keyWeight], fallback: 1),
+      taskType: _parseString(json[_keyTaskType]),
+      sourceTemplateKey: _parseString(json[_keySourceTemplateKey]),
+      recurrenceGroupKey: _parseString(json[_keyRecurrenceGroupKey]),
+      occurrenceIndex: _parseInt(json[_keyOccurrenceIndex]),
       startDate: _parseDate(json[_keyStartDate]),
       dueDate: _parseDate(json[_keyDueDate]),
       status: _parseString(json[_keyStatus]),
@@ -1004,6 +1244,8 @@ class ProductionPlanDetail {
   final ProductionPreorderSummary? preorderSummary;
   final List<ProductionTimelineRow> timelineRows;
   final List<ProductionStaffProgressScore> staffProgressScores;
+  final List<ProductionDraftAuditEntry> draftAuditLog;
+  final List<ProductionDraftRevisionSummary> draftRevisions;
   final List<ProductionPhaseUnitProgress> phaseUnitProgress;
   final List<ProductionUnitDivergence> unitDivergence;
   final List<ProductionUnitScheduleWarning> unitScheduleWarnings;
@@ -1024,6 +1266,8 @@ class ProductionPlanDetail {
     required this.preorderSummary,
     required this.timelineRows,
     required this.staffProgressScores,
+    required this.draftAuditLog,
+    required this.draftRevisions,
     required this.phaseUnitProgress,
     required this.unitDivergence,
     required this.unitScheduleWarnings,
@@ -1046,6 +1290,9 @@ class ProductionPlanDetail {
     final timelineRowsList = (json[_keyTimelineRows] ?? []) as List<dynamic>;
     final staffProgressScoresList =
         (json[_keyStaffProgressScores] ?? []) as List<dynamic>;
+    final draftAuditLogList = (json[_keyDraftAuditLog] ?? []) as List<dynamic>;
+    final draftRevisionsList =
+        (json[_keyDraftRevisions] ?? []) as List<dynamic>;
     final phaseUnitProgressList =
         (json[_keyPhaseUnitProgress] ?? []) as List<dynamic>;
     final unitDivergenceList =
@@ -1108,6 +1355,14 @@ class ProductionPlanDetail {
               item as Map<String, dynamic>,
             ),
           )
+          .toList(),
+      draftAuditLog: draftAuditLogList
+          .whereType<Map<String, dynamic>>()
+          .map(ProductionDraftAuditEntry.fromJson)
+          .toList(),
+      draftRevisions: draftRevisionsList
+          .whereType<Map<String, dynamic>>()
+          .map(ProductionDraftRevisionSummary.fromJson)
           .toList(),
       phaseUnitProgress: phaseUnitProgressList
           .whereType<Map<String, dynamic>>()
@@ -1769,6 +2024,9 @@ class ProductionTimelineRow {
   final String farmerName;
   final num expectedPlots;
   final num actualPlots;
+  final String quantityActivityType;
+  final num quantityAmount;
+  final String quantityUnit;
   final String status;
   final String delay;
   final String delayReason;
@@ -1789,6 +2047,9 @@ class ProductionTimelineRow {
     required this.farmerName,
     required this.expectedPlots,
     required this.actualPlots,
+    required this.quantityActivityType,
+    required this.quantityAmount,
+    required this.quantityUnit,
     required this.status,
     required this.delay,
     required this.delayReason,
@@ -1817,6 +2078,9 @@ class ProductionTimelineRow {
       farmerName: _parseString(json[_keyFarmerName]),
       expectedPlots: _parseNum(json[_keyExpectedPlots]),
       actualPlots: _parseNum(json[_keyActualPlots]),
+      quantityActivityType: _parseString(json[_keyQuantityActivityType]),
+      quantityAmount: _parseNum(json[_keyQuantityAmount]),
+      quantityUnit: _parseString(json[_keyQuantityUnit]),
       status: _parseString(json[_keyStatus]),
       delay: _parseString(json[_keyDelay]),
       delayReason: _parseString(json[_keyDelayReason]),
@@ -1866,6 +2130,9 @@ class ProductionTaskProgressRecord {
   final DateTime? workDate;
   final num expectedPlots;
   final num actualPlots;
+  final String quantityActivityType;
+  final num quantityAmount;
+  final String quantityUnit;
   final String delayReason;
   final String notes;
   final String createdBy;
@@ -1881,6 +2148,9 @@ class ProductionTaskProgressRecord {
     required this.workDate,
     required this.expectedPlots,
     required this.actualPlots,
+    required this.quantityActivityType,
+    required this.quantityAmount,
+    required this.quantityUnit,
     required this.delayReason,
     required this.notes,
     required this.createdBy,
@@ -1898,6 +2168,9 @@ class ProductionTaskProgressRecord {
       workDate: _parseDate(json[_keyWorkDate]),
       expectedPlots: _parseNum(json[_keyExpectedPlots]),
       actualPlots: _parseNum(json[_keyActualPlots]),
+      quantityActivityType: _parseString(json[_keyQuantityActivityType]),
+      quantityAmount: _parseNum(json[_keyQuantityAmount]),
+      quantityUnit: _parseString(json[_keyQuantityUnit]),
       delayReason: _parseString(json[_keyDelayReason]),
       notes: _parseString(json[_keyNotes]),
       createdBy: _parseString(json[_keyCreatedBy]),

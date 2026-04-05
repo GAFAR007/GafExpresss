@@ -31,6 +31,178 @@ const PRODUCTION_PLAN_STATUSES = [
   'archived',
 ];
 
+const productionPlantingTargetsSchema = new mongoose.Schema(
+  {
+    materialType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    plannedPlantingQuantity: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    plannedPlantingUnit: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    estimatedHarvestQuantity: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    estimatedHarvestUnit: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+const productionDraftActorSchema = new mongoose.Schema(
+  {
+    actorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    actorName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    actorEmail: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    actorRole: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    actorStaffRole: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+const productionDraftRevisionSummarySchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    status: {
+      type: String,
+      trim: true,
+      default: 'draft',
+    },
+    phaseCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    taskCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    startDate: {
+      type: Date,
+      default: null,
+    },
+    endDate: {
+      type: Date,
+      default: null,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
+const productionDraftRevisionSchema = new mongoose.Schema(
+  {
+    revisionNumber: {
+      type: Number,
+      min: 1,
+      required: true,
+    },
+    action: {
+      type: String,
+      trim: true,
+      default: 'updated',
+    },
+    note: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    actor: {
+      type: productionDraftActorSchema,
+      default: null,
+    },
+    savedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    summary: {
+      type: productionDraftRevisionSummarySchema,
+      default: () => ({}),
+    },
+    snapshot: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+  },
+  {
+    timestamps: false,
+  },
+);
+
+const productionDraftAuditEntrySchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      trim: true,
+      default: 'updated',
+    },
+    note: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    revisionNumber: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    actor: {
+      type: productionDraftActorSchema,
+      default: null,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    timestamps: false,
+  },
+);
+
 const productionPlanSchema = new mongoose.Schema(
   {
     // WHY: Business scope keeps plans isolated per owner.
@@ -87,6 +259,11 @@ const productionPlanSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+    // WHY: Farm plans need explicit planting and expected harvest targets before execution starts.
+    plantingTargets: {
+      type: productionPlantingTargetsSchema,
+      default: null,
     },
     // WHY: Flags AI-generated drafts for review workflows.
     aiGenerated: {
@@ -162,6 +339,33 @@ const productionPlanSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: 0,
+    },
+    // WHY: Draft saves must track who last changed the plan before activation.
+    lastDraftSavedAt: {
+      type: Date,
+      default: null,
+    },
+    lastDraftSavedBy: {
+      type: productionDraftActorSchema,
+      default: null,
+    },
+    draftRevisionCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    draftAuditTrailCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    draftAuditLog: {
+      type: [productionDraftAuditEntrySchema],
+      default: [],
+    },
+    draftRevisions: {
+      type: [productionDraftRevisionSchema],
+      default: [],
     },
   },
   {

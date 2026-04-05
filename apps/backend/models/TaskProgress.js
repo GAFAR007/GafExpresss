@@ -22,6 +22,13 @@ const {
   PRODUCTION_TASK_PROGRESS_DELAY_REASONS,
 } = require("../utils/production_engine.config");
 
+const PRODUCTION_QUANTITY_ACTIVITY_TYPES = [
+  "none",
+  "planting",
+  "transplant",
+  "harvest",
+];
+
 debug("Loading TaskProgress model...");
 
 const taskProgressSchema = new mongoose.Schema(
@@ -91,6 +98,23 @@ const taskProgressSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // WHY: Farm execution also tracks planting, transplant, and harvest quantities per day.
+    quantityActivityType: {
+      type: String,
+      enum: PRODUCTION_QUANTITY_ACTIVITY_TYPES,
+      default: "none",
+      index: true,
+    },
+    quantityAmount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    quantityUnit: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     // WHY: Structured delay reasons avoid vague "task failed" records.
     delayReason: {
       type: String,
@@ -149,3 +173,5 @@ module.exports.PRODUCTION_TASK_PROGRESS_DELAY_REASONS =
   PRODUCTION_TASK_PROGRESS_DELAY_REASONS;
 module.exports.PLOT_UNIT_SCALE =
   PLOT_UNIT_SCALE;
+module.exports.PRODUCTION_QUANTITY_ACTIVITY_TYPES =
+  PRODUCTION_QUANTITY_ACTIVITY_TYPES;

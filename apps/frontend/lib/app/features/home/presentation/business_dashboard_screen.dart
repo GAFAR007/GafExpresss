@@ -366,6 +366,17 @@ class BusinessDashboardScreen extends ConsumerWidget {
         },
       ),
       _DashboardAction(
+        icon: Icons.agriculture_outlined,
+        title: "Farm audit",
+        subtitle:
+            "Track tools, machinery, and quarterly or yearly equipment reviews.",
+        accent: AppColors.productionAccent,
+        onTap: () {
+          _logTap("farm_audit_quick");
+          context.go('/business-assets/farm-audit');
+        },
+      ),
+      _DashboardAction(
         icon: Icons.home_work_outlined,
         title: "Tenants",
         subtitle:

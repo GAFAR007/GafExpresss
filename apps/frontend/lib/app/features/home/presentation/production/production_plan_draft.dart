@@ -67,6 +67,16 @@ const String _errorProductRequired = "Product is required.";
 const String _errorStartDateRequired = "Start date is required.";
 const String _errorEndDateRequired = "End date is required.";
 const String _errorDateRange = "End date must be after start date.";
+const String _errorPlantingMaterialRequired =
+    "Planting material type is required for farm production.";
+const String _errorPlannedPlantingQuantityRequired =
+    "Planned planting quantity is required before drafting farm production.";
+const String _errorPlannedPlantingUnitRequired =
+    "Planned planting unit is required before drafting farm production.";
+const String _errorEstimatedHarvestQuantityRequired =
+    "Estimated harvest quantity is required before drafting farm production.";
+const String _errorEstimatedHarvestUnitRequired =
+    "Estimated harvest unit is required before drafting farm production.";
 const String _errorTasksRequired = "Add at least one task.";
 const String _errorTaskTitleRequired = "Task title is required.";
 const String _errorTaskRoleRequired = "Task role is required.";
@@ -83,6 +93,12 @@ const String _payloadStartDate = "startDate";
 const String _payloadEndDate = "endDate";
 const String _payloadDomainContext = "domainContext";
 const String _payloadAiGenerated = "aiGenerated";
+const String _payloadPlantingTargets = "plantingTargets";
+const String _payloadPlantingMaterialType = "materialType";
+const String _payloadPlannedPlantingQuantity = "plannedPlantingQuantity";
+const String _payloadPlannedPlantingUnit = "plannedPlantingUnit";
+const String _payloadEstimatedHarvestQuantity = "estimatedHarvestQuantity";
+const String _payloadEstimatedHarvestUnit = "estimatedHarvestUnit";
 const String _payloadPhases = "phases";
 const String _payloadPhaseName = "name";
 const String _payloadPhaseOrder = "order";
@@ -158,6 +174,7 @@ const String _fieldStartDate = "startDate";
 const String _fieldEndDate = "endDate";
 const String _fieldDomainContext = "domainContext";
 const String _fieldAiGenerated = "aiGenerated";
+const String _fieldPlantingTargets = "plantingTargets";
 const String _fieldTask = "task";
 const String _responseDraftKey = "draft";
 const String _responseStatusKey = "status";
@@ -170,6 +187,262 @@ const String _extraPhaseCountKey = "phaseCount";
 const String _extraMissingKey = "missing";
 const String _extraInvalidKey = "invalid";
 const String _extraIssueTypeKey = "issueType";
+
+const List<String> productionPlantingMaterialTypeValues = [
+  "seed",
+  "seedling",
+  "root",
+  "stem",
+  "cutting",
+  "tuber",
+  "sucker",
+  "runner",
+  "other",
+];
+
+const List<String> productionPlantingTargetUnitValues = [
+  "kg",
+  "g",
+  "ton",
+  "bag",
+  "sack",
+  "crate",
+  "carton",
+  "basket",
+  "box",
+  "bucket",
+  "bunch",
+  "bundle",
+  "tray",
+  "seed",
+  "seedling",
+  "piece",
+  "plant",
+];
+
+bool productionDomainRequiresPlantingTargets(String? domainContext) {
+  return normalizeProductionDomainContext(domainContext) ==
+      productionDomainFarm;
+}
+
+String formatProductionPlantingMaterialType(String value) {
+  switch (value.trim().toLowerCase()) {
+    case "seed":
+      return "Seed";
+    case "seedling":
+      return "Seedling";
+    case "root":
+      return "Root";
+    case "stem":
+      return "Stem";
+    case "cutting":
+      return "Cutting";
+    case "tuber":
+      return "Tuber";
+    case "sucker":
+      return "Sucker";
+    case "runner":
+      return "Runner";
+    case "other":
+      return "Other";
+    default:
+      return value.trim().isEmpty ? "Material" : value.trim();
+  }
+}
+
+String normalizeProductionPlantingTargetUnit(String? value) {
+  final normalized = (value ?? "").trim().toLowerCase();
+  switch (normalized) {
+    case "kgs":
+      return "kg";
+    case "gram":
+    case "grams":
+      return "g";
+    case "t":
+    case "tons":
+    case "tonne":
+    case "tonnes":
+      return "ton";
+    case "bags":
+      return "bag";
+    case "sacks":
+      return "sack";
+    case "crates":
+      return "crate";
+    case "cartons":
+      return "carton";
+    case "baskets":
+      return "basket";
+    case "boxes":
+      return "box";
+    case "buckets":
+      return "bucket";
+    case "bunches":
+      return "bunch";
+    case "bundles":
+      return "bundle";
+    case "trays":
+      return "tray";
+    case "seeds":
+      return "seed";
+    case "seedlings":
+      return "seedling";
+    case "pieces":
+      return "piece";
+    case "plants":
+      return "plant";
+    default:
+      return normalized;
+  }
+}
+
+String formatProductionPlantingTargetUnit(String value) {
+  switch (normalizeProductionPlantingTargetUnit(value)) {
+    case "kg":
+      return "kg";
+    case "g":
+      return "g";
+    case "ton":
+      return "Ton";
+    case "bag":
+      return "Bag";
+    case "sack":
+      return "Sack";
+    case "crate":
+      return "Crate";
+    case "carton":
+      return "Carton";
+    case "basket":
+      return "Basket";
+    case "box":
+      return "Box";
+    case "bucket":
+      return "Bucket";
+    case "bunch":
+      return "Bunch";
+    case "bundle":
+      return "Bundle";
+    case "tray":
+      return "Tray";
+    case "seed":
+      return "Seed";
+    case "seedling":
+      return "Seedling";
+    case "piece":
+      return "Piece";
+    case "plant":
+      return "Plant";
+    default:
+      return value.trim().isEmpty ? "Unit" : value.trim();
+  }
+}
+
+class ProductionPlantingTargetsDraft {
+  final String materialType;
+  final double? plannedPlantingQuantity;
+  final String plannedPlantingUnit;
+  final double? estimatedHarvestQuantity;
+  final String estimatedHarvestUnit;
+
+  const ProductionPlantingTargetsDraft({
+    required this.materialType,
+    required this.plannedPlantingQuantity,
+    required this.plannedPlantingUnit,
+    required this.estimatedHarvestQuantity,
+    required this.estimatedHarvestUnit,
+  });
+
+  bool get hasAnyValue {
+    return materialType.trim().isNotEmpty ||
+        plannedPlantingQuantity != null ||
+        plannedPlantingUnit.trim().isNotEmpty ||
+        estimatedHarvestQuantity != null ||
+        estimatedHarvestUnit.trim().isNotEmpty;
+  }
+
+  bool get isComplete {
+    return materialType.trim().isNotEmpty &&
+        (plannedPlantingQuantity ?? 0) > 0 &&
+        plannedPlantingUnit.trim().isNotEmpty &&
+        (estimatedHarvestQuantity ?? 0) > 0 &&
+        estimatedHarvestUnit.trim().isNotEmpty;
+  }
+
+  ProductionPlantingTargetsDraft copyWith({
+    String? materialType,
+    Object? plannedPlantingQuantity = _unsetValue,
+    String? plannedPlantingUnit,
+    Object? estimatedHarvestQuantity = _unsetValue,
+    String? estimatedHarvestUnit,
+  }) {
+    return ProductionPlantingTargetsDraft(
+      materialType: materialType ?? this.materialType,
+      plannedPlantingQuantity: plannedPlantingQuantity == _unsetValue
+          ? this.plannedPlantingQuantity
+          : plannedPlantingQuantity as double?,
+      plannedPlantingUnit: plannedPlantingUnit ?? this.plannedPlantingUnit,
+      estimatedHarvestQuantity: estimatedHarvestQuantity == _unsetValue
+          ? this.estimatedHarvestQuantity
+          : estimatedHarvestQuantity as double?,
+      estimatedHarvestUnit: estimatedHarvestUnit ?? this.estimatedHarvestUnit,
+    );
+  }
+
+  Map<String, dynamic> toPayload() {
+    return {
+      _payloadPlantingMaterialType: materialType.trim(),
+      _payloadPlannedPlantingQuantity: plannedPlantingQuantity,
+      _payloadPlannedPlantingUnit: plannedPlantingUnit.trim(),
+      _payloadEstimatedHarvestQuantity: estimatedHarvestQuantity,
+      _payloadEstimatedHarvestUnit: estimatedHarvestUnit.trim(),
+    };
+  }
+
+  factory ProductionPlantingTargetsDraft.fromJson(Map<String, dynamic> json) {
+    return ProductionPlantingTargetsDraft(
+      materialType: (json[_payloadPlantingMaterialType] ?? "")
+          .toString()
+          .trim()
+          .toLowerCase(),
+      plannedPlantingQuantity: _parsePositiveDraftDouble(
+        json[_payloadPlannedPlantingQuantity],
+      ),
+      plannedPlantingUnit: normalizeProductionPlantingTargetUnit(
+        json[_payloadPlannedPlantingUnit] ?? json["plantingUnit"],
+      ),
+      estimatedHarvestQuantity: _parsePositiveDraftDouble(
+        json[_payloadEstimatedHarvestQuantity],
+      ),
+      estimatedHarvestUnit: normalizeProductionPlantingTargetUnit(
+        json[_payloadEstimatedHarvestUnit] ?? json["harvestUnit"],
+      ),
+    );
+  }
+
+  List<String> validateForDomain(String domainContext) {
+    if (!productionDomainRequiresPlantingTargets(domainContext)) {
+      return const <String>[];
+    }
+
+    final errors = <String>[];
+    if (materialType.trim().isEmpty) {
+      errors.add(_errorPlantingMaterialRequired);
+    }
+    if ((plannedPlantingQuantity ?? 0) <= 0) {
+      errors.add(_errorPlannedPlantingQuantityRequired);
+    }
+    if (plannedPlantingUnit.trim().isEmpty) {
+      errors.add(_errorPlannedPlantingUnitRequired);
+    }
+    if ((estimatedHarvestQuantity ?? 0) <= 0) {
+      errors.add(_errorEstimatedHarvestQuantityRequired);
+    }
+    if (estimatedHarvestUnit.trim().isEmpty) {
+      errors.add(_errorEstimatedHarvestUnitRequired);
+    }
+    return errors;
+  }
+}
 
 class ProductionAiDraftError implements Exception {
   final String message;
@@ -625,6 +898,7 @@ class ProductionPlanDraftState {
   final String? productId;
   final DateTime? startDate;
   final DateTime? endDate;
+  final ProductionPlantingTargetsDraft plantingTargets;
   final ProductDraft? proposedProduct;
   final bool productAiSuggested;
   final bool startDateAiSuggested;
@@ -643,6 +917,7 @@ class ProductionPlanDraftState {
     required this.productId,
     required this.startDate,
     required this.endDate,
+    required this.plantingTargets,
     required this.proposedProduct,
     required this.productAiSuggested,
     required this.startDateAiSuggested,
@@ -662,6 +937,7 @@ class ProductionPlanDraftState {
     Object? productId = _unsetValue,
     Object? startDate = _unsetValue,
     Object? endDate = _unsetValue,
+    ProductionPlantingTargetsDraft? plantingTargets,
     Object? proposedProduct = _unsetValue,
     bool? productAiSuggested,
     bool? startDateAiSuggested,
@@ -686,6 +962,7 @@ class ProductionPlanDraftState {
           ? this.startDate
           : startDate as DateTime?,
       endDate: endDate == _unsetValue ? this.endDate : endDate as DateTime?,
+      plantingTargets: plantingTargets ?? this.plantingTargets,
       proposedProduct: proposedProduct == _unsetValue
           ? this.proposedProduct
           : proposedProduct as ProductDraft?,
@@ -713,6 +990,13 @@ class ProductionPlanDraftController
           productId: null,
           startDate: null,
           endDate: null,
+          plantingTargets: const ProductionPlantingTargetsDraft(
+            materialType: "",
+            plannedPlantingQuantity: null,
+            plannedPlantingUnit: "",
+            estimatedHarvestQuantity: null,
+            estimatedHarvestUnit: "",
+          ),
           proposedProduct: null,
           productAiSuggested: false,
           startDateAiSuggested: false,
@@ -780,6 +1064,71 @@ class ProductionPlanDraftController
     AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldEndDate});
   }
 
+  void updatePlantingMaterialType(String? value) {
+    state = state.copyWith(
+      plantingTargets: state.plantingTargets.copyWith(
+        materialType: (value ?? "").trim().toLowerCase(),
+      ),
+    );
+    AppDebug.log(
+      _logTag,
+      _logUpdate,
+      extra: {_extraFieldKey: _fieldPlantingTargets},
+    );
+  }
+
+  void updatePlannedPlantingQuantity(double? value) {
+    state = state.copyWith(
+      plantingTargets: state.plantingTargets.copyWith(
+        plannedPlantingQuantity: value == null || value <= 0 ? null : value,
+      ),
+    );
+    AppDebug.log(
+      _logTag,
+      _logUpdate,
+      extra: {_extraFieldKey: _fieldPlantingTargets},
+    );
+  }
+
+  void updatePlannedPlantingUnit(String? value) {
+    state = state.copyWith(
+      plantingTargets: state.plantingTargets.copyWith(
+        plannedPlantingUnit: normalizeProductionPlantingTargetUnit(value),
+      ),
+    );
+    AppDebug.log(
+      _logTag,
+      _logUpdate,
+      extra: {_extraFieldKey: _fieldPlantingTargets},
+    );
+  }
+
+  void updateEstimatedHarvestQuantity(double? value) {
+    state = state.copyWith(
+      plantingTargets: state.plantingTargets.copyWith(
+        estimatedHarvestQuantity: value == null || value <= 0 ? null : value,
+      ),
+    );
+    AppDebug.log(
+      _logTag,
+      _logUpdate,
+      extra: {_extraFieldKey: _fieldPlantingTargets},
+    );
+  }
+
+  void updateEstimatedHarvestUnit(String? value) {
+    state = state.copyWith(
+      plantingTargets: state.plantingTargets.copyWith(
+        estimatedHarvestUnit: normalizeProductionPlantingTargetUnit(value),
+      ),
+    );
+    AppDebug.log(
+      _logTag,
+      _logUpdate,
+      extra: {_extraFieldKey: _fieldPlantingTargets},
+    );
+  }
+
   void updateAiGenerated(bool value) {
     // WHY: AI drafts require review before activation.
     state = state.copyWith(aiGenerated: value);
@@ -800,6 +1149,13 @@ class ProductionPlanDraftController
       productId: null,
       startDate: null,
       endDate: null,
+      plantingTargets: const ProductionPlantingTargetsDraft(
+        materialType: "",
+        plannedPlantingQuantity: null,
+        plannedPlantingUnit: "",
+        estimatedHarvestQuantity: null,
+        estimatedHarvestUnit: "",
+      ),
       proposedProduct: null,
       productAiSuggested: false,
       startDateAiSuggested: false,
@@ -1034,6 +1390,7 @@ class ProductionPlanDraftController
         !state.endDate!.isAfter(state.startDate!)) {
       errors.add(_errorDateRange);
     }
+    errors.addAll(state.plantingTargets.validateForDomain(state.domainContext));
 
     final allTasks = state.phases.expand((phase) => phase.tasks).toList();
     if (allTasks.isEmpty) {
@@ -1108,6 +1465,7 @@ class ProductionPlanDraftController
       _payloadStartDate: state.startDate?.toIso8601String(),
       _payloadEndDate: state.endDate?.toIso8601String(),
       _payloadAiGenerated: state.aiGenerated,
+      _payloadPlantingTargets: state.plantingTargets.toPayload(),
       _payloadPhases: phasesPayload,
     };
   }
@@ -1857,6 +2215,7 @@ ProductionPlanDraftState _buildStrictDraftState(Map<String, dynamic> draft) {
   final domainContextRaw = draft[_payloadDomainContext];
   final proposedStartDateRaw = draft[_payloadProposedStartDate];
   final proposedEndDateRaw = draft[_payloadProposedEndDate];
+  final plantingTargetsRaw = draft[_payloadPlantingTargets];
   final startDateString =
       _isValidIsoDate(startDateRaw?.toString() ?? _emptyText)
       ? startDateRaw.toString()
@@ -1984,6 +2343,15 @@ ProductionPlanDraftState _buildStrictDraftState(Map<String, dynamic> draft) {
         : null,
     startDate: startDateString == null ? null : DateTime.parse(startDateString),
     endDate: endDateString == null ? null : DateTime.parse(endDateString),
+    plantingTargets: plantingTargetsRaw is Map<String, dynamic>
+        ? ProductionPlantingTargetsDraft.fromJson(plantingTargetsRaw)
+        : const ProductionPlantingTargetsDraft(
+            materialType: "",
+            plannedPlantingQuantity: null,
+            plannedPlantingUnit: "",
+            estimatedHarvestQuantity: null,
+            estimatedHarvestUnit: "",
+          ),
     proposedProduct: suggestedProduct,
     productAiSuggested: suggestedProduct != null,
     startDateAiSuggested:
@@ -2005,6 +2373,17 @@ ProductionPlanDraftState _buildStrictDraftState(Map<String, dynamic> draft) {
 bool _isValidRequiredString(dynamic value) {
   if (value == null) return false;
   return value.toString().trim().isNotEmpty;
+}
+
+double? _parsePositiveDraftDouble(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+  final parsed = double.tryParse(value.toString().trim());
+  if (parsed == null || parsed <= 0) {
+    return null;
+  }
+  return parsed;
 }
 
 void _validateRequiredStringField(

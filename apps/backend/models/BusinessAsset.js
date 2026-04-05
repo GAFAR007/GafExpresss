@@ -43,6 +43,35 @@ const DEPRECIATION_METHODS = ['straight_line'];
 
 const RENT_PERIODS = ['monthly', 'quarterly', 'yearly'];
 const FEE_PERIODS = ['monthly', 'quarterly', 'yearly'];
+const FARM_AUDIT_FREQUENCIES = ['quarterly', 'yearly'];
+const ASSET_APPROVAL_STATUSES = [
+  'pending_approval',
+  'approved',
+  'rejected',
+];
+const TIME_24H_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function buildNextAuditDate(lastAuditDate, auditFrequency) {
+  if (!lastAuditDate || !auditFrequency) {
+    return null;
+  }
+
+  const base = new Date(lastAuditDate);
+  if (Number.isNaN(base.getTime())) {
+    return null;
+  }
+
+  const next = new Date(base);
+  if (auditFrequency === 'quarterly') {
+    next.setMonth(next.getMonth() + 3);
+    return next;
+  }
+  if (auditFrequency === 'yearly') {
+    next.setFullYear(next.getFullYear() + 1);
+    return next;
+  }
+  return null;
+}
 
 // WHY: Estate-level schedule blocks override business defaults when configured.
 const estateWorkScheduleBlockSchema = new mongoose.Schema(
@@ -276,6 +305,230 @@ const estateSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const assetActorSnapshotSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    name: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    actorRole: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    staffRole: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    email: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
+const farmProductionUsageRequestSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ASSET_APPROVAL_STATUSES,
+    default: 'pending_approval',
+    index: true,
+  },
+  requestedBy: {
+    type: assetActorSnapshotSchema,
+    default: null,
+  },
+  requestedAt: {
+    type: Date,
+    default: null,
+  },
+  productionDate: {
+    type: Date,
+    default: null,
+  },
+  usageStartTime: {
+    type: String,
+    trim: true,
+    default: '',
+    validate: {
+      validator(value) {
+        return !value || TIME_24H_REGEX.test(value);
+      },
+      message: 'Usage start time must use HH:MM format',
+    },
+  },
+  usageEndTime: {
+    type: String,
+    trim: true,
+    default: '',
+    validate: {
+      validator(value) {
+        return !value || TIME_24H_REGEX.test(value);
+      },
+      message: 'Usage end time must use HH:MM format',
+    },
+  },
+  productionActivity: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  quantityRequested: {
+    type: Number,
+    min: 1,
+    default: 1,
+  },
+  quantityUsed: {
+    type: Number,
+    min: 0,
+    default: 0,
+  },
+  note: {
+    type: String,
+    trim: true,
+    default: '',
+  },
+  approvedBy: {
+    type: assetActorSnapshotSchema,
+    default: null,
+  },
+  approvedAt: {
+    type: Date,
+    default: null,
+  },
+});
+
+const farmProfileSchema = new mongoose.Schema(
+  {
+    attachedFarmLabel: {
+      type: String,
+      trim: true,
+    },
+    farmSection: {
+      type: String,
+      trim: true,
+    },
+    farmCategory: {
+      type: String,
+      trim: true,
+      required() {
+        return this.ownerDocument()?.domainContext === 'farm';
+      },
+    },
+    farmSubcategory: {
+      type: String,
+      trim: true,
+    },
+    auditFrequency: {
+      type: String,
+      enum: FARM_AUDIT_FREQUENCIES,
+      required() {
+        return this.ownerDocument()?.domainContext === 'farm';
+      },
+    },
+    lastAuditDate: {
+      type: Date,
+      required() {
+        return this.ownerDocument()?.domainContext === 'farm';
+      },
+    },
+    nextAuditDate: {
+      type: Date,
+      default: null,
+    },
+    quantity: {
+      type: Number,
+      min: 1,
+      default: 1,
+    },
+    unitOfMeasure: {
+      type: String,
+      trim: true,
+      default: 'units',
+    },
+    estimatedCurrentValue: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    lastAuditSubmittedBy: {
+      type: assetActorSnapshotSchema,
+      default: null,
+    },
+    lastAuditSubmittedAt: {
+      type: Date,
+      default: null,
+    },
+    lastAuditNote: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    pendingAuditRequest: {
+      type: new mongoose.Schema(
+        {
+          status: {
+            type: String,
+            enum: ASSET_APPROVAL_STATUSES,
+            default: 'pending_approval',
+          },
+          requestedBy: {
+            type: assetActorSnapshotSchema,
+            default: null,
+          },
+          requestedAt: {
+            type: Date,
+            default: null,
+          },
+          auditDate: {
+            type: Date,
+            default: null,
+          },
+          resultingStatus: {
+            type: String,
+            enum: ['active', 'inactive', 'maintenance'],
+            default: 'active',
+          },
+          estimatedCurrentValue: {
+            type: Number,
+            min: 0,
+            default: 0,
+          },
+          note: {
+            type: String,
+            trim: true,
+            default: '',
+          },
+          approvedBy: {
+            type: assetActorSnapshotSchema,
+            default: null,
+          },
+          approvedAt: {
+            type: Date,
+            default: null,
+          },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
+    productionUsageRequests: {
+      type: [farmProductionUsageRequestSchema],
+      default: [],
+    },
+  },
+  { _id: false }
+);
+
 const assetSchema = new mongoose.Schema(
   {
     businessId: {
@@ -330,6 +583,38 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: 'NGN',
       trim: true,
+    },
+    domainContext: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    approvalStatus: {
+      type: String,
+      enum: ASSET_APPROVAL_STATUSES,
+      default: 'approved',
+      index: true,
+    },
+    approvalRequestedBy: {
+      type: assetActorSnapshotSchema,
+      default: null,
+    },
+    approvalRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    approvalReviewedBy: {
+      type: assetActorSnapshotSchema,
+      default: null,
+    },
+    approvalReviewedAt: {
+      type: Date,
+      default: null,
+    },
+    approvalNote: {
+      type: String,
+      trim: true,
+      default: '',
     },
     // WHY: Fixed assets require cost + useful life to compute depreciation.
     purchaseCost: {
@@ -437,6 +722,11 @@ const assetSchema = new mongoose.Schema(
       type: estateSchema,
       default: null,
     },
+    // WHY: Farm asset registers need category + audit cadence for equipment reviews.
+    farmProfile: {
+      type: farmProfileSchema,
+      default: null,
+    },
     // WHY: Estate override policy allows per-location scheduling controls.
     productionSchedulePolicy: {
       type: estateProductionSchedulePolicySchema,
@@ -469,11 +759,42 @@ const assetSchema = new mongoose.Schema(
 
 // WHY: Speed up filtered asset listings by type and status.
 assetSchema.index({ businessId: 1, assetType: 1, ownershipType: 1, status: 1 });
+assetSchema.index({
+  businessId: 1,
+  domainContext: 1,
+  'farmProfile.auditFrequency': 1,
+  'farmProfile.farmCategory': 1,
+});
 
 // WHY: Auto-derive class + estate rollups when users provide mixed data.
 assetSchema.pre('validate', function applyAssetDefaults(next) {
   if (!this.assetClass) {
     this.assetClass = ASSET_CLASS_BY_TYPE[this.assetType] || 'fixed';
+  }
+
+  if (this.farmProfile || this.domainContext === 'farm') {
+    this.domainContext = 'farm';
+    this.farmProfile = this.farmProfile || {};
+
+    const quantity = Number(this.farmProfile.quantity || 1);
+    this.farmProfile.quantity =
+      Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+
+    const estimatedCurrentValue = Number(
+      this.farmProfile.estimatedCurrentValue || 0
+    );
+    this.farmProfile.estimatedCurrentValue =
+      Number.isFinite(estimatedCurrentValue) && estimatedCurrentValue > 0
+        ? estimatedCurrentValue
+        : 0;
+
+    const nextAuditDate = buildNextAuditDate(
+      this.farmProfile.lastAuditDate,
+      this.farmProfile.auditFrequency
+    );
+    if (nextAuditDate) {
+      this.farmProfile.nextAuditDate = nextAuditDate;
+    }
   }
 
   if (this.assetType !== 'estate') {

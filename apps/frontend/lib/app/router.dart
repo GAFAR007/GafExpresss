@@ -29,6 +29,7 @@ import 'package:frontend/app/features/home/presentation/presentation/providers/a
 import 'package:frontend/app/features/home/presentation/cart_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_account_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/business_farm_asset_audit_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_assets_screen.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_dashboard_screen.dart';
@@ -66,6 +67,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_plan_archive_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_calendar_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_assistant_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_plan_draft_editor_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_insights_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
@@ -82,6 +84,8 @@ const String _routeProductionCalendarLog = "-> /business-production/calendar";
 const String _routeProductionAssistantLog =
     "-> /business-production/create-assistant";
 const String _routeProductionCreateLog = "-> /business-production/create";
+const String _routeProductionDraftStudioLog =
+    "-> /business-production/draft-studio";
 const String _routeProductionPreorderReservationsLog =
     "-> /business-production/preorder-reservations";
 const String _routeProductionInsightsLog =
@@ -415,6 +419,24 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/business-assets/farm-audit',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-assets/farm-audit");
+          return const BusinessThemeWrapper(
+            child: BusinessFarmAssetAuditScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/business-assets/new-estate',
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /business-assets/new-estate");
+          return const BusinessThemeWrapper(
+            child: BusinessAssetDetailScreen.createEstate(),
+          );
+        },
+      ),
+      GoRoute(
         path: '/business-assets/:id',
         builder: (context, state) {
           final id = state.pathParameters['id'] ?? '';
@@ -547,6 +569,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           AppDebug.log("ROUTER", _routeProductionCreateLog);
           return const BusinessThemeWrapper(
             child: ProductionPlanAssistantScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanDraftStudioRoute,
+        builder: (context, state) {
+          final planId = state.uri.queryParameters['planId'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionDraftStudioLog,
+            extra: {_productionPlanIdParam: planId},
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPlanDraftEditorScreen(planId: planId),
           );
         },
       ),

@@ -87,6 +87,7 @@ const String _plannerCropAutoCreateProductSuccessLog =
     "planner_crop_auto_create_product_success";
 const String _plannerCropAutoCreateProductFailLog =
     "planner_crop_auto_create_product_fail";
+const String _directDraftPayloadPlantingTargets = "plantingTargets";
 const List<String> _monthLabels = <String>[
   "January",
   "February",
@@ -149,7 +150,7 @@ const String _guideQuestionProduct =
 const String _guideQuestionRoleStaff =
     "Great. Select roles and staff I should prioritize in this production.";
 const String _guideQuestionWorkload =
-    "Good. Tell me your workload setup before dates: work-unit type, total units, and staffing limits.";
+    "Good. Tell me your workload setup before dates: work-unit type, total units, staffing limits, planned planting quantity + unit, and estimated harvest quantity + unit.";
 const String _guideQuestionDates =
     "Do you want to set dates now, or use product lifecycle dates?";
 const String _guideQuestionReady =
@@ -195,6 +196,18 @@ const String _contextPromptConfirmStaffContextMissing =
 const String _contextPromptWorkloadLabel = "Workload setup";
 const String _contextPromptWorkloadHint =
     "Set unit size and staffing assumptions so AI can distribute workload realistically.";
+const String _contextPromptPlantingTargetsLabel = "Planting targets";
+const String _contextPromptPlantingTargetsHint =
+    "For farm plans, capture what you plan to plant and what you expect to harvest before drafting the timeline.";
+const String _contextPromptPlantingMaterialLabel = "Planting material";
+const String _contextPromptPlannedPlantingQuantityLabel =
+    "Planned planting quantity";
+const String _contextPromptPlannedPlantingUnitLabel = "Planned planting unit";
+const String _contextPromptEstimatedHarvestQuantityLabel =
+    "Estimated harvest quantity";
+const String _contextPromptEstimatedHarvestUnitLabel = "Estimated harvest unit";
+const String _contextPromptPlantingTargetsMissing =
+    "For farm production, set planting material, planned planting quantity + unit, and estimated harvest quantity + unit before drafting.";
 const String _contextPromptTotalUnitsSliderLabel = "Total work units";
 const String _contextPromptActiveStaffAssumptionLabel =
     "Expected active selected staff";
@@ -631,6 +644,11 @@ class _ProductionPlanAssistantScreenState
   int? _minStaffPerUnit;
   int? _maxStaffPerUnit;
   int _activeStaffAvailabilityPercent = 70;
+  String _plantingMaterialType = "";
+  double? _plannedPlantingQuantity;
+  String _plannedPlantingUnit = "";
+  double? _estimatedHarvestQuantity;
+  String _estimatedHarvestUnit = "";
   DateTime? _startDate;
   DateTime? _endDate;
   bool _useAiInferredDates = false;
@@ -728,6 +746,11 @@ class _ProductionPlanAssistantScreenState
         _minStaffPerUnit = 1;
         _maxStaffPerUnit = 3;
         _activeStaffAvailabilityPercent = 70;
+        _plantingMaterialType = "";
+        _plannedPlantingQuantity = null;
+        _plannedPlantingUnit = "";
+        _estimatedHarvestQuantity = null;
+        _estimatedHarvestUnit = "";
         _startDate = null;
         _endDate = null;
         _useAiInferredDates = false;
@@ -766,6 +789,11 @@ class _ProductionPlanAssistantScreenState
       _minStaffPerUnit = 1;
       _maxStaffPerUnit = 3;
       _activeStaffAvailabilityPercent = 70;
+      _plantingMaterialType = "";
+      _plannedPlantingQuantity = null;
+      _plannedPlantingUnit = "";
+      _estimatedHarvestQuantity = null;
+      _estimatedHarvestUnit = "";
       _startDate = null;
       _endDate = null;
       _useAiInferredDates = false;
@@ -1636,6 +1664,8 @@ class _ProductionPlanAssistantScreenState
         "activeStaffAvailabilityPercent": _activeStaffAvailabilityPercent,
         "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
       },
+      _directDraftPayloadPlantingTargets: _currentPlantingTargetsDraft()
+          .toPayload(),
       "cropSubtype": "",
     };
   }
@@ -2003,6 +2033,8 @@ class _ProductionPlanAssistantScreenState
                     _activeStaffAvailabilityPercent,
                 "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
               },
+              _directDraftPayloadPlantingTargets: _currentPlantingTargetsDraft()
+                  .toPayload(),
               "cropSubtype": "",
             },
           );
@@ -2086,6 +2118,9 @@ class _ProductionPlanAssistantScreenState
             "hasStartDate": _startDate != null,
             "hasEndDate": _endDate != null,
             "workloadConfigured": _hasWorkloadContextValues(),
+            "plantingTargetsConfigured":
+                !_requiresPlantingTargets() ||
+                _currentPlantingTargetsDraft().isComplete,
           },
           "httpStatus": dioError?.response?.statusCode ?? "unknown",
           "providerErrorCode": providerErrorCode,
@@ -2518,6 +2553,11 @@ class _ProductionPlanAssistantScreenState
     notifier.updateProduct(_selectedProductId);
     notifier.updateStartDate(_startDate);
     notifier.updateEndDate(_endDate);
+    notifier.updatePlantingMaterialType(_plantingMaterialType);
+    notifier.updatePlannedPlantingQuantity(_plannedPlantingQuantity);
+    notifier.updatePlannedPlantingUnit(_plannedPlantingUnit);
+    notifier.updateEstimatedHarvestQuantity(_estimatedHarvestQuantity);
+    notifier.updateEstimatedHarvestUnit(_estimatedHarvestUnit);
     notifier.updateTitle(
       "${_resolveSelectedProductName().trim().isEmpty ? 'Production' : _resolveSelectedProductName().trim()} Plan",
     );
@@ -7764,6 +7804,7 @@ class _ProductionPlanAssistantScreenState
           : improvedPayload.productId.trim(),
       startDate: resolvedStartDate,
       endDate: resolvedEndDate,
+      plantingTargets: currentDraft.plantingTargets,
       proposedProduct: currentDraft.proposedProduct,
       productAiSuggested: currentDraft.productAiSuggested,
       startDateAiSuggested: currentDraft.startDateAiSuggested,
@@ -10837,6 +10878,9 @@ class _ProductionPlanAssistantScreenState
         : safeMaxStaffPerUnitRaw;
     final workloadInstruction =
         " Workload context: $safeTotalWorkUnits $safeWorkUnitLabel units, min $safeMinStaffPerUnit and max $safeMaxStaffPerUnit staff per $safeWorkUnitLabel, expected active selected staff $_activeStaffAvailabilityPercent% per block.";
+    final plantingTargetsInstruction = !_requiresPlantingTargets()
+        ? ""
+        : " Planting targets: material ${formatProductionPlantingMaterialType(_plantingMaterialType).toLowerCase()}; planned input ${_formatPlantingQuantity(_plannedPlantingQuantity)} ${_plannedPlantingUnit.trim()}; estimated harvest ${_formatPlantingQuantity(_estimatedHarvestQuantity)} ${_estimatedHarvestUnit.trim()}. Use these numbers as the baseline for sowing, planting, establishment, and harvest tasks.";
     final staffingRuleInstruction =
         " Keep requiredHeadcount realistic for that staffing range, and add warnings if workload exceeds likely capacity.";
     final stageGateInstruction =
@@ -10847,7 +10891,7 @@ class _ProductionPlanAssistantScreenState
         " Use lifecycle-based dates from trusted product lifecycle data. Do not assign final staff IDs or hand-write dated schedule blocks; the backend scheduler owns that.";
     const outputInstruction =
         " Return lifecycle-safe phases, semantic tasks, roleRequired, requiredHeadcount, and warnings.";
-    return "Generate a lifecycle-safe production draft for $safeProduct at $safeEstate. $dateInstruction$roleInstruction$roleAlignmentInstruction$staffCapacityInstruction$staffInstruction$workloadInstruction$staffingRuleInstruction$stageGateInstruction$executionTruthInstruction$lifecycleInstruction$outputInstruction";
+    return "Generate a lifecycle-safe production draft for $safeProduct at $safeEstate. $dateInstruction$roleInstruction$roleAlignmentInstruction$staffCapacityInstruction$staffInstruction$workloadInstruction$plantingTargetsInstruction$staffingRuleInstruction$stageGateInstruction$executionTruthInstruction$lifecycleInstruction$outputInstruction";
   }
 
   String _resolveSelectedEstateNameFromProvider() {
@@ -10887,7 +10931,7 @@ class _ProductionPlanAssistantScreenState
     final focusedRoles = _focusedRoleKeys.toList()..sort();
     final focusedStaffIds = _focusedStaffProfileIds.toList()..sort();
     final workloadKey =
-        "${_workUnitLabel.trim()}|${_totalWorkUnits ?? 0}|${_minStaffPerUnit ?? 0}|${_maxStaffPerUnit ?? 0}|$_activeStaffAvailabilityPercent|${_hasConfirmedWorkloadContext ? 1 : 0}";
+        "${_workUnitLabel.trim()}|${_totalWorkUnits ?? 0}|${_minStaffPerUnit ?? 0}|${_maxStaffPerUnit ?? 0}|$_activeStaffAvailabilityPercent|${_hasConfirmedWorkloadContext ? 1 : 0}|${_plantingMaterialType.trim()}|${_plannedPlantingQuantity ?? 0}|${_plannedPlantingUnit.trim()}|${_estimatedHarvestQuantity ?? 0}|${_estimatedHarvestUnit.trim()}";
     return "$estateId|$productKey|$dateMode|$_domainContext|${focusedRoles.join(",")}|${focusedStaffIds.join(",")}|$workloadKey";
   }
 
@@ -10974,10 +11018,14 @@ class _ProductionPlanAssistantScreenState
   }
 
   bool _hasWorkloadContextValues() {
+    final hasPlantingTargets =
+        !_requiresPlantingTargets() ||
+        _currentPlantingTargetsDraft().isComplete;
     return _workUnitLabel.trim().isNotEmpty &&
         (_totalWorkUnits ?? 0) > 0 &&
         (_minStaffPerUnit ?? 0) > 0 &&
-        (_maxStaffPerUnit ?? 0) >= (_minStaffPerUnit ?? 0);
+        (_maxStaffPerUnit ?? 0) >= (_minStaffPerUnit ?? 0) &&
+        hasPlantingTargets;
   }
 
   bool _isWorkloadContextReadyForDraft() {
@@ -11003,6 +11051,54 @@ class _ProductionPlanAssistantScreenState
       return configuredLabel;
     }
     return _defaultWorkUnitLabelForDomain(_domainContext);
+  }
+
+  bool _requiresPlantingTargets() {
+    return productionDomainRequiresPlantingTargets(_domainContext);
+  }
+
+  ProductionPlantingTargetsDraft _currentPlantingTargetsDraft() {
+    return ProductionPlantingTargetsDraft(
+      materialType: _plantingMaterialType,
+      plannedPlantingQuantity: _plannedPlantingQuantity,
+      plannedPlantingUnit: _plannedPlantingUnit,
+      estimatedHarvestQuantity: _estimatedHarvestQuantity,
+      estimatedHarvestUnit: _estimatedHarvestUnit,
+    );
+  }
+
+  String? _resolvePlantingTargetsError() {
+    final errors = _currentPlantingTargetsDraft().validateForDomain(
+      _domainContext,
+    );
+    return errors.isEmpty ? null : errors.first;
+  }
+
+  String _formatPlantingQuantity(double? value) {
+    if (value == null || value <= 0) {
+      return "0";
+    }
+    final rounded = value.roundToDouble();
+    if (rounded == value) {
+      return rounded.toInt().toString();
+    }
+    return value.toStringAsFixed(value < 10 ? 2 : 1);
+  }
+
+  String _buildPlantingTargetsSummary() {
+    final targets = _currentPlantingTargetsDraft();
+    if (!targets.isComplete) {
+      return "Pending";
+    }
+    final materialLabel = formatProductionPlantingMaterialType(
+      targets.materialType,
+    ).toLowerCase();
+    return "${_formatPlantingQuantity(targets.plannedPlantingQuantity)} ${targets.plannedPlantingUnit.trim()} ($materialLabel) -> ${_formatPlantingQuantity(targets.estimatedHarvestQuantity)} ${targets.estimatedHarvestUnit.trim()}";
+  }
+
+  String _resolveWorkloadContextMissingMessage() {
+    return _resolvePlantingTargetsError() ??
+        _contextPromptConfirmWorkloadContextMissing;
   }
 
   String _normalizeRoleKey(String rawRole) {
@@ -12171,6 +12267,98 @@ class _ProductionPlanAssistantScreenState
     _appendAssistantMessageOnce(_resolveGuideQuestion());
   }
 
+  void _onPlantingMaterialTypeChanged(String? value) {
+    setState(() {
+      _plantingMaterialType = (value ?? "").trim().toLowerCase();
+      _hasConfirmedWorkloadContext = false;
+      _lastAutoGenerateKey = "";
+    });
+    AppDebug.log(
+      _logTag,
+      _workloadContextUpdateLog,
+      extra: {
+        "field": "plantingMaterialType",
+        "value": _plantingMaterialType,
+        "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
+      },
+    );
+    _appendAssistantMessageOnce(_resolveGuideQuestion());
+  }
+
+  void _onPlannedPlantingQuantityChanged(double? value) {
+    final safeValue = value == null || value <= 0 ? null : value;
+    setState(() {
+      _plannedPlantingQuantity = safeValue;
+      _hasConfirmedWorkloadContext = false;
+      _lastAutoGenerateKey = "";
+    });
+    AppDebug.log(
+      _logTag,
+      _workloadContextUpdateLog,
+      extra: {
+        "field": "plannedPlantingQuantity",
+        "value": _plannedPlantingQuantity ?? 0,
+        "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
+      },
+    );
+    _appendAssistantMessageOnce(_resolveGuideQuestion());
+  }
+
+  void _onPlannedPlantingUnitChanged(String? value) {
+    setState(() {
+      _plannedPlantingUnit = normalizeProductionPlantingTargetUnit(value);
+      _hasConfirmedWorkloadContext = false;
+      _lastAutoGenerateKey = "";
+    });
+    AppDebug.log(
+      _logTag,
+      _workloadContextUpdateLog,
+      extra: {
+        "field": "plannedPlantingUnit",
+        "value": _plannedPlantingUnit,
+        "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
+      },
+    );
+    _appendAssistantMessageOnce(_resolveGuideQuestion());
+  }
+
+  void _onEstimatedHarvestQuantityChanged(double? value) {
+    final safeValue = value == null || value <= 0 ? null : value;
+    setState(() {
+      _estimatedHarvestQuantity = safeValue;
+      _hasConfirmedWorkloadContext = false;
+      _lastAutoGenerateKey = "";
+    });
+    AppDebug.log(
+      _logTag,
+      _workloadContextUpdateLog,
+      extra: {
+        "field": "estimatedHarvestQuantity",
+        "value": _estimatedHarvestQuantity ?? 0,
+        "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
+      },
+    );
+    _appendAssistantMessageOnce(_resolveGuideQuestion());
+  }
+
+  void _onEstimatedHarvestUnitChanged(String? value) {
+    setState(() {
+      _estimatedHarvestUnit = normalizeProductionPlantingTargetUnit(value);
+      _hasConfirmedWorkloadContext = false;
+      _lastAutoGenerateKey = "";
+    });
+    AppDebug.log(
+      _logTag,
+      _workloadContextUpdateLog,
+      extra: {
+        "field": "estimatedHarvestUnit",
+        "value": _estimatedHarvestUnit,
+        "hasConfirmedWorkloadContext": _hasConfirmedWorkloadContext,
+      },
+    );
+    _appendAssistantMessageOnce(_resolveGuideQuestion());
+  }
+
   void _onTotalWorkUnitsChanged(int? value) {
     final safeValue = value == null || value < 1 ? null : value;
     setState(() {
@@ -12260,7 +12448,7 @@ class _ProductionPlanAssistantScreenState
 
   void _confirmWorkloadContext() {
     if (!_hasWorkloadContextValues()) {
-      _showSnack(_contextPromptConfirmWorkloadContextMissing);
+      _showSnack(_resolveWorkloadContextMissingMessage());
       return;
     }
     setState(() {
@@ -12271,7 +12459,7 @@ class _ProductionPlanAssistantScreenState
       _ChatMessage(
         fromAssistant: false,
         text:
-            "Workload: ${_totalWorkUnits ?? 0} ${_workUnitLabel.trim()} units, min ${_minStaffPerUnit ?? 0} and max ${_maxStaffPerUnit ?? 0} staff per unit, $_activeStaffAvailabilityPercent% active staff assumption.",
+            "Workload: ${_totalWorkUnits ?? 0} ${_workUnitLabel.trim()} units, min ${_minStaffPerUnit ?? 0} and max ${_maxStaffPerUnit ?? 0} staff per unit, $_activeStaffAvailabilityPercent% active staff assumption.${_requiresPlantingTargets() ? ' Material ${formatProductionPlantingMaterialType(_plantingMaterialType).toLowerCase()}, planned input ${_formatPlantingQuantity(_plannedPlantingQuantity)} ${_plannedPlantingUnit.trim()}, estimated harvest ${_formatPlantingQuantity(_estimatedHarvestQuantity)} ${_estimatedHarvestUnit.trim()}.' : ''}",
       ),
     );
     AppDebug.log(
@@ -12283,6 +12471,7 @@ class _ProductionPlanAssistantScreenState
         "minStaffPerUnit": _minStaffPerUnit ?? 0,
         "maxStaffPerUnit": _maxStaffPerUnit ?? 0,
         "activeStaffAvailabilityPercent": _activeStaffAvailabilityPercent,
+        "plantingTargets": _currentPlantingTargetsDraft().toPayload(),
       },
     );
     _appendAssistantMessageOnce(_resolveGuideQuestion());
@@ -12307,6 +12496,13 @@ class _ProductionPlanAssistantScreenState
       if (_workUnitLabel.trim().isEmpty ||
           _workUnitLabel.trim() == previousDefaultWorkUnit) {
         _workUnitLabel = _defaultWorkUnitLabelForDomain(nextDomain);
+      }
+      if (!productionDomainRequiresPlantingTargets(nextDomain)) {
+        _plantingMaterialType = "";
+        _plannedPlantingQuantity = null;
+        _plannedPlantingUnit = "";
+        _estimatedHarvestQuantity = null;
+        _estimatedHarvestUnit = "";
       }
       _hasConfirmedWorkloadContext = false;
       _lastAutoGenerateKey = "";
@@ -12876,6 +13072,18 @@ class _ProductionPlanAssistantScreenState
     if (!mounted) {
       return;
     }
+    final plantingTargetsError = _resolvePlantingTargetsError();
+    if (plantingTargetsError != null) {
+      _appendMessage(
+        _ChatMessage(
+          fromAssistant: true,
+          text: plantingTargetsError,
+          isError: true,
+        ),
+      );
+      _showSnack(plantingTargetsError);
+      return;
+    }
     if (!_isFocusedStaffContextReadyForDraft()) {
       _appendMessage(
         const _ChatMessage(
@@ -12895,7 +13103,7 @@ class _ProductionPlanAssistantScreenState
           isError: true,
         ),
       );
-      _showSnack(_contextPromptConfirmWorkloadContextMissing);
+      _showSnack(_resolveWorkloadContextMissingMessage());
       return;
     }
     final focusedRoles = _focusedRoleKeys.toList()..sort();
@@ -12979,6 +13187,7 @@ class _ProductionPlanAssistantScreenState
         (_selectedEstateAssetId ?? "").trim().isNotEmpty ||
         _hasSelectedProduct() ||
         _hasResolvedDateMode() ||
+        _currentPlantingTargetsDraft().hasAnyValue ||
         _focusedRoleKeys.isNotEmpty ||
         _focusedStaffProfileIds.isNotEmpty ||
         _hasDraftStudioContent(draft);
@@ -13018,7 +13227,7 @@ class _ProductionPlanAssistantScreenState
       case _CreateWizardStep.crop:
         return "Search the planner crop database and lock the crop you want to plan.";
       case _CreateWizardStep.timing:
-        return "Set lifecycle dates or exact dates, then define the workload assumptions.";
+        return "Set lifecycle dates or exact dates, then define workload assumptions and farm planting targets.";
       case _CreateWizardStep.people:
         return "Focus the roles and staff that should anchor this plan.";
       case _CreateWizardStep.review:
@@ -13119,7 +13328,7 @@ class _ProductionPlanAssistantScreenState
           return;
         }
         if (!_hasWorkloadContextValues()) {
-          _showSnack(_contextPromptConfirmWorkloadContextMissing);
+          _showSnack(_resolveWorkloadContextMissingMessage());
           return;
         }
         _confirmWorkloadContext();
@@ -13203,7 +13412,8 @@ class _ProductionPlanAssistantScreenState
       canGenerateDraft:
           !_isSending &&
           (_selectedEstateAssetId ?? "").trim().isNotEmpty &&
-          _hasSelectedProduct(),
+          _hasSelectedProduct() &&
+          _resolvePlantingTargetsError() == null,
       onSearchCrop: () async {
         await _openPlannerCropSearch();
       },
@@ -13353,6 +13563,7 @@ class _ProductionPlanAssistantScreenState
       productId: resolvedProductId.isEmpty ? null : resolvedProductId,
       startDate: startDate,
       endDate: endDate,
+      plantingTargets: _currentPlantingTargetsDraft(),
       proposedProduct: null,
       productAiSuggested: false,
       startDateAiSuggested: false,
@@ -13392,13 +13603,12 @@ class _ProductionPlanAssistantScreenState
     try {
       final detail = await ref
           .read(productionPlanActionsProvider)
-          .createPlan(payload: controller.toPayload());
-      controller.reset();
+          .saveDraft(payload: controller.toPayload());
       if (!mounted) {
         return;
       }
-      _showSnack("Plan created successfully.");
-      context.go(productionPlanDetailPath(detail.plan.id));
+      _showSnack("Draft saved.");
+      context.go(productionPlanDraftStudioPath(planId: detail.plan.id));
     } catch (error) {
       AppDebug.log(
         _logTag,
@@ -13406,7 +13616,7 @@ class _ProductionPlanAssistantScreenState
         extra: {"error": error.toString()},
       );
       if (mounted) {
-        _showSnack("Unable to create plan.");
+        _showSnack("Unable to save draft.");
       }
     } finally {
       if (mounted) {
@@ -13884,6 +14094,139 @@ class _ProductionPlanAssistantScreenState
               ),
             ],
           ],
+          if (_requiresPlantingTargets()) ...[
+            const SizedBox(height: 22),
+            Text(
+              _contextPromptPlantingTargetsLabel,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _contextPromptPlantingTargetsHint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _plantingMaterialType.trim().isEmpty
+                  ? null
+                  : _plantingMaterialType,
+              decoration: const InputDecoration(
+                labelText: _contextPromptPlantingMaterialLabel,
+                border: OutlineInputBorder(),
+              ),
+              items: productionPlantingMaterialTypeValues
+                  .map(
+                    (value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(formatProductionPlantingMaterialType(value)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _onPlantingMaterialTypeChanged,
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useColumn = constraints.maxWidth < 860;
+                final plantingField = TextFormField(
+                  initialValue: _plannedPlantingQuantity?.toString() ?? "",
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: _contextPromptPlannedPlantingQuantityLabel,
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) => _onPlannedPlantingQuantityChanged(
+                    double.tryParse(value.trim()),
+                  ),
+                );
+                final plantingUnitField = DropdownButtonFormField<String>(
+                  initialValue: _plannedPlantingUnit.trim().isEmpty
+                      ? null
+                      : _plannedPlantingUnit,
+                  decoration: const InputDecoration(
+                    labelText: _contextPromptPlannedPlantingUnitLabel,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: productionPlantingTargetUnitValues
+                      .map(
+                        (value) => DropdownMenuItem<String>(
+                          value: value,
+                          child: Text(
+                            formatProductionPlantingTargetUnit(value),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _onPlannedPlantingUnitChanged,
+                );
+                final harvestQuantityField = TextFormField(
+                  initialValue: _estimatedHarvestQuantity?.toString() ?? "",
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: _contextPromptEstimatedHarvestQuantityLabel,
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) => _onEstimatedHarvestQuantityChanged(
+                    double.tryParse(value.trim()),
+                  ),
+                );
+                final harvestUnitField = DropdownButtonFormField<String>(
+                  initialValue: _estimatedHarvestUnit.trim().isEmpty
+                      ? null
+                      : _estimatedHarvestUnit,
+                  decoration: const InputDecoration(
+                    labelText: _contextPromptEstimatedHarvestUnitLabel,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: productionPlantingTargetUnitValues
+                      .map(
+                        (value) => DropdownMenuItem<String>(
+                          value: value,
+                          child: Text(
+                            formatProductionPlantingTargetUnit(value),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _onEstimatedHarvestUnitChanged,
+                );
+                if (useColumn) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      plantingField,
+                      const SizedBox(height: 12),
+                      plantingUnitField,
+                      const SizedBox(height: 12),
+                      harvestQuantityField,
+                      const SizedBox(height: 12),
+                      harvestUnitField,
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(flex: 2, child: plantingField),
+                    const SizedBox(width: 12),
+                    Expanded(child: plantingUnitField),
+                    const SizedBox(width: 12),
+                    Expanded(flex: 2, child: harvestQuantityField),
+                    const SizedBox(width: 12),
+                    Expanded(child: harvestUnitField),
+                  ],
+                );
+              },
+            ),
+          ],
           const SizedBox(height: 22),
           Text(
             "Workload setup",
@@ -14101,6 +14444,12 @@ class _ProductionPlanAssistantScreenState
           "Workload",
           "${_totalWorkUnits ?? 0} ${_resolveSafeWorkUnitLabelForStaffing()}",
         ),
+        if (_requiresPlantingTargets())
+          buildSummaryChip(
+            Icons.grass_outlined,
+            "Planting",
+            _buildPlantingTargetsSummary(),
+          ),
       ];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -14125,12 +14474,19 @@ class _ProductionPlanAssistantScreenState
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  "Create a timeline-first production draft using the selected crop lifecycle, workload assumptions, focused staff, and your selected estate context.",
+                  "Create a timeline-first production draft using the selected crop lifecycle, workload assumptions, planting targets, focused staff, and your selected estate context.",
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     height: 1.45,
                   ),
                 ),
+                if (_requiresPlantingTargets()) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    "Planting baseline: ${_buildPlantingTargetsSummary()}",
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
                 const SizedBox(height: 14),
                 Text(
                   "Focused roles: ${selectedFocusedRoles.isEmpty ? 'None explicitly selected' : selectedFocusedRoles.map(formatStaffRoleLabel).join(", ")}",
@@ -14478,6 +14834,16 @@ class _ProductionPlanAssistantScreenState
                         ? "${formatDateLabel(draft.startDate)} → ${formatDateLabel(draft.endDate)}"
                         : "Dates unresolved",
                   ),
+                  if (productionDomainRequiresPlantingTargets(
+                    draft.domainContext,
+                  ))
+                    buildSummaryChip(
+                      Icons.grass_outlined,
+                      "Planting",
+                      draft.plantingTargets.isComplete
+                          ? "${_formatPlantingQuantity(draft.plantingTargets.plannedPlantingQuantity)} ${draft.plantingTargets.plannedPlantingUnit} (${formatProductionPlantingMaterialType(draft.plantingTargets.materialType).toLowerCase()}) -> ${_formatPlantingQuantity(draft.plantingTargets.estimatedHarvestQuantity)} ${draft.plantingTargets.estimatedHarvestUnit}"
+                          : "Pending",
+                    ),
                 ],
               ),
               const SizedBox(height: 18),
@@ -14695,6 +15061,14 @@ class _ProductionPlanAssistantScreenState
                 "Total units",
                 "${_totalWorkUnits ?? 0}",
               ),
+              if (_requiresPlantingTargets()) ...[
+                const SizedBox(height: 10),
+                buildSummaryChip(
+                  Icons.grass_outlined,
+                  "Planting",
+                  _buildPlantingTargetsSummary(),
+                ),
+              ],
               const SizedBox(height: 18),
               Text(
                 "Adjust dates",
@@ -14805,7 +15179,7 @@ class _ProductionPlanAssistantScreenState
       final timelineCard = buildShellCard(
         title: "Timeline-first draft studio",
         subtitle:
-            "Review the timeline first, then adjust tasks, staffing, notes, and plan settings from the inspector.",
+            "Use this screen for calendar review and setup. Open the dedicated draft editor for the full list, save history, and revision tracking.",
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -14848,7 +15222,7 @@ class _ProductionPlanAssistantScreenState
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Text(
-                  "This draft is editable, but the selected crop is not linked to a business product yet. Saving the production plan will still require a linked product.",
+                  "This draft is editable, but the selected crop is not linked to a business product yet. You can save the draft now, but activating production later will still require a linked product.",
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onTertiaryContainer,
                   ),
@@ -14859,6 +15233,12 @@ class _ProductionPlanAssistantScreenState
             ProductionPlanTaskTable(
               draft: draft,
               staff: staffList,
+              calendarOnly: true,
+              showLayoutToggle: true,
+              onOpenListScreen: () {
+                AppDebug.log(_logTag, _openEditorLog);
+                context.push(productionPlanDraftStudioPath());
+              },
               onAddTask: (phaseIndex) {
                 ref
                     .read(productionPlanDraftProvider.notifier)
@@ -14929,6 +15309,12 @@ class _ProductionPlanAssistantScreenState
           Icons.view_timeline_outlined,
           "Workload",
           "${_totalWorkUnits ?? 0} ${_resolveSafeWorkUnitLabelForStaffing()}",
+        ),
+      if (_requiresPlantingTargets())
+        buildSummaryChip(
+          Icons.grass_outlined,
+          "Planting",
+          _buildPlantingTargetsSummary(),
         ),
     ];
 
@@ -15045,7 +15431,7 @@ class _ProductionPlanAssistantScreenState
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.check_circle_outline),
-                  label: const Text("Save plan"),
+                  label: const Text("Save draft"),
                 ),
               ];
               final secondaryActions = children.sublist(0, children.length - 1);

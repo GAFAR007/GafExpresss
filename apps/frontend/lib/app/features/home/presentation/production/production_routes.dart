@@ -14,6 +14,8 @@ const String productionPlansRoute = "/business-production";
 const String productionPlanAssistantRoute =
     "/business-production/create-assistant";
 const String productionPlanCreateRoute = "/business-production/create";
+const String productionPlanDraftStudioRoute =
+    "/business-production/draft-studio";
 const String productionPlanDetailRoute = "/business-production/:id";
 const String productionPlanInsightsRoute = "/business-production/:id/insights";
 const String productionCalendarRoute = "/business-production/calendar";
@@ -29,4 +31,12 @@ String productionPlanDetailPath(String id) {
 String productionPlanInsightsPath(String id) {
   // WHY: Insights live on a separate route so the plan workspace can stay calendar-first.
   return "/business-production/$id/insights";
+}
+
+String productionPlanDraftStudioPath({String? planId}) {
+  final trimmedPlanId = (planId ?? "").trim();
+  if (trimmedPlanId.isEmpty) {
+    return productionPlanDraftStudioRoute;
+  }
+  return "$productionPlanDraftStudioRoute?planId=$trimmedPlanId";
 }

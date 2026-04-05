@@ -15,6 +15,7 @@
 
 const debug = require("../utils/debug");
 const User = require("../models/User");
+const BusinessStaffProfile = require("../models/BusinessStaffProfile");
 const {
   ACCOUNT_TYPES,
 } = require("../models/User");
@@ -311,7 +312,10 @@ function shapeAddress(addressValue) {
 }
 
 // WHY: Hide Mongo internal fields and password hash from client responses.
-function shapeProfile(userDoc) {
+function shapeProfile(
+  userDoc,
+  { staffRole = null } = {},
+) {
   return {
     id: userDoc._id.toString(),
     name: userDoc.name || "",
@@ -351,6 +355,7 @@ function shapeProfile(userDoc) {
     companyRegistration:
       userDoc.companyRegistration ||
       null,
+    staffRole,
     businessVerificationStatus:
       userDoc.businessVerificationStatus || 'unverified',
     businessVerificationSource:
@@ -381,6 +386,40 @@ function shapeProfile(userDoc) {
   };
 }
 
+async function resolveUserStaffRole(
+  userDoc,
+) {
+  if (
+    !userDoc ||
+    userDoc.role !== "staff" ||
+    !userDoc._id
+  ) {
+    return null;
+  }
+
+  const query = {
+    userId: userDoc._id,
+    status: { $ne: "terminated" },
+  };
+
+  if (userDoc.businessId) {
+    query.businessId =
+      userDoc.businessId;
+  }
+
+  const staffProfile =
+    await BusinessStaffProfile.findOne(
+      query,
+    )
+      .sort({
+        updatedAt: -1,
+        createdAt: -1,
+      })
+      .select("staffRole");
+
+  return staffProfile?.staffRole || null;
+}
+
 async function getUserProfile(userId) {
   debug(
     "PROFILE SERVICE: getUserProfile - entry",
@@ -404,7 +443,12 @@ async function getUserProfile(userId) {
     { userId },
   );
 
-  return shapeProfile(user);
+  const staffRole =
+    await resolveUserStaffRole(user);
+
+  return shapeProfile(user, {
+    staffRole,
+  });
 }
 
 async function updateUserProfile(
@@ -530,7 +574,12 @@ async function updateUserProfile(
     { userId },
   );
 
-  return shapeProfile(user);
+  const staffRole =
+    await resolveUserStaffRole(user);
+
+  return shapeProfile(user, {
+    staffRole,
+  });
 }
 
 module.exports = {

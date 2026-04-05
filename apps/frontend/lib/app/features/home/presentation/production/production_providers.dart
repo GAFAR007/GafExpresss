@@ -391,6 +391,34 @@ class ProductionPlanActions {
 
   ProductionPlanActions(this._ref);
 
+  Future<ProductionPlanDetail> saveDraft({
+    required Map<String, dynamic> payload,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonCreateMissing,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final detail = await api.createPlan(
+      token: session.token,
+      payload: {...payload, "saveMode": "draft"},
+    );
+
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPlanDetailProvider(detail.plan.id));
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return detail;
+  }
+
   Future<ProductionPlanDetail> createPlan({
     required Map<String, dynamic> payload,
   }) async {
@@ -415,6 +443,37 @@ class ProductionPlanActions {
     _ref.invalidate(productionPlanDetailProvider(detail.plan.id));
     _ref.invalidate(productionPortfolioConfidenceProvider);
 
+    return detail;
+  }
+
+  Future<ProductionPlanDetail> updateDraft({
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonCreateMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final detail = await api.updateDraft(
+      token: session.token,
+      planId: planId,
+      payload: payload,
+    );
+
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPortfolioConfidenceProvider);
     return detail;
   }
 
@@ -696,6 +755,9 @@ class ProductionPlanActions {
     String? staffId,
     String? unitId,
     required num actualPlots,
+    String? quantityActivityType,
+    num? quantityAmount,
+    String? quantityUnit,
     required String delayReason,
     required String notes,
     required String planId,
@@ -721,6 +783,9 @@ class ProductionPlanActions {
       staffId: staffId,
       unitId: unitId,
       actualPlots: actualPlots,
+      quantityActivityType: quantityActivityType,
+      quantityAmount: quantityAmount,
+      quantityUnit: quantityUnit,
       delayReason: delayReason,
       notes: notes,
     );

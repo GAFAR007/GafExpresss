@@ -1633,6 +1633,41 @@ class _PlanSummaryCard extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final domainLabel = formatProductionDomainLabel(plan.domainContext);
+    final plantingTargets = plan.plantingTargets;
+    String formatTargetNumber(double value) {
+      if (value <= 0) {
+        return "0";
+      }
+      final rounded = value.roundToDouble();
+      if (rounded == value) {
+        return rounded.toInt().toString();
+      }
+      return value.toStringAsFixed(value < 10 ? 2 : 1);
+    }
+
+    String formatMaterialLabel(String value) {
+      switch (value.trim().toLowerCase()) {
+        case "seed":
+          return "seed";
+        case "seedling":
+          return "seedling";
+        case "root":
+          return "root";
+        case "stem":
+          return "stem";
+        case "cutting":
+          return "cutting";
+        case "tuber":
+          return "tuber";
+        case "sucker":
+          return "sucker";
+        case "runner":
+          return "runner";
+        default:
+          return value.trim().isEmpty ? "material" : value.trim().toLowerCase();
+      }
+    }
+
     final confidencePercent = preorderSummary == null
         ? 0
         : (preorderSummary!.confidenceScore * _percentMultiplier)
@@ -1714,6 +1749,15 @@ class _PlanSummaryCard extends StatelessWidget {
                 label: "Duration",
                 value: durationLabel,
               ),
+              if (plantingTargets?.isConfigured == true)
+                _SummarySignalTile(
+                  icon: Icons.grass_outlined,
+                  label: "Planting",
+                  value:
+                      "${formatTargetNumber(plantingTargets!.plannedPlantingQuantity)} ${plantingTargets.plannedPlantingUnit} (${formatMaterialLabel(plantingTargets.materialType)})",
+                  helper:
+                      "Harvest est. ${formatTargetNumber(plantingTargets.estimatedHarvestQuantity)} ${plantingTargets.estimatedHarvestUnit}",
+                ),
               if (showPlanUnits)
                 _SummarySignalTile(
                   icon: Icons.grid_view_outlined,
@@ -1802,6 +1846,12 @@ class _PlanSummaryCard extends StatelessWidget {
                               icon: Icons.history_toggle_off_outlined,
                               label: durationLabel,
                             ),
+                            if (plantingTargets?.isConfigured == true)
+                              _InfoPill(
+                                icon: Icons.grass_outlined,
+                                label:
+                                    "${formatTargetNumber(plantingTargets!.plannedPlantingQuantity)} ${plantingTargets.plannedPlantingUnit} (${formatMaterialLabel(plantingTargets.materialType)})",
+                              ),
                           ],
                         ),
                       ],
@@ -4503,7 +4553,10 @@ bool _canReviewTaskProgress({
     return true;
   }
 
-  return actorRole == _staffRole && staffRole == _staffRoleEstateManager;
+  return actorRole == _staffRole &&
+      (staffRole == _staffRoleEstateManager ||
+          staffRole == _staffRoleFarmManager ||
+          staffRole == _staffRoleAssetManager);
 }
 
 bool _canLogTaskProgress({

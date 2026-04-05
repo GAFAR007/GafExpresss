@@ -95,11 +95,19 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
+            onPressed: () {
+              _logTap("open_farm_audit");
+              context.push('/business-assets/farm-audit');
+            },
+            icon: const Icon(Icons.agriculture_outlined),
+            tooltip: "Farm audit",
+          ),
+          IconButton(
             onPressed: _isSaving
                 ? null
                 : () {
                     _logTap("create_asset");
-                    _openAssetSheet(context);
+                    _openAssetSheet();
                   },
             icon: const Icon(Icons.add),
           ),
@@ -139,7 +147,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                         ? null
                         : () {
                             _logTap("empty_state_create");
-                            _openAssetSheet(context);
+                            _openAssetSheet();
                           },
                   )
                 else
@@ -163,7 +171,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                   "edit_asset",
                                   extra: {"assetId": asset.id},
                                 );
-                                _openAssetSheet(context, asset: asset);
+                                _openAssetSheet(asset: asset);
                               },
                         onDelete: _isSaving
                             ? null
@@ -172,7 +180,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
                                   "delete_asset",
                                   extra: {"assetId": asset.id},
                                 );
-                                _confirmDelete(context, asset);
+                                _confirmDelete(asset: asset);
                               },
                       ),
                     ),
@@ -264,10 +272,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
     return formatNgnInput(value);
   }
 
-  Future<void> _openAssetSheet(
-    BuildContext context, {
-    BusinessAsset? asset,
-  }) async {
+  Future<void> _openAssetSheet({BusinessAsset? asset}) async {
     // WHY: Reuse one modal for both create + edit flows.
     final nameCtrl = TextEditingController(text: asset?.name ?? '');
     final descriptionCtrl = TextEditingController(
@@ -1296,6 +1301,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
       return;
     }
 
+    if (!mounted) return;
+
     final session = ref.read(authSessionProvider);
     if (session == null || !session.isTokenValid) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1334,6 +1341,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
             ? "business_asset_create_success"
             : "business_asset_update_success",
       );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(asset == null ? "Asset created" : "Asset updated"),
@@ -1359,7 +1367,7 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
     }
   }
 
-  Future<void> _confirmDelete(BuildContext context, BusinessAsset asset) async {
+  Future<void> _confirmDelete({required BusinessAsset asset}) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1384,6 +1392,8 @@ class _BusinessAssetsScreenState extends ConsumerState<BusinessAssetsScreen> {
       _logTap("asset_delete_cancel", extra: {"assetId": asset.id});
       return;
     }
+
+    if (!mounted) return;
 
     final session = ref.read(authSessionProvider);
     if (session == null || !session.isTokenValid) {
@@ -1486,7 +1496,7 @@ class _AssetsSummaryHeader extends StatelessWidget {
               ],
             ),
             loading: () => const LinearProgressIndicator(),
-            error: (_, __) => Text(
+            error: (error, stackTrace) => Text(
               "Analytics unavailable",
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
@@ -1591,7 +1601,7 @@ class _StatusFilterRow extends StatelessWidget {
       ),
       loading: () =>
           Text("Loading status filters...", style: theme.textTheme.bodySmall),
-      error: (_, __) =>
+      error: (error, stackTrace) =>
           Text("Unable to load filters", style: theme.textTheme.bodySmall),
     );
   }
@@ -1689,7 +1699,7 @@ class _AssetCard extends StatelessWidget {
             border: Border.all(color: scheme.outlineVariant),
             boxShadow: [
               BoxShadow(
-                color: scheme.shadow.withOpacity(0.05),
+                color: scheme.shadow.withValues(alpha: 0.05),
                 blurRadius: 12,
                 offset: const Offset(0, 6),
               ),

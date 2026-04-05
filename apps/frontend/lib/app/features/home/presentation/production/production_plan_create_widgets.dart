@@ -87,6 +87,14 @@ const String _createProductLabel = "Create product";
 const String _createProductHint = "Add a new product for this plan.";
 const String _startDateLabel = "Start date";
 const String _endDateLabel = "End date";
+const String _plantingTargetsLabel = "Planting targets";
+const String _plantingMaterialTypeLabel = "Planting material";
+const String _plannedPlantingQuantityLabel = "Planned planting quantity";
+const String _plannedPlantingUnitLabel = "Planned planting unit";
+const String _estimatedHarvestQuantityLabel = "Estimated harvest quantity";
+const String _estimatedHarvestUnitLabel = "Estimated harvest unit";
+const String _plantingTargetsHint =
+    "Capture what you plan to plant and what you expect to harvest before the farm draft is generated.";
 const String _aiDraftLabel = "AI-generated draft";
 const String _aiDraftHelper = "Mark if this plan started as an AI draft.";
 const String _aiDraftApplyButtonLabel = "Draft production";
@@ -97,6 +105,8 @@ const String _aiSummaryRisksLabel = "Risk notes";
 const String _aiSummaryNoRisks = "No risks flagged";
 const String _aiDraftMissingFields =
     "Select estate and product before generating an AI draft.";
+const String _aiDraftMissingPlantingTargets =
+    "For farm production, choose planting material, planned planting quantity + unit, and estimated harvest quantity + unit before drafting.";
 const String _aiDraftSuccessMessage = "AI draft applied.";
 const String _aiDraftFailureMessage = "Unable to generate AI draft.";
 const String _aiDraftErrorTitle = "AI draft could not be applied";
@@ -189,6 +199,7 @@ const String _draftPayloadDomainContext = "domainContext";
 const String _draftPayloadStartDate = "startDate";
 const String _draftPayloadEndDate = "endDate";
 const String _draftPayloadAiBrief = "aiBrief";
+const String _draftPayloadPlantingTargets = "plantingTargets";
 const String _draftPayloadFocusedRoles = "focusedRoles";
 const String _draftPayloadFocusedStaffProfileIds = "focusedStaffProfileIds";
 const String _draftPayloadCropSubtype = "cropSubtype";
@@ -216,6 +227,11 @@ const List<int> _taskEditorHeadcountOptions = <int>[
   9,
   10,
 ];
+
+String? _farmPlantingTargetsErrorForDraft(ProductionPlanDraftState draft) {
+  final errors = draft.plantingTargets.validateForDomain(draft.domainContext);
+  return errors.isEmpty ? null : errors.first;
+}
 
 enum _AiDraftUiState { idle, generating, success, partial, error }
 
@@ -718,6 +734,11 @@ class _ProductionPlanCreateBodyState
       _showSnack(_aiDraftMissingFields);
       return;
     }
+    final plantingTargetsError = _farmPlantingTargetsErrorForDraft(draft);
+    if (plantingTargetsError != null) {
+      _showSnack(plantingTargetsError);
+      return;
+    }
 
     final strictPrompt = _buildStrictDraftPromptFromSelection(
       selectedRoleLabels: _aiFocusedRoles,
@@ -738,6 +759,7 @@ class _ProductionPlanCreateBodyState
       _draftPayloadStartDate: draft.startDate?.toIso8601String(),
       _draftPayloadEndDate: draft.endDate?.toIso8601String(),
       _draftPayloadAiBrief: strictPrompt,
+      _draftPayloadPlantingTargets: draft.plantingTargets.toPayload(),
       _draftPayloadFocusedRoles: _aiFocusedRoles.toList()..sort(),
       _draftPayloadFocusedStaffProfileIds: _aiFocusedStaffProfileIds.toList()
         ..sort(),
@@ -1347,6 +1369,10 @@ class _ProductionPlanCreateBodyState
         ),
         const SizedBox(height: _sectionSpacing),
         _PlanDatesSection(draft: draft),
+        if (productionDomainRequiresPlantingTargets(draft.domainContext)) ...[
+          const SizedBox(height: _sectionSpacing),
+          _PlanPlantingTargetsSection(draft: draft),
+        ],
         const SizedBox(height: _sectionSpacing),
         _PlanAiSection(
           key: _planAiSectionKey,
@@ -1891,6 +1917,160 @@ class _PlanDatesSection extends ConsumerWidget {
   }
 }
 
+class _PlanPlantingTargetsSection extends ConsumerWidget {
+  final ProductionPlanDraftState draft;
+
+  const _PlanPlantingTargetsSection({required this.draft});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(productionPlanDraftProvider.notifier);
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _plantingTargetsLabel,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _plantingTargetsHint,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: _fieldSpacing),
+        DropdownButtonFormField<String>(
+          initialValue: draft.plantingTargets.materialType.trim().isEmpty
+              ? null
+              : draft.plantingTargets.materialType,
+          decoration: const InputDecoration(
+            labelText: _plantingMaterialTypeLabel,
+          ),
+          hint: const Text(_selectPlaceholder),
+          items: productionPlantingMaterialTypeValues
+              .map(
+                (value) => DropdownMenuItem(
+                  value: value,
+                  child: Text(formatProductionPlantingMaterialType(value)),
+                ),
+              )
+              .toList(),
+          onChanged: controller.updatePlantingMaterialType,
+        ),
+        const SizedBox(height: _fieldSpacing),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useColumn = constraints.maxWidth < 860;
+            final plannedQuantityField = TextFormField(
+              initialValue:
+                  draft.plantingTargets.plannedPlantingQuantity?.toString() ??
+                  "",
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: _plannedPlantingQuantityLabel,
+              ),
+              onChanged: (value) => controller.updatePlannedPlantingQuantity(
+                double.tryParse(value.trim()),
+              ),
+            );
+            final plannedUnitField = DropdownButtonFormField<String>(
+              initialValue:
+                  draft.plantingTargets.plannedPlantingUnit.trim().isEmpty
+                  ? null
+                  : draft.plantingTargets.plannedPlantingUnit,
+              decoration: const InputDecoration(
+                labelText: _plannedPlantingUnitLabel,
+              ),
+              hint: const Text(_selectPlaceholder),
+              items: productionPlantingTargetUnitValues
+                  .map(
+                    (value) => DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(formatProductionPlantingTargetUnit(value)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: controller.updatePlannedPlantingUnit,
+            );
+            final harvestQuantityField = TextFormField(
+              initialValue:
+                  draft.plantingTargets.estimatedHarvestQuantity?.toString() ??
+                  "",
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: _estimatedHarvestQuantityLabel,
+              ),
+              onChanged: (value) => controller.updateEstimatedHarvestQuantity(
+                double.tryParse(value.trim()),
+              ),
+            );
+            final harvestUnitField = DropdownButtonFormField<String>(
+              initialValue:
+                  draft.plantingTargets.estimatedHarvestUnit.trim().isEmpty
+                  ? null
+                  : draft.plantingTargets.estimatedHarvestUnit,
+              decoration: const InputDecoration(
+                labelText: _estimatedHarvestUnitLabel,
+              ),
+              hint: const Text(_selectPlaceholder),
+              items: productionPlantingTargetUnitValues
+                  .map(
+                    (value) => DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(formatProductionPlantingTargetUnit(value)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: controller.updateEstimatedHarvestUnit,
+            );
+            if (useColumn) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  plannedQuantityField,
+                  const SizedBox(height: _fieldSpacing),
+                  plannedUnitField,
+                  const SizedBox(height: _fieldSpacing),
+                  harvestQuantityField,
+                  const SizedBox(height: _fieldSpacing),
+                  harvestUnitField,
+                ],
+              );
+            }
+            return Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(flex: 2, child: plannedQuantityField),
+                    const SizedBox(width: 12),
+                    Expanded(child: plannedUnitField),
+                  ],
+                ),
+                const SizedBox(height: _fieldSpacing),
+                Row(
+                  children: [
+                    Expanded(flex: 2, child: harvestQuantityField),
+                    const SizedBox(width: 12),
+                    Expanded(child: harvestUnitField),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
 class _DateField extends StatelessWidget {
   final String label;
   final DateTime? value;
@@ -2193,6 +2373,42 @@ class _PlanAiSectionState extends ConsumerState<_PlanAiSection> {
       }
       return;
     }
+    final plantingTargetsError = _farmPlantingTargetsErrorForDraft(
+      widget.draft,
+    );
+    if (plantingTargetsError != null) {
+      if (mounted) {
+        _showSnack(plantingTargetsError);
+        setState(() {
+          _uiState = _AiDraftUiState.error;
+          _lastError = ProductionAiDraftError(
+            message: _aiDraftMissingPlantingTargets,
+            classification: "MISSING_REQUIRED_FIELD",
+            errorCode: "PRODUCTION_AI_PLANTING_TARGETS_REQUIRED",
+            resolutionHint:
+                "Set planting material, planned planting quantity + unit, and estimated harvest quantity + unit before generating the farm draft.",
+            details: <String, dynamic>{
+              "missing": const [
+                "plantingTargets.materialType",
+                "plantingTargets.plannedPlantingQuantity",
+                "plantingTargets.plannedPlantingUnit",
+                "plantingTargets.estimatedHarvestQuantity",
+                "plantingTargets.estimatedHarvestUnit",
+              ],
+              "invalid": const [],
+            },
+            retryAllowed: true,
+            retryReason: "missing_required_context",
+            statusCode: 400,
+          );
+          _lastPartialIssue = null;
+          _generatedDraft = null;
+          _draftTaskOverrides = <int, ProductionDraftTaskOverride>{};
+          _showErrorDetails = false;
+        });
+      }
+      return;
+    }
 
     setState(() {
       // WHY: Keep state explicit to drive loading/success/error UI.
@@ -2234,6 +2450,7 @@ class _PlanAiSectionState extends ConsumerState<_PlanAiSection> {
         _draftPayloadStartDate: widget.draft.startDate?.toIso8601String(),
         _draftPayloadEndDate: widget.draft.endDate?.toIso8601String(),
         _draftPayloadAiBrief: prompt,
+        _draftPayloadPlantingTargets: widget.draft.plantingTargets.toPayload(),
         _draftPayloadFocusedRoles: widget.focusedRoles,
         _draftPayloadFocusedStaffProfileIds: widget.focusedStaffProfileIds,
         _draftPayloadBusinessType: normalizeProductionDomainContext(

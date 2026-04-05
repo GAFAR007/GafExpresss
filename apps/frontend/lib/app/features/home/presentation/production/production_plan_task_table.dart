@@ -1,16 +1,17 @@
 /// lib/app/features/home/presentation/production/production_plan_task_table.dart
 /// ----------------------------------------------------------------------------
 /// WHAT:
-/// - Table layout for production plan tasks (phase flow + status + assignments).
+/// - Phase-based editing workspace for production draft tasks.
 ///
 /// WHY:
-/// - Replaces long card lists with a compact, scannable grid.
-/// - Makes it faster to see who is assigned, what is done, and what is blocked.
+/// - Long operational drafts need a calmer editing surface than a dense table.
+/// - Users must read full task names, understand phase progress, and expand
+///   secondary controls only when needed.
 ///
 /// HOW:
-/// - Builds a phase flow row, summary KPIs, and a per-phase task table.
-/// - Uses draft controller callbacks to update tasks inline.
-/// - Logs table build and user interactions for diagnostics.
+/// - Builds a summary strip, phase navigator, and per-phase task editor cards.
+/// - Separates primary editing fields from secondary assignment metadata.
+/// - Logs key layout and interaction states for diagnostics.
 library;
 
 import 'package:flutter/material.dart';
@@ -70,8 +71,10 @@ const String _metaLabelSuffix = ":";
 const String _phaseProgressLabel = "Progress";
 const String _addTaskLabel = "Add task";
 const String _phaseEmptyLabel = "No tasks in this phase yet.";
+const String _stageNavigatorLabel = "Phase navigator";
+const String _stageNavigatorHint =
+    "Only the selected phase is loaded to keep the editor responsive.";
 
-const String _columnDone = "Done";
 const String _columnTask = "Task";
 const String _columnRole = "Role";
 const String _columnHeadcount = "Headcount";
@@ -91,8 +94,9 @@ const String _statusBlocked = "Blocked";
 const String _statusDone = "Done";
 
 const double _sectionSpacing = 16;
+const double _taskCardSpacing = 12;
+const double _taskCardPadding = 14;
 const double _mobileBreakpoint = 720;
-const double _mobileCardSpacing = 12;
 const double _mobileFieldSpacing = 10;
 const double _mobileHeaderSpacing = 6;
 const double _mobileTogglePadding = 12;
@@ -113,26 +117,12 @@ const double _summaryProgressHeight = 6;
 const double _phaseCardRadius = 16;
 const double _phaseCardPadding = 12;
 const double _phaseHeaderSpacing = 8;
-const double _tableHeaderHeight = 40;
-const double _rowSpacing = 8;
-const double _rowPadding = 8;
 const double _chipPadding = 8;
 const double _chipSpacing = 8;
 const double _progressHeight = 6;
 const double _iconSize = 16;
 const double _denseFieldSpacing = 6;
 const double _rowBorderOpacity = 0.35;
-
-const double _colDoneWidth = 60;
-const double _colTaskWidth = 220;
-const double _colRoleWidth = 160;
-const double _colHeadcountWidth = 120;
-const double _colStaffWidth = 180;
-const double _colWeightWidth = 90;
-const double _colStatusWidth = 160;
-const double _colInstructionsWidth = 220;
-const double _colCompletedWidth = 140;
-const double _colActionsWidth = 60;
 
 const List<int> _weightOptions = [1, 2, 3, 4, 5];
 const List<int> _headcountOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -160,9 +150,14 @@ const List<_CalendarDefaultSlot> _calendarDefaultSlots = [
 
 enum _TaskLayoutMode { calendar, list }
 
-class ProductionPlanTaskTable extends ConsumerWidget {
+class ProductionPlanTaskTable extends ConsumerStatefulWidget {
   final ProductionPlanDraftState draft;
   final List<BusinessStaffProfileSummary> staff;
+  final bool calendarOnly;
+  final bool listOnly;
+  final bool showLayoutToggle;
+  final bool showPhaseNavigator;
+  final VoidCallback? onOpenListScreen;
   final void Function(int phaseIndex) onAddTask;
   final Future<void> Function(
     int phaseIndex,
@@ -179,6 +174,11 @@ class ProductionPlanTaskTable extends ConsumerWidget {
     super.key,
     required this.draft,
     required this.staff,
+    this.calendarOnly = false,
+    this.listOnly = false,
+    this.showLayoutToggle = true,
+    this.showPhaseNavigator = false,
+    this.onOpenListScreen,
     required this.onAddTask,
     this.onAddTaskAt,
     this.taskScheduleOverrides = const <String, DateTimeRange>{},
@@ -186,18 +186,72 @@ class ProductionPlanTaskTable extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProductionPlanTaskTable> createState() =>
+      _ProductionPlanTaskTableState();
+}
+
+class _ProductionPlanTaskTableState
+    extends ConsumerState<ProductionPlanTaskTable> {
+  int _visiblePhaseIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant ProductionPlanTaskTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final maxIndex = widget.draft.phases.length - 1;
+    if (maxIndex < 0) {
+      if (_visiblePhaseIndex != 0) {
+        setState(() {
+          _visiblePhaseIndex = 0;
+        });
+      }
+      return;
+    }
+    if (_visiblePhaseIndex > maxIndex) {
+      setState(() {
+        _visiblePhaseIndex = maxIndex;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     AppDebug.log(_logTag, _logBuild);
     // WHY: Summary keeps the workload and completion visible at a glance.
+    final draft = widget.draft;
+    final staff = widget.staff;
     final summary = _TaskSummary.fromDraft(draft);
-    final layoutMode = ref.watch(_taskLayoutModeProvider);
+    final storedLayoutMode = ref.watch(_taskLayoutModeProvider);
+    final layoutMode = widget.listOnly
+        ? _TaskLayoutMode.list
+        : widget.calendarOnly
+        ? _TaskLayoutMode.calendar
+        : storedLayoutMode;
     final isNarrow = MediaQuery.of(context).size.width < _mobileBreakpoint;
+    final safeVisiblePhaseIndex = draft.phases.isEmpty
+        ? 0
+        : _visiblePhaseIndex.clamp(0, draft.phases.length - 1);
+    final visiblePhaseEntries =
+        widget.showPhaseNavigator && draft.phases.isNotEmpty
+        ? <MapEntry<int, ProductionPhaseDraft>>[
+            MapEntry(
+              safeVisiblePhaseIndex,
+              draft.phases[safeVisiblePhaseIndex],
+            ),
+          ]
+        : draft.phases.asMap().entries.toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _TaskLayoutToggle(mode: layoutMode),
-        const SizedBox(height: _summarySpacing),
+        if (widget.showLayoutToggle &&
+            !widget.listOnly &&
+            (!widget.calendarOnly || widget.onOpenListScreen != null)) ...[
+          _TaskLayoutToggle(
+            mode: widget.calendarOnly ? _TaskLayoutMode.calendar : layoutMode,
+            onOpenListScreen: widget.onOpenListScreen,
+          ),
+          const SizedBox(height: _summarySpacing),
+        ],
         _TaskSummaryBar(summary: summary),
         const SizedBox(height: _summarySpacing),
         if (isNarrow && layoutMode == _TaskLayoutMode.list) ...[
@@ -208,25 +262,38 @@ class ProductionPlanTaskTable extends ConsumerWidget {
           _TaskCalendarPreviewPanel(
             draft: draft,
             staff: staff,
-            onAddTask: onAddTask,
-            onAddTaskAt: onAddTaskAt,
-            taskScheduleOverrides: taskScheduleOverrides,
+            onAddTask: widget.onAddTask,
+            onAddTaskAt: widget.onAddTaskAt,
+            taskScheduleOverrides: widget.taskScheduleOverrides,
           ),
         if (layoutMode == _TaskLayoutMode.calendar)
           const SizedBox(height: _sectionSpacing),
         if (layoutMode == _TaskLayoutMode.list) ...[
-          // WHY: Phase flow row provides a quick visual of plan progression.
-          _PhaseFlowRow(phases: draft.phases),
+          if (widget.showPhaseNavigator && draft.phases.isNotEmpty)
+            _PhaseStageNavigator(
+              phases: draft.phases,
+              selectedIndex: safeVisiblePhaseIndex,
+              onChanged: (nextIndex) {
+                if (nextIndex == _visiblePhaseIndex) {
+                  return;
+                }
+                setState(() {
+                  _visiblePhaseIndex = nextIndex;
+                });
+              },
+            )
+          else
+            _PhaseFlowRow(phases: draft.phases),
           const SizedBox(height: _sectionSpacing),
           if (summary.totalTasks == 0) _EmptyTableMessage(),
           if (summary.totalTasks == 0) const SizedBox(height: _sectionSpacing),
-          ...draft.phases.asMap().entries.map(
+          ...visiblePhaseEntries.map(
             (entry) => _PhaseTableCard(
               phaseIndex: entry.key,
               phase: entry.value,
               staff: staff,
-              onAddTask: () => onAddTask(entry.key),
-              onRemoveTask: (taskId) => onRemoveTask(entry.key, taskId),
+              onAddTask: () => widget.onAddTask(entry.key),
+              onRemoveTask: (taskId) => widget.onRemoveTask(entry.key, taskId),
             ),
           ),
         ],
@@ -237,8 +304,9 @@ class ProductionPlanTaskTable extends ConsumerWidget {
 
 class _TaskLayoutToggle extends ConsumerWidget {
   final _TaskLayoutMode mode;
+  final VoidCallback? onOpenListScreen;
 
-  const _TaskLayoutToggle({required this.mode});
+  const _TaskLayoutToggle({required this.mode, this.onOpenListScreen});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -269,6 +337,10 @@ class _TaskLayoutToggle extends ConsumerWidget {
               selected: <_TaskLayoutMode>{mode},
               onSelectionChanged: (nextSet) {
                 final next = nextSet.first;
+                if (next == _TaskLayoutMode.list && onOpenListScreen != null) {
+                  onOpenListScreen!();
+                  return;
+                }
                 AppDebug.log(
                   _logTag,
                   _logLayoutToggle,
@@ -628,6 +700,108 @@ class _SummaryChip extends StatelessWidget {
   }
 }
 
+class _PhaseStageNavigator extends StatelessWidget {
+  final List<ProductionPhaseDraft> phases;
+  final int selectedIndex;
+  final ValueChanged<int> onChanged;
+
+  const _PhaseStageNavigator({
+    required this.phases,
+    required this.selectedIndex,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useDropdown = constraints.maxWidth < 760;
+        return Container(
+          padding: const EdgeInsets.all(_phaseCardPadding),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(_phaseCardRadius),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _stageNavigatorLabel,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: _mobileHeaderSpacing),
+              Text(
+                _stageNavigatorHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: _summarySpacing),
+              if (useDropdown)
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: _stageNavigatorLabel,
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      value: selectedIndex,
+                      isExpanded: true,
+                      items: phases.asMap().entries.map((entry) {
+                        final phase = entry.value;
+                        final summary = _PhaseSummary.fromPhase(phase);
+                        return DropdownMenuItem<int>(
+                          value: entry.key,
+                          child: Text(
+                            "${phase.name} (${summary.totalTasks} tasks)",
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          onChanged(value);
+                        }
+                      },
+                    ),
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: _chipSpacing,
+                  runSpacing: _chipSpacing,
+                  children: phases.asMap().entries.map((entry) {
+                    final phase = entry.value;
+                    final summary = _PhaseSummary.fromPhase(phase);
+                    final isSelected = entry.key == selectedIndex;
+                    return ChoiceChip(
+                      selected: isSelected,
+                      label: Text("${phase.name} (${summary.totalTasks})"),
+                      avatar: Icon(
+                        summary.icon,
+                        size: _iconSize,
+                        color: isSelected
+                            ? theme.colorScheme.onPrimary
+                            : AppStatusBadgeColors.fromTheme(
+                                theme: theme,
+                                tone: summary.tone,
+                              ).foreground,
+                      ),
+                      onSelected: (_) => onChanged(entry.key),
+                    );
+                  }).toList(),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _PhaseFlowRow extends StatelessWidget {
   final List<ProductionPhaseDraft> phases;
 
@@ -808,7 +982,7 @@ class _PhaseTableCard extends ConsumerWidget {
   }
 }
 
-class _PhaseTaskList extends ConsumerWidget {
+class _PhaseTaskList extends StatelessWidget {
   final int phaseIndex;
   final ProductionPhaseDraft phase;
   final List<BusinessStaffProfileSummary> staff;
@@ -822,29 +996,19 @@ class _PhaseTaskList extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final expandedNotifier = ref.read(_expandedTaskIdsProvider.notifier);
-    // WHY: Mobile list keeps tasks readable without horizontal scrolling.
+  Widget build(BuildContext context) {
     return Column(
-      children: phase.tasks
-          .map(
-            (task) => _TaskMobileCard(
-              phaseIndex: phaseIndex,
-              task: task,
-              staff: staff,
-              onRemove: () {
-                // WHY: Clear expansion state when a task is removed.
-                expandedNotifier.update((state) {
-                  if (!state.contains(task.id)) return state;
-                  final next = {...state};
-                  next.remove(task.id);
-                  return next;
-                });
-                onRemoveTask(task.id);
-              },
-            ),
-          )
-          .toList(),
+      children: phase.tasks.asMap().entries.map((entry) {
+        final task = entry.value;
+        return _TaskEditorCard(
+          phaseIndex: phaseIndex,
+          taskIndex: entry.key,
+          task: task,
+          staff: staff,
+          compactLayout: true,
+          onRemove: () => onRemoveTask(task.id),
+        );
+      }).toList(),
     );
   }
 }
@@ -864,137 +1028,36 @@ class _PhaseTaskTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // WHY: Keep header and rows aligned for readability.
-    final header = _TaskTableHeader();
-    final rows = phase.tasks
-        .map(
-          (task) => _TaskTableRow(
-            phaseIndex: phaseIndex,
-            task: task,
-            staff: staff,
-            onRemove: () => onRemoveTask(task.id),
-          ),
-        )
-        .toList();
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          header,
-          const SizedBox(height: _rowSpacing),
-          ...rows,
-        ],
-      ),
+    return Column(
+      children: phase.tasks.asMap().entries.map((entry) {
+        final task = entry.value;
+        return _TaskEditorCard(
+          phaseIndex: phaseIndex,
+          taskIndex: entry.key,
+          task: task,
+          staff: staff,
+          compactLayout: false,
+          onRemove: () => onRemoveTask(task.id),
+        );
+      }).toList(),
     );
   }
 }
 
-class _TaskTableHeader extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Container(
-      height: _tableHeaderHeight,
-      padding: const EdgeInsets.symmetric(horizontal: _rowPadding),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(_phaseCardRadius),
-      ),
-      child: Row(
-        children: [
-          _HeaderCell(
-            width: _colDoneWidth,
-            label: _columnDone,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colTaskWidth,
-            label: _columnTask,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colRoleWidth,
-            label: _columnRole,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colHeadcountWidth,
-            label: _columnHeadcount,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colStaffWidth,
-            label: _columnStaff,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colWeightWidth,
-            label: _columnWeight,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colStatusWidth,
-            label: _columnStatus,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colInstructionsWidth,
-            label: _columnInstructions,
-            style: textTheme,
-          ),
-          _HeaderCell(
-            width: _colCompletedWidth,
-            label: _columnCompleted,
-            style: textTheme,
-          ),
-          const SizedBox(width: _colActionsWidth),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeaderCell extends StatelessWidget {
-  final double width;
-  final String label;
-  final TextTheme style;
-
-  const _HeaderCell({
-    required this.width,
-    required this.label,
-    required this.style,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: width,
-      child: Text(
-        label,
-        style: style.labelSmall?.copyWith(
-          color: colorScheme.onSurfaceVariant,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _TaskTableRow extends ConsumerWidget {
+class _TaskEditorCard extends ConsumerWidget {
   final int phaseIndex;
+  final int taskIndex;
   final ProductionTaskDraft task;
   final List<BusinessStaffProfileSummary> staff;
+  final bool compactLayout;
   final VoidCallback onRemove;
 
-  const _TaskTableRow({
+  const _TaskEditorCard({
     required this.phaseIndex,
+    required this.taskIndex,
     required this.task,
     required this.staff,
+    required this.compactLayout,
     required this.onRemove,
   });
 
@@ -1002,147 +1065,8 @@ class _TaskTableRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(productionPlanDraftProvider.notifier);
     final theme = Theme.of(context);
-    // WHY: Row accents make status visible without extra clicks.
-    final rowTone = _statusTone(task.status);
-    final rowColors = AppStatusBadgeColors.fromTheme(
-      theme: theme,
-      tone: rowTone,
-    );
-    final rowBackground = rowTone == AppStatusTone.neutral
-        ? theme.colorScheme.surface
-        : rowColors.background;
-    final rowBorder = rowTone == AppStatusTone.neutral
-        ? theme.colorScheme.outlineVariant
-        : rowColors.foreground.withValues(alpha: _rowBorderOpacity);
-    // WHY: Filter staff list by required role for accurate assignments.
-    final roleStaff = staff
-        .where((member) => member.staffRole == task.roleRequired)
-        .toList();
-    // WHY: Prevent stale staff selections when role changes.
-    final selectedStaffId =
-        roleStaff.any((member) => member.id == task.assignedStaffId)
-        ? task.assignedStaffId
-        : null;
-
-    return Container(
-      padding: const EdgeInsets.all(_rowPadding),
-      margin: const EdgeInsets.only(bottom: _rowSpacing),
-      decoration: BoxDecoration(
-        color: rowBackground,
-        borderRadius: BorderRadius.circular(_phaseCardRadius),
-        border: Border.all(color: rowBorder),
-      ),
-      child: Row(
-        children: [
-          _TaskDoneCell(
-            task: task,
-            onDone: () {
-              AppDebug.log(
-                _logTag,
-                _logDoneToggle,
-                extra: {_extraTaskIdKey: task.id},
-              );
-              controller.markTaskDone(phaseIndex, task.id);
-            },
-            onClear: () {
-              AppDebug.log(
-                _logTag,
-                _logClearToggle,
-                extra: {_extraTaskIdKey: task.id},
-              );
-              controller.clearTaskDone(phaseIndex, task.id);
-            },
-          ),
-          _TaskTitleCell(
-            task: task,
-            onChanged: (value) =>
-                controller.updateTaskTitle(phaseIndex, task.id, value),
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          _TaskRoleCell(
-            value: task.roleRequired,
-            onChanged: (value) =>
-                controller.updateTaskRole(phaseIndex, task.id, value),
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          _TaskHeadcountCell(
-            requiredHeadcount: task.requiredHeadcount,
-            assignedCount: task.assignedStaffProfileIds.length,
-            onChanged: (value) => controller.updateTaskRequiredHeadcount(
-              phaseIndex,
-              task.id,
-              value,
-            ),
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          _TaskStaffCell(
-            staff: roleStaff,
-            selectedStaffId: selectedStaffId,
-            onChanged: roleStaff.isEmpty
-                ? null
-                : (value) =>
-                      controller.updateTaskStaff(phaseIndex, task.id, value),
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          _TaskWeightCell(
-            value: task.weight,
-            onChanged: (value) =>
-                controller.updateTaskWeight(phaseIndex, task.id, value),
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          _TaskStatusCell(
-            value: task.status,
-            onChanged: (value) {
-              AppDebug.log(
-                _logTag,
-                _logStatusChange,
-                extra: {_extraTaskIdKey: task.id, _extraStatusKey: value.name},
-              );
-              controller.updateTaskStatus(phaseIndex, task.id, value);
-            },
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          _TaskInstructionsCell(
-            task: task,
-            onChanged: (value) =>
-                controller.updateTaskInstructions(phaseIndex, task.id, value),
-          ),
-          const SizedBox(width: _denseFieldSpacing),
-          SizedBox(
-            width: _colCompletedWidth,
-            child: _CompletedCell(
-              completedAt: task.completedAt,
-              status: task.status,
-            ),
-          ),
-          _TaskActionsCell(onRemove: onRemove),
-        ],
-      ),
-    );
-  }
-}
-
-class _TaskMobileCard extends ConsumerWidget {
-  final int phaseIndex;
-  final ProductionTaskDraft task;
-  final List<BusinessStaffProfileSummary> staff;
-  final VoidCallback onRemove;
-
-  const _TaskMobileCard({
-    required this.phaseIndex,
-    required this.task,
-    required this.staff,
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final controller = ref.read(productionPlanDraftProvider.notifier);
-    final theme = Theme.of(context);
-    final isCompact = ref.watch(_compactModeProvider);
     final expandedTasks = ref.watch(_expandedTaskIdsProvider);
-    final isExpanded = !isCompact || expandedTasks.contains(task.id);
-    // WHY: Card accents mirror desktop row status to keep cues consistent.
+    final isExpanded = expandedTasks.contains(task.id);
     final rowTone = _statusTone(task.status);
     final rowColors = AppStatusBadgeColors.fromTheme(
       theme: theme,
@@ -1154,130 +1078,283 @@ class _TaskMobileCard extends ConsumerWidget {
     final rowBorder = rowTone == AppStatusTone.neutral
         ? theme.colorScheme.outlineVariant
         : rowColors.foreground.withValues(alpha: _rowBorderOpacity);
-    // WHY: Filter staff list by required role for accurate assignments.
     final roleStaff = staff
         .where((member) => member.staffRole == task.roleRequired)
         .toList();
-    // WHY: Prevent stale staff selections when role changes.
     final selectedStaffId =
         roleStaff.any((member) => member.id == task.assignedStaffId)
         ? task.assignedStaffId
         : null;
+    final assignedCount = task.assignedStaffProfileIds.length;
+    final roleLabel = formatStaffRoleLabel(
+      task.roleRequired,
+      fallback: task.roleRequired,
+    );
+    final staffLabel = _resolveStaffLabel(roleStaff, selectedStaffId);
+    final dayLabel = _extractProjectDayLabel(task);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: _mobileCardSpacing),
-      padding: const EdgeInsets.all(_rowPadding),
+      margin: const EdgeInsets.only(bottom: _taskCardSpacing),
+      padding: const EdgeInsets.all(_taskCardPadding),
       decoration: BoxDecoration(
         color: rowBackground,
-        borderRadius: BorderRadius.circular(_phaseCardRadius),
+        borderRadius: BorderRadius.circular(_phaseCardRadius + 2),
         border: Border.all(color: rowBorder),
+        boxShadow: [
+          BoxShadow(
+            color: theme.colorScheme.shadow.withValues(alpha: 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _TaskMobileHeaderRow(
-            task: task,
-            isCompact: isCompact,
-            isExpanded: isExpanded,
-            onToggleExpand: () {
-              final nextExpanded = !expandedTasks.contains(task.id);
-              AppDebug.log(
-                _logTag,
-                _logExpandToggle,
-                extra: {
-                  _extraTaskIdKey: task.id,
-                  _extraExpandedKey: nextExpanded,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Checkbox(
+                value: task.status == ProductionTaskStatus.done,
+                onChanged: (value) {
+                  if (value == true) {
+                    AppDebug.log(
+                      _logTag,
+                      _logDoneToggle,
+                      extra: {_extraTaskIdKey: task.id},
+                    );
+                    controller.markTaskDone(phaseIndex, task.id);
+                  } else {
+                    AppDebug.log(
+                      _logTag,
+                      _logClearToggle,
+                      extra: {_extraTaskIdKey: task.id},
+                    );
+                    controller.clearTaskDone(phaseIndex, task.id);
+                  }
                 },
-              );
-              ref.read(_expandedTaskIdsProvider.notifier).update((state) {
-                final next = {...state};
-                if (nextExpanded) {
-                  next.add(task.id);
-                } else {
-                  next.remove(task.id);
-                }
-                return next;
-              });
-            },
-            onDone: () {
-              AppDebug.log(
-                _logTag,
-                _logDoneToggle,
-                extra: {_extraTaskIdKey: task.id},
-              );
-              controller.markTaskDone(phaseIndex, task.id);
-            },
-            onClear: () {
-              AppDebug.log(
-                _logTag,
-                _logClearToggle,
-                extra: {_extraTaskIdKey: task.id},
-              );
-              controller.clearTaskDone(phaseIndex, task.id);
-            },
-            onTitleChanged: (value) =>
-                controller.updateTaskTitle(phaseIndex, task.id, value),
-            onRemove: onRemove,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: _chipSpacing,
+                      runSpacing: _chipSpacing,
+                      children: [
+                        _MetaChip(
+                          label: "Task",
+                          value: (taskIndex + 1).toString(),
+                          tone: AppStatusTone.neutral,
+                        ),
+                        _MetaChip(
+                          label: _columnStatus,
+                          value: _statusLabel(task.status),
+                          tone: rowTone,
+                        ),
+                        if (dayLabel != null)
+                          _MetaChip(
+                            label: "Day",
+                            value: dayLabel,
+                            tone: AppStatusTone.info,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      // WHAT: The task title is the primary editing surface.
+                      // WHY: Full operational task names must stay readable.
+                      // HOW: Use a multi-line input instead of a compressed
+                      // table cell so editors can review the whole title.
+                      initialValue: task.title,
+                      minLines: 1,
+                      maxLines: compactLayout ? 2 : 3,
+                      decoration: const InputDecoration(
+                        labelText: "Task title",
+                        hintText: "Describe task",
+                      ),
+                      onChanged: (value) => controller.updateTaskTitle(
+                        phaseIndex,
+                        task.id,
+                        value,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    if (!isExpanded && task.instructions.trim().isNotEmpty) ...[
+                      Text(
+                        task.instructions.trim(),
+                        maxLines: compactLayout ? 2 : 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    _TaskEditorPreviewMeta(
+                      roleLabel: roleLabel,
+                      staffLabel: staffLabel,
+                      assignmentLabel:
+                          "$assignedCount/${task.requiredHeadcount}",
+                      weight: task.weight,
+                      completedAt: task.completedAt,
+                      status: task.status,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      final nextExpanded = !isExpanded;
+                      AppDebug.log(
+                        _logTag,
+                        _logExpandToggle,
+                        extra: {
+                          _extraTaskIdKey: task.id,
+                          _extraExpandedKey: nextExpanded,
+                        },
+                      );
+                      ref.read(_expandedTaskIdsProvider.notifier).update((
+                        state,
+                      ) {
+                        final next = {...state};
+                        if (nextExpanded) {
+                          next.add(task.id);
+                        } else {
+                          next.remove(task.id);
+                        }
+                        return next;
+                      });
+                    },
+                    icon: Icon(
+                      isExpanded ? Icons.expand_less : Icons.expand_more,
+                    ),
+                    tooltip: isExpanded ? _collapseLabel : _expandLabel,
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      ref.read(_expandedTaskIdsProvider.notifier).update((
+                        state,
+                      ) {
+                        if (!state.contains(task.id)) {
+                          return state;
+                        }
+                        final next = {...state};
+                        next.remove(task.id);
+                        return next;
+                      });
+                      onRemove();
+                    },
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: _removeTaskTooltip,
+                  ),
+                ],
+              ),
+            ],
           ),
-          if (isCompact && !isExpanded) ...[
-            const SizedBox(height: _mobileHeaderSpacing),
-            _TaskMobileCollapsedMeta(
-              status: task.status,
-              roleLabel:
-                  "${formatStaffRoleLabel(task.roleRequired, fallback: task.roleRequired)} x${task.assignedStaffProfileIds.isNotEmpty ? task.assignedStaffProfileIds.length : task.requiredHeadcount}",
-              assignmentLabel:
-                  "${task.assignedStaffProfileIds.length}/${task.requiredHeadcount}",
-              staffLabel: _resolveStaffLabel(roleStaff, selectedStaffId),
-              weight: task.weight,
+          if (isExpanded) ...[
+            const SizedBox(height: 14),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            Text(
+              "Execution notes",
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ] else ...[
-            const SizedBox(height: _mobileFieldSpacing),
-            _TaskMobileStatusField(
-              value: task.status,
-              onChanged: (value) {
-                AppDebug.log(
-                  _logTag,
-                  _logStatusChange,
-                  extra: {
-                    _extraTaskIdKey: task.id,
-                    _extraStatusKey: value.name,
-                  },
-                );
-                controller.updateTaskStatus(phaseIndex, task.id, value);
-              },
-            ),
-            const SizedBox(height: _mobileFieldSpacing),
-            _TaskMobileRoleField(
-              value: task.roleRequired,
-              onChanged: (value) =>
-                  controller.updateTaskRole(phaseIndex, task.id, value),
-            ),
-            const SizedBox(height: _mobileFieldSpacing),
-            _TaskMobileStaffField(
-              staff: roleStaff,
-              selectedStaffId: selectedStaffId,
-              onChanged: roleStaff.isEmpty
-                  ? null
-                  : (value) =>
-                        controller.updateTaskStaff(phaseIndex, task.id, value),
-            ),
-            const SizedBox(height: _mobileFieldSpacing),
-            _TaskMobileWeightRow(
-              weight: task.weight,
-              requiredHeadcount: task.requiredHeadcount,
-              assignedCount: task.assignedStaffProfileIds.length,
-              completedAt: task.completedAt,
-              status: task.status,
-              onHeadcountChanged: (value) => controller
-                  .updateTaskRequiredHeadcount(phaseIndex, task.id, value),
-              onChanged: (value) =>
-                  controller.updateTaskWeight(phaseIndex, task.id, value),
-            ),
-            const SizedBox(height: _mobileFieldSpacing),
+            const SizedBox(height: 8),
             _TaskMobileInstructionsField(
               value: task.instructions,
               onChanged: (value) =>
                   controller.updateTaskInstructions(phaseIndex, task.id, value),
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useSingleColumn =
+                    compactLayout || constraints.maxWidth < 760;
+                final halfWidth = (constraints.maxWidth - _sectionSpacing) / 2;
+                return Wrap(
+                  spacing: _sectionSpacing,
+                  runSpacing: _mobileFieldSpacing,
+                  children: [
+                    SizedBox(
+                      width: useSingleColumn ? double.infinity : halfWidth,
+                      child: _TaskMobileStatusField(
+                        value: task.status,
+                        onChanged: (value) {
+                          AppDebug.log(
+                            _logTag,
+                            _logStatusChange,
+                            extra: {
+                              _extraTaskIdKey: task.id,
+                              _extraStatusKey: value.name,
+                            },
+                          );
+                          controller.updateTaskStatus(
+                            phaseIndex,
+                            task.id,
+                            value,
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: useSingleColumn ? double.infinity : halfWidth,
+                      child: _TaskMobileRoleField(
+                        value: task.roleRequired,
+                        onChanged: (value) => controller.updateTaskRole(
+                          phaseIndex,
+                          task.id,
+                          value,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: useSingleColumn ? double.infinity : halfWidth,
+                      child: _TaskMobileStaffField(
+                        staff: roleStaff,
+                        selectedStaffId: selectedStaffId,
+                        onChanged: roleStaff.isEmpty
+                            ? null
+                            : (value) => controller.updateTaskStaff(
+                                phaseIndex,
+                                task.id,
+                                value,
+                              ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: useSingleColumn ? double.infinity : halfWidth,
+                      child: _TaskMobileWeightRow(
+                        weight: task.weight,
+                        requiredHeadcount: task.requiredHeadcount,
+                        assignedCount: assignedCount,
+                        completedAt: task.completedAt,
+                        status: task.status,
+                        onHeadcountChanged: (value) =>
+                            controller.updateTaskRequiredHeadcount(
+                              phaseIndex,
+                              task.id,
+                              value,
+                            ),
+                        onChanged: (value) => controller.updateTaskWeight(
+                          phaseIndex,
+                          task.id,
+                          value,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ],
         ],
@@ -1286,66 +1363,59 @@ class _TaskMobileCard extends ConsumerWidget {
   }
 }
 
-class _TaskMobileHeaderRow extends StatelessWidget {
-  final ProductionTaskDraft task;
-  final bool isCompact;
-  final bool isExpanded;
-  final VoidCallback onToggleExpand;
-  final VoidCallback onDone;
-  final VoidCallback onClear;
-  final ValueChanged<String> onTitleChanged;
-  final VoidCallback onRemove;
+class _TaskEditorPreviewMeta extends StatelessWidget {
+  final String roleLabel;
+  final String staffLabel;
+  final String assignmentLabel;
+  final int weight;
+  final DateTime? completedAt;
+  final ProductionTaskStatus status;
 
-  const _TaskMobileHeaderRow({
-    required this.task,
-    required this.isCompact,
-    required this.isExpanded,
-    required this.onToggleExpand,
-    required this.onDone,
-    required this.onClear,
-    required this.onTitleChanged,
-    required this.onRemove,
+  const _TaskEditorPreviewMeta({
+    required this.roleLabel,
+    required this.staffLabel,
+    required this.assignmentLabel,
+    required this.weight,
+    required this.completedAt,
+    required this.status,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Wrap(
+      spacing: _chipSpacing,
+      runSpacing: _chipSpacing,
       children: [
-        Checkbox(
-          // WHY: Checkbox is the fastest done/clear action on mobile.
-          value: task.status == ProductionTaskStatus.done,
-          onChanged: (value) {
-            if (value == true) {
-              onDone();
-            } else {
-              onClear();
-            }
-          },
+        _MetaChip(
+          label: _columnRole,
+          value: roleLabel,
+          tone: AppStatusTone.neutral,
         ),
-        const SizedBox(width: _denseFieldSpacing),
-        Expanded(
-          child: TextFormField(
-            // WHY: Inline title edit keeps mobile flow fast.
-            initialValue: task.title,
-            decoration: const InputDecoration(
-              isDense: true,
-              labelText: _columnTask,
-            ),
-            onChanged: onTitleChanged,
-          ),
+        _MetaChip(
+          label: _columnStaff,
+          value: _shortenMetaValue(staffLabel),
+          tone: staffLabel == _unassignedLabel
+              ? AppStatusTone.warning
+              : AppStatusTone.neutral,
         ),
-        if (isCompact)
-          IconButton(
-            // WHY: Collapse reduces scrolling on mobile.
-            onPressed: onToggleExpand,
-            icon: Icon(isExpanded ? Icons.expand_less : Icons.expand_more),
-            tooltip: isExpanded ? _collapseLabel : _expandLabel,
-          ),
-        IconButton(
-          // WHY: Keep remove action reachable without scrolling.
-          onPressed: onRemove,
-          icon: const Icon(Icons.delete_outline),
-          tooltip: _removeTaskTooltip,
+        _MetaChip(
+          label: _columnHeadcount,
+          value: assignmentLabel,
+          tone: AppStatusTone.neutral,
+        ),
+        _MetaChip(
+          label: _columnWeight,
+          value: weight.toString(),
+          tone: AppStatusTone.neutral,
+        ),
+        _MetaChip(
+          label: _columnCompleted,
+          value: completedAt == null
+              ? _completedPlaceholder
+              : formatDateLabel(completedAt),
+          tone: status == ProductionTaskStatus.done
+              ? AppStatusTone.success
+              : AppStatusTone.neutral,
         ),
       ],
     );
@@ -1488,60 +1558,82 @@ class _TaskMobileWeightRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: DropdownButtonFormField<int>(
-            // WHY: Weight helps prioritize tasks on the go.
-            initialValue: weight,
-            decoration: const InputDecoration(
-              isDense: true,
-              labelText: _columnWeight,
-            ),
-            isExpanded: true,
-            items: _weightOptions
-                .map(
-                  (weight) => DropdownMenuItem(
-                    value: weight,
-                    child: Text(weight.toString()),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              if (value == null) return;
-              onChanged(value);
-            },
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stackFields = constraints.maxWidth < 420;
+        final weightField = DropdownButtonFormField<int>(
+          // WHY: Weight helps prioritize tasks on the go.
+          initialValue: weight,
+          decoration: const InputDecoration(
+            isDense: true,
+            labelText: _columnWeight,
           ),
-        ),
-        const SizedBox(width: _mobileFieldSpacing),
-        Expanded(
-          child: DropdownButtonFormField<int>(
-            initialValue: requiredHeadcount < 1 ? 1 : requiredHeadcount,
-            decoration: InputDecoration(
-              isDense: true,
-              labelText: _columnHeadcount,
-              helperText: "$assignedCount/$requiredHeadcount",
-            ),
-            isExpanded: true,
-            items: _headcountOptions
-                .map(
-                  (value) => DropdownMenuItem(
-                    value: value,
-                    child: Text(value.toString()),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              if (value == null) return;
-              onHeadcountChanged(value);
-            },
+          isExpanded: true,
+          items: _weightOptions
+              .map(
+                (weight) => DropdownMenuItem(
+                  value: weight,
+                  child: Text(weight.toString()),
+                ),
+              )
+              .toList(),
+          onChanged: (value) {
+            if (value == null) return;
+            onChanged(value);
+          },
+        );
+        final headcountField = DropdownButtonFormField<int>(
+          initialValue: requiredHeadcount < 1 ? 1 : requiredHeadcount,
+          decoration: InputDecoration(
+            isDense: true,
+            labelText: _columnHeadcount,
+            helperText: "$assignedCount/$requiredHeadcount",
           ),
-        ),
-        const SizedBox(width: _mobileFieldSpacing),
-        Expanded(
-          child: _MobileCompletedChip(completedAt: completedAt, status: status),
-        ),
-      ],
+          isExpanded: true,
+          items: _headcountOptions
+              .map(
+                (value) => DropdownMenuItem(
+                  value: value,
+                  child: Text(value.toString()),
+                ),
+              )
+              .toList(),
+          onChanged: (value) {
+            if (value == null) return;
+            onHeadcountChanged(value);
+          },
+        );
+        final completedChip = _MobileCompletedChip(
+          completedAt: completedAt,
+          status: status,
+        );
+
+        if (stackFields) {
+          return Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(child: weightField),
+                  const SizedBox(width: _mobileFieldSpacing),
+                  Expanded(child: headcountField),
+                ],
+              ),
+              const SizedBox(height: _mobileFieldSpacing),
+              SizedBox(width: double.infinity, child: completedChip),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: weightField),
+            const SizedBox(width: _mobileFieldSpacing),
+            Expanded(child: headcountField),
+            const SizedBox(width: _mobileFieldSpacing),
+            Expanded(child: completedChip),
+          ],
+        );
+      },
     );
   }
 }
@@ -1567,58 +1659,6 @@ class _TaskMobileInstructionsField extends StatelessWidget {
       ),
       maxLines: 2,
       onChanged: onChanged,
-    );
-  }
-}
-
-class _TaskMobileCollapsedMeta extends StatelessWidget {
-  final ProductionTaskStatus status;
-  final String roleLabel;
-  final String assignmentLabel;
-  final String staffLabel;
-  final int weight;
-
-  const _TaskMobileCollapsedMeta({
-    required this.status,
-    required this.roleLabel,
-    required this.assignmentLabel,
-    required this.staffLabel,
-    required this.weight,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // WHY: Collapsed meta keeps key info visible without extra scrolling.
-    return Wrap(
-      spacing: _chipSpacing,
-      runSpacing: _chipSpacing,
-      children: [
-        _MetaChip(
-          label: _columnStatus,
-          value: _statusLabel(status),
-          tone: _statusTone(status),
-        ),
-        _MetaChip(
-          label: _columnRole,
-          value: roleLabel,
-          tone: AppStatusTone.neutral,
-        ),
-        _MetaChip(
-          label: _columnHeadcount,
-          value: assignmentLabel,
-          tone: AppStatusTone.neutral,
-        ),
-        _MetaChip(
-          label: _columnStaff,
-          value: staffLabel,
-          tone: AppStatusTone.neutral,
-        ),
-        _MetaChip(
-          label: _columnWeight,
-          value: weight.toString(),
-          tone: AppStatusTone.neutral,
-        ),
-      ],
     );
   }
 }
@@ -1672,320 +1712,6 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-class _TaskDoneCell extends StatelessWidget {
-  final ProductionTaskDraft task;
-  final VoidCallback onDone;
-  final VoidCallback onClear;
-
-  const _TaskDoneCell({
-    required this.task,
-    required this.onDone,
-    required this.onClear,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colDoneWidth,
-      child: Checkbox(
-        // WHY: Checkbox provides the fastest done/clear action.
-        value: task.status == ProductionTaskStatus.done,
-        onChanged: (value) {
-          if (value == true) {
-            onDone();
-          } else {
-            onClear();
-          }
-        },
-      ),
-    );
-  }
-}
-
-class _TaskTitleCell extends StatelessWidget {
-  final ProductionTaskDraft task;
-  final ValueChanged<String> onChanged;
-
-  const _TaskTitleCell({required this.task, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colTaskWidth,
-      child: TextFormField(
-        // WHY: Inline title editing keeps the table fast to scan and edit.
-        initialValue: task.title,
-        decoration: const InputDecoration(isDense: true, hintText: _columnTask),
-        onChanged: onChanged,
-      ),
-    );
-  }
-}
-
-class _TaskRoleCell extends StatelessWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  const _TaskRoleCell({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colRoleWidth,
-      child: DropdownButtonFormField<String>(
-        // WHY: Role drives which staff can be assigned to the task.
-        initialValue: value,
-        decoration: const InputDecoration(isDense: true),
-        isExpanded: true,
-        items: staffRoleValues
-            .map(
-              (role) => DropdownMenuItem(
-                value: role,
-                child: Text(
-                  formatStaffRoleLabel(role, fallback: role),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            )
-            .toList(),
-        onChanged: (value) {
-          if (value == null) return;
-          onChanged(value);
-        },
-      ),
-    );
-  }
-}
-
-class _TaskHeadcountCell extends StatelessWidget {
-  final int requiredHeadcount;
-  final int assignedCount;
-  final ValueChanged<int> onChanged;
-
-  const _TaskHeadcountCell({
-    required this.requiredHeadcount,
-    required this.assignedCount,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final shortage = assignedCount < requiredHeadcount;
-    final warningColors = AppStatusBadgeColors.fromTheme(
-      theme: Theme.of(context),
-      tone: shortage ? AppStatusTone.warning : AppStatusTone.neutral,
-    );
-    return SizedBox(
-      width: _colHeadcountWidth,
-      child: DropdownButtonFormField<int>(
-        initialValue: requiredHeadcount < 1 ? 1 : requiredHeadcount,
-        decoration: InputDecoration(
-          isDense: true,
-          helperText: "$assignedCount/$requiredHeadcount",
-          helperStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: shortage
-                ? warningColors.foreground
-                : Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-        items: _headcountOptions
-            .map(
-              (value) =>
-                  DropdownMenuItem(value: value, child: Text(value.toString())),
-            )
-            .toList(),
-        onChanged: (value) {
-          if (value == null) return;
-          onChanged(value);
-        },
-      ),
-    );
-  }
-}
-
-class _TaskStaffCell extends StatelessWidget {
-  final List<BusinessStaffProfileSummary> staff;
-  final String? selectedStaffId;
-  final ValueChanged<String?>? onChanged;
-
-  const _TaskStaffCell({
-    required this.staff,
-    required this.selectedStaffId,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colStaffWidth,
-      child: DropdownButtonFormField<String>(
-        // WHY: Assignment should remain scoped to the selected role.
-        initialValue: selectedStaffId,
-        decoration: const InputDecoration(isDense: true),
-        isExpanded: true,
-        hint: const Text(_selectPlaceholder),
-        items: staff
-            .map(
-              (member) => DropdownMenuItem(
-                value: member.id,
-                child: Text(
-                  member.userName ?? member.userEmail ?? member.id,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            )
-            .toList(),
-        onChanged: onChanged,
-      ),
-    );
-  }
-}
-
-class _TaskWeightCell extends StatelessWidget {
-  final int value;
-  final ValueChanged<int> onChanged;
-
-  const _TaskWeightCell({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colWeightWidth,
-      child: DropdownButtonFormField<int>(
-        // WHY: Weight helps prioritize tasks without extra screens.
-        initialValue: value,
-        decoration: const InputDecoration(isDense: true),
-        isExpanded: true,
-        items: _weightOptions
-            .map(
-              (weight) => DropdownMenuItem(
-                value: weight,
-                child: Text(weight.toString()),
-              ),
-            )
-            .toList(),
-        onChanged: (value) {
-          if (value == null) return;
-          onChanged(value);
-        },
-      ),
-    );
-  }
-}
-
-class _TaskStatusCell extends StatelessWidget {
-  final ProductionTaskStatus value;
-  final ValueChanged<ProductionTaskStatus> onChanged;
-
-  const _TaskStatusCell({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      width: _colStatusWidth,
-      child: DropdownButtonFormField<ProductionTaskStatus>(
-        // WHY: Status selection combines icon + label for quick scanning.
-        initialValue: value,
-        decoration: const InputDecoration(isDense: true),
-        isExpanded: true,
-        items: ProductionTaskStatus.values
-            .map(
-              (status) => DropdownMenuItem(
-                value: status,
-                child: Row(
-                  children: [
-                    Icon(
-                      _statusIcon(status),
-                      size: _iconSize,
-                      color: _statusColor(theme, status),
-                    ),
-                    const SizedBox(width: _denseFieldSpacing),
-                    Expanded(
-                      child: Text(
-                        _statusLabel(status),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-            .toList(),
-        onChanged: (value) {
-          if (value == null) return;
-          onChanged(value);
-        },
-        selectedItemBuilder: (context) {
-          return ProductionTaskStatus.values
-              .map(
-                (status) => Row(
-                  children: [
-                    Icon(
-                      _statusIcon(status),
-                      size: _iconSize,
-                      color: _statusColor(theme, status),
-                    ),
-                    const SizedBox(width: _denseFieldSpacing),
-                    Expanded(
-                      child: Text(
-                        _statusLabel(status),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-              .toList();
-        },
-      ),
-    );
-  }
-}
-
-class _TaskInstructionsCell extends StatelessWidget {
-  final ProductionTaskDraft task;
-  final ValueChanged<String> onChanged;
-
-  const _TaskInstructionsCell({required this.task, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colInstructionsWidth,
-      child: TextFormField(
-        // WHY: Keep instructions editable without leaving the table.
-        initialValue: task.instructions,
-        decoration: const InputDecoration(
-          isDense: true,
-          hintText: _instructionsHint,
-        ),
-        maxLines: 1,
-        onChanged: onChanged,
-      ),
-    );
-  }
-}
-
-class _TaskActionsCell extends StatelessWidget {
-  final VoidCallback onRemove;
-
-  const _TaskActionsCell({required this.onRemove});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: _colActionsWidth,
-      child: IconButton(
-        // WHY: Quick remove keeps table cleanup fast.
-        onPressed: onRemove,
-        icon: const Icon(Icons.delete_outline),
-        tooltip: _removeTaskTooltip,
-      ),
-    );
-  }
-}
-
 class _MobileCompletedChip extends StatelessWidget {
   final DateTime? completedAt;
   final ProductionTaskStatus status;
@@ -2030,46 +1756,6 @@ class _MobileCompletedChip extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _CompletedCell extends StatelessWidget {
-  final DateTime? completedAt;
-  final ProductionTaskStatus status;
-
-  const _CompletedCell({required this.completedAt, required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    if (status != ProductionTaskStatus.done || completedAt == null) {
-      return Text(
-        _completedPlaceholder,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      );
-    }
-
-    final label = formatDateLabel(completedAt);
-    return Row(
-      children: [
-        Icon(
-          Icons.check_circle,
-          size: _iconSize,
-          color: _statusColor(theme, ProductionTaskStatus.done),
-        ),
-        const SizedBox(width: _denseFieldSpacing),
-        Expanded(
-          child: Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -2542,6 +2228,23 @@ String _resolveStaffLabel(
   if (match.isEmpty) return _unassignedLabel;
   final profile = match.first;
   return profile.userName ?? profile.userEmail ?? _unassignedLabel;
+}
+
+String? _extractProjectDayLabel(ProductionTaskDraft task) {
+  final match = RegExp(
+    r"Project day\s+(\d+)",
+    caseSensitive: false,
+  ).firstMatch(task.instructions);
+  final dayNumber = match?.group(1)?.trim() ?? "";
+  return dayNumber.isEmpty ? null : dayNumber;
+}
+
+String _shortenMetaValue(String value, {int maxLength = 28}) {
+  final trimmed = value.trim();
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+  return "${trimmed.substring(0, maxLength - 1)}…";
 }
 
 class _PhaseSummary {

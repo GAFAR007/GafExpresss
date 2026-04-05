@@ -81,7 +81,7 @@ const MAX_WEIGHT = 5;
 const MIN_ESTIMATED_DAYS = 1;
 const MAX_ESTIMATED_DAYS = 365;
 const MAX_STAFF_ROSTER_ITEMS = 6;
-const MAX_ASSISTANT_PROMPT_CHARS = 1200;
+const MAX_ASSISTANT_PROMPT_CHARS = 80000;
 const MAX_PROVIDER_MESSAGE_CHARS = 800;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_Z_DATE_TIME_PATTERN =
@@ -292,13 +292,21 @@ function summarizeStaffRoster(staffRoster) {
 }
 
 function sanitizeAssistantPrompt(value) {
-  const raw = (value || "").toString().trim();
+  const raw = (value || "")
+    .toString()
+    .replace(/\r\n?/g, "\n")
+    .trim();
   if (!raw) return "";
-  const compact = raw.replace(/\s+/g, " ");
+  const compact = raw
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   if (compact.length <= MAX_ASSISTANT_PROMPT_CHARS) {
     return compact;
   }
-  return compact.slice(0, MAX_ASSISTANT_PROMPT_CHARS);
+  return `${compact.slice(0, MAX_ASSISTANT_PROMPT_CHARS)}\n...[assistant context truncated]`;
 }
 
 function resolveDomainContextConfig(domainContext) {
@@ -401,7 +409,7 @@ function buildUserPrompt({
   }
 
   if (assistantPrompt) {
-    sections.push(`User assistant context: ${assistantPrompt}`);
+    sections.push(`User assistant context:\n${assistantPrompt}`);
   }
 
   sections.push(ENVELOPE_SCHEMA_HINT);

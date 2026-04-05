@@ -13,6 +13,7 @@
 /// - Adds multi-select draft deletion and per-plan action menus.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -78,14 +79,20 @@ const String _planArchiveConfirmTitle = "Archive production plan?";
 const String _planArchiveConfirmMessage =
     "Archived plans stay visible for record-keeping but are treated as closed.";
 const String _planArchiveConfirmLabel = "Archive";
+const String _planReturnDraftConfirmTitle = "Move production back to draft?";
+const String _planReturnDraftConfirmMessage =
+    "This stops the live production lifecycle and reopens the same plan in draft mode so you can edit it again.";
+const String _planReturnDraftConfirmLabel = "Return to draft";
 const String _planStartSuccess = "Production plan started.";
 const String _planPauseSuccess = "Production plan paused.";
 const String _planResumeSuccess = "Production plan resumed.";
+const String _planReturnDraftSuccess = "Production plan returned to draft.";
 const String _planArchiveSuccess = "Production plan archived.";
 const String _planActionFailure = "Unable to update production plan.";
 const String _planActionStartLabel = "Start production";
 const String _planActionPauseLabel = "Pause process";
 const String _planActionResumeLabel = "Resume process";
+const String _planActionReturnDraftLabel = "Return to draft";
 const String _planActionArchiveLabel = "Archive plan";
 const String _planActionDeleteLabel = "Delete draft";
 const String _extraPlanIdKey = "planId";
@@ -106,7 +113,14 @@ const String _planStatusPaused = "paused";
 const String _planStatusCompleted = "completed";
 const String _planStatusArchived = "archived";
 
-enum _PlanCardAction { start, pause, resume, archive, deleteDraft }
+enum _PlanCardAction {
+  start,
+  pause,
+  resume,
+  returnToDraft,
+  archive,
+  deleteDraft,
+}
 
 class ProductionPlanListScreen extends ConsumerStatefulWidget {
   const ProductionPlanListScreen({super.key});
@@ -266,10 +280,22 @@ class _ProductionPlanListScreenState
       }
     }
 
+    if (action == _PlanCardAction.returnToDraft) {
+      final confirmed = await _confirmDialog(
+        title: _planReturnDraftConfirmTitle,
+        message: _planReturnDraftConfirmMessage,
+        confirmLabel: _planReturnDraftConfirmLabel,
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
     final nextStatus = switch (action) {
       _PlanCardAction.start => _planStatusActive,
       _PlanCardAction.pause => _planStatusPaused,
       _PlanCardAction.resume => _planStatusActive,
+      _PlanCardAction.returnToDraft => _planStatusDraft,
       _PlanCardAction.archive => _planStatusArchived,
       _PlanCardAction.deleteDraft => _planStatusDraft,
     };
@@ -295,13 +321,19 @@ class _ProductionPlanListScreenState
         _PlanCardAction.start => _planStartSuccess,
         _PlanCardAction.pause => _planPauseSuccess,
         _PlanCardAction.resume => _planResumeSuccess,
+        _PlanCardAction.returnToDraft => _planReturnDraftSuccess,
         _PlanCardAction.archive => _planArchiveSuccess,
         _PlanCardAction.deleteDraft => _draftDeleteSuccessSingle,
       };
       _showSnack(message);
     } catch (err) {
       if (mounted) {
-        _showSnack(_planActionFailure);
+        _showSnack(
+          _resolveProductionActionErrorMessage(
+            err,
+            fallback: _planActionFailure,
+          ),
+        );
       }
     } finally {
       if (mounted) {
@@ -490,7 +522,11 @@ class _ProductionPlanListScreenState
                         _openDetail,
                         extra: {_extraPlanIdKey: plan.id},
                       );
-                      context.push(productionPlanDetailPath(plan.id));
+                      context.push(
+                        _isDraftPlan(plan.status)
+                            ? productionPlanDraftStudioPath(planId: plan.id)
+                            : productionPlanDetailPath(plan.id),
+                      );
                     },
                     onLongPress: () {
                       final plan = visiblePlans[index];
@@ -647,6 +683,33 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
             ],
+            if (plan.lastDraftSavedAt != null) ...[
+              const SizedBox(height: _cardRowSpacing),
+              Text(
+                "Last draft save: ${formatDateLabel(plan.lastDraftSavedAt)}",
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (plan.lastDraftSavedBy?.displayLabel.trim().isNotEmpty == true) ...[
+              const SizedBox(height: _cardRowSpacing),
+              Text(
+                "Saved by: ${plan.lastDraftSavedBy!.displayLabel}",
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (plan.draftRevisionCount > 0) ...[
+              const SizedBox(height: _cardRowSpacing),
+              Text(
+                "Revisions: ${plan.draftRevisionCount}",
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -752,10 +815,12 @@ List<_PlanCardAction> _planActionsForStatus(String rawStatus) {
     ],
     _planStatusActive => const <_PlanCardAction>[
       _PlanCardAction.pause,
+      _PlanCardAction.returnToDraft,
       _PlanCardAction.archive,
     ],
     _planStatusPaused => const <_PlanCardAction>[
       _PlanCardAction.resume,
+      _PlanCardAction.returnToDraft,
       _PlanCardAction.archive,
     ],
     _planStatusCompleted => const <_PlanCardAction>[_PlanCardAction.archive],
@@ -769,6 +834,7 @@ String _labelForPlanAction(_PlanCardAction action) {
     _PlanCardAction.start => _planActionStartLabel,
     _PlanCardAction.pause => _planActionPauseLabel,
     _PlanCardAction.resume => _planActionResumeLabel,
+    _PlanCardAction.returnToDraft => _planActionReturnDraftLabel,
     _PlanCardAction.archive => _planActionArchiveLabel,
     _PlanCardAction.deleteDraft => _planActionDeleteLabel,
   };
@@ -779,9 +845,31 @@ IconData _iconForPlanAction(_PlanCardAction action) {
     _PlanCardAction.start => Icons.play_arrow_outlined,
     _PlanCardAction.pause => Icons.pause_circle_outline,
     _PlanCardAction.resume => Icons.play_circle_outline,
+    _PlanCardAction.returnToDraft => Icons.edit_calendar_outlined,
     _PlanCardAction.archive => Icons.archive_outlined,
     _PlanCardAction.deleteDraft => Icons.delete_outline,
   };
+}
+
+String _resolveProductionActionErrorMessage(
+  Object error, {
+  required String fallback,
+}) {
+  final dioError = error is DioException ? error : null;
+  final responseData = dioError?.response?.data;
+  final responseMap = responseData is Map<String, dynamic>
+      ? responseData
+      : const <String, dynamic>{};
+  final backendError =
+      (responseMap["error"] ?? responseMap["message"] ?? "").toString().trim();
+  if (backendError.isNotEmpty) {
+    return backendError;
+  }
+  final rawMessage = error.toString().trim();
+  if (rawMessage.isNotEmpty && rawMessage != "Exception") {
+    return rawMessage;
+  }
+  return fallback;
 }
 
 bool _isDraftPlan(String status) =>

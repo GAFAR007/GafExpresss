@@ -22,6 +22,7 @@ class UserProfile {
   final String? dob;
   final String email;
   final String role;
+  final String? staffRole;
   final String accountType;
   final bool isEmailVerified;
   final bool isPhoneVerified;
@@ -46,6 +47,7 @@ class UserProfile {
     this.dob,
     required this.email,
     required this.role,
+    this.staffRole,
     required this.accountType,
     required this.isEmailVerified,
     required this.isPhoneVerified,
@@ -81,6 +83,7 @@ class UserProfile {
       dob: _nullIfEmpty(json['dob']),
       email: (json['email'] ?? '').toString(),
       role: (json['role'] ?? 'customer').toString(),
+      staffRole: _nullIfEmpty(json['staffRole']),
       accountType: rawAccountType,
       isEmailVerified: json['isEmailVerified'] == true,
       isPhoneVerified: json['isPhoneVerified'] == true,
@@ -132,6 +135,7 @@ class UserProfile {
     String? dob,
     String? phone,
     String? profileImageUrl,
+    String? staffRole,
     UserAddress? homeAddress,
     String? accountType,
     bool? isEmailVerified,
@@ -154,6 +158,7 @@ class UserProfile {
       dob: dob ?? this.dob,
       email: email,
       role: role,
+      staffRole: staffRole ?? this.staffRole,
       accountType: accountType ?? this.accountType,
       isEmailVerified: isEmailVerified ?? this.isEmailVerified,
       isPhoneVerified: isPhoneVerified ?? this.isPhoneVerified,

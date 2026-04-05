@@ -26,13 +26,30 @@ import 'package:frontend/app/features/home/presentation/business_asset_providers
 
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
 class BusinessAssetDetailScreen extends ConsumerStatefulWidget {
-  final BusinessAsset asset;
+  final BusinessAsset? asset;
+  final bool isCreateMode;
+  final String screenTitle;
+  final String initialAssetType;
+  final String initialOwnershipType;
 
-  const BusinessAssetDetailScreen({super.key, required this.asset});
+  const BusinessAssetDetailScreen({super.key, required this.asset})
+    : assert(asset != null),
+      isCreateMode = false,
+      screenTitle = "Asset details",
+      initialAssetType = "equipment",
+      initialOwnershipType = "owned";
+
+  const BusinessAssetDetailScreen.createEstate({super.key})
+    : asset = null,
+      isCreateMode = true,
+      screenTitle = "Add estate asset",
+      initialAssetType = "estate",
+      initialOwnershipType = "rented_out";
 
   @override
   ConsumerState<BusinessAssetDetailScreen> createState() =>
@@ -83,6 +100,7 @@ class _BusinessAssetDetailScreenState
   String _managementPeriod = 'monthly';
 
   bool _isSaving = false;
+  BusinessAsset? _assetSnapshot;
   final List<_UnitMixControllers> _unitMixRows = [];
 
   static const List<Map<String, String>> _statusOptions = [
@@ -98,7 +116,12 @@ class _BusinessAssetDetailScreenState
   @override
   void initState() {
     super.initState();
-    _applyAsset(widget.asset);
+    _assetSnapshot = widget.asset;
+    if (_assetSnapshot != null) {
+      _applyAsset(_assetSnapshot!);
+    } else {
+      _applyCreateDefaults();
+    }
   }
 
   @override
@@ -201,6 +224,51 @@ class _BusinessAssetDetailScreenState
     }
   }
 
+  void _applyCreateDefaults() {
+    _nameCtrl.clear();
+    _descriptionCtrl.clear();
+    _serialCtrl.clear();
+    _locationCtrl.clear();
+    _purchaseCostCtrl.clear();
+    _purchaseDateCtrl.clear();
+    _usefulLifeCtrl.clear();
+    _salvageCtrl.clear();
+    _leaseStartCtrl.clear();
+    _leaseEndCtrl.clear();
+    _leaseCostCtrl.clear();
+    _lessorCtrl.clear();
+    _leaseTermsCtrl.clear();
+    _managementFeeCtrl.clear();
+    _clientNameCtrl.clear();
+    _serviceTermsCtrl.clear();
+    _inventoryQtyCtrl.clear();
+    _inventoryUnitCostCtrl.clear();
+    _inventoryReorderCtrl.clear();
+    _inventoryUnitCtrl.clear();
+    _estateHouseCtrl.clear();
+    _estateStreetCtrl.clear();
+    _estateCityCtrl.clear();
+    _estateStateCtrl.clear();
+    _estatePostalCtrl.clear();
+    _estateLgaCtrl.clear();
+    _estateLandmarkCtrl.clear();
+    _referencesMinCtrl.text = '1';
+    _referencesMaxCtrl.text = '2';
+    _guarantorsMinCtrl.text = '1';
+    _guarantorsMaxCtrl.text = '2';
+
+    _assetType = widget.initialAssetType;
+    _ownershipType = widget.initialOwnershipType;
+    _assetClass = assetClassForType(widget.initialAssetType);
+    _status = 'active';
+    _leasePeriod = 'monthly';
+    _managementPeriod = 'monthly';
+
+    _unitMixRows
+      ..clear()
+      ..add(_UnitMixControllers.empty());
+  }
+
   /// ------------------------------------------------------------
   /// INPUT PARSERS
   /// ------------------------------------------------------------
@@ -231,6 +299,115 @@ class _BusinessAssetDetailScreenState
     if (value == null) return '';
     // WHY: Format monetary values for display in input fields.
     return formatNgnInput(value);
+  }
+
+  BusinessAsset? get _currentAsset => _assetSnapshot ?? widget.asset;
+
+  bool _isFarmAsset(BusinessAsset? asset) {
+    return asset?.domainContext == 'farm';
+  }
+
+  bool _canApproveFarmRequests({
+    required String actorRole,
+    required String? staffRole,
+  }) {
+    if (actorRole == 'business_owner') {
+      return true;
+    }
+
+    return actorRole == 'staff' &&
+        (staffRole == staffRoleEstateManager ||
+            staffRole == staffRoleFarmManager ||
+            staffRole == staffRoleAssetManager);
+  }
+
+  void _replaceAssetSnapshot(BusinessAsset asset) {
+    _assetSnapshot = asset;
+    _applyAsset(asset);
+  }
+
+  Future<void> _refreshAssetRelatedProviders() async {
+    ref.invalidate(businessAssetsProvider);
+    ref.invalidate(businessAssetSummaryProvider);
+    ref.invalidate(businessFarmAssetAuditProvider);
+  }
+
+  String _formatActor(BusinessAssetActorSnapshot? actor) {
+    if (actor == null) {
+      return "Unknown staff";
+    }
+
+    final name = actor.name.trim().isEmpty ? "Unknown staff" : actor.name.trim();
+    final role = actor.staffRole?.trim().isNotEmpty == true
+        ? formatStaffRoleLabel(
+            actor.staffRole!,
+            fallback: actor.actorRole,
+          )
+        : actor.actorRole.trim().isNotEmpty
+            ? actor.actorRole
+            : '';
+    if (role.trim().isEmpty) {
+      return name;
+    }
+    return "$name (${role.replaceAll('_', ' ')})";
+  }
+
+  String _formatDateTime(DateTime? value) {
+    if (value == null) {
+      return "Not available";
+    }
+    final dateLabel = formatDateLabel(value, fallback: "");
+    final local = value.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return "$dateLabel $hour:$minute";
+  }
+
+  String _formatUsageWindow(BusinessAssetProductionUsageRequest request) {
+    final dateLabel = formatDateLabel(request.productionDate, fallback: "No date");
+    final start = request.usageStartTime.trim();
+    final end = request.usageEndTime.trim();
+    if (start.isEmpty && end.isEmpty) {
+      return dateLabel;
+    }
+    if (end.isEmpty) {
+      return "$dateLabel • $start";
+    }
+    return "$dateLabel • $start - $end";
+  }
+
+  Future<void> _pickTime(
+    TextEditingController controller, {
+    required String field,
+  }) async {
+    _logFlow("TIME_PICK_OPEN", "Time picker opened", extra: {"field": field});
+
+    TimeOfDay initial = TimeOfDay.now();
+    final raw = controller.text.trim();
+    if (raw.contains(':')) {
+      final parts = raw.split(':');
+      final hour = int.tryParse(parts.first);
+      final minute = parts.length > 1 ? int.tryParse(parts[1]) : null;
+      if (hour != null && minute != null) {
+        initial = TimeOfDay(hour: hour, minute: minute);
+      }
+    }
+
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+    if (!mounted || picked == null) {
+      return;
+    }
+
+    controller.text =
+        "${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}";
+    _logFlow(
+      "TIME_PICK_SELECTED",
+      "Time selected",
+      extra: {"field": field, "time": controller.text},
+    );
   }
 
   Future<void> _pickDate(
@@ -274,13 +451,579 @@ class _BusinessAssetDetailScreenState
     );
   }
 
+  Future<void> _approveFarmRequest(
+    BusinessAsset asset, {
+    required String requestType,
+    String? requestId,
+  }) async {
+    if (_isSaving) {
+      return;
+    }
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final api = ref.read(businessAssetApiProvider);
+      final updated = await api.approveFarmAssetRequest(
+        token: session.token,
+        id: asset.id,
+        requestType: requestType,
+        requestId: requestId,
+      );
+      await _refreshAssetRelatedProviders();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _replaceAssetSnapshot(updated));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            requestType == 'usage'
+                ? "Tool usage approved successfully"
+                : requestType == 'audit'
+                    ? "Audit approved successfully"
+                    : "Equipment approved successfully",
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            requestType == 'usage'
+                ? "Unable to approve tool usage"
+                : requestType == 'audit'
+                    ? "Unable to approve audit request"
+                    : "Unable to approve equipment request",
+          ),
+        ),
+      );
+      _logFlow(
+        "APPROVAL_FAIL",
+        "Farm approval failed",
+        extra: {
+          "assetId": asset.id,
+          "requestType": requestType,
+          "requestId": requestId ?? '',
+          "error": error.toString(),
+        },
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _openFarmAuditSheet(BusinessAsset asset) async {
+    if (_isSaving) {
+      return;
+    }
+
+    final auditDateCtrl = TextEditingController(
+      text: _formatDateInput(DateTime.now()),
+    );
+    final estimatedValueCtrl = TextEditingController(
+      text: formatNgnInput(
+        asset.farmProfile?.estimatedCurrentValue ?? asset.purchaseCost ?? 0,
+      ),
+    );
+    final noteCtrl = TextEditingController(
+      text: asset.farmProfile?.lastAuditNote ?? '',
+    );
+    var selectedStatus = asset.status;
+
+    final payload = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Do an audit",
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "Record the latest audit result for ${asset.name}. Staff submissions route to manager approval automatically.",
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: auditDateCtrl,
+                      readOnly: true,
+                      showCursor: false,
+                      enableInteractiveSelection: false,
+                      onTap: () => _pickDate(auditDateCtrl, field: "audit_date"),
+                      decoration: const InputDecoration(
+                        labelText: "Audit date",
+                        suffixIcon: Icon(Icons.calendar_today_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedStatus,
+                      decoration: const InputDecoration(
+                        labelText: "Resulting status",
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'active', child: Text("Active")),
+                        DropdownMenuItem(
+                          value: 'maintenance',
+                          child: Text("Maintenance"),
+                        ),
+                        DropdownMenuItem(
+                          value: 'inactive',
+                          child: Text("Inactive"),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setSheetState(() => selectedStatus = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: estimatedValueCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: const [NgnInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: "Estimated current value (NGN)",
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteCtrl,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: "Audit note",
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: const Text("Cancel"),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              final auditDate = _parseDateInput(
+                                auditDateCtrl.text,
+                              );
+                              if (auditDate == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text("Audit date is required"),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              Navigator.of(context).pop({
+                                "auditDate": auditDate.toIso8601String(),
+                                "status": selectedStatus,
+                                "estimatedCurrentValue":
+                                    parseNgnInput(estimatedValueCtrl.text) ?? 0,
+                                "note": noteCtrl.text.trim(),
+                              });
+                            },
+                            child: const Text("Submit audit"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    auditDateCtrl.dispose();
+    estimatedValueCtrl.dispose();
+    noteCtrl.dispose();
+
+    if (payload == null) {
+      return;
+    }
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final api = ref.read(businessAssetApiProvider);
+      final updated = await api.submitFarmAssetAudit(
+        token: session.token,
+        id: asset.id,
+        payload: payload,
+      );
+      await _refreshAssetRelatedProviders();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _replaceAssetSnapshot(updated));
+      final hasPendingRequest =
+          updated.farmProfile?.pendingAuditRequest?.status == 'pending_approval';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            hasPendingRequest
+                ? "Audit submitted for approval"
+                : "Audit recorded successfully",
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Unable to submit audit update")),
+      );
+      _logFlow(
+        "AUDIT_SUBMIT_FAIL",
+        "Farm audit submission failed",
+        extra: {"assetId": asset.id, "error": error.toString()},
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _openToolUsageSheet(BusinessAsset asset) async {
+    if (_isSaving) {
+      return;
+    }
+
+    final productionDateCtrl = TextEditingController(
+      text: _formatDateInput(DateTime.now()),
+    );
+    final startTimeCtrl = TextEditingController(text: "08:00");
+    final endTimeCtrl = TextEditingController(text: "12:00");
+    final quantityAvailable =
+        asset.farmProfile?.quantity ?? asset.inventory?.quantity ?? 1;
+    final quantityRequestedCtrl = TextEditingController(text: "1");
+    final quantityUsedCtrl = TextEditingController(text: "1");
+    final activityCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+
+    final payload = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Request tool usage",
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Track daily production usage for ${asset.name}. Farmers can submit requests and managers approve them.",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Tracked quantity: $quantityAvailable ${(asset.farmProfile?.unitOfMeasure ?? 'units').trim()}",
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: productionDateCtrl,
+                  readOnly: true,
+                  showCursor: false,
+                  enableInteractiveSelection: false,
+                  onTap: () => _pickDate(
+                    productionDateCtrl,
+                    field: "production_date",
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: "Production date",
+                    suffixIcon: Icon(Icons.calendar_today_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: startTimeCtrl,
+                        readOnly: true,
+                        showCursor: false,
+                        enableInteractiveSelection: false,
+                        onTap: () => _pickTime(
+                          startTimeCtrl,
+                          field: "usage_start_time",
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: "Start time",
+                          suffixIcon: Icon(Icons.access_time_outlined),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: endTimeCtrl,
+                        readOnly: true,
+                        showCursor: false,
+                        enableInteractiveSelection: false,
+                        onTap: () => _pickTime(
+                          endTimeCtrl,
+                          field: "usage_end_time",
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: "End time",
+                          suffixIcon: Icon(Icons.access_time_outlined),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: activityCtrl,
+                  decoration: const InputDecoration(
+                    labelText: "Production activity",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: quantityRequestedCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: "Requested quantity",
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: quantityUsedCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: "Used quantity",
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: "Usage note",
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text("Cancel"),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final productionDate = _parseDateInput(
+                            productionDateCtrl.text,
+                          );
+                          final requestedQty = _parseIntInput(
+                            quantityRequestedCtrl.text,
+                          );
+                          final usedQty = _parseIntInput(
+                            quantityUsedCtrl.text,
+                          );
+                          if (productionDate == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Production date is required"),
+                              ),
+                            );
+                            return;
+                          }
+                          if (requestedQty == null || requestedQty <= 0) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Requested quantity is required"),
+                              ),
+                            );
+                            return;
+                          }
+                          if (usedQty == null || usedQty <= 0) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Used quantity is required"),
+                              ),
+                            );
+                            return;
+                          }
+
+                          Navigator.of(context).pop({
+                            "productionDate": productionDate.toIso8601String(),
+                            "usageStartTime": startTimeCtrl.text.trim(),
+                            "usageEndTime": endTimeCtrl.text.trim(),
+                            "productionActivity": activityCtrl.text.trim(),
+                            "quantityRequested": requestedQty,
+                            "quantityUsed": usedQty,
+                            "note": noteCtrl.text.trim(),
+                          });
+                        },
+                        child: const Text("Submit usage"),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    productionDateCtrl.dispose();
+    startTimeCtrl.dispose();
+    endTimeCtrl.dispose();
+    quantityRequestedCtrl.dispose();
+    quantityUsedCtrl.dispose();
+    activityCtrl.dispose();
+    noteCtrl.dispose();
+
+    if (payload == null) {
+      return;
+    }
+
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Session expired. Please sign in again.")),
+      );
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final api = ref.read(businessAssetApiProvider);
+      final updated = await api.submitFarmToolUsageRequest(
+        token: session.token,
+        id: asset.id,
+        payload: payload,
+      );
+      await _refreshAssetRelatedProviders();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _replaceAssetSnapshot(updated));
+      final latestUsage = updated.farmProfile?.productionUsageRequests.isNotEmpty == true
+          ? updated.farmProfile!.productionUsageRequests.first
+          : null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            latestUsage?.status == 'pending_approval'
+                ? "Tool usage submitted for approval"
+                : "Tool usage logged successfully",
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Unable to submit tool usage")),
+      );
+      _logFlow(
+        "USAGE_SUBMIT_FAIL",
+        "Tool usage submission failed",
+        extra: {"assetId": asset.id, "error": error.toString()},
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
   Future<void> _saveChanges() async {
     if (_isSaving) {
       _logFlow("SAVE_BLOCK", "Save ignored (already saving)");
       return;
     }
 
-    _logFlow("SAVE_TAP", "Save tapped", extra: {"assetId": widget.asset.id});
+    _logFlow(
+      "SAVE_TAP",
+      widget.isCreateMode ? "Create tapped" : "Save tapped",
+      extra: {"assetId": _currentAsset?.id ?? "new"},
+    );
 
     final session = ref.read(authSessionProvider);
     if (session == null || !session.isTokenValid) {
@@ -456,36 +1199,67 @@ class _BusinessAssetDetailScreenState
 
     try {
       final api = ref.read(businessAssetApiProvider);
-      _logFlow(
-        "SAVE_REQUEST",
-        "Updating asset",
-        extra: {"assetId": widget.asset.id},
-      );
-      await api.updateAsset(
-        token: session.token,
-        id: widget.asset.id,
-        payload: payload,
-      );
+      BusinessAsset savedAsset;
+      if (widget.isCreateMode) {
+        _logFlow(
+          "SAVE_REQUEST",
+          "Creating estate asset",
+          extra: {"assetType": _assetType},
+        );
+        savedAsset = await api.createAsset(
+          token: session.token,
+          payload: payload,
+        );
+      } else {
+        final assetId = _currentAsset!.id;
+        _logFlow("SAVE_REQUEST", "Updating asset", extra: {"assetId": assetId});
+        savedAsset = await api.updateAsset(
+          token: session.token,
+          id: assetId,
+          payload: payload,
+        );
+      }
 
       // WHY: Refresh list + summary so analytics stay in sync.
-      ref.invalidate(businessAssetsProvider);
-      ref.invalidate(businessAssetSummaryProvider);
+      await _refreshAssetRelatedProviders();
 
       if (!mounted) return;
-      _logFlow("SAVE_OK", "Asset updated", extra: {"assetId": widget.asset.id});
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Asset updated successfully")),
+      if (!widget.isCreateMode) {
+        setState(() => _replaceAssetSnapshot(savedAsset));
+      }
+      _logFlow(
+        "SAVE_OK",
+        widget.isCreateMode ? "Asset created" : "Asset updated",
+        extra: {"assetId": savedAsset.id},
       );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.isCreateMode
+                ? "Estate asset created successfully"
+                : "Asset updated successfully",
+          ),
+        ),
+      );
+      if (widget.isCreateMode) {
+        context.go('/business-assets/${savedAsset.id}', extra: savedAsset);
+      }
     } catch (e) {
       _logFlow(
         "SAVE_FAIL",
-        "Asset update failed",
+        widget.isCreateMode ? "Asset create failed" : "Asset update failed",
         extra: {"error": e.toString()},
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Unable to update asset")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.isCreateMode
+                ? "Unable to create estate asset"
+                : "Unable to update asset",
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -496,10 +1270,16 @@ class _BusinessAssetDetailScreenState
     AppDebug.log(
       "BUSINESS_ASSET_DETAIL",
       "build()",
-      extra: {"assetId": widget.asset.id},
+      extra: {"assetId": widget.asset?.id ?? "new"},
     );
 
     final theme = Theme.of(context);
+    final currentAsset = _currentAsset;
+    final profile = ref.watch(userProfileProvider).valueOrNull;
+    final canApproveFarmRequests = _canApproveFarmRequests(
+      actorRole: profile?.role ?? '',
+      staffRole: profile?.staffRole,
+    );
     final statusColors = AppStatusBadgeColors.fromTheme(
       theme: theme,
       tone: _status == "active"
@@ -511,7 +1291,7 @@ class _BusinessAssetDetailScreenState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Asset details"),
+        title: Text(widget.screenTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
@@ -523,6 +1303,32 @@ class _BusinessAssetDetailScreenState
             context.go('/business-assets');
           },
         ),
+        actions: [
+          if (!widget.isCreateMode)
+            if (currentAsset != null && _isFarmAsset(currentAsset))
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: TextButton.icon(
+                  onPressed: _isSaving
+                      ? null
+                      : () => _openFarmAuditSheet(currentAsset),
+                  icon: const Icon(Icons.fact_check_outlined),
+                  label: const Text("Do audit"),
+                ),
+              ),
+          if (!widget.isCreateMode)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: () {
+                  _logFlow("FARM_AUDIT_OPEN", "Open farm audit register");
+                  context.push('/business-assets/farm-audit');
+                },
+                icon: const Icon(Icons.agriculture_outlined),
+                label: const Text("Farm audit"),
+              ),
+            ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -537,7 +1343,7 @@ class _BusinessAssetDetailScreenState
               children: [
                 Expanded(
                   child: Text(
-                    widget.asset.name,
+                    currentAsset?.name ?? "New estate asset",
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -563,20 +1369,32 @@ class _BusinessAssetDetailScreenState
               ],
             ),
           ),
-          if (isEstateType(_assetType)) ...[
+          if (!widget.isCreateMode &&
+              currentAsset != null &&
+              isEstateType(_assetType)) ...[
             const SizedBox(height: 12),
             _EstateAnalyticsStrip(
-              assetId: widget.asset.id,
+              assetId: currentAsset.id,
               onViewTenants: () {
                 _logFlow(
                   "TENANT_LIST_OPEN",
                   "Open tenant applications from analytics strip",
-                  extra: {"assetId": widget.asset.id},
+                  extra: {"assetId": currentAsset.id},
                 );
                 context.go(
-                  '/business-tenants?estateAssetId=${widget.asset.id}',
+                  '/business-tenants?estateAssetId=${currentAsset.id}',
                 );
               },
+            ),
+          ],
+          if (!widget.isCreateMode &&
+              currentAsset != null &&
+              _isFarmAsset(currentAsset)) ...[
+            const SizedBox(height: 12),
+            _buildFarmOperationsCard(
+              theme,
+              currentAsset,
+              canApproveFarmRequests: canApproveFarmRequests,
             ),
           ],
           const SizedBox(height: 20),
@@ -603,7 +1421,7 @@ class _BusinessAssetDetailScreenState
                   ),
                 )
                 .toList(),
-            onChanged: _isSaving
+            onChanged: _isSaving || widget.isCreateMode
                 ? null
                 : (value) {
                     if (value == null) return;
@@ -968,21 +1786,22 @@ class _BusinessAssetDetailScreenState
                   ),
                 ),
                 const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    // WHY: Quick jump to tenant review for this estate asset.
-                    _logFlow(
-                      "TENANT_LIST_OPEN",
-                      "Open tenant applications",
-                      extra: {"assetId": widget.asset.id},
-                    );
-                    context.go(
-                      '/business-tenants?estateAssetId=${widget.asset.id}',
-                    );
-                  },
-                  icon: const Icon(Icons.people_outline),
-                  label: const Text("Tenants"),
-                ),
+                if (!widget.isCreateMode && currentAsset != null)
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      // WHY: Quick jump to tenant review for this estate asset.
+                      _logFlow(
+                        "TENANT_LIST_OPEN",
+                        "Open tenant applications",
+                        extra: {"assetId": currentAsset.id},
+                      );
+                      context.go(
+                        '/business-tenants?estateAssetId=${currentAsset.id}',
+                      );
+                    },
+                    icon: const Icon(Icons.people_outline),
+                    label: const Text("Tenants"),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
@@ -1213,36 +2032,319 @@ class _BusinessAssetDetailScreenState
             ),
             const SizedBox(height: 16),
           ],
-          const SizedBox(height: 20),
-          Text(
-            "Audit info",
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
+          if (!widget.isCreateMode && currentAsset != null) ...[
+            const SizedBox(height: 20),
+            Text(
+              "Audit info",
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _ReadOnlyRow(
-            label: "Created",
-            value: _formatDate(widget.asset.createdAt),
-          ),
-          const SizedBox(height: 8),
-          _ReadOnlyRow(
-            label: "Updated",
-            value: _formatDate(widget.asset.updatedAt),
-          ),
-          const SizedBox(height: 8),
-          _ReadOnlyRow(
-            label: "Updated by",
-            value: widget.asset.updatedBy ?? "System",
-          ),
+            const SizedBox(height: 12),
+            _ReadOnlyRow(
+              label: "Created",
+              value: _formatDate(currentAsset.createdAt),
+            ),
+            const SizedBox(height: 8),
+            _ReadOnlyRow(
+              label: "Updated",
+              value: _formatDate(currentAsset.updatedAt),
+            ),
+            const SizedBox(height: 8),
+            _ReadOnlyRow(
+              label: "Updated by",
+              value: currentAsset.updatedBy ?? "System",
+            ),
+          ],
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _isSaving ? null : _saveChanges,
-              child: Text(_isSaving ? "Saving..." : "Save changes"),
+              child: Text(
+                _isSaving
+                    ? (widget.isCreateMode ? "Creating..." : "Saving...")
+                    : (widget.isCreateMode
+                          ? "Create estate asset"
+                          : "Save changes"),
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFarmOperationsCard(
+    ThemeData theme,
+    BusinessAsset asset, {
+    required bool canApproveFarmRequests,
+  }) {
+    final usageRequests = [
+      ...?asset.farmProfile?.productionUsageRequests,
+    ]..sort(
+        (left, right) => (right.requestedAt ?? DateTime(1900)).compareTo(
+          left.requestedAt ?? DateTime(1900),
+        ),
+      );
+    final pendingUsageRequests = usageRequests
+        .where((request) => request.status == 'pending_approval')
+        .toList();
+    final approvedUsageRequests = usageRequests
+        .where((request) => request.status == 'approved')
+        .toList();
+    final pendingAudit = asset.farmProfile?.pendingAuditRequest;
+    final pendingAssetApproval = asset.approvalStatus == 'pending_approval';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  "Farm operations",
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                asset.farmProfile?.farmSection ?? asset.location ?? "Farm equipment",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Submit audits, track daily production usage, and approve farm requests from this asset.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _isSaving || pendingAssetApproval
+                    ? null
+                    : () => _openFarmAuditSheet(asset),
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text("Do audit"),
+              ),
+              OutlinedButton.icon(
+                onPressed: _isSaving || pendingAssetApproval
+                    ? null
+                    : () => _openToolUsageSheet(asset),
+                icon: const Icon(Icons.build_circle_outlined),
+                label: const Text("Request tool usage"),
+              ),
+              if (canApproveFarmRequests && pendingAssetApproval)
+                OutlinedButton.icon(
+                  onPressed: _isSaving
+                      ? null
+                      : () => _approveFarmRequest(
+                            asset,
+                            requestType: 'asset',
+                          ),
+                  icon: const Icon(Icons.approval_outlined),
+                  label: const Text("Approve equipment"),
+                ),
+              if (canApproveFarmRequests &&
+                  pendingAudit?.status == 'pending_approval')
+                OutlinedButton.icon(
+                  onPressed: _isSaving
+                      ? null
+                      : () => _approveFarmRequest(
+                            asset,
+                            requestType: 'audit',
+                          ),
+                  icon: const Icon(Icons.task_alt_outlined),
+                  label: const Text("Approve audit"),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _FarmInfoChip(
+                label: "Usage logs",
+                value: usageRequests.length.toString(),
+              ),
+              _FarmInfoChip(
+                label: "Pending usage",
+                value: pendingUsageRequests.length.toString(),
+              ),
+              _FarmInfoChip(
+                label: "Approved usage",
+                value: approvedUsageRequests.length.toString(),
+              ),
+            ],
+          ),
+          if (pendingAssetApproval) ...[
+            const SizedBox(height: 12),
+            _FarmNotice(
+              title: "Equipment approval pending",
+              body:
+                  "Submitted by ${_formatActor(asset.approvalRequestedBy)} on ${_formatDateTime(asset.approvalRequestedAt)}.",
+              tone: Colors.orange,
+            ),
+          ],
+          if (pendingAudit?.status == 'pending_approval') ...[
+            const SizedBox(height: 12),
+            _FarmNotice(
+              title: "Audit approval pending",
+              body:
+                  "${_formatActor(pendingAudit?.requestedBy)} requested ${pendingAudit?.resultingStatus ?? asset.status} on ${_formatDateTime(pendingAudit?.auditDate)}.",
+              tone: Colors.blue,
+            ),
+          ],
+          if (usageRequests.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text(
+              "Daily production usage",
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            ...usageRequests.take(6).map(
+              (request) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _buildUsageRequestTile(
+                  theme,
+                  asset,
+                  request,
+                  canApproveFarmRequests: canApproveFarmRequests,
+                ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 16),
+            Text(
+              "No daily production usage logged yet.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUsageRequestTile(
+    ThemeData theme,
+    BusinessAsset asset,
+    BusinessAssetProductionUsageRequest request, {
+    required bool canApproveFarmRequests,
+  }) {
+    final isPending = request.status == 'pending_approval';
+    final statusTone = isPending
+        ? theme.colorScheme.secondaryContainer
+        : theme.colorScheme.primaryContainer;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  request.productionActivity.trim().isEmpty
+                      ? "Production usage request"
+                      : request.productionActivity,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: statusTone,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  request.status.replaceAll('_', ' ').toUpperCase(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _formatUsageWindow(request),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Requested by ${_formatActor(request.requestedBy)} • requested ${request.quantityRequested} • used ${request.quantityUsed}",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (request.note.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              request.note,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (request.approvedBy != null || request.approvedAt != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              "Approved by ${_formatActor(request.approvedBy)} on ${_formatDateTime(request.approvedAt)}",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (isPending && canApproveFarmRequests) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: _isSaving
+                    ? null
+                    : () => _approveFarmRequest(
+                          asset,
+                          requestType: 'usage',
+                          requestId: request.id,
+                        ),
+                icon: const Icon(Icons.approval_outlined),
+                label: const Text("Approve usage"),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1284,6 +2386,93 @@ class _ReadOnlyRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _FarmInfoChip extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _FarmInfoChip({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FarmNotice extends StatelessWidget {
+  final String title;
+  final String body;
+  final Color tone;
+
+  const _FarmNotice({
+    required this.title,
+    required this.body,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: tone,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            body,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

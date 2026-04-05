@@ -57,6 +57,7 @@ const String _intentPlanUnits = "load production plan units";
 const String _intentPortfolioConfidence =
     "load production confidence portfolio";
 const String _intentPlanCreate = "create production plan";
+const String _intentPlanDraftUpdate = "update production draft";
 const String _intentPlanStatusUpdate = "update production plan status";
 const String _intentPlanDelete = "delete production plan draft";
 const String _intentPlanDraft = "generate production plan draft";
@@ -88,6 +89,7 @@ const String _operationPlanDetail = "fetchPlanDetail";
 const String _operationPlanUnits = "fetchPlanUnits";
 const String _operationPortfolioConfidence = "fetchPortfolioConfidence";
 const String _operationPlanCreate = "createPlan";
+const String _operationPlanDraftUpdate = "updateDraft";
 const String _operationPlanStatusUpdate = "updatePlanStatus";
 const String _operationPlanDelete = "deletePlan";
 const String _operationPlanDraft = "generatePlanDraft";
@@ -128,6 +130,9 @@ const String _keyStaffId = "staffId";
 const String _keyUnitId = "unitId";
 const String _keyAssignedStaffProfileIds = "assignedStaffProfileIds";
 const String _keyActualPlots = "actualPlots";
+const String _keyQuantityActivityType = "quantityActivityType";
+const String _keyQuantityAmount = "quantityAmount";
+const String _keyQuantityUnit = "quantityUnit";
 const String _keyDelayReason = "delayReason";
 const String _keyNotes = "notes";
 const String _keyNote = "note";
@@ -181,6 +186,9 @@ const String _planUnitsFailureMessage = "fetchPlanUnits() failed";
 const String _planCreateStartMessage = "createPlan() start";
 const String _planCreateSuccessMessage = "createPlan() success";
 const String _planCreateFailureMessage = "createPlan() failed";
+const String _planDraftUpdateStartMessage = "updateDraft() start";
+const String _planDraftUpdateSuccessMessage = "updateDraft() success";
+const String _planDraftUpdateFailureMessage = "updateDraft() failed";
 const String _planStatusUpdateStartMessage = "updatePlanStatus() start";
 const String _planStatusUpdateSuccessMessage = "updatePlanStatus() success";
 const String _planStatusUpdateFailureMessage = "updatePlanStatus() failed";
@@ -932,6 +940,65 @@ class ProductionApi {
           _extraServiceKey: _serviceName,
           _extraOperationKey: _operationPlanCreate,
           _extraIntentKey: _intentPlanCreate,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ProductionPlanDetail> updateDraft({
+    required String? token,
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _planDraftUpdateStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationPlanDraftUpdate,
+        _extraIntentKey: _intentPlanDraftUpdate,
+        _extraPlanIdKey: planId,
+      },
+    );
+
+    try {
+      final resp = await _dio.put(
+        "$_plansPath/$planId/draft",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final detail = ProductionPlanDetail.fromJson(data);
+      AppDebug.log(
+        _logTag,
+        _planDraftUpdateSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanDraftUpdate,
+          _extraIntentKey: _intentPlanDraftUpdate,
+          _extraPlanIdKey: detail.plan.id,
+        },
+      );
+      return detail;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _planDraftUpdateFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanDraftUpdate,
+          _extraIntentKey: _intentPlanDraftUpdate,
+          _extraPlanIdKey: planId,
           _extraStatusKey: status,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,
@@ -1879,6 +1946,9 @@ class ProductionApi {
     String? staffId,
     String? unitId,
     required num actualPlots,
+    String? quantityActivityType,
+    num? quantityAmount,
+    String? quantityUnit,
     required String delayReason,
     required String notes,
   }) async {
@@ -1896,7 +1966,9 @@ class ProductionApi {
     try {
       final normalizedStaffId = staffId?.trim() ?? "";
       final normalizedUnitId = unitId?.trim() ?? "";
-      final payload = {
+      final normalizedQuantityActivityType = quantityActivityType?.trim() ?? "";
+      final normalizedQuantityUnit = quantityUnit?.trim() ?? "";
+      final payload = <String, dynamic>{
         _keyWorkDate: workDate.toIso8601String().split("T").first,
         _keyActualPlots: actualPlots,
         _keyDelayReason: delayReason,
@@ -1907,6 +1979,15 @@ class ProductionApi {
       }
       if (normalizedUnitId.isNotEmpty) {
         payload[_keyUnitId] = normalizedUnitId;
+      }
+      if (normalizedQuantityActivityType.isNotEmpty) {
+        payload[_keyQuantityActivityType] = normalizedQuantityActivityType;
+      }
+      if (quantityAmount != null) {
+        payload[_keyQuantityAmount] = quantityAmount;
+      }
+      if (normalizedQuantityUnit.isNotEmpty) {
+        payload[_keyQuantityUnit] = normalizedQuantityUnit;
       }
       final resp = await _dio.post(
         "$_tasksPath/$taskId/progress",

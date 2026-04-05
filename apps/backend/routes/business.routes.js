@@ -213,6 +213,16 @@ router.post(
   businessController.createAsset,
 );
 
+router.post(
+  "/assets/farm-audit/submissions",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.submitFarmAsset,
+);
+
 router.get(
   "/assets",
   requireAuth,
@@ -225,6 +235,54 @@ router.get(
     capability: PERMISSION_CAPABILITIES.VIEW,
   }),
   businessController.getAssets,
+);
+
+router.get(
+  "/assets/farm-audit",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.VIEW,
+  }),
+  businessController.getFarmAssetAuditAnalytics,
+);
+
+router.post(
+  "/assets/:id/farm-audit-requests",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.submitFarmAssetAudit,
+);
+
+router.post(
+  "/assets/:id/farm-usage-requests",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.submitFarmToolUsageRequest,
+);
+
+router.post(
+  "/assets/:id/farm-approval",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.ASSETS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
+  businessController.approveFarmAssetRequest,
 );
 
 router.patch(
@@ -450,6 +508,16 @@ router.get(
     "staff",
   ]),
   businessController.listProductionPlans,
+);
+
+router.put(
+  "/production/plans/:id/draft",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.updateProductionPlanDraft,
 );
 
 router.patch(

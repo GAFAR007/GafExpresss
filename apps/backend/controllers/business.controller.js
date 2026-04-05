@@ -30,6 +30,10 @@ const {
   generateProductionPlanDraft,
 } = require("../services/production_plan_ai.service");
 const {
+  extractAiDraftSourceDocumentContext,
+  buildProductionDraftImportResponse,
+} = require("../services/production_plan_import.service");
+const {
   generateProductionPlanDraftV2,
 } = require("../services/planner");
 const {
@@ -63,6 +67,9 @@ const PlanUnit = require("../models/PlanUnit");
 const ProductionPhaseUnitCompletion = require("../models/ProductionPhaseUnitCompletion");
 const LifecycleDeviationAlert = require("../models/LifecycleDeviationAlert");
 const TaskProgress = require("../models/TaskProgress");
+const {
+  PRODUCTION_QUANTITY_ACTIVITY_TYPES,
+} = require("../models/TaskProgress");
 const ProductionDeviationGovernanceConfig = require("../models/ProductionDeviationGovernanceConfig");
 const ProductionUnitTaskSchedule = require("../models/ProductionUnitTaskSchedule");
 const ProductionUnitScheduleWarning = require("../models/ProductionUnitScheduleWarning");
@@ -118,10 +125,19 @@ const {
   PRODUCTION_TASK_TIMING_MODES,
   PRODUCTION_TASK_TIMING_REFERENCE_EVENTS,
 } = ProductionUnitTaskSchedule;
+const PERSISTED_PRODUCTION_TASK_TYPES = new Set(
+  Array.isArray(
+    ProductionTask.PRODUCTION_TASK_TYPES,
+  ) && ProductionTask.PRODUCTION_TASK_TYPES.length > 0 ?
+    ProductionTask.PRODUCTION_TASK_TYPES
+  : ["workload", "recurring", "event"],
+);
 const {
   PRODUCTION_UNIT_WARNING_TYPES,
   PRODUCTION_UNIT_WARNING_SEVERITIES,
 } = ProductionUnitScheduleWarning;
+const IMPORTED_PROJECT_DAY_PATTERN =
+  /Project day\s+\d+\s+\((\d{4}-\d{2}-\d{2})\)\./i;
 
 // WHY: Enforce the same yearly payment cap in summary calculations.
 const MAX_TENANT_RENT_PAYMENTS_PER_YEAR = 3;
@@ -318,6 +334,10 @@ const STAFF_COMPENSATION_LOG = {
 const PRODUCTION_COPY = {
   PLAN_CREATED:
     "Production plan created successfully",
+  PLAN_DRAFT_SAVED:
+    "Production draft saved successfully",
+  PLAN_DRAFT_UPDATED:
+    "Production draft updated successfully",
   PLAN_DRAFT_OK:
     "Production plan draft generated successfully",
   PLAN_ASSISTANT_TURN_OK:
@@ -336,10 +356,14 @@ const PRODUCTION_COPY = {
     "Production plan status change is not allowed",
   PLAN_STATUS_UPDATED:
     "Production plan status updated successfully",
+  PLAN_RETURN_DRAFT_PROGRESS_LOCKED:
+    "This production plan already has execution logs or output records. Save a draft copy instead.",
   PLAN_DELETED:
     "Production plan deleted successfully",
   PLAN_DELETE_DRAFT_ONLY:
     "Only draft or archived production plans can be deleted",
+  PLAN_UPDATE_DRAFT_ONLY:
+    "Only draft production plans can be updated from the draft editor",
   PLAN_ARCHIVE_PREORDER_ENABLED:
     "Disable pre-order before archiving this production plan",
   PLAN_UNITS_LIST_OK:
@@ -422,6 +446,8 @@ const PRODUCTION_COPY = {
     "Production output created successfully",
   OUTPUT_LIST_OK:
     "Production outputs fetched successfully",
+  PLANTING_TARGETS_REQUIRED:
+    "Farm production needs planting targets before the draft or plan can be created.",
   PRODUCT_REQUIRED:
     "Product is required",
   OUTPUT_QUANTITY_REQUIRED:
@@ -658,6 +684,8 @@ const PRODUCTION_TASK_APPROVAL_APPROVED =
   "approved";
 const PRODUCTION_TASK_APPROVAL_REJECTED =
   "rejected";
+const PRODUCTION_SAVE_MODE_DRAFT =
+  "draft";
 const DEFAULT_TASK_TITLE = "Task";
 const DEFAULT_PHASE_NAME_PREFIX =
   "Phase";
@@ -798,6 +826,14 @@ const TASK_PROGRESS_APPROVAL_APPROVED =
   "approved";
 const TASK_PROGRESS_APPROVAL_NEEDS_REVIEW =
   "needs_review";
+const PRODUCTION_QUANTITY_ACTIVITY_NONE =
+  "none";
+const PRODUCTION_QUANTITY_ACTIVITY_PLANTING =
+  "planting";
+const PRODUCTION_QUANTITY_ACTIVITY_TRANSPLANT =
+  "transplant";
+const PRODUCTION_QUANTITY_ACTIVITY_HARVEST =
+  "harvest";
 const TASK_PROGRESS_REJECTION_NOTE_PREFIX =
   "[TASK_PROGRESS_REJECTED]";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_ID_REQUIRED =
@@ -1027,6 +1063,24 @@ function canManageProductionPlanLifecycle({
   });
 }
 
+function canEditProductionPlanDraft({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    (
+      staffRole === STAFF_ROLE_ESTATE_MANAGER ||
+      staffRole === STAFF_ROLE_FARM_MANAGER ||
+      staffRole === STAFF_ROLE_ASSET_MANAGER
+    )
+  );
+}
+
 // WHY: Task assignments can be initiated by designated managers.
 function canAssignProductionTasks({
   actorRole,
@@ -1044,6 +1098,43 @@ function canAssignProductionTasks({
         STAFF_ROLE_FARM_MANAGER ||
       staffRole ===
         STAFF_ROLE_ASSET_MANAGER)
+  );
+}
+
+function canLogProductionTaskProgress({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    Boolean(
+      (staffRole || "")
+        .toString()
+        .trim(),
+    )
+  );
+}
+
+// WHY: Farm asset approvals are limited to operational managers and owners.
+function canApproveFarmAssetWorkflow({
+  actorRole,
+  staffRole,
+}) {
+  if (actorRole === "business_owner") {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    (
+      staffRole === STAFF_ROLE_ESTATE_MANAGER ||
+      staffRole === STAFF_ROLE_FARM_MANAGER ||
+      staffRole === STAFF_ROLE_ASSET_MANAGER
+    )
   );
 }
 
@@ -1066,6 +1157,8 @@ function canTransitionProductionPlanStatus(
     case PRODUCTION_STATUS_ACTIVE:
       return (
         nextStatus ===
+          PRODUCTION_STATUS_DRAFT ||
+        nextStatus ===
           PRODUCTION_STATUS_PAUSED ||
         nextStatus ===
           PRODUCTION_STATUS_COMPLETED ||
@@ -1074,6 +1167,8 @@ function canTransitionProductionPlanStatus(
       );
     case PRODUCTION_STATUS_PAUSED:
       return (
+        nextStatus ===
+          PRODUCTION_STATUS_DRAFT ||
         nextStatus ===
           PRODUCTION_STATUS_ACTIVE ||
         nextStatus ===
@@ -1186,8 +1281,12 @@ async function syncProductForPlanLifecycle({
   }
 
   if (
-    targetStatus ===
-      PRODUCTION_STATUS_ARCHIVED &&
+    (
+      targetStatus ===
+        PRODUCTION_STATUS_ARCHIVED ||
+      targetStatus ===
+        PRODUCTION_STATUS_DRAFT
+    ) &&
     linkedPlanId === planId
   ) {
     if (product.preorderEnabled) {
@@ -1220,6 +1319,34 @@ async function syncProductForPlanLifecycle({
       updates,
     },
   );
+}
+
+async function buildBusinessAssetActor({
+  actor,
+  businessId,
+}) {
+  const staffProfile =
+    await getStaffProfileForActor({
+      actor,
+      businessId,
+      allowMissing: true,
+    });
+
+  return {
+    id: actor._id,
+    role: actor.role,
+    name:
+      actor.name ||
+      [
+        actor.firstName,
+        actor.lastName,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .trim(),
+    email: actor.email || "",
+    staffRole: staffProfile?.staffRole || "",
+  };
 }
 
 async function detachProductFromDeletedDraft({
@@ -1273,8 +1400,14 @@ function canReviewTaskProgress({
 
   return (
     actorRole === "staff" &&
-    staffRole ===
-      STAFF_ROLE_ESTATE_MANAGER
+    (
+      staffRole ===
+        STAFF_ROLE_ESTATE_MANAGER ||
+      staffRole ===
+        STAFF_ROLE_FARM_MANAGER ||
+      staffRole ===
+        STAFF_ROLE_ASSET_MANAGER
+    )
   );
 }
 
@@ -2092,6 +2225,1252 @@ function parsePositiveNumberInput(
     return null;
   }
   return parsed;
+}
+
+function normalizePlantingMaterialTypeInput(
+  value,
+) {
+  const raw =
+    value == null ? "" : (
+      value.toString().trim()
+    );
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  switch (normalized) {
+    case "seeds":
+      return "seed";
+    case "seedlings":
+      return "seedling";
+    case "roots":
+      return "root";
+    case "stems":
+    case "stem_cutting":
+    case "stem_cuttings":
+      return "stem";
+    case "cuttings":
+      return "cutting";
+    case "tubers":
+      return "tuber";
+    case "suckers":
+      return "sucker";
+    case "runners":
+      return "runner";
+    default:
+      return normalized;
+  }
+}
+
+function normalizePlantingTargetsInput(
+  value,
+) {
+  const source =
+    (
+      value &&
+      typeof value === "object"
+    ) ?
+      value
+    : {};
+  return {
+    materialType:
+      normalizePlantingMaterialTypeInput(
+        source.materialType ||
+          source.plantingMaterialType,
+      ),
+    plannedPlantingQuantity:
+      parsePositiveNumberInput(
+        source.plannedPlantingQuantity ||
+          source.plantingQuantity,
+      ),
+    plannedPlantingUnit:
+      normalizePlantingTargetUnitInput(
+        source.plannedPlantingUnit ||
+          source.plantingUnit ||
+          source.plantingQuantityUnit ||
+          source.plannedPlantingMeasureUnit,
+      ),
+    estimatedHarvestQuantity:
+      parsePositiveNumberInput(
+        source.estimatedHarvestQuantity ||
+          source.harvestQuantity,
+      ),
+    estimatedHarvestUnit:
+      normalizePlantingTargetUnitInput(
+        source.estimatedHarvestUnit ||
+          source.harvestUnit,
+      ),
+  };
+}
+
+function normalizePlantingTargetUnitInput(
+  value,
+) {
+  const normalized =
+    (value || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+  switch (normalized) {
+    case "kgs":
+      return "kg";
+    case "gram":
+    case "grams":
+      return "g";
+    case "t":
+    case "tons":
+    case "tonne":
+    case "tonnes":
+      return "ton";
+    case "bags":
+      return "bag";
+    case "sacks":
+      return "sack";
+    case "crates":
+      return "crate";
+    case "cartons":
+      return "carton";
+    case "baskets":
+      return "basket";
+    case "boxes":
+      return "box";
+    case "buckets":
+      return "bucket";
+    case "bunches":
+      return "bunch";
+    case "bundles":
+      return "bundle";
+    case "trays":
+      return "tray";
+    case "seeds":
+      return "seed";
+    case "seedlings":
+      return "seedling";
+    case "pieces":
+      return "piece";
+    case "plants":
+      return "plant";
+    default:
+      return normalized;
+  }
+}
+
+function parseNonNegativeNumberInput(
+  value,
+) {
+  if (value == null || value === "") {
+    return 0;
+  }
+  const parsed = Number(value);
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < 0
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseNonNegativeIntegerInput(
+  value,
+) {
+  const parsed =
+    parseNonNegativeNumberInput(value);
+  if (
+    parsed == null ||
+    !Number.isFinite(parsed)
+  ) {
+    return null;
+  }
+  return Math.max(
+    0,
+    Math.floor(parsed),
+  );
+}
+
+function normalizeProductionQuantityActivityType(
+  value,
+) {
+  const normalized =
+    (value || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+  switch (normalized) {
+    case "plant":
+    case "planted":
+    case "planting":
+      return PRODUCTION_QUANTITY_ACTIVITY_PLANTING;
+    case "transplant":
+    case "transplanted":
+    case "transplanting":
+      return PRODUCTION_QUANTITY_ACTIVITY_TRANSPLANT;
+    case "harvest":
+    case "harvested":
+    case "harvesting":
+      return PRODUCTION_QUANTITY_ACTIVITY_HARVEST;
+    default:
+      return PRODUCTION_QUANTITY_ACTIVITY_NONE;
+  }
+}
+
+function resolveFarmQuantityTrackingConfig({
+  plan,
+  activityType,
+}) {
+  const plantingTargets =
+    normalizePlantingTargetsInput(
+      plan?.plantingTargets,
+    );
+  if (
+    plan?.domainContext !== "farm" ||
+    !hasValidPlantingTargets({
+      plantingTargets,
+    })
+  ) {
+    return null;
+  }
+
+  switch (activityType) {
+    case PRODUCTION_QUANTITY_ACTIVITY_PLANTING:
+    case PRODUCTION_QUANTITY_ACTIVITY_TRANSPLANT:
+      return {
+        activityType,
+        targetQuantity:
+          plantingTargets.plannedPlantingQuantity,
+        unit:
+          plantingTargets.plannedPlantingUnit,
+      };
+    case PRODUCTION_QUANTITY_ACTIVITY_HARVEST:
+      return {
+        activityType,
+        targetQuantity:
+          plantingTargets.estimatedHarvestQuantity,
+        unit:
+          plantingTargets.estimatedHarvestUnit,
+      };
+    default:
+      return null;
+  }
+}
+
+function hasCompletePlantingTargets(
+  plantingTargets,
+) {
+  return Boolean(
+    plantingTargets?.materialType &&
+      plantingTargets?.plannedPlantingUnit &&
+      plantingTargets?.estimatedHarvestUnit &&
+      Number(
+        plantingTargets?.plannedPlantingQuantity,
+      ) > 0 &&
+      Number(
+        plantingTargets?.estimatedHarvestQuantity,
+      ) > 0,
+  );
+}
+
+function buildPlantingTargetsValidationDetails(
+  plantingTargets,
+) {
+  const missing = [];
+  if (!plantingTargets?.materialType) {
+    missing.push(
+      "plantingTargets.materialType",
+    );
+  }
+  if (
+    !Number(
+      plantingTargets?.plannedPlantingQuantity,
+    )
+  ) {
+    missing.push(
+      "plantingTargets.plannedPlantingQuantity",
+    );
+  }
+  if (
+    !plantingTargets?.plannedPlantingUnit
+  ) {
+    missing.push(
+      "plantingTargets.plannedPlantingUnit",
+    );
+  }
+  if (
+    !Number(
+      plantingTargets?.estimatedHarvestQuantity,
+    )
+  ) {
+    missing.push(
+      "plantingTargets.estimatedHarvestQuantity",
+    );
+  }
+  if (
+    !plantingTargets?.estimatedHarvestUnit
+  ) {
+    missing.push(
+      "plantingTargets.estimatedHarvestUnit",
+    );
+  }
+  return {
+    missing,
+    invalid: [],
+  };
+}
+
+function buildPlantingTargetsPrompt(
+  plantingTargets,
+) {
+  if (
+    !hasCompletePlantingTargets(
+      plantingTargets,
+    )
+  ) {
+    return "";
+  }
+  return `Planting targets: material ${plantingTargets.materialType}; plan ${plantingTargets.plannedPlantingQuantity} ${plantingTargets.plannedPlantingUnit} for establishment; estimate harvest at ${plantingTargets.estimatedHarvestQuantity} ${plantingTargets.estimatedHarvestUnit}. Use these numbers as the yield baseline for planting, establishment, and harvest planning.`;
+}
+
+function normalizeDraftRefineTargetInput(
+  value,
+) {
+  const source =
+    (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) ?
+      value
+    : {};
+  const phaseTargets =
+    Array.isArray(source.phaseTargets) ?
+      source.phaseTargets
+        .map((entry) => {
+          const row =
+            (
+              entry &&
+              typeof entry === "object" &&
+              !Array.isArray(entry)
+            ) ?
+              entry
+            : {};
+          return {
+            phaseName:
+              (
+                row.phaseName || ""
+              )
+                .toString()
+                .trim(),
+            targetTaskCount:
+              parseNonNegativeIntegerInput(
+                row.targetTaskCount,
+              ) || 0,
+          };
+        })
+        .filter(
+          (entry) =>
+            entry.targetTaskCount > 0,
+        )
+      : [];
+  return {
+    mode:
+      (
+        source.mode || ""
+      )
+        .toString()
+        .trim(),
+    currentTaskCount:
+      parseNonNegativeIntegerInput(
+        source.currentTaskCount,
+      ) || 0,
+    requestedTaskCount:
+      parseNonNegativeIntegerInput(
+        source.requestedTaskCount,
+      ) || 0,
+    maxAdditionalTasks:
+      parseNonNegativeIntegerInput(
+        source.maxAdditionalTasks,
+      ),
+    phaseTargets,
+  };
+}
+
+function normalizeDraftPhaseTargetName(
+  value,
+) {
+  return (
+    value == null ? "" : value.toString()
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function resolveInclusivePhaseWindowDays(
+  phase,
+) {
+  const start =
+    parseDateInput(
+      phase?.taskStartDate ||
+        phase?.startDate,
+    ) ||
+    parseDateInput(phase?.startDate);
+  const end =
+    parseDateInput(
+      phase?.taskEndDate ||
+        phase?.endDate,
+    ) ||
+    parseDateInput(phase?.endDate);
+  if (!start || !end) {
+    return Math.max(
+      1,
+      Math.floor(
+        Number(
+          phase?.estimatedDays || 1,
+        ),
+      ),
+    );
+  }
+  return Math.max(
+    1,
+    Math.floor(
+      (end.getTime() - start.getTime()) /
+        MS_PER_DAY,
+    ) + 1,
+  );
+}
+
+function resolveDraftRequestedTaskCount({
+  planningDays,
+  currentTaskCount,
+  refineTarget,
+  sourceDocumentTaskLineEstimate,
+}) {
+  const safePlanningDays = Math.max(
+    1,
+    Math.floor(
+      Number(planningDays || 0),
+    ),
+  );
+  let targetTaskCount = Math.max(
+    0,
+    Number(currentTaskCount || 0),
+  );
+
+  if (
+    Number(
+      refineTarget?.requestedTaskCount,
+    ) > targetTaskCount
+  ) {
+    targetTaskCount = Number(
+      refineTarget.requestedTaskCount,
+    );
+  }
+
+  if (
+    Number(sourceDocumentTaskLineEstimate) >
+    0
+  ) {
+    targetTaskCount = Math.max(
+      targetTaskCount,
+      Math.min(
+        Math.floor(
+          Number(
+            sourceDocumentTaskLineEstimate,
+          ),
+        ),
+        safePlanningDays,
+      ),
+    );
+  }
+
+  if (
+    Number.isFinite(
+      Number(
+        refineTarget?.maxAdditionalTasks,
+      ),
+    )
+  ) {
+    targetTaskCount = Math.min(
+      targetTaskCount,
+      Math.max(
+        0,
+        Number(currentTaskCount || 0),
+      ) +
+        Math.max(
+          0,
+          Number(
+            refineTarget.maxAdditionalTasks,
+          ),
+        ),
+    );
+  }
+
+  return Math.max(
+    Math.max(
+      0,
+      Number(currentTaskCount || 0),
+    ),
+    Math.floor(targetTaskCount),
+  );
+}
+
+function buildDraftPhaseTaskTargetMap({
+  scheduledPhases,
+  refineTarget,
+  requestedTaskCount,
+}) {
+  const explicitTargetsByName =
+    new Map(
+      (refineTarget?.phaseTargets || [])
+        .map((entry) => [
+          normalizeDraftPhaseTargetName(
+            entry.phaseName,
+          ),
+          Math.max(
+            0,
+            Number(
+              entry.targetTaskCount || 0,
+            ),
+          ),
+        ])
+        .filter(([key, value]) => key && value > 0),
+    );
+  const rows =
+    (
+      Array.isArray(scheduledPhases) ?
+        scheduledPhases
+      : []
+    ).map((phase) => {
+      const currentTaskCount =
+        Array.isArray(phase?.tasks) ?
+          phase.tasks.length
+        : 0;
+      const phaseWindowDays =
+        resolveInclusivePhaseWindowDays(
+          phase,
+        );
+      const normalizedName =
+        normalizeDraftPhaseTargetName(
+          phase?.name,
+        );
+      const explicitTarget =
+        explicitTargetsByName.get(
+          normalizedName,
+        ) || 0;
+      const heuristicTarget =
+        Math.max(
+          currentTaskCount,
+          Math.max(
+            phaseWindowDays >= 4 ? 2 : 1,
+            Math.min(
+              phaseWindowDays,
+              Math.ceil(
+                phaseWindowDays * 0.85,
+              ),
+            ),
+          ),
+        );
+      return {
+        phaseName:
+          phase?.name || "",
+        targetTaskCount:
+          Math.max(
+            currentTaskCount,
+            explicitTarget || heuristicTarget,
+          ),
+        phaseWindowDays,
+      };
+    });
+
+  let remaining =
+    Math.max(
+      0,
+      Number(requestedTaskCount || 0),
+    ) -
+    rows.reduce(
+      (sum, row) =>
+        sum +
+        row.targetTaskCount,
+      0,
+    );
+  const expandableRows = rows
+    .filter(
+      (row) =>
+        row.phaseWindowDays >
+        row.targetTaskCount,
+    )
+    .sort(
+      (left, right) =>
+        right.phaseWindowDays -
+        left.phaseWindowDays,
+    );
+  let cursor = 0;
+  while (
+    remaining > 0 &&
+    expandableRows.length > 0
+  ) {
+    const row =
+      expandableRows[
+        cursor % expandableRows.length
+      ];
+    if (
+      row.targetTaskCount <
+      row.phaseWindowDays
+    ) {
+      row.targetTaskCount += 1;
+      remaining -= 1;
+    }
+    cursor += 1;
+    if (
+      cursor >
+      expandableRows.length * 8
+    ) {
+      break;
+    }
+  }
+
+  return new Map(
+    rows.map((row) => [
+      normalizeDraftPhaseTargetName(
+        row.phaseName,
+      ),
+      row.targetTaskCount,
+    ]),
+  );
+}
+
+function resolveDraftPhaseDefaultRole(
+  tasks,
+) {
+  const counts = new Map();
+  (
+    Array.isArray(tasks) ? tasks : []
+  ).forEach((task) => {
+    const role =
+      normalizeStaffIdInput(
+        task?.roleRequired,
+      ) || "farmer";
+    counts.set(
+      role,
+      (counts.get(role) || 0) + 1,
+    );
+  });
+  const sorted =
+    Array.from(counts.entries()).sort(
+      (left, right) =>
+        right[1] - left[1],
+    );
+  return sorted[0]?.[0] || "farmer";
+}
+
+function resolveDraftPhaseDefaultHeadcount(
+  tasks,
+) {
+  const counts = new Map();
+  (
+    Array.isArray(tasks) ? tasks : []
+  ).forEach((task) => {
+    const headcount =
+      normalizeDraftTaskHeadcount(
+        task?.requiredHeadcount,
+      );
+    counts.set(
+      headcount,
+      (counts.get(headcount) || 0) + 1,
+    );
+  });
+  const sorted =
+    Array.from(counts.entries()).sort(
+      (left, right) =>
+        right[1] - left[1],
+    );
+  return sorted[0]?.[0] || 1;
+}
+
+function resolveDraftPhaseTopUpTemplates({
+  phaseName,
+  domainContext,
+}) {
+  const normalizedName =
+    normalizeDraftPhaseTargetName(
+      phaseName,
+    );
+  if (domainContext === "farm") {
+    if (normalizedName.includes("nursery")) {
+      return [
+        ["Seed tray moisture check", "Inspect tray moisture, germination uniformity, and replace weak trays before the next nursery cycle."],
+        ["Nursery sanitation pass", "Clean nursery benches, remove diseased material, and reset hygiene controls for the next work block."],
+        ["Seedling vigor count", "Record seedling vigor, leaf color, and tray gaps so the nursery register stays current."],
+      ];
+    }
+    if (
+      normalizedName.includes("transplant")
+    ) {
+      return [
+        ["Transplant line check", "Verify spacing, placement depth, and line straightness across the greenhouse before closing the work block."],
+        ["Gap-fill walk", "Identify missed holes, weak stands, and transplant shock points, then queue replacements."],
+        ["Irrigation settle review", "Check post-transplant irrigation coverage and correct uneven wetting or pressure issues."],
+      ];
+    }
+    if (
+      normalizedName.includes("vegetative")
+    ) {
+      return [
+        ["Canopy growth inspection", "Walk the greenhouse, review canopy growth, and record uneven vigor or stress signals."],
+        ["Fertigation tuning check", "Confirm dosing rate, tank levels, and feed uniformity against current vegetative demand."],
+        ["Pest scouting round", "Inspect leaves, stems, and greenhouse edges for pests or disease pressure and record findings."],
+        ["Trellis and pruning pass", "Tighten support lines, remove excess growth, and keep plant structure consistent."],
+      ];
+    }
+    if (
+      normalizedName.includes("flower")
+    ) {
+      return [
+        ["Flower set inspection", "Review flower initiation, drop rate, and greenhouse climate signals affecting set."],
+        ["Pollination support check", "Confirm airflow, pollination support work, and bloom uniformity across houses."],
+        ["Nutrient balance review", "Check feed balance and irrigation timing for flowering-stage stability."],
+      ];
+    }
+    if (
+      normalizedName.includes("fruit")
+    ) {
+      return [
+        ["Fruit load count", "Measure fruit set density, identify weak clusters, and record corrective actions."],
+        ["Fruit quality sampling", "Sample size, color, and surface quality so the harvest forecast stays accurate."],
+        ["Support and stress check", "Inspect supports, plant load, and crop stress risk before the next pick cycle."],
+      ];
+    }
+    if (
+      normalizedName.includes("harvest")
+    ) {
+      return [
+        ["Harvest maturity sampling", "Walk the crop and tag rows ready for the next pick based on maturity and market spec."],
+        ["Picking round prep", "Set picking sequence, crates, and staffing before the next harvest round starts."],
+        ["Sorting and grading run", "Sort harvested fruit by grade, isolate rejects, and reconcile harvested quantities."],
+      ];
+    }
+  }
+  return [
+    ["Operational checkpoint", `Record phase progress, execution blockers, and the next action for ${phaseName || "this phase"}.`],
+    ["Workfront inspection", `Inspect active work in ${phaseName || "this phase"} and resolve any missed follow-up tasks.`],
+    ["Manager review note", `Capture daily status, labor needs, and quality observations for ${phaseName || "this phase"}.`],
+  ];
+}
+
+function buildDraftPhaseTopUpTasks({
+  phaseName,
+  domainContext,
+  existingTasks,
+  targetTaskCount,
+}) {
+  const safeExistingTasks =
+    Array.isArray(existingTasks) ?
+      existingTasks
+    : [];
+  const missingTaskCount =
+    Math.max(
+      0,
+      Number(targetTaskCount || 0) -
+        safeExistingTasks.length,
+    );
+  if (missingTaskCount < 1) {
+    return [];
+  }
+
+  const templates =
+    resolveDraftPhaseTopUpTemplates({
+      phaseName,
+      domainContext,
+    });
+  const roleRequired =
+    resolveDraftPhaseDefaultRole(
+      safeExistingTasks,
+    );
+  const requiredHeadcount =
+    resolveDraftPhaseDefaultHeadcount(
+      safeExistingTasks,
+    );
+  const seenTitles =
+    new Set(
+      safeExistingTasks.map((task) =>
+        normalizeDraftPhaseTargetName(
+          task?.title,
+        ),
+      ),
+    );
+  const generatedTasks = [];
+  let templateIndex = 0;
+  let safetyCounter = 0;
+
+  while (
+    generatedTasks.length <
+      missingTaskCount &&
+    safetyCounter <
+      missingTaskCount * 8
+  ) {
+    const template =
+      templates[
+        templateIndex %
+          templates.length
+      ];
+    const cycle =
+      Math.floor(
+        templateIndex /
+          templates.length,
+      ) + 1;
+    const title =
+      cycle <= 1 ?
+        template[0]
+      : `${template[0]} ${cycle}`;
+    const normalizedTitle =
+      normalizeDraftPhaseTargetName(
+        title,
+      );
+    if (
+      normalizedTitle &&
+      !seenTitles.has(
+        normalizedTitle,
+      )
+    ) {
+      generatedTasks.push(
+        normalizeDraftTaskShape({
+          title,
+          roleRequired,
+          requiredHeadcount,
+          weight: 1,
+          instructions:
+            template[1] ||
+            `Operational follow-up for ${phaseName || "this phase"}.`,
+          assignedStaffProfileIds:
+            [],
+        }),
+      );
+      seenTitles.add(
+        normalizedTitle,
+      );
+    }
+    templateIndex += 1;
+    safetyCounter += 1;
+  }
+
+  return generatedTasks;
+}
+
+function buildProductionDraftActor(
+  {
+    actor,
+    staffProfile,
+  } = {},
+) {
+  return {
+    actorId: actor?._id || null,
+    actorName:
+      (
+        actor?.name ||
+        actor?.fullName ||
+        actor?.userName ||
+        ""
+      )
+        .toString()
+        .trim(),
+    actorEmail:
+      (
+        actor?.email || ""
+      )
+        .toString()
+        .trim(),
+    actorRole:
+      (
+        actor?.role || ""
+      )
+        .toString()
+        .trim(),
+    actorStaffRole:
+      (
+        staffProfile?.staffRole || ""
+      )
+        .toString()
+        .trim(),
+  };
+}
+
+function buildProductionDraftRevisionSummary({
+  plan,
+  phases,
+  tasks,
+}) {
+  return {
+    title:
+      (
+        plan?.title || ""
+      )
+        .toString()
+        .trim(),
+    status:
+      (
+        plan?.status ||
+        PRODUCTION_STATUS_DRAFT
+      )
+        .toString()
+        .trim(),
+    phaseCount:
+      Array.isArray(phases) ?
+        phases.length
+      : 0,
+    taskCount:
+      Array.isArray(tasks) ?
+        tasks.length
+      : 0,
+    startDate:
+      plan?.startDate || null,
+    endDate:
+      plan?.endDate || null,
+  };
+}
+
+function buildProductionDraftSnapshot({
+  plan,
+  phases,
+  tasks,
+}) {
+  return {
+    plan: {
+      id:
+        plan?._id?.toString?.() || "",
+      businessId:
+        plan?.businessId?.toString?.() ||
+        "",
+      estateAssetId:
+        plan?.estateAssetId?.toString?.() ||
+        "",
+      productId:
+        plan?.productId?.toString?.() ||
+        "",
+      title:
+        (
+          plan?.title || ""
+        )
+          .toString()
+          .trim(),
+      notes:
+        (
+          plan?.notes || ""
+        )
+          .toString()
+          .trim(),
+      domainContext:
+        (
+          plan?.domainContext ||
+          DEFAULT_PRODUCTION_DOMAIN_CONTEXT
+        )
+          .toString()
+          .trim(),
+      status:
+        (
+          plan?.status ||
+          PRODUCTION_STATUS_DRAFT
+        )
+          .toString()
+          .trim(),
+      startDate:
+        plan?.startDate || null,
+      endDate:
+        plan?.endDate || null,
+      plantingTargets:
+        plan?.plantingTargets || null,
+      aiGenerated:
+        Boolean(plan?.aiGenerated),
+    },
+    phases:
+      Array.isArray(phases) ?
+        phases.map((phase) => ({
+          id:
+            phase?._id?.toString?.() || "",
+          name:
+            (
+              phase?.name || ""
+            )
+              .toString()
+              .trim(),
+          order: Number(phase?.order || 0),
+          status:
+            (
+              phase?.status || ""
+            )
+              .toString()
+              .trim(),
+          phaseType:
+            (
+              phase?.phaseType || ""
+            )
+              .toString()
+              .trim(),
+          requiredUnits:
+            Number(
+              phase?.requiredUnits || 0,
+            ) || 0,
+          minRatePerFarmerHour:
+            Number(
+              phase?.minRatePerFarmerHour ||
+                0,
+            ) || 0,
+          targetRatePerFarmerHour:
+            Number(
+              phase?.targetRatePerFarmerHour ||
+                0,
+            ) || 0,
+          plannedHoursPerDay:
+            Number(
+              phase?.plannedHoursPerDay ||
+                0,
+            ) || 0,
+          biologicalMinDays:
+            Number(
+              phase?.biologicalMinDays ||
+                0,
+            ) || 0,
+          startDate:
+            phase?.startDate || null,
+          endDate:
+            phase?.endDate || null,
+          kpiTarget:
+            phase?.kpiTarget || null,
+        }))
+      : [],
+    tasks:
+      Array.isArray(tasks) ?
+        tasks.map((task) => ({
+          id:
+            task?._id?.toString?.() || "",
+          phaseId:
+            task?.phaseId?.toString?.() ||
+            "",
+          title:
+            (
+              task?.title || ""
+            )
+              .toString()
+              .trim(),
+          roleRequired:
+            (
+              task?.roleRequired || ""
+            )
+              .toString()
+              .trim(),
+          assignedStaffId:
+            task?.assignedStaffId?.toString?.() ||
+            "",
+          assignedStaffProfileIds:
+            resolveTaskAssignedStaffIds(task),
+          assignedUnitIds:
+            resolveTaskAssignedUnitIds(task),
+          requiredHeadcount:
+            Number(
+              task?.requiredHeadcount || 0,
+            ) || 0,
+          weight:
+            Number(task?.weight || 0) || 0,
+          status:
+            (
+              task?.status || ""
+            )
+              .toString()
+              .trim(),
+          approvalStatus:
+            (
+              task?.approvalStatus || ""
+            )
+              .toString()
+              .trim(),
+          startDate:
+            task?.startDate || null,
+          dueDate:
+            task?.dueDate || null,
+          instructions:
+            (
+              task?.instructions || ""
+            )
+              .toString()
+              .trim(),
+          taskType:
+            (
+              task?.taskType || ""
+            )
+              .toString()
+              .trim(),
+          sourceTemplateKey:
+            (
+              task?.sourceTemplateKey || ""
+            )
+              .toString()
+              .trim(),
+          recurrenceGroupKey:
+            (
+              task?.recurrenceGroupKey || ""
+            )
+              .toString()
+              .trim(),
+          occurrenceIndex:
+            Number(
+              task?.occurrenceIndex || 0,
+            ) || 0,
+        }))
+      : [],
+  };
+}
+
+async function appendProductionDraftSaveHistory({
+  plan,
+  actor,
+  staffProfile,
+  phases,
+  tasks,
+  action,
+  note,
+}) {
+  if (!plan) {
+    return;
+  }
+  const actorSummary =
+    buildProductionDraftActor({
+      actor,
+      staffProfile,
+    });
+  const savedAt = new Date();
+  const revisionNumber =
+    Math.max(
+      0,
+      Number(
+        plan.draftRevisionCount || 0,
+      ),
+    ) + 1;
+  const cleanNote =
+    (
+      note || ""
+    )
+      .toString()
+      .trim();
+  const revisionSummary =
+    buildProductionDraftRevisionSummary(
+      {
+        plan,
+        phases,
+        tasks,
+      },
+    );
+  const snapshot =
+    buildProductionDraftSnapshot({
+      plan,
+      phases,
+      tasks,
+    });
+
+  plan.lastDraftSavedAt = savedAt;
+  plan.lastDraftSavedBy = actorSummary;
+  plan.draftRevisionCount = revisionNumber;
+  plan.draftAuditTrailCount =
+    Math.max(
+      0,
+      Number(
+        plan.draftAuditTrailCount ||
+          0,
+      ),
+    ) + 1;
+  if (!Array.isArray(plan.draftAuditLog)) {
+    plan.draftAuditLog = [];
+  }
+  if (!Array.isArray(plan.draftRevisions)) {
+    plan.draftRevisions = [];
+  }
+  plan.draftAuditLog.push({
+    action,
+    note: cleanNote,
+    revisionNumber,
+    actor: actorSummary,
+    createdAt: savedAt,
+  });
+  plan.draftRevisions.push({
+    revisionNumber,
+    action,
+    note: cleanNote,
+    actor: actorSummary,
+    savedAt,
+    summary: revisionSummary,
+    snapshot,
+  });
+  await plan.save();
+}
+
+function sanitizeProductionDraftAuditEntries(
+  entries,
+) {
+  return (
+    Array.isArray(entries) ?
+      entries
+    : []
+  ).map((entry) => ({
+    id:
+      entry?._id?.toString?.() || "",
+    action:
+      (
+        entry?.action || ""
+      )
+        .toString()
+        .trim(),
+    note:
+      (
+        entry?.note || ""
+      )
+        .toString()
+        .trim(),
+    revisionNumber:
+      Number(
+        entry?.revisionNumber || 0,
+      ) || 0,
+    createdAt:
+      entry?.createdAt || null,
+    actor:
+      entry?.actor || null,
+  }));
+}
+
+function sanitizeProductionDraftRevisionEntries(
+  entries,
+) {
+  return (
+    Array.isArray(entries) ?
+      entries
+    : []
+  ).map((entry) => ({
+    id:
+      entry?._id?.toString?.() || "",
+    revisionNumber:
+      Number(
+        entry?.revisionNumber || 0,
+      ) || 0,
+    action:
+      (
+        entry?.action || ""
+      )
+        .toString()
+        .trim(),
+    note:
+      (
+        entry?.note || ""
+      )
+        .toString()
+        .trim(),
+    savedAt:
+      entry?.savedAt || null,
+    actor:
+      entry?.actor || null,
+    summary:
+      entry?.summary || null,
+  }));
 }
 
 // PHASE-GATE-LAYER
@@ -3746,6 +5125,89 @@ function buildIsoDateTimeFromDayClock({
         0,
       ),
     ),
+  );
+}
+
+function resolveImportedTaskPinnedDay(
+  task,
+) {
+  const sourceTemplateKey = (
+    task?.sourceTemplateKey || ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (
+    !sourceTemplateKey.startsWith(
+      "imported_source_day_",
+    )
+  ) {
+    return null;
+  }
+  const instructions = (
+    task?.instructions || ""
+  )
+    .toString()
+    .trim();
+  const match =
+    instructions.match(
+      IMPORTED_PROJECT_DAY_PATTERN,
+    );
+  const isoDate =
+    match?.[1]
+      ?.toString()
+      .trim() || "";
+  if (!isoDate) {
+    return null;
+  }
+  return (
+    parseDateInput(
+      `${isoDate}T00:00:00.000Z`,
+    ) ||
+    parseDateInput(isoDate)
+  );
+}
+
+function applyPinnedImportedTaskDates({
+  sourceTasks,
+  scheduledTasks,
+  schedulePolicy,
+}) {
+  const defaultBlock =
+    schedulePolicy?.blocks?.[0] ||
+    WORK_SCHEDULE_FALLBACK_BLOCKS[0];
+  return scheduledTasks.map(
+    (scheduledTask, index) => {
+      const pinnedDay =
+        resolveImportedTaskPinnedDay(
+          sourceTasks[index],
+        );
+      if (!pinnedDay) {
+        return scheduledTask;
+      }
+      const pinnedStart =
+        parseDateInput(
+          buildIsoDateTimeFromDayClock({
+            day: pinnedDay,
+            clock:
+              defaultBlock?.start,
+          }),
+        ) || scheduledTask.startDate;
+      const pinnedDue =
+        parseDateInput(
+          buildIsoDateTimeFromDayClock({
+            day: pinnedDay,
+            clock:
+              defaultBlock?.end ||
+              defaultBlock?.start,
+          }),
+        ) || scheduledTask.dueDate;
+      return {
+        ...scheduledTask,
+        startDate: pinnedStart,
+        dueDate: pinnedDue,
+      };
+    },
   );
 }
 
@@ -7974,14 +9436,24 @@ function buildTimelineRows({
       const actualPlots = Number(
         record.actualPlots || 0,
       );
+      const quantityAmount = Number(
+        record.quantityAmount || 0,
+      );
       // WHY: Zero-output days are explicit blocked records, not implicit misses.
       let status =
         TASK_PROGRESS_STATUS_BEHIND;
-      if (actualPlots === 0) {
+      if (
+        actualPlots === 0 &&
+        quantityAmount === 0
+      ) {
         status =
           TASK_PROGRESS_STATUS_BLOCKED;
       } else if (
-        actualPlots >= expectedPlots
+        actualPlots >= expectedPlots ||
+        (
+          actualPlots === 0 &&
+          quantityAmount > 0
+        )
       ) {
         status =
           TASK_PROGRESS_STATUS_ON_TRACK;
@@ -8011,11 +9483,18 @@ function buildTimelineRows({
         taskId: record.taskId,
         planId: record.planId,
         staffId: record.staffId,
+        unitId: record.unitId || null,
         taskTitle: task?.title || "",
         phaseName: phase?.name || "",
         farmerName,
         expectedPlots,
         actualPlots,
+        quantityActivityType:
+          record.quantityActivityType ||
+          PRODUCTION_QUANTITY_ACTIVITY_NONE,
+        quantityAmount,
+        quantityUnit:
+          record.quantityUnit || "",
         status,
         delay,
         delayReason,
@@ -9442,15 +10921,24 @@ function buildTaskScheduleSequential({
     },
   );
 
-  return scheduleTasksAcrossBlocks({
-    tasks,
-    safeWeights,
-    taskDurations,
-    blocks,
-    phaseStart: normalizedPhaseStart,
-    phaseEnd: normalizedPhaseEnd,
-    logContext,
-  });
+  const scheduledTasks =
+    scheduleTasksAcrossBlocks({
+      tasks,
+      safeWeights,
+      taskDurations,
+      blocks,
+      phaseStart: normalizedPhaseStart,
+      phaseEnd: normalizedPhaseEnd,
+      logContext,
+    });
+  return applyPinnedImportedTaskDates(
+    {
+      sourceTasks: tasks,
+      scheduledTasks,
+      schedulePolicy:
+        effectivePolicy,
+    },
+  );
 }
 
 function buildTaskScheduleParallelByRole({
@@ -9547,6 +11035,39 @@ function buildTaskSchedule({
     tasks,
     schedulePolicy,
   });
+}
+
+function normalizePersistedProductionTaskType(
+  value,
+) {
+  const normalized = (
+    value || ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (
+    PERSISTED_PRODUCTION_TASK_TYPES.has(
+      normalized,
+    )
+  ) {
+    return normalized;
+  }
+  // Imported PDF drafts create already-expanded daily rows, so they should
+  // persist as normal workload tasks instead of introducing a new enum.
+  if (
+    normalized ===
+      "imported_document_task" ||
+    normalized.startsWith(
+      "imported_",
+    )
+  ) {
+    return "workload";
+  }
+  return null;
 }
 
 // WHY: Summarize task + output performance for KPI dashboards.
@@ -11041,14 +12562,16 @@ async function createAsset(req, res) {
       await getBusinessContext(
         req.user.sub,
       );
+    const assetActor =
+      await buildBusinessAssetActor({
+        actor,
+        businessId,
+      });
     const asset =
       await businessAssetService.createAsset(
         {
           businessId,
-          actor: {
-            id: actor._id,
-            role: actor.role,
-          },
+          actor: assetActor,
           payload: req.body,
         },
       );
@@ -11061,6 +12584,51 @@ async function createAsset(req, res) {
   } catch (err) {
     debug(
       "BUSINESS CONTROLLER: createAsset - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+async function submitFarmAsset(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: submitFarmAsset - entry",
+    {
+      actorId: req.user?.sub,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const assetActor =
+      await buildBusinessAssetActor({
+        actor,
+        businessId,
+      });
+    const asset =
+      await businessAssetService.submitFarmAsset(
+        {
+          businessId,
+          actor: assetActor,
+          payload: req.body,
+        },
+      );
+
+    return res.status(201).json({
+      message:
+        asset.approvalStatus === "pending_approval" ?
+          "Farm equipment submitted for approval"
+        : "Farm equipment created successfully",
+      asset,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: submitFarmAsset - error",
       err.message,
     );
     return res
@@ -11111,6 +12679,35 @@ async function getAssets(req, res) {
   }
 }
 
+async function getFarmAssetAuditAnalytics(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: getFarmAssetAuditAnalytics - entry",
+    {
+      actorId: req.user?.sub,
+      query: req.query,
+    },
+  );
+
+  try {
+    const { businessId } = await getBusinessContext(req.user.sub);
+    const analytics = await businessAssetService.getFarmAssetAuditAnalytics({
+      businessId,
+      query: req.query,
+    });
+
+    return res.status(200).json({
+      message: "Farm asset audit analytics fetched successfully",
+      ...analytics,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: getFarmAssetAuditAnalytics - error",
+      err.message,
+    );
+    return res.status(400).json({ error: err.message });
+  }
+}
+
 async function updateAsset(req, res) {
   debug(
     "BUSINESS CONTROLLER: updateAsset - entry",
@@ -11125,16 +12722,18 @@ async function updateAsset(req, res) {
       await getBusinessContext(
         req.user.sub,
       );
+    const assetActor =
+      await buildBusinessAssetActor({
+        actor,
+        businessId,
+      });
     const asset =
       await businessAssetService.updateAsset(
         {
           businessId,
           assetId: req.params.id,
           payload: req.body,
-          actor: {
-            id: actor._id,
-            role: actor.role,
-          },
+          actor: assetActor,
         },
       );
 
@@ -11146,6 +12745,192 @@ async function updateAsset(req, res) {
   } catch (err) {
     debug(
       "BUSINESS CONTROLLER: updateAsset - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+async function submitFarmAssetAudit(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: submitFarmAssetAudit - entry",
+    {
+      actorId: req.user?.sub,
+      assetId: req.params.id,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const assetActor =
+      await buildBusinessAssetActor({
+        actor,
+        businessId,
+      });
+    const asset =
+      await businessAssetService.submitFarmAssetAudit(
+        {
+          businessId,
+          assetId: req.params.id,
+          actor: assetActor,
+          payload: req.body,
+        },
+      );
+
+    return res.status(200).json({
+      message:
+        asset.farmProfile?.pendingAuditRequest?.status ===
+            "pending_approval" ?
+          "Farm audit submitted for approval"
+        : "Farm audit recorded successfully",
+      asset,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: submitFarmAssetAudit - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+async function submitFarmToolUsageRequest(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: submitFarmToolUsageRequest - entry",
+    {
+      actorId: req.user?.sub,
+      assetId: req.params.id,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const assetActor =
+      await buildBusinessAssetActor({
+        actor,
+        businessId,
+      });
+    const asset =
+      await businessAssetService.submitFarmToolUsageRequest(
+        {
+          businessId,
+          assetId: req.params.id,
+          actor: assetActor,
+          payload: req.body,
+        },
+      );
+
+    const latestUsageRequest =
+      Array.isArray(
+        asset.farmProfile?.productionUsageRequests,
+      ) &&
+        asset.farmProfile.productionUsageRequests
+          .length > 0
+      ? asset.farmProfile.productionUsageRequests[0]
+      : null;
+
+    return res.status(200).json({
+      message:
+        latestUsageRequest?.status ===
+            "pending_approval" ?
+          "Production tool usage submitted for approval"
+        : "Production tool usage logged successfully",
+      asset,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: submitFarmToolUsageRequest - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+async function approveFarmAssetRequest(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: approveFarmAssetRequest - entry",
+    {
+      actorId: req.user?.sub,
+      assetId: req.params.id,
+      requestType: req.body?.requestType,
+      requestId: req.body?.requestId,
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canApproveFarmAssetWorkflow({
+        actorRole: actor.role,
+        staffRole: staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          "Only estate managers, farm managers, asset managers, or business owners can approve farm requests",
+      });
+    }
+
+    const assetActor = {
+      id: actor._id,
+      role: actor.role,
+      name:
+        actor.name ||
+        [
+          actor.firstName,
+          actor.lastName,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim(),
+      email: actor.email || "",
+      staffRole: staffProfile?.staffRole || "",
+    };
+    const asset =
+      await businessAssetService.approveFarmAssetRequest(
+        {
+          businessId,
+          assetId: req.params.id,
+          actor: assetActor,
+          requestType: req.body?.requestType,
+          requestId: req.body?.requestId,
+        },
+      );
+
+    return res.status(200).json({
+      message:
+        req.body?.requestType === "audit" ?
+          "Farm audit approved successfully"
+        : req.body?.requestType === "usage" ?
+          "Production tool usage approved successfully"
+        : "Farm equipment approved successfully",
+      asset,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: approveFarmAssetRequest - error",
       err.message,
     );
     return res
@@ -11171,15 +12956,17 @@ async function softDeleteAsset(
       await getBusinessContext(
         req.user.sub,
       );
+    const assetActor =
+      await buildBusinessAssetActor({
+        actor,
+        businessId,
+      });
     const asset =
       await businessAssetService.softDeleteAsset(
         {
           businessId,
           assetId: req.params.id,
-          actor: {
-            id: actor._id,
-            role: actor.role,
-          },
+          actor: assetActor,
         },
       );
 
@@ -15084,6 +16871,33 @@ async function productionPlanAssistantTurnHandler(
  * POST /business/production/plans/ai-draft
  * Owner + estate manager: generate an AI draft for a production plan.
  */
+function buildAiDraftSourceDocumentPrompt(sourceDocumentContext) {
+  if (!sourceDocumentContext?.text) {
+    return "";
+  }
+
+  const safeFileName =
+    sourceDocumentContext.fileName || "uploaded source document";
+  const extension =
+    sourceDocumentContext.extension || "file";
+  const taskDensityInstruction =
+    sourceDocumentContext.taskLineEstimate > 0
+      ? `The uploaded source contains about ${sourceDocumentContext.taskLineEstimate} explicit task-like lines. Preserve roughly that task density and do not compress it into a short summary draft.`
+      : "Treat the uploaded source as a detailed working plan, not a short outline.";
+
+  return [
+    `Uploaded source document: ${safeFileName} (${extension}).`,
+    taskDensityInstruction,
+    "Use this source as the primary planning backbone.",
+    "Preserve explicit phases, day labels, task rows, sequences, staffing counts, and recurring operational work where they are coherent.",
+    "Do not collapse a task-rich document into a sparse phase summary or reduce dozens of explicit tasks down to a handful of generic milestones.",
+    "If the source already contains a full working schedule, keep the resulting draft close to that scope and detail unless there are obvious duplicates or contradictions.",
+    "SOURCE DOCUMENT START",
+    sourceDocumentContext.text,
+    "SOURCE DOCUMENT END",
+  ].join("\n");
+}
+
 async function generateProductionPlanDraftHandler(
   req,
   res,
@@ -15107,6 +16921,14 @@ async function generateProductionPlanDraftHandler(
       ),
       hasDomainContext: Boolean(
         req.body?.domainContext,
+      ),
+      hasSourceDocument: Boolean(
+        req.body?.sourceDocument,
+      ),
+      hasPlantingTargets: Boolean(
+        req.body?.plantingTargets ||
+          req.body?.workloadContext
+            ?.plantingTargets,
       ),
     },
   );
@@ -15181,6 +17003,14 @@ async function generateProductionPlanDraftHandler(
         ?.toString()
         .trim() ||
       "";
+    const sourceDocumentContext =
+      extractAiDraftSourceDocumentContext(
+        req.body?.sourceDocument,
+      );
+    const refineTarget =
+      normalizeDraftRefineTargetInput(
+        req.body?.refineTarget,
+      );
     const cropSubtype =
       req.body?.cropSubtype
         ?.toString()
@@ -15196,6 +17026,36 @@ async function generateProductionPlanDraftHandler(
       );
     const domainContext =
       domainContextInput.value;
+    const plantingTargets =
+      normalizePlantingTargetsInput(
+        req.body?.plantingTargets ||
+          req.body?.workloadContext
+            ?.plantingTargets,
+      );
+    if (
+      domainContext === "farm" &&
+      !hasCompletePlantingTargets(
+        plantingTargets,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLANTING_TARGETS_REQUIRED,
+        classification:
+          "MISSING_REQUIRED_FIELD",
+        error_code:
+          "PRODUCTION_AI_PLANTING_TARGETS_REQUIRED",
+        resolution_hint:
+          "Set planting material, planned planting quantity + unit, and estimated harvest quantity + unit before generating the farm draft.",
+        retry_skipped: true,
+        retry_reason:
+          validationRetryReason,
+        details:
+          buildPlantingTargetsValidationDetails(
+            plantingTargets,
+          ),
+      });
+    }
     // PHASE-GATE-LAYER
     // WHY: Draft-level phase-gate sanitization can target persisted plan phases only when an explicit plan id is supplied.
     const draftPlanId =
@@ -15403,6 +17263,53 @@ async function generateProductionPlanDraftHandler(
       });
     }
 
+    if (
+      sourceDocumentContext?.text &&
+      refineTarget?.mode ===
+        "document_import"
+    ) {
+      const importedDraftResponse =
+        buildProductionDraftImportResponse(
+          {
+            sourceDocumentContext,
+            estateAssetId,
+            productId:
+              resolvedProductId,
+            productName:
+              product?.name || "",
+            domainContext,
+            plantingTargets,
+            titleFallback:
+              `${product?.name || "Production"} Plan`,
+          },
+        );
+      if (importedDraftResponse) {
+        debug(
+          "BUSINESS CONTROLLER: generateProductionPlanDraft - direct source import success",
+          {
+            actorId: actor._id,
+            businessId:
+              businessId.toString(),
+            productId:
+              resolvedProductId,
+            phaseCount:
+              importedDraftResponse
+                ?.draft?.phases
+                ?.length || 0,
+            taskCount:
+              importedDraftResponse
+                ?.summary?.totalTasks || 0,
+            sourceFileName:
+              sourceDocumentContext.fileName ||
+              "",
+          },
+        );
+        return res.status(200).json(
+          importedDraftResponse,
+        );
+      }
+    }
+
     // WHY: Include business-wide staff plus estate-specific staff for drafting.
     const staffFilter = {
       businessId,
@@ -15437,9 +17344,23 @@ async function generateProductionPlanDraftHandler(
         businessId,
         estateAssetId,
       });
+    const shouldUseDensityAwareDraftPipeline =
+      Boolean(sourceDocumentContext?.text) ||
+      [
+        "draft_refine",
+        "document_import",
+      ].includes(
+        (
+          refineTarget?.mode || ""
+        )
+          .toString()
+          .trim()
+          .toLowerCase(),
+      );
     const shouldUsePlannerV2 =
       PRODUCTION_FEATURE_FLAGS.enableAiPlannerV2 &&
-      domainContext === "farm";
+      domainContext === "farm" &&
+      !shouldUseDensityAwareDraftPipeline;
     const workloadContextInput =
       (
         req.body?.workloadContext &&
@@ -15454,7 +17375,18 @@ async function generateProductionPlanDraftHandler(
       focusedStaffProfileIds,
       focusedStaffByRole,
       focusedRoleTaskHints,
+      plantingTargets,
     };
+    const plantingTargetsPrompt =
+      buildPlantingTargetsPrompt(
+        plantingTargets,
+      );
+    const promptWithPlantingTargets = [
+      prompt,
+      plantingTargetsPrompt,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     // WHY: V2 still needs the same lifecycle boundary logging even though AI no longer generates dated tasks directly.
     if (shouldUsePlannerV2) {
@@ -15474,6 +17406,10 @@ async function generateProductionPlanDraftHandler(
           productId:
             resolvedProductId,
           hasPrompt: Boolean(prompt),
+          hasPlantingTargets:
+            hasCompletePlantingTargets(
+              plantingTargets,
+            ),
           hasStartDate: Boolean(
             startDateValue,
           ),
@@ -15496,7 +17432,8 @@ async function generateProductionPlanDraftHandler(
             cropSubtype,
             startDate,
             endDate,
-            assistantPrompt: prompt,
+            assistantPrompt:
+              promptWithPlantingTargets,
             useReasoning,
             capacitySummary,
             schedulePolicy:
@@ -15567,6 +17504,10 @@ async function generateProductionPlanDraftHandler(
           status:
             plannerV2Response?.status ||
             "ai_draft_success",
+          hasPlantingTargets:
+            hasCompletePlantingTargets(
+              plantingTargets,
+            ),
           planningDays:
             plannerV2Response?.summary
               ?.days || 0,
@@ -15579,9 +17520,16 @@ async function generateProductionPlanDraftHandler(
         },
       });
 
-      return res.status(200).json(
-        plannerV2Response,
-      );
+      return res.status(200).json({
+        ...plannerV2Response,
+        plantingTargets,
+        draft: {
+          ...(
+            plannerV2Response?.draft || {}
+          ),
+          plantingTargets,
+        },
+      });
     }
     const requestedPlanningSummary =
       startDate && endDate ?
@@ -15634,9 +17582,14 @@ async function generateProductionPlanDraftHandler(
     ]
       .filter(Boolean)
       .join(" ");
+    const sourceDocumentPrompt =
+      buildAiDraftSourceDocumentPrompt(
+        sourceDocumentContext,
+      );
     const assistantPrompt = [
-      prompt,
+      promptWithPlantingTargets,
       schedulerPrompt,
+      sourceDocumentPrompt,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -15659,6 +17612,12 @@ async function generateProductionPlanDraftHandler(
         hasPrompt: Boolean(
           assistantPrompt,
         ),
+        hasSourceDocument: Boolean(
+          sourceDocumentContext?.text,
+        ),
+        sourceDocumentTaskLineEstimate:
+          sourceDocumentContext?.taskLineEstimate ||
+          0,
         hasStartDate: Boolean(
           startDateValue,
         ),
@@ -15691,6 +17650,12 @@ async function generateProductionPlanDraftHandler(
             hasPrompt: Boolean(
               assistantPrompt,
             ),
+            hasSourceDocument: Boolean(
+              sourceDocumentContext?.text,
+            ),
+            sourceDocumentTaskLineEstimate:
+              sourceDocumentContext?.taskLineEstimate ||
+              0,
             domainContext,
             schedulePolicy:
               effectiveSchedulePolicy,
@@ -16215,6 +18180,32 @@ async function generateProductionPlanDraftHandler(
         endDate: resolvedDraftEndDate,
         phases: normalizedDraftPhases,
       });
+    const requestedTaskCount =
+      resolveDraftRequestedTaskCount({
+        planningDays:
+          planningSummary.days,
+        currentTaskCount:
+          normalizedDraftPhases.reduce(
+            (sum, phase) =>
+              sum +
+              (Array.isArray(
+                phase?.tasks,
+              ) ?
+                phase.tasks.length
+              : 0),
+            0,
+          ),
+        refineTarget,
+        sourceDocumentTaskLineEstimate:
+          sourceDocumentContext?.taskLineEstimate ||
+          0,
+      });
+    const phaseTaskTargetMap =
+      buildDraftPhaseTaskTargetMap({
+        scheduledPhases,
+        refineTarget,
+        requestedTaskCount,
+      });
     const scheduledTaskRows = [];
     const draftPhasesWithTimes =
       scheduledPhases.map(
@@ -16525,6 +18516,66 @@ async function generateProductionPlanDraftHandler(
               cappedPhaseTasks;
           }
 
+          const phaseTaskTargetCount =
+            phaseTaskTargetMap.get(
+              normalizeDraftPhaseTargetName(
+                phase?.name ||
+                  draftPhase?.name ||
+                  "",
+              ),
+            ) || phaseTasks.length;
+          if (
+            phaseTasks.length <
+            phaseTaskTargetCount
+          ) {
+            const densityTopUpTasks =
+              buildDraftPhaseTopUpTasks({
+                phaseName:
+                  phase?.name ||
+                  draftPhase?.name ||
+                  "",
+                domainContext,
+                existingTasks: phaseTasks,
+                targetTaskCount:
+                  phaseTaskTargetCount,
+              });
+            if (
+              densityTopUpTasks.length > 0
+            ) {
+              phaseTasks = [
+                ...phaseTasks,
+                ...densityTopUpTasks,
+              ];
+              const warningKey = `DRAFT_TASK_DENSITY_TOP_UP:${phaseOrder}`;
+              if (
+                !phaseGateWarningKeys.has(
+                  warningKey,
+                )
+              ) {
+                normalizedWarnings.push({
+                  code: "DRAFT_TASK_DENSITY_TOP_UP",
+                  phaseOrder,
+                  phaseName:
+                    phase?.name ||
+                    draftPhase?.name ||
+                    "",
+                  previousTaskCount:
+                    phaseTasks.length -
+                    densityTopUpTasks.length,
+                  targetTaskCount:
+                    phaseTaskTargetCount,
+                  addedTaskCount:
+                    densityTopUpTasks.length,
+                  message:
+                    "Draft phase was expanded automatically because AI returned too few tasks for its allocated days.",
+                });
+                phaseGateWarningKeys.add(
+                  warningKey,
+                );
+              }
+            }
+          }
+
           const scheduledTasks =
             buildTaskSchedule({
               phaseStart:
@@ -16699,6 +18750,7 @@ async function generateProductionPlanDraftHandler(
         resolvedProductId,
       startDate: resolvedStartDateValue,
       endDate: resolvedEndDateValue,
+      plantingTargets,
       phases: draftPhasesWithTimes,
       summary: {
         ...(aiDraftPayload?.summary ||
@@ -16765,7 +18817,13 @@ async function generateProductionPlanDraftHandler(
         capacity: capacitySummary,
         scheduledTaskCount:
           scheduledTaskRows.length,
-        hasPrompt: Boolean(prompt),
+        hasPrompt: Boolean(
+          promptWithPlantingTargets,
+        ),
+        hasPlantingTargets:
+          hasCompletePlantingTargets(
+            plantingTargets,
+          ),
       },
     );
 
@@ -16786,6 +18844,10 @@ async function generateProductionPlanDraftHandler(
         status:
           aiResult?.status ||
           "ai_draft_success",
+        hasPlantingTargets:
+          hasCompletePlantingTargets(
+            plantingTargets,
+          ),
         planningDays:
           planningSummary.days,
         planningWeeks:
@@ -16813,6 +18875,7 @@ async function generateProductionPlanDraftHandler(
       capacity: capacitySummary,
       phases: draftPhasesWithTimes,
       tasks: scheduledTaskRows,
+      plantingTargets,
       draft: {
         ...normalizedDraft,
       },
@@ -16930,6 +18993,295 @@ async function generateProductionPlanDraftHandler(
   }
 }
 
+async function persistProductionPlanScheduleRows(
+  {
+    planId,
+    businessId,
+    actor,
+    scheduledPhases,
+    tasksInputByPhase,
+    effectiveSchedulePolicy,
+    route,
+    source,
+    resetExistingSchedule = false,
+    seedUnitSchedule = false,
+  } = {},
+) {
+  if (resetExistingSchedule) {
+    await Promise.all([
+      ProductionTask.deleteMany({
+        planId,
+      }),
+      ProductionPhase.deleteMany({
+        planId,
+      }),
+      ProductionUnitTaskSchedule.deleteMany(
+        {
+          planId,
+        },
+      ),
+      ProductionPhaseUnitCompletion.deleteMany(
+        {
+          planId,
+        },
+      ),
+      PlanUnit.deleteMany({
+        planId,
+      }),
+      LifecycleDeviationAlert.deleteMany(
+        {
+          planId,
+          businessId,
+        },
+      ),
+      ProductionUnitScheduleWarning.deleteMany(
+        {
+          planId,
+          businessId,
+        },
+      ),
+    ]);
+  }
+
+  const createdPhases =
+    await ProductionPhase.insertMany(
+      scheduledPhases.map(
+        (phase) => ({
+          planId,
+          name: phase.name,
+          order: phase.order,
+          startDate: phase.startDate,
+          endDate: phase.endDate,
+          status:
+            PRODUCTION_PHASE_STATUS_PENDING,
+          phaseType:
+            normalizeProductionPhaseTypeInput(
+              phase?.phaseType,
+            ),
+          requiredUnits:
+            normalizePhaseRequiredUnitsInput(
+              phase?.requiredUnits,
+            ),
+          minRatePerFarmerHour:
+            normalizePhaseRatePerFarmerHourInput(
+              phase?.minRatePerFarmerHour,
+              {
+                fallback:
+                  DEFAULT_PHASE_MIN_RATE_PER_FARMER_HOUR,
+              },
+            ),
+          targetRatePerFarmerHour:
+            Math.max(
+              normalizePhaseRatePerFarmerHourInput(
+                phase?.minRatePerFarmerHour,
+                {
+                  fallback:
+                    DEFAULT_PHASE_MIN_RATE_PER_FARMER_HOUR,
+                },
+              ),
+              normalizePhaseRatePerFarmerHourInput(
+                phase?.targetRatePerFarmerHour,
+                {
+                  fallback:
+                    DEFAULT_PHASE_TARGET_RATE_PER_FARMER_HOUR,
+                },
+              ),
+            ),
+          plannedHoursPerDay:
+            normalizePhasePlannedHoursPerDayInput(
+              phase?.plannedHoursPerDay,
+              {
+                fallback:
+                  DEFAULT_PHASE_PLANNED_HOURS_PER_DAY,
+              },
+            ),
+          biologicalMinDays:
+            normalizePhaseBiologicalMinDaysInput(
+              phase?.biologicalMinDays,
+              {
+                fallback:
+                  DEFAULT_PHASE_BIOLOGICAL_MIN_DAYS,
+              },
+            ),
+          kpiTarget: phase.kpiTarget,
+        }),
+      ),
+    );
+
+  const tasksToCreate = [];
+  createdPhases.forEach(
+    (phase, index) => {
+      const phaseTasks =
+        tasksInputByPhase[index] || [];
+      if (phaseTasks.length === 0) {
+        return;
+      }
+
+      const scheduledTasks =
+        buildTaskSchedule({
+          phaseStart:
+            phase.taskStartDate ||
+            phase.startDate,
+          phaseEnd:
+            phase.taskEndDate ||
+            phase.endDate,
+          tasks: phaseTasks,
+          schedulePolicy:
+            effectiveSchedulePolicy,
+          allowParallelByRole: true,
+        });
+
+      scheduledTasks.forEach((task) => {
+        const assignedStaffProfileIds =
+          resolveTaskAssignedStaffIds(task);
+        const assignedUnitIds =
+          resolveTaskAssignedUnitIds(task);
+        const primaryAssignedStaffId =
+          assignedStaffProfileIds[0] || null;
+        const requiredHeadcount =
+          Math.max(
+            1,
+            Math.floor(
+              Number(
+                task.requiredHeadcount || 1,
+              ),
+            ),
+          );
+        const isOwner =
+          actor.role === "business_owner";
+        const approvalStatus =
+          isOwner ?
+            PRODUCTION_TASK_APPROVAL_APPROVED
+          : PRODUCTION_TASK_APPROVAL_PENDING;
+        const reviewedBy =
+          isOwner ? actor._id : null;
+        const reviewedAt =
+          isOwner ? new Date() : null;
+
+        tasksToCreate.push({
+          planId,
+          phaseId: phase._id,
+          title:
+            task.title
+              ?.toString()
+              .trim() || DEFAULT_TASK_TITLE,
+          roleRequired:
+            task.roleRequired,
+          assignedStaffId:
+            primaryAssignedStaffId,
+          assignedStaffProfileIds,
+          assignedUnitIds,
+          requiredHeadcount,
+          weight: task.weight || 1,
+          startDate: task.startDate,
+          dueDate: task.dueDate,
+          status:
+            PRODUCTION_TASK_STATUS_PENDING,
+          instructions:
+            task.instructions
+              ?.toString()
+              .trim() || "",
+          taskType:
+            normalizePersistedProductionTaskType(
+              task.taskType,
+            ),
+          sourceTemplateKey:
+            task.sourceTemplateKey
+              ?.toString()
+              .trim() || "",
+          recurrenceGroupKey:
+            task.recurrenceGroupKey
+              ?.toString()
+              .trim() || "",
+          occurrenceIndex: Math.max(
+            0,
+            Math.floor(
+              Number(
+                task.occurrenceIndex || 0,
+              ),
+            ),
+          ),
+          dependencies:
+            Array.isArray(task.dependencies) ?
+              task.dependencies
+            : [],
+          createdBy: actor._id,
+          approvalStatus,
+          assignedBy: actor._id,
+          reviewedBy,
+          reviewedAt,
+          rejectionReason: "",
+        });
+      });
+    },
+  );
+
+  logProductionLifecycleBoundary({
+    operation: "schedule_commit",
+    stage: "start",
+    intent:
+      "persist generated schedule rows for plan lifecycle",
+    actorId: actor._id,
+    businessId,
+    context: {
+      route,
+      source,
+      planId: planId.toString(),
+      phaseCount:
+        createdPhases.length,
+      taskCount:
+        tasksToCreate.length,
+    },
+  });
+
+  const createdTasks =
+    tasksToCreate.length > 0 ?
+      await ProductionTask.insertMany(
+        tasksToCreate,
+      )
+    : [];
+
+  let unitScheduleSeedResult = null;
+  if (
+    seedUnitSchedule &&
+    createdTasks.length > 0
+  ) {
+    unitScheduleSeedResult =
+      await seedUnitTaskScheduleRows({
+        planId,
+        taskRows: createdTasks,
+        operation: source,
+      });
+  }
+
+  logProductionLifecycleBoundary({
+    operation: "schedule_commit",
+    stage: "success",
+    intent:
+      "persist generated schedule rows for plan lifecycle",
+    actorId: actor._id,
+    businessId,
+    context: {
+      route,
+      source,
+      planId: planId.toString(),
+      phaseCount:
+        createdPhases.length,
+      taskCount:
+        createdTasks.length,
+      seededUnitScheduleRows:
+        unitScheduleSeedResult?.rowCount ||
+        0,
+    },
+  });
+
+  return {
+    createdPhases,
+    createdTasks,
+    unitScheduleSeedResult,
+  };
+}
+
 /**
  * POST /business/production/plans
  * Owner + estate manager: create a production plan with phases/tasks.
@@ -16938,10 +19290,22 @@ async function createProductionPlan(
   req,
   res,
 ) {
+  const requestedSaveMode =
+    (
+      req.body?.saveMode || ""
+    )
+      .toString()
+      .trim()
+      .toLowerCase();
+  const saveAsDraft =
+    requestedSaveMode ===
+    PRODUCTION_SAVE_MODE_DRAFT;
   debug(
     "BUSINESS CONTROLLER: createProductionPlan - entry",
     {
       actorId: req.user?.sub,
+      saveMode:
+        requestedSaveMode || "",
       hasProduct: Boolean(
         req.body?.productId,
       ),
@@ -16950,6 +19314,11 @@ async function createProductionPlan(
       ),
       hasDomainContext: Boolean(
         req.body?.domainContext,
+      ),
+      hasPlantingTargets: Boolean(
+        req.body?.plantingTargets ||
+          req.body?.workloadContext
+            ?.plantingTargets,
       ),
     },
   );
@@ -16984,11 +19353,19 @@ async function createProductionPlan(
       });
 
     if (
-      !canCreateProductionPlan({
-        actorRole: actor.role,
-        staffRole:
-          staffProfile?.staffRole,
-      })
+      !(
+        saveAsDraft ?
+          canEditProductionPlanDraft({
+            actorRole: actor.role,
+            staffRole:
+              staffProfile?.staffRole,
+          })
+        : canCreateProductionPlan({
+            actorRole: actor.role,
+            staffRole:
+              staffProfile?.staffRole,
+          })
+      )
     ) {
       return res.status(403).json({
         error:
@@ -17021,6 +19398,12 @@ async function createProductionPlan(
       );
     const domainContext =
       domainContextInput.value;
+    const plantingTargets =
+      normalizePlantingTargetsInput(
+        req.body?.plantingTargets ||
+          req.body?.workloadContext
+            ?.plantingTargets,
+      );
     const requestedWorkloadUnits =
       parseWorkloadContextTotalUnits(
         req.body?.workloadContext,
@@ -17064,6 +19447,21 @@ async function createProductionPlan(
       return res.status(400).json({
         error:
           PRODUCTION_COPY.DOMAIN_CONTEXT_INVALID,
+      });
+    }
+    if (
+      domainContext === "farm" &&
+      !hasCompletePlantingTargets(
+        plantingTargets,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLANTING_TARGETS_REQUIRED,
+        details:
+          buildPlantingTargetsValidationDetails(
+            plantingTargets,
+          ),
       });
     }
 
@@ -17420,6 +19818,12 @@ async function createProductionPlan(
         status: PRODUCTION_STATUS_DRAFT,
         createdBy: actor._id,
         notes,
+        plantingTargets:
+          hasCompletePlantingTargets(
+            plantingTargets,
+          ) ?
+            plantingTargets
+          : null,
         aiGenerated,
         domainContext,
       });
@@ -17458,317 +19862,105 @@ async function createProductionPlan(
       }
     }
 
-    const createdPhases =
-      await ProductionPhase.insertMany(
-        scheduledPhases.map(
-          (phase) => ({
-            planId: plan._id,
-            name: phase.name,
-            order: phase.order,
-            startDate: phase.startDate,
-            endDate: phase.endDate,
-            status:
-              PRODUCTION_PHASE_STATUS_PENDING,
-            phaseType:
-              normalizeProductionPhaseTypeInput(
-                phase?.phaseType,
-              ),
-            requiredUnits:
-              normalizePhaseRequiredUnitsInput(
-                phase?.requiredUnits,
-              ),
-            minRatePerFarmerHour:
-              normalizePhaseRatePerFarmerHourInput(
-                phase?.minRatePerFarmerHour,
-                {
-                  fallback:
-                    DEFAULT_PHASE_MIN_RATE_PER_FARMER_HOUR,
-                },
-              ),
-            targetRatePerFarmerHour:
-              Math.max(
-                normalizePhaseRatePerFarmerHourInput(
-                  phase?.minRatePerFarmerHour,
-                  {
-                    fallback:
-                      DEFAULT_PHASE_MIN_RATE_PER_FARMER_HOUR,
-                  },
-                ),
-                normalizePhaseRatePerFarmerHourInput(
-                  phase?.targetRatePerFarmerHour,
-                  {
-                    fallback:
-                      DEFAULT_PHASE_TARGET_RATE_PER_FARMER_HOUR,
-                  },
-                ),
-              ),
-            plannedHoursPerDay:
-              normalizePhasePlannedHoursPerDayInput(
-                phase?.plannedHoursPerDay,
-                {
-                  fallback:
-                    DEFAULT_PHASE_PLANNED_HOURS_PER_DAY,
-                },
-              ),
-            biologicalMinDays:
-              normalizePhaseBiologicalMinDaysInput(
-                phase?.biologicalMinDays,
-                {
-                  fallback:
-                    DEFAULT_PHASE_BIOLOGICAL_MIN_DAYS,
-                },
-              ),
-            kpiTarget: phase.kpiTarget,
-          }),
-        ),
-      );
-
-    const tasksToCreate = [];
-    createdPhases.forEach(
-      (phase, index) => {
-        const phaseTasks =
-          tasksInputByPhase[index] ||
-          [];
-        if (phaseTasks.length === 0) {
-          return;
-        }
-
-        const scheduledTasks =
-          buildTaskSchedule({
-            phaseStart:
-              phase.taskStartDate ||
-              phase.startDate,
-            phaseEnd:
-              phase.taskEndDate ||
-              phase.endDate,
-            tasks: phaseTasks,
-            schedulePolicy:
-              effectiveSchedulePolicy,
-            allowParallelByRole: true,
-          });
-
-        scheduledTasks.forEach(
-          (task) => {
-            const assignedStaffProfileIds =
-              resolveTaskAssignedStaffIds(
-                task,
-              );
-            const assignedUnitIds =
-              resolveTaskAssignedUnitIds(
-                task,
-              );
-            const primaryAssignedStaffId =
-              assignedStaffProfileIds[0] ||
-              null;
-            const requiredHeadcount =
-              Math.max(
-                1,
-                Math.floor(
-                  Number(
-                    task.requiredHeadcount ||
-                      1,
-                  ),
-                ),
-              );
-
-            const isOwner =
-              actor.role ===
-              "business_owner";
-            const approvalStatus =
-              isOwner ?
-                PRODUCTION_TASK_APPROVAL_APPROVED
-              : PRODUCTION_TASK_APPROVAL_PENDING;
-            const reviewedBy =
-              isOwner ?
-                actor._id
-              : null;
-            const reviewedAt =
-              isOwner ?
-                new Date()
-              : null;
-
-            tasksToCreate.push({
-              planId: plan._id,
-              phaseId: phase._id,
-              title:
-                task.title
-                  ?.toString()
-                  .trim() ||
-                DEFAULT_TASK_TITLE,
-              roleRequired:
-                task.roleRequired,
-              assignedStaffId:
-                primaryAssignedStaffId,
-              assignedStaffProfileIds,
-              assignedUnitIds,
-              requiredHeadcount,
-              weight: task.weight || 1,
-              startDate: task.startDate,
-              dueDate: task.dueDate,
-              status:
-                PRODUCTION_TASK_STATUS_PENDING,
-              instructions:
-                task.instructions
-                  ?.toString()
-                  .trim() || "",
-              taskType:
-                task.taskType
-                  ?.toString()
-                  .trim() || null,
-              sourceTemplateKey:
-                task.sourceTemplateKey
-                  ?.toString()
-                  .trim() || "",
-              recurrenceGroupKey:
-                task.recurrenceGroupKey
-                  ?.toString()
-                  .trim() || "",
-              occurrenceIndex: Math.max(
-                0,
-                Math.floor(
-                  Number(
-                    task.occurrenceIndex ||
-                      0,
-                  ),
-                ),
-              ),
-              dependencies:
-                (
-                  Array.isArray(
-                    task.dependencies,
-                  )
-                ) ?
-                  task.dependencies
-                : [],
-              createdBy: actor._id,
-              approvalStatus,
-              assignedBy: actor._id,
-              reviewedBy,
-              reviewedAt,
-              rejectionReason: "",
-            });
-          },
-        );
-      },
-    );
-
-    logProductionLifecycleBoundary({
-      operation: "schedule_commit",
-      stage: "start",
-      intent:
-        "persist generated schedule rows for plan lifecycle",
-      actorId: actor._id,
-      businessId,
-      context: {
-        route:
-          "/business/production/plans",
-        source: "create_plan_endpoint",
-        planId: plan._id.toString(),
-        phaseCount:
-          createdPhases.length,
-        taskCount: tasksToCreate.length,
-      },
-    });
-
-    const createdTasks =
-      tasksToCreate.length > 0 ?
-        await ProductionTask.insertMany(
-          tasksToCreate,
-        )
-      : [];
-
-    // UNIT-LIFECYCLE
-    // WHY: Stage 5 downstream propagation requires persisted per-unit timing rows at schedule commit.
-    let unitScheduleSeedResult = null;
-    if (createdTasks.length > 0) {
-      unitScheduleSeedResult =
-        await seedUnitTaskScheduleRows({
-          planId: plan._id,
-          taskRows: createdTasks,
-          operation:
-            "createProductionPlan",
-        });
-    }
-
-    // WHY: Creating tasks is the schedule commit boundary that Stage 0 instrumentation tracks.
-    logProductionLifecycleBoundary({
-      operation: "schedule_commit",
-      stage: "success",
-      intent:
-        "persist generated schedule rows for plan lifecycle",
-      actorId: actor._id,
-      businessId,
-      context: {
-        route:
-          "/business/production/plans",
-        source: "create_plan_endpoint",
-        planId: plan._id.toString(),
-        phaseCount:
-          createdPhases.length,
-        taskCount: createdTasks.length,
-        seededUnitScheduleRows:
-          unitScheduleSeedResult?.rowCount ||
-          0,
-      },
-    });
-
-    // WHY: Starting a production plan should move product out of sellable stock mode.
-    const lifecycleProduct =
-      await businessProductService.updateProduct(
+    const {
+      createdPhases,
+      createdTasks,
+      unitScheduleSeedResult,
+    } =
+      await persistProductionPlanScheduleRows(
         {
+          planId: plan._id,
           businessId,
-          id: productId,
-          actor: {
-            id: actor._id,
-            role: actor.role,
-          },
-          updates: {
-            isActive: false,
-            productionState:
-              PRODUCT_STATE_IN_PRODUCTION,
-            productionPlanId: plan._id,
-            preorderEnabled: false,
-            preorderStartDate: null,
-            preorderCapQuantity: 0,
-            preorderReservedQuantity: 0,
-            preorderReleasedQuantity: 0,
-            conservativeYieldQuantity:
-              null,
-            conservativeYieldUnit: "",
-          },
+          actor,
+          scheduledPhases,
+          tasksInputByPhase,
+          effectiveSchedulePolicy,
+          route:
+            "/business/production/plans",
+          source: "create_plan_endpoint",
+          seedUnitSchedule:
+            !saveAsDraft,
         },
       );
+
+    let lifecycleProduct = product;
+    if (!saveAsDraft) {
+      // WHY: Final plan creation should move product out of sellable stock mode; draft saves must not.
+      lifecycleProduct =
+        await businessProductService.updateProduct(
+          {
+            businessId,
+            id: productId,
+            actor: {
+              id: actor._id,
+              role: actor.role,
+            },
+            updates: {
+              isActive: false,
+              productionState:
+                PRODUCT_STATE_IN_PRODUCTION,
+              productionPlanId: plan._id,
+              preorderEnabled: false,
+              preorderStartDate: null,
+              preorderCapQuantity: 0,
+              preorderReservedQuantity: 0,
+              preorderReleasedQuantity: 0,
+              conservativeYieldQuantity:
+                null,
+              conservativeYieldUnit: "",
+            },
+          },
+        );
+    }
 
     // CONFIDENCE-SCORE
     // WHY: Schedule commit is the deterministic trigger boundary that initializes baseline/current confidence.
     let createdPlanConfidence = null;
-    try {
-      const confidenceRecompute =
-        await triggerPlanConfidenceRecompute(
+    if (!saveAsDraft) {
+      try {
+        const confidenceRecompute =
+          await triggerPlanConfidenceRecompute(
+            {
+              planId: plan._id,
+              trigger:
+                CONFIDENCE_RECOMPUTE_TRIGGERS.SCHEDULE_COMMIT,
+              actorId: actor._id,
+              operation:
+                "createProductionPlan",
+            },
+          );
+        createdPlanConfidence =
+          confidenceRecompute?.snapshot ||
+          null;
+      } catch (confidenceErr) {
+        // WHY: Confidence scoring must not block schedule commit persistence.
+        debug(
+          "BUSINESS CONTROLLER: createProductionPlan - confidence recompute skipped",
           {
-            planId: plan._id,
-            trigger:
-              CONFIDENCE_RECOMPUTE_TRIGGERS.SCHEDULE_COMMIT,
             actorId: actor._id,
-            operation:
-              "createProductionPlan",
+            planId: plan._id,
+            reason: confidenceErr.message,
+            next: "Retry confidence recompute through deterministic trigger flow",
           },
         );
-      createdPlanConfidence =
-        confidenceRecompute?.snapshot ||
-        null;
-    } catch (confidenceErr) {
-      // WHY: Confidence scoring must not block schedule commit persistence.
-      debug(
-        "BUSINESS CONTROLLER: createProductionPlan - confidence recompute skipped",
-        {
-          actorId: actor._id,
-          planId: plan._id,
-          reason: confidenceErr.message,
-          next: "Retry confidence recompute through deterministic trigger flow",
-        },
-      );
+      }
     }
+
+    await appendProductionDraftSaveHistory({
+      plan,
+      actor,
+      staffProfile,
+      phases: createdPhases,
+      tasks: createdTasks,
+      action:
+        saveAsDraft ?
+          "draft_saved"
+        : "created",
+      note:
+        saveAsDraft ?
+          "Initial draft saved from the production studio."
+        : "Initial production plan created.",
+    });
 
     const responsePlan =
       createdPlanConfidence ?
@@ -17784,10 +19976,16 @@ async function createProductionPlan(
       {
         actorId: actor._id,
         planId: plan._id,
+        saveAsDraft,
         domainContext:
           plan.domainContext,
         productState:
-          lifecycleProduct?.productionState,
+          lifecycleProduct?.productionState ||
+          null,
+        hasPlantingTargets:
+          hasCompletePlantingTargets(
+            plantingTargets,
+          ),
         phases: createdPhases.length,
         tasks: createdTasks.length,
         seededUnitScheduleRows:
@@ -17826,11 +20024,21 @@ async function createProductionPlan(
 
     return res.status(201).json({
       message:
-        PRODUCTION_COPY.PLAN_CREATED,
+        saveAsDraft ?
+          PRODUCTION_COPY.PLAN_DRAFT_SAVED
+        : PRODUCTION_COPY.PLAN_CREATED,
       plan: responsePlan,
       phases: createdPhases,
       tasks: createdTasks,
       product: lifecycleProduct,
+      draftAuditLog:
+        sanitizeProductionDraftAuditEntries(
+          plan.draftAuditLog,
+        ),
+      draftRevisions:
+        sanitizeProductionDraftRevisionEntries(
+          plan.draftRevisions,
+        ),
       ...(createdPlanConfidence ?
         {
           confidence:
@@ -17872,6 +20080,591 @@ async function createProductionPlan(
     });
     debug(
       "BUSINESS CONTROLLER: createProductionPlan - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
+}
+
+async function updateProductionPlanDraft(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: updateProductionPlanDraft - entry",
+    {
+      actorId: req.user?.sub,
+      planId: req.params?.id,
+      hasProduct: Boolean(
+        req.body?.productId,
+      ),
+      hasEstate: Boolean(
+        req.body?.estateAssetId,
+      ),
+    },
+  );
+
+  try {
+    const planId = req.params?.id
+      ?.toString()
+      .trim();
+    if (!planId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLAN_ID_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canEditProductionPlanDraft({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const plan =
+      await ProductionPlan.findOne({
+        _id: planId,
+        businessId,
+      });
+    if (!plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+    const estateAssetId =
+      req.body?.estateAssetId
+        ?.toString()
+        .trim() ||
+      plan.estateAssetId
+        ?.toString()
+        .trim() ||
+      "";
+    const productId =
+      req.body?.productId
+        ?.toString()
+        .trim() ||
+      plan.productId
+        ?.toString()
+        .trim() ||
+      "";
+    const title =
+      req.body?.title
+        ?.toString()
+        .trim() ||
+      plan.title
+        ?.toString()
+        .trim() ||
+      "";
+    const notes =
+      req.body?.notes
+        ?.toString()
+        .trim() ||
+      "";
+    const aiGenerated = Boolean(
+      req.body?.aiGenerated,
+    );
+    const domainContextInput =
+      parseDomainContextInput(
+        req.body?.domainContext ||
+          plan.domainContext,
+      );
+    const domainContext =
+      domainContextInput.value;
+    const plantingTargets =
+      normalizePlantingTargetsInput(
+        req.body?.plantingTargets ||
+          req.body?.workloadContext
+            ?.plantingTargets ||
+          plan.plantingTargets,
+      );
+    const requestedWorkloadUnits =
+      parseWorkloadContextTotalUnits(
+        req.body?.workloadContext,
+      );
+    const startDate = parseDateInput(
+      req.body?.startDate ||
+        plan.startDate,
+    );
+    const endDate = parseDateInput(
+      req.body?.endDate ||
+        plan.endDate,
+    );
+
+    if (!estateAssetId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.ESTATE_REQUIRED,
+      });
+    }
+    if (!productId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_REQUIRED,
+      });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATES_REQUIRED,
+      });
+    }
+    if (endDate <= startDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DATE_RANGE_INVALID,
+      });
+    }
+    if (
+      domainContextInput.provided &&
+      !domainContextInput.isValid
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.DOMAIN_CONTEXT_INVALID,
+      });
+    }
+    if (
+      domainContext === "farm" &&
+      !hasCompletePlantingTargets(
+        plantingTargets,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PLANTING_TARGETS_REQUIRED,
+        details:
+          buildPlantingTargetsValidationDetails(
+            plantingTargets,
+          ),
+      });
+    }
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      actor.estateAssetId.toString() !==
+        estateAssetId
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    await resolveEstateAsset({
+      estateAssetId,
+      businessId,
+    });
+    const {
+      effectivePolicy:
+        effectiveSchedulePolicy,
+    } =
+      await resolveEffectiveSchedulePolicy(
+        {
+          businessId,
+          estateAssetId,
+        },
+      );
+    const product =
+      await businessProductService.getProductById(
+        {
+          businessId,
+          id: productId,
+        },
+      );
+    if (!product) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.PRODUCT_NOT_FOUND,
+      });
+    }
+
+    const rawPhases =
+      Array.isArray(req.body?.phases) ?
+        req.body.phases
+      : [];
+    const phaseTemplates =
+      rawPhases.length > 0 ?
+        rawPhases
+      : DEFAULT_PRODUCTION_PHASES;
+    if (phaseTemplates.length === 0) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.PHASES_REQUIRED,
+      });
+    }
+
+    const normalizedPhases =
+      phaseTemplates.map(
+        (phase, index) => ({
+          phaseType:
+            normalizeProductionPhaseTypeInput(
+              phase?.phaseType,
+            ),
+          requiredUnits:
+            normalizePhaseRequiredUnitsInput(
+              phase?.requiredUnits,
+              {
+                fallback:
+                  (
+                    normalizeProductionPhaseTypeInput(
+                      phase?.phaseType,
+                    ) ===
+                    PRODUCTION_PHASE_TYPE_FINITE
+                  ) ?
+                    requestedWorkloadUnits
+                  : 0,
+              },
+            ),
+          minRatePerFarmerHour:
+            normalizePhaseRatePerFarmerHourInput(
+              phase?.minRatePerFarmerHour,
+              {
+                fallback:
+                  DEFAULT_PHASE_MIN_RATE_PER_FARMER_HOUR,
+              },
+            ),
+          targetRatePerFarmerHour:
+            Math.max(
+              normalizePhaseRatePerFarmerHourInput(
+                phase?.minRatePerFarmerHour,
+                {
+                  fallback:
+                    DEFAULT_PHASE_MIN_RATE_PER_FARMER_HOUR,
+                },
+              ),
+              normalizePhaseRatePerFarmerHourInput(
+                phase?.targetRatePerFarmerHour,
+                {
+                  fallback:
+                    DEFAULT_PHASE_TARGET_RATE_PER_FARMER_HOUR,
+                },
+              ),
+            ),
+          plannedHoursPerDay:
+            normalizePhasePlannedHoursPerDayInput(
+              phase?.plannedHoursPerDay,
+              {
+                fallback:
+                  DEFAULT_PHASE_PLANNED_HOURS_PER_DAY,
+              },
+            ),
+          biologicalMinDays:
+            normalizePhaseBiologicalMinDaysInput(
+              phase?.biologicalMinDays,
+              {
+                fallback:
+                  DEFAULT_PHASE_BIOLOGICAL_MIN_DAYS,
+              },
+            ),
+          estimatedDays:
+            Number.isFinite(
+              Number(
+                phase?.estimatedDays,
+              ),
+            ) ?
+              Math.max(
+                1,
+                Math.floor(
+                  Number(
+                    phase?.estimatedDays,
+                  ),
+                ),
+              )
+            : 1,
+          name:
+            (phase?.name || "")
+              .toString()
+              .trim() ||
+            DEFAULT_PRODUCTION_PHASES[
+              index
+            ]?.name ||
+            `${DEFAULT_PHASE_NAME_PREFIX} ${index + 1}`,
+          order:
+            (
+              Number.isFinite(
+                phase?.order,
+              ) &&
+              Number(phase.order) > 0
+            ) ?
+              Math.floor(
+                Number(phase.order),
+              )
+            : index + 1,
+          kpiTarget:
+            phase?.kpiTarget || null,
+          tasks:
+            Array.isArray(phase?.tasks) ?
+              phase.tasks
+            : [],
+        }),
+      );
+
+    const scheduledPhases =
+      buildPhaseSchedule({
+        startDate,
+        endDate,
+        phases: normalizedPhases,
+      });
+    const tasksInputByPhase =
+      scheduledPhases.map(
+        (phase) => phase.tasks || [],
+      );
+    const assignedStaffIds =
+      tasksInputByPhase
+        .flat()
+        .flatMap((task) =>
+          resolveTaskAssignedStaffIds(
+            task,
+          ),
+        )
+        .filter(Boolean);
+    const staffProfiles =
+      assignedStaffIds.length > 0 ?
+        await BusinessStaffProfile.find(
+          {
+            _id: {
+              $in: assignedStaffIds,
+            },
+            businessId,
+          },
+        ).lean()
+      : [];
+    const staffProfileMap = new Map(
+      staffProfiles.map((profile) => [
+        profile._id.toString(),
+        profile,
+      ]),
+    );
+
+    scheduledPhases.forEach((phase) => {
+      const scheduledTasks =
+        buildTaskSchedule({
+          phaseStart:
+            phase.taskStartDate ||
+            phase.startDate,
+          phaseEnd:
+            phase.taskEndDate ||
+            phase.endDate,
+          tasks: phase.tasks || [],
+          schedulePolicy:
+            effectiveSchedulePolicy,
+          allowParallelByRole: true,
+        });
+      scheduledTasks.forEach((task) => {
+        if (!task.roleRequired) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ROLE_REQUIRED,
+          );
+        }
+        if (
+          !STAFF_ROLE_VALUES.includes(
+            task.roleRequired,
+          )
+        ) {
+          throw new Error(
+            PRODUCTION_COPY.STAFF_ROLE_REQUIRED,
+          );
+        }
+
+        const assignedIds =
+          resolveTaskAssignedStaffIds(
+            task,
+          );
+        assignedIds.forEach(
+          (assignedId) => {
+            const assignedProfile =
+              staffProfileMap.get(
+                assignedId,
+              );
+            if (!assignedProfile) {
+              throw new Error(
+                STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+              );
+            }
+            if (
+              assignedProfile.staffRole !==
+              task.roleRequired
+            ) {
+              throw new Error(
+                PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+              );
+            }
+            if (
+              assignedProfile.estateAssetId &&
+              assignedProfile.estateAssetId.toString() !==
+                estateAssetId
+            ) {
+              throw new Error(
+                PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+              );
+            }
+          },
+        );
+      });
+    });
+
+    const normalizedPlantingTargets =
+      hasCompletePlantingTargets(
+        plantingTargets,
+      ) ?
+        plantingTargets
+      : null;
+    const shouldForkDraftCopy =
+      plan.status !==
+      PRODUCTION_STATUS_DRAFT;
+
+    if (shouldForkDraftCopy) {
+      const draftCopy =
+        await ProductionPlan.create({
+          businessId,
+          estateAssetId,
+          productId,
+          title,
+          startDate,
+          endDate,
+          status: PRODUCTION_STATUS_DRAFT,
+          createdBy: actor._id,
+          notes,
+          plantingTargets:
+            normalizedPlantingTargets,
+          aiGenerated,
+          domainContext,
+        });
+
+      const {
+        createdPhases,
+        createdTasks,
+      } =
+        await persistProductionPlanScheduleRows(
+          {
+            planId: draftCopy._id,
+            businessId,
+            actor,
+            scheduledPhases,
+            tasksInputByPhase,
+            effectiveSchedulePolicy,
+            route:
+              "/business/production/plans/:id/draft",
+            source:
+              "fork_draft_copy_endpoint",
+            seedUnitSchedule: false,
+          },
+        );
+
+      await appendProductionDraftSaveHistory(
+        {
+          plan: draftCopy,
+          actor,
+          staffProfile,
+          phases: createdPhases,
+          tasks: createdTasks,
+          action: "draft_saved",
+          note:
+            "Draft copy saved from an existing production plan.",
+        },
+      );
+
+      return res.status(200).json({
+        message:
+          PRODUCTION_COPY.PLAN_DRAFT_SAVED,
+        plan: draftCopy,
+        phases: createdPhases,
+        tasks: createdTasks,
+        product,
+        draftAuditLog:
+          sanitizeProductionDraftAuditEntries(
+            draftCopy.draftAuditLog,
+          ),
+        draftRevisions:
+          sanitizeProductionDraftRevisionEntries(
+            draftCopy.draftRevisions,
+          ),
+      });
+    }
+
+    plan.estateAssetId = estateAssetId;
+    plan.productId = productId;
+    plan.title = title;
+    plan.notes = notes;
+    plan.startDate = startDate;
+    plan.endDate = endDate;
+    plan.aiGenerated = aiGenerated;
+    plan.domainContext = domainContext;
+    plan.plantingTargets =
+      normalizedPlantingTargets;
+
+    const {
+      createdPhases,
+      createdTasks,
+    } =
+      await persistProductionPlanScheduleRows(
+        {
+          planId: plan._id,
+          businessId,
+          actor,
+          scheduledPhases,
+          tasksInputByPhase,
+          effectiveSchedulePolicy,
+          route:
+            "/business/production/plans/:id/draft",
+          source:
+            "update_draft_endpoint",
+          resetExistingSchedule: true,
+          seedUnitSchedule: false,
+        },
+      );
+
+    await appendProductionDraftSaveHistory({
+      plan,
+      actor,
+      staffProfile,
+      phases: createdPhases,
+      tasks: createdTasks,
+      action: "draft_updated",
+      note:
+        "Production draft updated from the dedicated draft editor.",
+    });
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.PLAN_DRAFT_UPDATED,
+      plan,
+      phases: createdPhases,
+      tasks: createdTasks,
+      product,
+      draftAuditLog:
+        sanitizeProductionDraftAuditEntries(
+          plan.draftAuditLog,
+        ),
+      draftRevisions:
+        sanitizeProductionDraftRevisionEntries(
+          plan.draftRevisions,
+        ),
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: updateProductionPlanDraft - error",
       err.message,
     );
     return res
@@ -17931,6 +20724,10 @@ async function listProductionPlans(
 
     const plans =
       await ProductionPlan.find(filter)
+        .select({
+          draftAuditLog: 0,
+          draftRevisions: 0,
+        })
         .sort({ createdAt: -1 })
         .lean();
 
@@ -18118,8 +20915,12 @@ async function updateProductionPlanStatus(
     }
 
     if (
-      nextStatus ===
-      PRODUCTION_STATUS_ARCHIVED
+      (
+        nextStatus ===
+          PRODUCTION_STATUS_ARCHIVED ||
+        nextStatus ===
+          PRODUCTION_STATUS_DRAFT
+      )
     ) {
       const linkedProduct =
         await businessProductService.getProductById(
@@ -18139,6 +20940,34 @@ async function updateProductionPlanStatus(
         return res.status(400).json({
           error:
             PRODUCTION_COPY.PLAN_ARCHIVE_PREORDER_ENABLED,
+        });
+      }
+    }
+
+    if (
+      nextStatus ===
+        PRODUCTION_STATUS_DRAFT &&
+      plan.status !==
+        PRODUCTION_STATUS_DRAFT
+    ) {
+      const [
+        existingProgressEntry,
+        existingOutputEntry,
+      ] = await Promise.all([
+        TaskProgress.exists({
+          planId: plan._id,
+        }),
+        ProductionOutput.exists({
+          planId: plan._id,
+        }),
+      ]);
+      if (
+        existingProgressEntry ||
+        existingOutputEntry
+      ) {
+        return res.status(400).json({
+          error:
+            PRODUCTION_COPY.PLAN_RETURN_DRAFT_PROGRESS_LOCKED,
         });
       }
     }
@@ -19993,10 +22822,17 @@ async function getProductionPlanDetail(
         );
       }
     }
+    const {
+      draftAuditLog:
+        rawDraftAuditLog = [],
+      draftRevisions:
+        rawDraftRevisions = [],
+      ...planWithoutDraftHistory
+    } = plan;
     const visiblePlan =
       canViewPlanConfidence ?
         {
-          ...plan,
+          ...planWithoutDraftHistory,
           ...(planConfidence ?
             {
               confidence:
@@ -20004,7 +22840,9 @@ async function getProductionPlanDetail(
             }
           : {}),
         }
-      : stripPlanConfidenceFields(plan);
+      : stripPlanConfidenceFields(
+          planWithoutDraftHistory,
+        );
 
     const phases =
       await ProductionPhase.find({
@@ -20412,6 +23250,14 @@ async function getProductionPlanDetail(
         visibleAttendanceRecords,
       staffProgressScores:
         visibleStaffProgressScores,
+      draftAuditLog:
+        sanitizeProductionDraftAuditEntries(
+          rawDraftAuditLog,
+        ),
+      draftRevisions:
+        sanitizeProductionDraftRevisionEntries(
+          rawDraftRevisions,
+        ),
       phaseUnitProgress,
       unitDivergence,
       unitScheduleWarnings,
@@ -22252,6 +25098,11 @@ async function logProductionTaskProgress(
           req.body || {},
           "actualPlotUnits",
         ),
+      hasQuantityAmount:
+        Object.prototype.hasOwnProperty.call(
+          req.body || {},
+          "quantityAmount",
+        ),
       hasStaffId:
         Object.prototype.hasOwnProperty.call(
           req.body || {},
@@ -22290,9 +25141,27 @@ async function logProductionTaskProgress(
         req.body || {},
         "actualPlotUnits",
       );
+    const quantityActivityType =
+      normalizeProductionQuantityActivityType(
+        req.body?.quantityActivityType,
+      );
+    const quantityAmount =
+      parseNonNegativeNumberInput(
+        req.body?.quantityAmount,
+      );
+    const rawQuantityUnit =
+      normalizePlantingTargetUnitInput(
+        req.body?.quantityUnit,
+      );
+    const hasQuantityTracking =
+      quantityAmount != null &&
+      quantityAmount > 0 &&
+      quantityActivityType !==
+        PRODUCTION_QUANTITY_ACTIVITY_NONE;
     if (
       !hasActualPlots &&
-      !hasActualPlotUnits
+      !hasActualPlotUnits &&
+      !hasQuantityTracking
     ) {
       return res.status(400).json({
         error:
@@ -22371,15 +25240,6 @@ async function logProductionTaskProgress(
           PRODUCTION_COPY.TASK_PROGRESS_DELAY_REASON_INVALID,
       });
     }
-    if (
-      actualPlotUnits === 0 &&
-      delayReason === "none"
-    ) {
-      return res.status(400).json({
-        error:
-          PRODUCTION_COPY.TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED,
-      });
-    }
     const notes =
       req.body?.notes
         ?.toString()
@@ -22428,6 +25288,11 @@ async function logProductionTaskProgress(
 
     if (
       !canAssignProductionTasks({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      }) &&
+      !canLogProductionTaskProgress({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
@@ -22485,19 +25350,36 @@ async function logProductionTaskProgress(
 
     let effectiveStaffId =
       assignedStaffIds[0];
-    if (
-      assignedStaffIds.length > 1 &&
-      !requestedStaffId
-    ) {
-      return res.status(400).json({
-        error:
-          PRODUCTION_COPY.TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN,
+    const actorStaffProfileId =
+      normalizeStaffIdInput(
+        staffProfile?._id,
+      );
+    const canManageProgressForOthers =
+      canAssignProductionTasks({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
       });
-    }
-    if (requestedStaffId) {
+    if (!canManageProgressForOthers) {
+      if (!actorStaffProfileId) {
+        return res.status(403).json({
+          error:
+            PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+        });
+      }
+      if (
+        requestedStaffId &&
+        requestedStaffId !==
+          actorStaffProfileId
+      ) {
+        return res.status(403).json({
+          error:
+            PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+        });
+      }
       if (
         !assignedStaffIds.includes(
-          requestedStaffId,
+          actorStaffProfileId,
         )
       ) {
         return res.status(400).json({
@@ -22506,7 +25388,31 @@ async function logProductionTaskProgress(
         });
       }
       effectiveStaffId =
-        requestedStaffId;
+        actorStaffProfileId;
+    } else {
+      if (
+        assignedStaffIds.length > 1 &&
+        !requestedStaffId
+      ) {
+        return res.status(400).json({
+          error:
+            PRODUCTION_COPY.TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN,
+        });
+      }
+      if (requestedStaffId) {
+        if (
+          !assignedStaffIds.includes(
+            requestedStaffId,
+          )
+        ) {
+          return res.status(400).json({
+            error:
+              PRODUCTION_COPY.TASK_PROGRESS_STAFF_NOT_ASSIGNED,
+          });
+        }
+        effectiveStaffId =
+          requestedStaffId;
+      }
     }
     if (
       !mongoose.Types.ObjectId.isValid(
@@ -22619,6 +25525,18 @@ async function logProductionTaskProgress(
             expectedPlotUnits,
             actualPlots,
             actualPlotUnits,
+            quantityActivityType:
+              hasQuantityTracking ?
+                quantityActivityType
+              : PRODUCTION_QUANTITY_ACTIVITY_NONE,
+            quantityAmount:
+              hasQuantityTracking ?
+                quantityAmount
+              : 0,
+            quantityUnit:
+              hasQuantityTracking ?
+                quantityUnit
+              : "",
             delayReason,
             notes,
           },
@@ -22647,6 +25565,9 @@ async function logProductionTaskProgress(
         workDate: normalizedWorkDate,
         actualPlots,
         actualPlotUnits,
+        quantityActivityType,
+        quantityAmount,
+        quantityUnit,
         expectedPlotUnits,
       },
     );
@@ -27223,6 +30144,7 @@ module.exports = {
   productionPlanAssistantTurnHandler,
   generateProductionPlanDraftHandler,
   createProductionPlan,
+  updateProductionPlanDraft,
   listProductionPlans,
   updateProductionPlanStatus,
   deleteProductionPlan,
@@ -27253,7 +30175,12 @@ module.exports = {
   getOrders,
   updateOrderStatus,
   createAsset,
+  submitFarmAsset,
   getAssets,
+  getFarmAssetAuditAnalytics,
+  submitFarmAssetAudit,
+  submitFarmToolUsageRequest,
+  approveFarmAssetRequest,
   updateAsset,
   softDeleteAsset,
   lookupUser,
