@@ -18,6 +18,7 @@ class HomeHeroMetric {
 }
 
 class HomeHeroSection extends StatelessWidget {
+  final String topLabel;
   final String catalogLabel;
   final String headline;
   final String subtitle;
@@ -36,6 +37,7 @@ class HomeHeroSection extends StatelessWidget {
 
   const HomeHeroSection({
     super.key,
+    this.topLabel = "Home",
     required this.catalogLabel,
     required this.headline,
     required this.subtitle,
@@ -75,7 +77,7 @@ class HomeHeroSection extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                "Home",
+                topLabel,
                 style: theme.textTheme.titleLarge?.copyWith(
                   color: scheme.onSurface,
                   fontWeight: FontWeight.w900,
