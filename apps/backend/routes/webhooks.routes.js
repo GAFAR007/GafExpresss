@@ -1,6 +1,8 @@
 /**
  * routes/webhooks.routes.js
  * -------------------------
+ *
+ * flutter run -d chrome
  * WHAT:
  * - Receives external payment provider webhooks (Paystack)
  *
@@ -38,7 +40,7 @@ router.post(
   "/paystack",
   express.raw({ type: "application/json" }), // 🔐 REQUIRED FOR SIGNATURE VERIFICATION
   verifyPaystackSignature, // 🔒 MUST RUN BEFORE controller
-  webhooksController.handlePaystackWebhook // ✅ MUST EXIST
+  webhooksController.handlePaystackWebhook, // ✅ MUST EXIST
 );
 
 module.exports = router;
