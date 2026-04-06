@@ -5,6 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "./scripts/run-with-project-node.sh nodemon server.js",
+    "dev:status": "./scripts/manage-dev-server.sh status",
+    "dev:stop": "./scripts/manage-dev-server.sh stop",
+    "dev:restart": "./scripts/manage-dev-server.sh restart",
     "start": "./scripts/run-with-project-node.sh node server.js",
     "reset:password": "./scripts/run-with-project-node.sh node scripts/reset-user-password.js",
     "test:planner:v2": "./scripts/run-with-project-node.sh node --test scripts/planner-v2.unit.test.js",

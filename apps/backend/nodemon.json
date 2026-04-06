@@ -1,0 +1,26 @@
+{
+  "watch": [
+    "server.js",
+    ".env",
+    "config",
+    "controllers",
+    "middlewares",
+    "models",
+    "routes",
+    "services",
+    "utils"
+  ],
+  "legacyWatch": true,
+  "ext": "js,json",
+  "ignore": [
+    "node_modules/**",
+    "generated/**",
+    "scripts/**",
+    "docs/**",
+    "**/*.md",
+    "**/*.pdf",
+    "**/*.csv",
+    "paystack-test.json"
+  ],
+  "delay": "400"
+}

@@ -12,6 +12,16 @@ if [ -d "$PROJECT_BIN_DIR" ]; then
 fi
 
 if [ "${1:-}" = "nodemon" ]; then
+  existing_nodemon_pid="$(
+    pgrep -f "[n]ode $PROJECT_BIN_DIR/nodemon .*server\\.js" | head -n 1 || true
+  )"
+
+  if [ -n "$existing_nodemon_pid" ]; then
+    printf '%s\n' "Backend dev server is already running via nodemon (PID $existing_nodemon_pid)." >&2
+    printf '%s\n' "Reuse the existing terminal, stop it with: npm run dev:stop, or restart it with: npm run dev:restart" >&2
+    exit 1
+  fi
+
   shift
   set -- nodemon --no-update-notifier "$@"
 fi

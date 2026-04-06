@@ -230,6 +230,36 @@ function listenOnPort(port) {
   });
 }
 
+function logListenFailure(error) {
+  console.error('❌ Backend startup failed');
+
+  if (error?.code !== 'EADDRINUSE') {
+    console.error(error.message);
+    return;
+  }
+
+  const portNumber = Number(PORT);
+  const fallbackPort = Number.isFinite(portNumber)
+    ? portNumber + 1
+    : 4001;
+
+  console.error(`Port ${PORT} is already in use.`);
+
+  if (process.platform === 'win32') {
+    console.error(
+      'Stop the existing listener with Task Manager or netstat/taskkill, then retry.',
+    );
+  } else {
+    console.error(
+      `Find the existing listener with: lsof -nP -iTCP:${PORT} -sTCP:LISTEN`,
+    );
+  }
+
+  console.error(
+    `Or start this backend on another port: PORT=${fallbackPort} npm run dev`,
+  );
+}
+
 async function startServer() {
   try {
     await listenOnPort(PORT);
@@ -242,8 +272,7 @@ async function startServer() {
 
     void connectDatabaseInBackground();
   } catch (error) {
-    console.error('❌ Backend startup failed');
-    console.error(error.message);
+    logListenFailure(error);
     debug('Backend startup failed before listen', {
       error,
       databaseStatus: getDatabaseStatus(),
