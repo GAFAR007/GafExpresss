@@ -15,54 +15,52 @@
  * - Mounts route modules under their base paths
  */
 
-const debug = require('../utils/debug');
-const connectDB = require('../config/db');
-const {
-  getDatabaseStatus,
-  isDatabaseReady,
-} = connectDB;
-const authRoutes = require('./auth.routes');
-const adminRoutes = require('./admin.routes');
-const businessRoutes = require('./business.routes');
-const chatRoutes = require('./chat.routes');
-
+const debug = require("../utils/debug");
+const connectDB = require("../config/db");
+const { getDatabaseStatus, isDatabaseReady } = connectDB;
+const authRoutes = require("./auth.routes");
+const adminRoutes = require("./admin.routes");
+const businessRoutes = require("./business.routes");
+const chatRoutes = require("./chat.routes");
+const purchaseRequestRoutes = require("./purchase_request.routes");
 
 // Public product routes (no auth needed)
-const productPublicRoutes = require('./product.public.routes');
+const productPublicRoutes = require("./product.public.routes");
 
 // User order routes (authenticated)
-const orderRoutes = require('./order.routes');
+const orderRoutes = require("./order.routes");
 // Payment init routes (authenticated)
-const paymentRoutes = require('./payments.routes');
+const paymentRoutes = require("./payments.routes");
 
 const ROUTE_GROUPS = [
-  ['/auth', authRoutes],
-  ['/admin', adminRoutes],
-  ['/business', businessRoutes],
-  ['/chat', chatRoutes],
-  ['/products', productPublicRoutes],
-  ['/orders', orderRoutes],
-  ['/payments', paymentRoutes],
+  ["/auth", authRoutes],
+  ["/admin", adminRoutes],
+  ["/business", businessRoutes],
+  ["/chat", chatRoutes],
+  ["/purchase-requests", purchaseRequestRoutes],
+  ["/products", productPublicRoutes],
+  ["/orders", orderRoutes],
+  ["/payments", paymentRoutes],
 ];
 
 module.exports = (app) => {
-  debug('Routes module loaded', {
+  debug("Routes module loaded", {
     groups: ROUTE_GROUPS.map(([basePath]) => basePath),
   });
 
   /**
    * HEALTH CHECK
    */
-  app.get('/health', (req, res) => {
+  app.get("/health", (req, res) => {
     // WHY: Health must reflect process liveness and MongoDB readiness separately.
     const databaseStatus = getDatabaseStatus();
     const isHealthy = isDatabaseReady();
 
     res.status(isHealthy ? 200 : 503).json({
-      status: isHealthy ? 'ok' : 'degraded',
+      status: isHealthy ? "ok" : "degraded",
       message: isHealthy
-        ? 'Backend is alive'
-        : 'Backend is alive but database is unavailable',
+        ? "Backend is alive"
+        : "Backend is alive but database is unavailable",
       database: {
         isReady: databaseStatus.isReady,
         readyState: databaseStatus.readyState,

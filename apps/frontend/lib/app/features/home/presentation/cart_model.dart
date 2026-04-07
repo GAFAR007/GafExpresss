@@ -21,6 +21,7 @@ import 'product_model.dart';
 
 class CartItem {
   final String productId;
+  final String businessId;
   final String name;
   final String imageUrl;
   final int unitPriceCents;
@@ -28,6 +29,7 @@ class CartItem {
 
   const CartItem({
     required this.productId,
+    required this.businessId,
     required this.name,
     required this.imageUrl,
     required this.unitPriceCents,
@@ -46,6 +48,7 @@ class CartItem {
 
     return CartItem(
       productId: product.id,
+      businessId: product.businessId ?? "",
       name: product.name,
       imageUrl: product.imageUrl,
       unitPriceCents: product.priceCents,
@@ -60,6 +63,7 @@ class CartItem {
   Map<String, dynamic> toOrderItemJson() {
     return {
       "productId": productId,
+      "businessId": businessId,
       "quantity": quantity,
     };
   }
@@ -67,6 +71,7 @@ class CartItem {
   CartItem copyWith({int? quantity}) {
     return CartItem(
       productId: productId,
+      businessId: businessId,
       name: name,
       imageUrl: imageUrl,
       unitPriceCents: unitPriceCents,

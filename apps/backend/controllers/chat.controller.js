@@ -13,31 +13,30 @@
  * - Emits socket events via chat_socket.service after persistence.
  */
 
-const debug = require('../utils/debug');
-const ChatConversation = require('../models/ChatConversation');
-const chatService = require('../services/chat.service');
+const debug = require("../utils/debug");
+const ChatConversation = require("../models/ChatConversation");
+const chatService = require("../services/chat.service");
+const purchaseRequestService = require("../services/purchase_request.service");
 const {
   emitMessageCreated,
   emitMessageRead,
-} = require('../services/chat_socket.service');
-const {
-  CHAT_CONVERSATION_TYPES,
-} = require('../utils/chat_constants');
+} = require("../services/chat_socket.service");
+const { CHAT_CONVERSATION_TYPES } = require("../utils/chat_constants");
 
 // WHY: Keep controller log tags consistent.
-const LOG_TAG = 'CHAT_CONTROLLER';
+const LOG_TAG = "CHAT_CONTROLLER";
 
 // WHY: Centralize response copy to avoid inline strings.
 const CHAT_COPY = {
-  CONVERSATIONS_OK: 'Conversations loaded successfully',
-  CONVERSATION_CREATED: 'Conversation created successfully',
-  CONVERSATION_DETAIL_OK: 'Conversation loaded successfully',
-  MESSAGES_OK: 'Messages loaded successfully',
-  MESSAGE_SENT: 'Message sent successfully',
-  MESSAGE_READ: 'Messages marked as read',
-  ATTACHMENT_OK: 'Attachment uploaded successfully',
-  CONVERSATION_REQUIRED: 'Conversation id is required',
-  UNKNOWN_ERROR: 'Unable to complete chat request',
+  CONVERSATIONS_OK: "Conversations loaded successfully",
+  CONVERSATION_CREATED: "Conversation created successfully",
+  CONVERSATION_DETAIL_OK: "Conversation loaded successfully",
+  MESSAGES_OK: "Messages loaded successfully",
+  MESSAGE_SENT: "Message sent successfully",
+  MESSAGE_READ: "Messages marked as read",
+  ATTACHMENT_OK: "Attachment uploaded successfully",
+  CONVERSATION_REQUIRED: "Conversation id is required",
+  UNKNOWN_ERROR: "Unable to complete chat request",
 };
 
 function buildContext(req, operation, intent) {
@@ -64,12 +63,18 @@ function logError(action, error, context) {
   });
 }
 
+function emitMessages(conversationId, messages = []) {
+  messages.filter(Boolean).forEach((message) => {
+    emitMessageCreated({
+      conversationId:
+        message.conversationId?.toString() || conversationId?.toString(),
+      message,
+    });
+  });
+}
+
 async function listConversations(req, res) {
-  const context = buildContext(
-    req,
-    'ListConversations',
-    'load chat inbox'
-  );
+  const context = buildContext(req, "ListConversations", "load chat inbox");
   debug(`${LOG_TAG}: listConversations - entry`, {
     actorId: req.user?.sub,
   });
@@ -80,13 +85,9 @@ async function listConversations(req, res) {
       ? req.query.businessId.toString()
       : null;
 
-    const businessId = actor.businessId
-      ? actor.businessId.toString()
-      : businessIdHint;
-
     const conversations = await chatService.listConversations({
       userId: actor._id,
-      businessId,
+      businessId: businessIdHint,
       limit: Number.parseInt(req.query?.limit, 10) || 50,
       context,
     });
@@ -100,7 +101,7 @@ async function listConversations(req, res) {
       conversations,
     });
   } catch (error) {
-    logError('listConversations', error, context);
+    logError("listConversations", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -108,11 +109,7 @@ async function listConversations(req, res) {
 }
 
 async function createConversation(req, res) {
-  const context = buildContext(
-    req,
-    'CreateConversation',
-    'start chat'
-  );
+  const context = buildContext(req, "CreateConversation", "start chat");
   debug(`${LOG_TAG}: createConversation - entry`, {
     actorId: req.user?.sub,
     hasParticipants: Array.isArray(req.body?.participantUserIds),
@@ -129,9 +126,7 @@ async function createConversation(req, res) {
     const conversation = await chatService.createConversation({
       actor,
       businessId,
-      type:
-        req.body?.type ||
-        CHAT_CONVERSATION_TYPES.DIRECT,
+      type: req.body?.type || CHAT_CONVERSATION_TYPES.DIRECT,
       title: req.body?.title,
       participantUserIds: req.body?.participantUserIds || [],
       context,
@@ -146,7 +141,7 @@ async function createConversation(req, res) {
       conversation,
     });
   } catch (error) {
-    logError('createConversation', error, context);
+    logError("createConversation", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -156,8 +151,8 @@ async function createConversation(req, res) {
 async function getConversationDetail(req, res) {
   const context = buildContext(
     req,
-    'GetConversationDetail',
-    'load conversation detail'
+    "GetConversationDetail",
+    "load conversation detail",
   );
   const conversationId = req.params?.conversationId;
 
@@ -178,9 +173,10 @@ async function getConversationDetail(req, res) {
       message: CHAT_COPY.CONVERSATION_DETAIL_OK,
       conversation: detail.conversation,
       participants: detail.participants,
+      purchaseRequest: detail.purchaseRequest || null,
     });
   } catch (error) {
-    logError('getConversationDetail', error, context);
+    logError("getConversationDetail", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -190,8 +186,8 @@ async function getConversationDetail(req, res) {
 async function listMessages(req, res) {
   const context = buildContext(
     req,
-    'ListMessages',
-    'load conversation messages'
+    "ListMessages",
+    "load conversation messages",
   );
   const conversationId = req.params?.conversationId;
 
@@ -215,7 +211,7 @@ async function listMessages(req, res) {
       messages,
     });
   } catch (error) {
-    logError('listMessages', error, context);
+    logError("listMessages", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -223,11 +219,7 @@ async function listMessages(req, res) {
 }
 
 async function sendMessage(req, res) {
-  const context = buildContext(
-    req,
-    'SendMessage',
-    'send chat message'
-  );
+  const context = buildContext(req, "SendMessage", "send chat message");
   const conversationId = req.body?.conversationId;
 
   if (!conversationId) {
@@ -238,13 +230,12 @@ async function sendMessage(req, res) {
 
   try {
     const actor = await chatService.loadActor(req.user?.sub, context);
-    const conversation = await ChatConversation.findById(
-      conversationId
-    ).select('businessId');
+    const conversation =
+      await ChatConversation.findById(conversationId).select("businessId");
 
     if (!conversation) {
       return res.status(404).json({
-        error: 'Conversation not found',
+        error: "Conversation not found",
       });
     }
 
@@ -258,17 +249,31 @@ async function sendMessage(req, res) {
       context,
     });
 
-    emitMessageCreated({
-      conversationId,
-      message,
-    });
+    emitMessages(conversationId, [message]);
+
+    let followUpMessages = [];
+    try {
+      followUpMessages = await purchaseRequestService.handleConversationMessageEffects({
+        actor,
+        conversationId,
+        message,
+        context,
+      });
+      emitMessages(conversationId, followUpMessages);
+    } catch (followUpError) {
+      debug(`${LOG_TAG}: sendMessage - purchase request follow-up error`, {
+        conversationId,
+        error: followUpError?.message || "unknown_error",
+      });
+    }
 
     return res.status(200).json({
       message: CHAT_COPY.MESSAGE_SENT,
       messageData: message,
+      followUpMessages,
     });
   } catch (error) {
-    logError('sendMessage', error, context);
+    logError("sendMessage", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -278,8 +283,8 @@ async function sendMessage(req, res) {
 async function markMessagesRead(req, res) {
   const context = buildContext(
     req,
-    'MarkMessagesRead',
-    'mark chat messages read'
+    "MarkMessagesRead",
+    "mark chat messages read",
   );
   const conversationId = req.body?.conversationId;
   const messageIds = req.body?.messageIds || [];
@@ -309,7 +314,7 @@ async function markMessagesRead(req, res) {
       updated: result.updated,
     });
   } catch (error) {
-    logError('markMessagesRead', error, context);
+    logError("markMessagesRead", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -319,8 +324,8 @@ async function markMessagesRead(req, res) {
 async function uploadChatAttachment(req, res) {
   const context = buildContext(
     req,
-    'UploadChatAttachment',
-    'upload chat attachment'
+    "UploadChatAttachment",
+    "upload chat attachment",
   );
   const conversationId = req.body?.conversationId;
 
@@ -332,13 +337,12 @@ async function uploadChatAttachment(req, res) {
 
   try {
     const actor = await chatService.loadActor(req.user?.sub, context);
-    const conversation = await ChatConversation.findById(
-      conversationId
-    ).select('businessId');
+    const conversation =
+      await ChatConversation.findById(conversationId).select("businessId");
 
     if (!conversation) {
       return res.status(404).json({
-        error: 'Conversation not found',
+        error: "Conversation not found",
       });
     }
 
@@ -355,7 +359,7 @@ async function uploadChatAttachment(req, res) {
       attachment,
     });
   } catch (error) {
-    logError('uploadChatAttachment', error, context);
+    logError("uploadChatAttachment", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });

@@ -14,9 +14,11 @@
 const express = require('express');
 const debug = require('../utils/debug');
 const { requireAuth } = require('../middlewares/auth.middleware');
+const { requireAnyRole } = require('../middlewares/requireRole.middleware');
 const orderController = require('../controllers/order.controller');
 
 const router = express.Router();
+const BUYER_ALLOWED_ROLES = ['customer', 'tenant', 'business_owner'];
 
 debug('Order routes initialized');
 
@@ -82,7 +84,12 @@ debug('Order routes initialized');
  *         description: Order created successfully
  */
 
-router.post('/', requireAuth, orderController.createOrder);
+router.post(
+  '/',
+  requireAuth,
+  requireAnyRole(BUYER_ALLOWED_ROLES),
+  orderController.createOrder,
+);
 
 /**
  * @swagger
@@ -98,7 +105,12 @@ router.post('/', requireAuth, orderController.createOrder);
  *         description: Orders retrieved successfully
  */
 
-router.get('/', requireAuth, orderController.getMyOrders);
+router.get(
+  '/',
+  requireAuth,
+  requireAnyRole(BUYER_ALLOWED_ROLES),
+  orderController.getMyOrders,
+);
 /**
  * @swagger
  * /orders/{id}/cancel:
@@ -119,6 +131,11 @@ router.get('/', requireAuth, orderController.getMyOrders);
  *         description: Order cancelled
  */
 
-router.patch('/:id/cancel', requireAuth, orderController.cancelOrder);
+router.patch(
+  '/:id/cancel',
+  requireAuth,
+  requireAnyRole(BUYER_ALLOWED_ROLES),
+  orderController.cancelOrder,
+);
 
 module.exports = router;

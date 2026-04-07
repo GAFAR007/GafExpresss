@@ -28,12 +28,19 @@ import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
+import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/features/home/presentation/delivery_address_sheet.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/product_providers.dart';
+import 'package:frontend/app/features/home/presentation/purchase_request_providers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+
+bool _isPaystackTemporarilyLocked() {
+  return true;
+}
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
   final String productId;
@@ -47,13 +54,39 @@ class ProductDetailScreen extends ConsumerStatefulWidget {
 
 class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   bool _isPaying = false;
+  bool _isRequesting = false;
   bool _isReserving = false;
   bool _isReleasing = false;
   String? _reservedReservationId;
   int? _reservedQuantity;
   int _quantity = 1;
 
+  bool _ensureBuyerAccess(String action) {
+    final role = ref.read(authSessionProvider)?.user.role;
+    if (isBuyerRole(role)) {
+      return true;
+    }
+
+    AppDebug.log(
+      "PRODUCT_DETAIL",
+      "Buyer action blocked for non-buyer role",
+      extra: {"action": action, "role": role ?? ""},
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Staff accounts cannot use customer cart or checkout"),
+        ),
+      );
+    }
+    return false;
+  }
+
   void _addToCart(Product product) {
+    if (!_ensureBuyerAccess("add_to_cart")) {
+      return;
+    }
+
     if (!product.isPurchasable) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -114,6 +147,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   }
 
   Future<void> _startPaystackCheckout(Product product) async {
+    if (!_ensureBuyerAccess("paystack_checkout")) {
+      return;
+    }
+
     if (!product.isPurchasable) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -227,6 +264,105 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Checkout failed: $e")));
+    }
+  }
+
+  Future<void> _startPurchaseRequest(Product product) async {
+    if (!_ensureBuyerAccess("purchase_request")) {
+      return;
+    }
+
+    if (!product.isPurchasable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "This preview item is not available for purchase requests",
+          ),
+        ),
+      );
+      return;
+    }
+
+    AppDebug.log(
+      "PRODUCT_DETAIL",
+      "Request to buy tapped",
+      extra: {"id": product.id, "qty": _quantity},
+    );
+
+    if (_isRequesting) {
+      AppDebug.log("PRODUCT_DETAIL", "Ignored tap (_isRequesting=true)");
+      return;
+    }
+
+    final hasReservedHold = (_reservedReservationId ?? "").trim().isNotEmpty;
+    if (product.stock <= 0 && !hasReservedHold) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Product is out of stock")));
+      return;
+    }
+
+    setState(() => _isRequesting = true);
+
+    try {
+      final safeQty = product.stock > 0
+          ? _quantity.clamp(1, product.stock).toInt()
+          : _quantity;
+      final normalizedReservationId = (_reservedReservationId ?? "").trim();
+      final hasReservationId = normalizedReservationId.isNotEmpty;
+      final requestQuantity = hasReservationId
+          ? (_reservedQuantity ?? safeQty)
+          : safeQty;
+
+      final session = ref.read(authSessionProvider);
+      if (session == null) {
+        throw Exception("Not logged in");
+      }
+
+      final selection = await _selectDeliveryAddress();
+      if (selection == null) {
+        if (mounted) setState(() => _isRequesting = false);
+        return;
+      }
+
+      final api = ref.read(purchaseRequestApiProvider);
+      final result = await api.createPurchaseRequest(
+        token: session.token,
+        items: [CartItem.fromProduct(product, quantity: requestQuantity)],
+        deliveryAddress: selection.toPayload(),
+        reservationId: hasReservationId ? normalizedReservationId : null,
+      );
+
+      ref.invalidate(chatInboxProvider);
+
+      if (!mounted) return;
+      setState(() => _isRequesting = false);
+
+      final conversationId = result.conversationId.trim();
+      if (conversationId.isEmpty) {
+        throw Exception("Request created but chat was not returned");
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Request sent. Continue the payment discussion in chat.",
+          ),
+        ),
+      );
+      await context.push("/chat/$conversationId");
+    } catch (e) {
+      AppDebug.log(
+        "PRODUCT_DETAIL",
+        "Request to buy failed",
+        extra: {"error": "$e"},
+      );
+      if (mounted) setState(() => _isRequesting = false);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Request failed: $e")));
     }
   }
 
@@ -557,7 +693,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
       productPreorderAvailabilityProvider(widget.productId),
     );
     final cart = ref.watch(cartProvider);
-    final cartBadgeCount = cart.hasUnseenChanges ? cart.totalItems : 0;
+    final session = ref.watch(authSessionProvider);
+    final canAccessBuyerFlows = isBuyerRole(session?.user.role);
+    final cartBadgeCount = canAccessBuyerFlows && cart.hasUnseenChanges
+        ? cart.totalItems
+        : 0;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -577,46 +717,47 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           tooltip: "Back",
         ),
         actions: [
-          IconButton(
-            onPressed: () {
-              AppDebug.log("PRODUCT_DETAIL", "Go Cart tapped");
-              context.go("/cart");
-            },
-            icon: Stack(
-              children: [
-                const Icon(Icons.shopping_cart),
-                if (cartBadgeCount > 0)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      // WHY: Count signals unseen cart items.
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: scheme.error,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      constraints: const BoxConstraints(
-                        minWidth: 16,
-                        minHeight: 16,
-                      ),
-                      child: Text(
-                        cartBadgeCount > 99 ? "99+" : "$cartBadgeCount",
-                        style: TextStyle(
-                          color: scheme.onError,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
+          if (canAccessBuyerFlows)
+            IconButton(
+              onPressed: () {
+                AppDebug.log("PRODUCT_DETAIL", "Go Cart tapped");
+                context.go("/cart");
+              },
+              icon: Stack(
+                children: [
+                  const Icon(Icons.shopping_cart),
+                  if (cartBadgeCount > 0)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        // WHY: Count signals unseen cart items.
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
                         ),
-                        textAlign: TextAlign.center,
+                        decoration: BoxDecoration(
+                          color: scheme.error,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 16,
+                          minHeight: 16,
+                        ),
+                        child: Text(
+                          cartBadgeCount > 99 ? "99+" : "$cartBadgeCount",
+                          style: TextStyle(
+                            color: scheme.onError,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
         ],
       ),
       body: productAsync.when(
@@ -626,16 +767,19 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             product: product,
             preorderAvailabilityAsync: preorderAvailabilityAsync,
             isPaying: _isPaying,
+            isRequesting: _isRequesting,
             isReserving: _isReserving,
             isReleasing: _isReleasing,
             reservedReservationId: _reservedReservationId,
             quantity: _quantity,
             maxSelectableQuantity: maxSelectableQuantity,
+            buyerActionsEnabled: canAccessBuyerFlows,
             onAddToCart: () => _addToCart(product),
             onGoToCart: () {
               AppDebug.log("PRODUCT_DETAIL", "View cart tapped");
               context.go("/cart");
             },
+            onRequestToBuy: () => _startPurchaseRequest(product),
             onPayWithPaystack: () => _startPaystackCheckout(product),
             onReservePreorder: () => _reservePreorder(product),
             onReleasePreorder: _releasePreorderReservation,
@@ -662,13 +806,16 @@ class _ProductDetailBody extends StatelessWidget {
   final Product product;
   final AsyncValue<PreorderAvailability> preorderAvailabilityAsync;
   final bool isPaying;
+  final bool isRequesting;
   final bool isReserving;
   final bool isReleasing;
   final String? reservedReservationId;
   final int quantity;
   final int maxSelectableQuantity;
+  final bool buyerActionsEnabled;
   final VoidCallback onAddToCart;
   final VoidCallback onGoToCart;
+  final VoidCallback onRequestToBuy;
   final VoidCallback onPayWithPaystack;
   final VoidCallback onReservePreorder;
   final Future<void> Function() onReleasePreorder;
@@ -680,13 +827,16 @@ class _ProductDetailBody extends StatelessWidget {
     required this.product,
     required this.preorderAvailabilityAsync,
     required this.isPaying,
+    required this.isRequesting,
     required this.isReserving,
     required this.isReleasing,
     required this.reservedReservationId,
     required this.quantity,
     required this.maxSelectableQuantity,
+    required this.buyerActionsEnabled,
     required this.onAddToCart,
     required this.onGoToCart,
+    required this.onRequestToBuy,
     required this.onPayWithPaystack,
     required this.onReservePreorder,
     required this.onReleasePreorder,
@@ -718,9 +868,10 @@ class _ProductDetailBody extends StatelessWidget {
         (canBuy ||
             (preorderAvailability?.preorderEnabled == true &&
                 effectiveRemaining > 0));
-    final canCheckout =
-        product.isPurchasable && (canBuy || hasReservedHold) && !isPaying;
+    final canRequest =
+        product.isPurchasable && (canBuy || hasReservedHold) && !isRequesting;
     final canReleaseReservedHold = hasReservedHold && !isReleasing;
+    final isPaystackLocked = _isPaystackTemporarilyLocked();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -927,7 +1078,7 @@ class _ProductDetailBody extends StatelessWidget {
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: canBuy ? onAddToCart : null,
+                  onPressed: buyerActionsEnabled && canBuy ? onAddToCart : null,
                   child: Text(
                     product.isPurchasable ? "Add to cart" : "Preview only",
                   ),
@@ -936,20 +1087,64 @@ class _ProductDetailBody extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: onGoToCart,
+                  onPressed: buyerActionsEnabled ? onGoToCart : null,
                   child: const Text("View cart"),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: canCheckout ? onPayWithPaystack : null,
-            child: Text(
-              isPaying ? "Processing payment..." : "Pay with Paystack",
+          if (!buyerActionsEnabled) ...[
+            Text(
+              "Staff accounts can review products but cannot use customer cart or checkout.",
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: buyerActionsEnabled && canRequest
+                  ? onRequestToBuy
+                  : null,
+              icon: isRequesting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.chat_bubble_outline_rounded),
+              label: Text(
+                isRequesting ? "Starting request..." : "Request to Buy",
+              ),
             ),
           ),
-          if (isPaying) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: !buyerActionsEnabled || isPaystackLocked
+                  ? null
+                  : (product.isPurchasable && !isPaying
+                        ? onPayWithPaystack
+                        : null),
+              icon: const Icon(Icons.lock_outline_rounded),
+              label: Text(
+                isPaying ? "Processing payment..." : "Pay with Paystack",
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (buyerActionsEnabled)
+            Text(
+              "Temporary flow: chat with the seller, receive direct payment details, pay externally, then upload proof for approval.",
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          if (buyerActionsEnabled && isPaying) ...[
             const SizedBox(height: 8),
             TextButton(onPressed: onCancelPay, child: const Text("Cancel")),
           ],

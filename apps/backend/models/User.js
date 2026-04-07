@@ -148,6 +148,50 @@ const addressSchema = new mongoose.Schema(
   }
 );
 
+const businessPaymentAccountSchema = new mongoose.Schema(
+  {
+    bankName: {
+      type: String,
+      trim: true,
+      maxlength: 80,
+      required: true,
+    },
+    accountName: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      required: true,
+    },
+    accountNumber: {
+      type: String,
+      trim: true,
+      match: /^\d{10}$/,
+      required: true,
+    },
+    transferInstruction: {
+      type: String,
+      trim: true,
+      maxlength: 240,
+      required: true,
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    _id: true,
+  }
+);
+
 const userSchema = new mongoose.Schema(
   {
     // ✅ Name is optional for now (useful for profile later)
@@ -265,6 +309,10 @@ const userSchema = new mongoose.Schema(
     companyRegistration: {
       type: String,
       trim: true,
+    },
+    businessPaymentAccounts: {
+      type: [businessPaymentAccountSchema],
+      default: [],
     },
     // ✅ Business verification metadata (Dojah-based)
     businessVerificationStatus: {

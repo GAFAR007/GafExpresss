@@ -84,38 +84,38 @@ final chatInboxProvider = FutureProvider<List<ChatConversation>>((ref) async {
 
 final chatConversationDetailProvider =
     FutureProvider.family<ChatConversationDetail, String>((ref, id) async {
-  AppDebug.log(_logTag, _detailLoadStart, extra: {"id": id});
+      AppDebug.log(_logTag, _detailLoadStart, extra: {"id": id});
 
-  final session = ref.read(authSessionProvider);
-  if (session == null || !session.isTokenValid) {
-    AppDebug.log(
-      _logTag,
-      _sessionMissingMessage,
-      extra: {
-        _extraReasonKey: _reasonDetailMissing,
-        _extraNextActionKey: _nextActionSignIn,
-      },
-    );
-    throw Exception(_sessionExpiredMessage);
-  }
+      final session = ref.read(authSessionProvider);
+      if (session == null || !session.isTokenValid) {
+        AppDebug.log(
+          _logTag,
+          _sessionMissingMessage,
+          extra: {
+            _extraReasonKey: _reasonDetailMissing,
+            _extraNextActionKey: _nextActionSignIn,
+          },
+        );
+        throw Exception(_sessionExpiredMessage);
+      }
 
-  try {
-    final api = ref.read(chatApiProvider);
-    final detail = await api.fetchConversationDetail(
-      token: session.token,
-      conversationId: id,
-    );
-    AppDebug.log(_logTag, _detailLoadSuccess, extra: {"id": id});
-    return detail;
-  } catch (error) {
-    AppDebug.log(
-      _logTag,
-      _detailLoadFail,
-      extra: {"error": error.toString()},
-    );
-    rethrow;
-  }
-});
+      try {
+        final api = ref.read(chatApiProvider);
+        final detail = await api.fetchConversationDetail(
+          token: session.token,
+          conversationId: id,
+        );
+        AppDebug.log(_logTag, _detailLoadSuccess, extra: {"id": id});
+        return detail;
+      } catch (error) {
+        AppDebug.log(
+          _logTag,
+          _detailLoadFail,
+          extra: {"error": error.toString()},
+        );
+        rethrow;
+      }
+    });
 
 class ChatThreadState {
   final List<ChatMessage> messages;
@@ -165,11 +165,9 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
   StreamSubscription? _messageSub;
   StreamSubscription? _readSub;
 
-  ChatThreadController({
-    required Ref ref,
-    required this.conversationId,
-  })  : _ref = ref,
-        super(ChatThreadState.initial()) {
+  ChatThreadController({required Ref ref, required this.conversationId})
+    : _ref = ref,
+      super(ChatThreadState.initial()) {
     _init();
   }
 
@@ -192,10 +190,7 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
           _extraNextActionKey: _nextActionSignIn,
         },
       );
-      state = state.copyWith(
-        isLoading: false,
-        error: _sessionExpiredMessage,
-      );
+      state = state.copyWith(isLoading: false, error: _sessionExpiredMessage);
       return;
     }
 
@@ -208,23 +203,24 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
 
       state = state.copyWith(
         isLoading: false,
-        messages: messages.reversed.toList(),
+        messages: messages.reversed.map(_normalizeServerMessage).toList(),
         error: null,
       );
 
       await _markRead(messages);
 
-      AppDebug.log(_logTag, _threadLoadSuccess, extra: {"count": messages.length});
+      AppDebug.log(
+        _logTag,
+        _threadLoadSuccess,
+        extra: {"count": messages.length},
+      );
     } catch (error) {
       AppDebug.log(
         _logTag,
         _threadLoadFail,
         extra: {"error": error.toString()},
       );
-      state = state.copyWith(
-        isLoading: false,
-        error: error.toString(),
-      );
+      state = state.copyWith(isLoading: false, error: error.toString());
     }
   }
 
@@ -238,14 +234,22 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
 
     _messageSub = socket.messageStream.listen((event) {
       if (event.conversationId != conversationId) return;
-      final updated = [...state.messages, event.message];
+      final updated = _mergeMessage(
+        state.messages,
+        _normalizeServerMessage(event.message),
+      );
       state = state.copyWith(messages: updated);
+      _ref.invalidate(chatInboxProvider);
+      _ref.invalidate(chatConversationDetailProvider(conversationId));
+      if (event.message.eventType.trim().isNotEmpty) {
+        _ref.invalidate(chatConversationDetailProvider(conversationId));
+      }
       _markRead([event.message]);
     });
 
     _readSub = socket.readStream.listen((event) {
       if (event.conversationId != conversationId) return;
-      // WHY: Read receipts are UI-only for now; no state change needed.
+      _ref.invalidate(chatConversationDetailProvider(conversationId));
     });
   }
 
@@ -312,8 +316,26 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
     state = state.copyWith(pendingAttachments: updated);
   }
 
-  Future<void> sendMessage({
+  Future<void> sendMessage({required String body}) async {
+    final attachments = [...state.pendingAttachments];
+    await _submitMessage(body: body, attachments: attachments);
+  }
+
+  Future<void> retryMessage(String messageId) async {
+    final failedMessage = state.messages.firstWhere(
+      (message) => message.id == messageId,
+    );
+    await _submitMessage(
+      body: failedMessage.body,
+      attachments: failedMessage.attachments,
+      replaceMessageId: failedMessage.id,
+    );
+  }
+
+  Future<void> _submitMessage({
     required String body,
+    required List<ChatAttachment> attachments,
+    String? replaceMessageId,
   }) async {
     AppDebug.log(_logTag, _threadSendStart);
     final session = _ref.read(authSessionProvider);
@@ -322,6 +344,7 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
       return;
     }
 
+    final clientMessageId = "client-${DateTime.now().microsecondsSinceEpoch}";
     final tempMessage = ChatMessage(
       id: "temp-${DateTime.now().millisecondsSinceEpoch}",
       conversationId: conversationId,
@@ -331,13 +354,28 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
           ? chatMessageTypeAttachment
           : chatMessageTypeText,
       body: body.trim(),
+      senderName: "",
+      senderRole: session.user.role,
+      clientMessageId: clientMessageId,
+      eventType: "",
+      eventData: null,
+      status: ChatMessageStatus.sending,
+      deliveredAt: null,
+      seenAt: null,
       createdAt: DateTime.now(),
-      attachments: state.pendingAttachments,
+      isInternalNote: false,
+      failureMessage: "",
+      attachments: attachments,
     );
+
+    final baseMessages = replaceMessageId == null
+        ? state.messages
+        : state.messages.where((msg) => msg.id != replaceMessageId).toList();
 
     state = state.copyWith(
       isSending: true,
-      messages: [...state.messages, tempMessage],
+      pendingAttachments: [],
+      messages: [...baseMessages, tempMessage],
     );
 
     try {
@@ -347,22 +385,19 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
         payload: {
           "conversationId": conversationId,
           "body": body.trim(),
-          "attachmentIds":
-              state.pendingAttachments.map((att) => att.id).toList(),
+          "clientMessageId": clientMessageId,
+          "attachmentIds": attachments.map((att) => att.id).toList(),
         },
       );
 
-      final updated = state.messages
-          .where((msg) => msg.id != tempMessage.id)
-          .toList()
-        ..add(message);
-
-      state = state.copyWith(
-        isSending: false,
-        messages: updated,
-        pendingAttachments: [],
-        error: null,
+      final updated = _mergeMessage(
+        state.messages.where((msg) => msg.id != tempMessage.id).toList(),
+        _normalizeServerMessage(message),
       );
+
+      state = state.copyWith(isSending: false, messages: updated, error: null);
+      _ref.invalidate(chatInboxProvider);
+      _ref.invalidate(chatConversationDetailProvider(conversationId));
 
       AppDebug.log(_logTag, _threadSendSuccess);
     } catch (error) {
@@ -371,8 +406,19 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
         _threadSendFail,
         extra: {"error": error.toString()},
       );
+      final failedMessages = state.messages
+          .map(
+            (message) => message.id == tempMessage.id
+                ? message.copyWith(
+                    status: ChatMessageStatus.failed,
+                    failureMessage: error.toString(),
+                  )
+                : message,
+          )
+          .toList();
       state = state.copyWith(
         isSending: false,
+        messages: failedMessages,
         error: error.toString(),
       );
     }
@@ -388,9 +434,46 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
   }
 }
 
+ChatMessage _normalizeServerMessage(ChatMessage message) {
+  final deliveredAt = message.deliveredAt ?? message.createdAt;
+  final status = message.status ?? ChatMessageStatus.delivered;
+  return message.copyWith(
+    status: status,
+    deliveredAt: deliveredAt,
+    failureMessage: "",
+  );
+}
+
+List<ChatMessage> _mergeMessage(
+  List<ChatMessage> current,
+  ChatMessage incoming,
+) {
+  final updated =
+      current
+          .where(
+            (message) =>
+                message.id != incoming.id &&
+                !(message.clientMessageId.trim().isNotEmpty &&
+                    message.clientMessageId == incoming.clientMessageId),
+          )
+          .toList()
+        ..add(incoming);
+
+  updated.sort((left, right) {
+    final leftTime = left.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final rightTime = right.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final timeCompare = leftTime.compareTo(rightTime);
+    if (timeCompare != 0) {
+      return timeCompare;
+    }
+    return left.id.compareTo(right.id);
+  });
+  return updated;
+}
+
 final chatThreadProvider =
     StateNotifierProvider.family<ChatThreadController, ChatThreadState, String>(
-  (ref, conversationId) {
-    return ChatThreadController(ref: ref, conversationId: conversationId);
-  },
-);
+      (ref, conversationId) {
+        return ChatThreadController(ref: ref, conversationId: conversationId);
+      },
+    );

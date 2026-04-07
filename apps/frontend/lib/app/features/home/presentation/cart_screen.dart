@@ -28,13 +28,20 @@ import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/app_ui.dart';
 import 'package:frontend/app/features/home/presentation/cart_model.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
+import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/features/home/presentation/delivery_address_sheet.dart';
 import 'package:frontend/app/features/home/presentation/order_providers.dart';
 import 'package:frontend/app/features/home/presentation/paystack_checkout_screen.dart';
+import 'package:frontend/app/features/home/presentation/purchase_request_providers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/theme/app_radius.dart';
 import 'package:frontend/app/theme/app_spacing.dart';
 import 'package:frontend/app/theme/app_theme.dart';
+
+bool _isPaystackTemporarilyLocked() {
+  return true;
+}
 
 class CartScreen extends ConsumerStatefulWidget {
   const CartScreen({super.key});
@@ -45,6 +52,28 @@ class CartScreen extends ConsumerStatefulWidget {
 
 class _CartScreenState extends ConsumerState<CartScreen> {
   bool _isPaying = false;
+  bool _isRequesting = false;
+
+  bool _ensureBuyerAccess(String action) {
+    final role = ref.read(authSessionProvider)?.user.role;
+    if (isBuyerRole(role)) {
+      return true;
+    }
+
+    AppDebug.log(
+      "CART",
+      "Buyer action blocked for non-buyer role",
+      extra: {"action": action, "role": role ?? ""},
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Staff accounts cannot use customer cart or checkout"),
+        ),
+      );
+    }
+    return false;
+  }
 
   Future<DeliveryAddressSelection?> _selectDeliveryAddress() async {
     AppDebug.log("CART", "Delivery address selection start");
@@ -82,6 +111,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   }
 
   Future<void> _startPaystackCheckout(CartState cart) async {
+    if (!_ensureBuyerAccess("paystack_checkout")) {
+      return;
+    }
+
     if (_isPaying) {
       AppDebug.log("CART", "Ignored tap (_isPaying=true)");
       return;
@@ -161,6 +194,88 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Checkout failed: $e")));
+    }
+  }
+
+  Future<void> _startRequestToBuy(CartState cart) async {
+    if (!_ensureBuyerAccess("purchase_request")) {
+      return;
+    }
+
+    if (_isRequesting) {
+      AppDebug.log("CART", "Ignored request tap (_isRequesting=true)");
+      return;
+    }
+
+    if (cart.items.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Your cart is empty")));
+      return;
+    }
+
+    setState(() => _isRequesting = true);
+
+    try {
+      final session = ref.read(authSessionProvider);
+      if (session == null) {
+        throw Exception("Not logged in");
+      }
+
+      final selection = await _selectDeliveryAddress();
+      if (selection == null) {
+        if (mounted) setState(() => _isRequesting = false);
+        return;
+      }
+
+      final api = ref.read(purchaseRequestApiProvider);
+      final result = await api.createBatchPurchaseRequests(
+        token: session.token,
+        items: cart.items,
+        deliveryAddress: selection.toPayload(),
+      );
+
+      ref.read(cartProvider.notifier).clearCart();
+      ref.invalidate(chatInboxProvider);
+
+      if (!mounted) return;
+      setState(() => _isRequesting = false);
+
+      if (result.requests.isEmpty) {
+        throw Exception("No seller requests were created");
+      }
+
+      if (result.requests.length == 1) {
+        final conversationId = result.requests.first.conversationId.trim();
+        if (conversationId.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                "Request sent. Continue the payment discussion in chat.",
+              ),
+            ),
+          );
+          await context.push("/chat/$conversationId");
+          return;
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Requests sent to ${result.requests.length} sellers. Continue each payment in chat.",
+          ),
+        ),
+      );
+      context.go("/chat");
+    } catch (e) {
+      AppDebug.log("CART", "Request to buy failed", extra: {"error": "$e"});
+      if (mounted) setState(() => _isRequesting = false);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Request failed: $e")));
     }
   }
 
@@ -333,15 +448,23 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                             itemCount: cart.totalItems,
                             totalText: totalText,
                             isPaying: _isPaying,
-                            onCheckout: _isPaying
+                            isRequesting: _isRequesting,
+                            onRequestToBuy: _isRequesting
                                 ? null
                                 : () {
                                     AppDebug.log(
                                       "CART",
-                                      "Pay with Paystack tapped",
+                                      "Request to buy tapped",
                                     );
-                                    _startPaystackCheckout(cart);
+                                    _startRequestToBuy(cart);
                                   },
+                            onLockedPaystackTap: () {
+                              AppDebug.log(
+                                "CART",
+                                "Locked Paystack callback retained",
+                              );
+                              _startPaystackCheckout(cart);
+                            },
                             onCancelProcessing: _isPaying
                                 ? _cancelProcessing
                                 : null,
@@ -538,14 +661,18 @@ class _CartSummaryPanel extends StatelessWidget {
   final int itemCount;
   final String totalText;
   final bool isPaying;
-  final VoidCallback? onCheckout;
+  final bool isRequesting;
+  final VoidCallback? onRequestToBuy;
+  final VoidCallback? onLockedPaystackTap;
   final VoidCallback? onCancelProcessing;
 
   const _CartSummaryPanel({
     required this.itemCount,
     required this.totalText,
     required this.isPaying,
-    required this.onCheckout,
+    required this.isRequesting,
+    required this.onRequestToBuy,
+    required this.onLockedPaystackTap,
     required this.onCancelProcessing,
   });
 
@@ -553,6 +680,7 @@ class _CartSummaryPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isPaystackLocked = _isPaystackTemporarilyLocked();
 
     return AppSectionCard(
       tone: AppPanelTone.hero,
@@ -568,7 +696,7 @@ class _CartSummaryPanel extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            "Delivery address is selected securely before payment.",
+            "Delivery address is selected first, then the app opens one seller chat per business so each seller can quote separately.",
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
@@ -585,14 +713,25 @@ class _CartSummaryPanel extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: onCheckout,
-              icon: isPaying
+              onPressed: onRequestToBuy,
+              icon: isRequesting
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.lock_rounded),
+                  : const Icon(Icons.chat_bubble_outline_rounded),
+              label: Text(
+                isRequesting ? "Starting request..." : "Request to Buy",
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: isPaystackLocked ? null : onLockedPaystackTap,
+              icon: const Icon(Icons.lock_outline_rounded),
               label: Text(
                 isPaying ? "Processing payment..." : "Pay with Paystack",
               ),
@@ -620,7 +759,7 @@ class _CartSummaryPanel extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  "Checkout is handled through Paystack and your order list updates after payment starts.",
+                  "Temporary flow: seller reviews the address, adds logistics and service charge, sends direct payment details, then approves your uploaded proof in chat.",
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                     height: 1.35,
