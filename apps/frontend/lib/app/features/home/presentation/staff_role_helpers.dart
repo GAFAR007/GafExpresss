@@ -16,6 +16,7 @@ library;
 const String staffRoleAssetManager = "asset_manager";
 const String staffRoleFarmManager = "farm_manager";
 const String staffRoleEstateManager = "estate_manager";
+const String staffRoleCustomerCare = "customer_care";
 const String staffRoleAccountant = "accountant";
 const String staffRoleFieldAgent = "field_agent";
 const String staffRoleCleaner = "cleaner";
@@ -30,6 +31,7 @@ const List<String> staffRoleValues = [
   staffRoleAssetManager,
   staffRoleFarmManager,
   staffRoleEstateManager,
+  staffRoleCustomerCare,
   staffRoleAccountant,
   staffRoleFieldAgent,
   staffRoleCleaner,
@@ -42,15 +44,14 @@ const List<String> staffRoleValues = [
 ];
 
 // WHY: Staff status values power directory filters.
-const List<String> staffStatusValues = [
-  "active",
-  "suspended",
-  "terminated",
-];
+const List<String> staffStatusValues = ["active", "suspended", "terminated"];
 
 const String staffLabelFallback = "Staff member";
 
-String formatStaffRoleLabel(String raw, {String fallback = staffLabelFallback}) {
+String formatStaffRoleLabel(
+  String raw, {
+  String fallback = staffLabelFallback,
+}) {
   if (raw.trim().isEmpty) return fallback;
   return raw.replaceAll("_", " ");
 }

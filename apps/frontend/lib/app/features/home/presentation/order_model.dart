@@ -40,13 +40,11 @@ class OrderItem {
     final product = json["product"];
 
     // WHY: Backend may return populated product or just id.
-    final Map<String, dynamic> productMap =
-        product is Map<String, dynamic> ? product : const {};
+    final Map<String, dynamic> productMap = product is Map<String, dynamic>
+        ? product
+        : const {};
 
-    final productId = (productMap["_id"] ??
-            productMap["id"] ??
-            product ??
-            "")
+    final productId = (productMap["_id"] ?? productMap["id"] ?? product ?? "")
         .toString();
 
     return OrderItem(
@@ -67,10 +65,7 @@ class OrderDeliveryAddress {
   final String source;
   final UserAddress address;
 
-  const OrderDeliveryAddress({
-    required this.source,
-    required this.address,
-  });
+  const OrderDeliveryAddress({required this.source, required this.address});
 
   factory OrderDeliveryAddress.fromJson(Map<String, dynamic> json) {
     return OrderDeliveryAddress(
@@ -83,7 +78,10 @@ class OrderDeliveryAddress {
 class Order {
   final String id;
   final String status;
+  final String paymentSource;
   final int totalPriceCents;
+  final int logisticsFeeCents;
+  final int serviceChargeCents;
   final List<OrderItem> items;
   final OrderDeliveryAddress? deliveryAddress;
   final DateTime? createdAt;
@@ -92,7 +90,10 @@ class Order {
   const Order({
     required this.id,
     required this.status,
+    required this.paymentSource,
     required this.totalPriceCents,
+    required this.logisticsFeeCents,
+    required this.serviceChargeCents,
     required this.items,
     required this.deliveryAddress,
     required this.createdAt,
@@ -117,9 +118,12 @@ class Order {
     return Order(
       id: id,
       status: (json["status"] ?? "").toString(),
+      paymentSource: (json["paymentSource"] ?? "paystack").toString(),
       totalPriceCents: (json["totalPrice"] ?? 0) is int
           ? (json["totalPrice"] ?? 0) as int
           : int.tryParse((json["totalPrice"] ?? 0).toString()) ?? 0,
+      logisticsFeeCents: _parseFee(json["charges"], "logisticsFee"),
+      serviceChargeCents: _parseFee(json["charges"], "serviceCharge"),
       items: items,
       deliveryAddress: deliveryAddress,
       createdAt: _parseDate(json["createdAt"]),
@@ -127,8 +131,20 @@ class Order {
     );
   }
 
+  int get subtotalPriceCents =>
+      items.fold<int>(0, (sum, item) => sum + item.lineTotalCents);
+
   static DateTime? _parseDate(dynamic value) {
     if (value == null) return null;
     return DateTime.tryParse(value.toString());
+  }
+
+  static int _parseFee(dynamic charges, String key) {
+    if (charges is! Map<String, dynamic>) {
+      return 0;
+    }
+    final value = charges[key];
+    if (value is int) return value;
+    return int.tryParse((value ?? 0).toString()) ?? 0;
   }
 }

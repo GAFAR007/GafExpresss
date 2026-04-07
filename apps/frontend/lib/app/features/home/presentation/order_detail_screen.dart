@@ -61,8 +61,10 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       }
 
       final api = ref.read(orderApiProvider);
-      final updated =
-          await api.cancelOrder(token: session.token, orderId: _order.id);
+      final updated = await api.cancelOrder(
+        token: session.token,
+        orderId: _order.id,
+      );
 
       setState(() {
         _order = updated;
@@ -73,17 +75,17 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
       ref.invalidate(myOrdersProvider);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Order cancelled")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Order cancelled")));
     } catch (e) {
       AppDebug.log("ORDER_DETAIL", "Cancel failed", extra: {"error": "$e"});
       if (mounted) setState(() => _isCancelling = false);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Cancel failed: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Cancel failed: $e")));
     }
   }
 
@@ -96,6 +98,9 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
     final createdText = _formatDate(_order.createdAt);
     final itemCount = _order.items.length;
     final colorScheme = Theme.of(context).colorScheme;
+    final paymentNote = _order.paymentSource == "manual_direct"
+        ? "Payment was confirmed by the seller after proof review."
+        : "Payments are confirmed by webhook.";
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -141,10 +146,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                   const SizedBox(height: 12),
                   const _DashedDivider(),
                   const SizedBox(height: 12),
-                  Text(
-                    "Items",
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
+                  Text("Items", style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
                   // WHY: Use a non-scrollable list to keep a single receipt scroll.
                   ListView.separated(
@@ -204,7 +206,20 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                   const _DashedDivider(),
                   const SizedBox(height: 12),
                   // WHY: Summary row clarifies the final payable amount.
-                  _SummaryRow(label: "Subtotal", value: totalText),
+                  _SummaryRow(
+                    label: "Subtotal",
+                    value: formatNgnFromCents(_order.subtotalPriceCents),
+                  ),
+                  if (_order.logisticsFeeCents > 0)
+                    _SummaryRow(
+                      label: "Logistics",
+                      value: formatNgnFromCents(_order.logisticsFeeCents),
+                    ),
+                  if (_order.serviceChargeCents > 0)
+                    _SummaryRow(
+                      label: "Service charge",
+                      value: formatNgnFromCents(_order.serviceChargeCents),
+                    ),
                   _SummaryRow(label: "Tax", value: formatNgnFromCents(0)),
                   const SizedBox(height: 6),
                   _SummaryRow(
@@ -214,10 +229,17 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    "Payments are confirmed by webhook.",
+                    "Payment method: ${_order.paymentSource == "manual_direct" ? "Seller direct invoice" : "Paystack"}",
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    paymentNote,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -227,9 +249,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
               // WHY: Keep cancel visible outside the receipt for emphasis.
               ElevatedButton(
                 onPressed: _isCancelling ? null : _cancelOrder,
-                child: Text(
-                  _isCancelling ? "Cancelling..." : "Cancel Order",
-                ),
+                child: Text(_isCancelling ? "Cancelling..." : "Cancel Order"),
               ),
             ],
           ],

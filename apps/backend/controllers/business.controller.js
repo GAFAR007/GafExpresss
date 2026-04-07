@@ -12512,7 +12512,13 @@ async function updateOrderStatus(
       await getBusinessContext(
         req.user.sub,
       );
-    const { status } = req.body;
+    const {
+      status,
+      carrierName,
+      trackingReference,
+      dispatchNote,
+      estimatedDeliveryDate,
+    } = req.body;
 
     if (!status) {
       return res.status(400).json({
@@ -12526,6 +12532,12 @@ async function updateOrderStatus(
           businessId,
           orderId: req.params.id,
           status,
+          dispatch: {
+            carrierName,
+            trackingReference,
+            dispatchNote,
+            estimatedDeliveryDate,
+          },
           actor: {
             id: actor._id,
             role: actor.role,

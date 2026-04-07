@@ -48,11 +48,7 @@ class BusinessOrderApi {
       throw Exception("Missing auth token");
     }
 
-    return Options(
-      headers: {
-        "Authorization": "Bearer $token",
-      },
-    );
+    return Options(headers: {"Authorization": "Bearer $token"});
   }
 
   /// ------------------------------------------------------
@@ -115,6 +111,10 @@ class BusinessOrderApi {
     required String? token,
     required String orderId,
     required String status,
+    String carrierName = "",
+    String trackingReference = "",
+    String dispatchNote = "",
+    DateTime? estimatedDeliveryDate,
   }) async {
     AppDebug.log(
       "BUSINESS_ORDER_API",
@@ -124,7 +124,15 @@ class BusinessOrderApi {
 
     final resp = await _dio.patch(
       "/business/orders/$orderId/status",
-      data: {"status": status},
+      data: {
+        "status": status,
+        if (carrierName.trim().isNotEmpty) "carrierName": carrierName.trim(),
+        if (trackingReference.trim().isNotEmpty)
+          "trackingReference": trackingReference.trim(),
+        if (dispatchNote.trim().isNotEmpty) "dispatchNote": dispatchNote.trim(),
+        if (estimatedDeliveryDate != null)
+          "estimatedDeliveryDate": estimatedDeliveryDate.toIso8601String(),
+      },
       options: _authOptions(token),
     );
 

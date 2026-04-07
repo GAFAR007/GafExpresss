@@ -20,6 +20,27 @@ const { writeAuditLog } = require('../utils/audit');
 const { writeAnalyticsEvent } = require('../utils/analytics');
 const debug = require('../utils/debug');
 
+function normalizeDispatchPayload(dispatch = {}) {
+  return {
+    carrierName: (dispatch.carrierName || '').toString().trim(),
+    trackingReference: (dispatch.trackingReference || '')
+      .toString()
+      .trim(),
+    dispatchNote: (dispatch.dispatchNote || '').toString().trim(),
+    estimatedDeliveryDate: (dispatch.estimatedDeliveryDate || '')
+      .toString()
+      .trim(),
+  };
+}
+
+function parseDispatchDate(value, fieldLabel) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`${fieldLabel} must be a valid date`);
+  }
+  return parsed;
+}
+
 async function getBusinessOrders({ businessId, userId, query }) {
   debug('BUSINESS ORDER SERVICE: getBusinessOrders - entry', {
     businessId,
@@ -66,7 +87,13 @@ async function getBusinessOrders({ businessId, userId, query }) {
   };
 }
 
-async function updateOrderStatus({ businessId, orderId, status, actor }) {
+async function updateOrderStatus({
+  businessId,
+  orderId,
+  status,
+  actor,
+  dispatch,
+}) {
   debug('BUSINESS ORDER SERVICE: updateOrderStatus - entry', {
     businessId,
     orderId,
@@ -112,13 +139,50 @@ async function updateOrderStatus({ businessId, orderId, status, actor }) {
       });
     }
 
+    const normalizedDispatch = normalizeDispatchPayload(dispatch);
+
+    if (oldStatus === 'paid' && status === 'shipped') {
+      if (!normalizedDispatch.carrierName) {
+        throw new Error('Carrier name is required before marking as shipped');
+      }
+      if (!normalizedDispatch.trackingReference) {
+        throw new Error('Tracking reference is required before marking as shipped');
+      }
+      if (!normalizedDispatch.estimatedDeliveryDate) {
+        throw new Error(
+          'Estimated delivery date is required before marking as shipped'
+        );
+      }
+
+      order.fulfillment = {
+        ...(order.fulfillment?.toObject?.() || order.fulfillment || {}),
+        carrierName: normalizedDispatch.carrierName,
+        trackingReference: normalizedDispatch.trackingReference,
+        dispatchNote: normalizedDispatch.dispatchNote,
+        estimatedDeliveryDate: parseDispatchDate(
+          normalizedDispatch.estimatedDeliveryDate,
+          'Estimated delivery date'
+        ),
+        shippedAt: new Date(),
+        deliveredAt: order.fulfillment?.deliveredAt || null,
+      };
+    } else if (oldStatus === 'shipped' && status === 'delivered') {
+      order.fulfillment = {
+        ...(order.fulfillment?.toObject?.() || order.fulfillment || {}),
+        deliveredAt: new Date(),
+      };
+    }
+
     order.status = status;
     order.statusHistory.push({
       status,
       changedAt: new Date(),
       changedBy: actor?.id,
       changedByRole: actor?.role,
-      note: 'business_status_update',
+      note:
+        status === 'shipped'
+          ? 'business_status_update_with_dispatch'
+          : 'business_status_update',
     });
     await order.save({ session });
 
@@ -143,7 +207,18 @@ async function updateOrderStatus({ businessId, orderId, status, actor }) {
       eventType: 'order_status_updated',
       entityType: 'order',
       entityId: order._id,
-      metadata: { from: oldStatus, to: status },
+      metadata: {
+        from: oldStatus,
+        to: status,
+        ...(status === 'shipped'
+          ? {
+              carrierName: order.fulfillment?.carrierName || '',
+              trackingReference: order.fulfillment?.trackingReference || '',
+              estimatedDeliveryDate:
+                order.fulfillment?.estimatedDeliveryDate || null,
+            }
+          : {}),
+      },
     });
 
     return await Order.findById(orderId)

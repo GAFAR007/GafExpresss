@@ -36,6 +36,7 @@ const STAFF_ROLES = {
   ASSET_MANAGER: 'asset_manager',
   FARM_MANAGER: 'farm_manager',
   ESTATE_MANAGER: 'estate_manager',
+  CUSTOMER_CARE: 'customer_care',
   ACCOUNTANT: 'accountant',
   FIELD_AGENT: 'field_agent',
   CLEANER: 'cleaner',
@@ -103,6 +104,15 @@ const ROLE_PERMISSIONS = {
     ],
     [PERMISSION_MODULES.PAYROLL]: [
       PERMISSION_CAPABILITIES.MANAGE,
+      PERMISSION_CAPABILITIES.VIEW,
+    ],
+  },
+  [STAFF_ROLES.CUSTOMER_CARE]: {
+    [PERMISSION_MODULES.PAYMENTS]: [
+      PERMISSION_CAPABILITIES.VIEW,
+      PERMISSION_CAPABILITIES.APPROVE,
+    ],
+    [PERMISSION_MODULES.REPORTS]: [
       PERMISSION_CAPABILITIES.VIEW,
     ],
   },

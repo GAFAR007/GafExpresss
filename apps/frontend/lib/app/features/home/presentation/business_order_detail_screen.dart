@@ -120,6 +120,9 @@ class _SummaryCard extends StatelessWidget {
     final buyerEmail = order.user?.email ?? "—";
     final status = order.status.toUpperCase();
     final amount = formatNgnFromCents(order.totalPriceCents);
+    final paymentMethod = order.paymentSource == "manual_direct"
+        ? "Seller direct invoice"
+        : "Paystack";
     final itemCount = order.items.fold<int>(
       0,
       (sum, item) => sum + item.quantity,
@@ -185,6 +188,14 @@ class _SummaryCard extends StatelessWidget {
                 value: _formatDate(order.updatedAt),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            paymentMethod,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onPrimary.withOpacity(0.8),
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(

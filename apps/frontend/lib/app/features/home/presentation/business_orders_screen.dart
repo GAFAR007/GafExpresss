@@ -22,6 +22,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/app_refresh.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_profile_action.dart';
@@ -30,6 +31,7 @@ import 'package:frontend/app/features/home/presentation/business_order_providers
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_analytics_models.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
 class BusinessOrdersScreen extends ConsumerStatefulWidget {
@@ -66,6 +68,12 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
     final statusFilter = ref.watch(businessOrderStatusFilterProvider);
     final ordersAsync = ref.watch(businessOrdersProvider);
     final summaryAsync = ref.watch(businessAnalyticsSummaryProvider);
+    final session = ref.watch(authSessionProvider);
+    final profileAsync = ref.watch(userProfileProvider);
+    final canOpenRequestQueue = canManageSellerRequests(
+      role: session?.user.role,
+      staffRole: profileAsync.valueOrNull?.staffRole,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -127,6 +135,15 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
                 // WHY: Keep list context visible when filtering.
                 _OrdersMeta(count: result.orders.length, total: result.total),
                 const SizedBox(height: 12),
+                if (canOpenRequestQueue) ...[
+                  _SellerRequestQueueCard(
+                    onOpenQueue: () {
+                      _logTap("open_request_queue");
+                      context.go('/chat');
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 if (result.orders.isEmpty)
                   const _EmptyState(text: "No orders yet")
                 else
@@ -202,6 +219,18 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
       return;
     }
 
+    _DispatchStatusDraft? dispatchDraft;
+    if (selected == "shipped") {
+      dispatchDraft = await _openDispatchDialog(order);
+      if (dispatchDraft == null) {
+        _logTap(
+          "dispatch_status_cancelled",
+          extra: {"orderId": order.id, "status": selected},
+        );
+        return;
+      }
+    }
+
     try {
       setState(() => _updatingOrderId = order.id);
       final api = ref.read(businessOrderApiProvider);
@@ -210,6 +239,10 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
         token: ref.read(authSessionProvider)?.token,
         orderId: order.id,
         status: selected,
+        carrierName: dispatchDraft?.carrierName ?? "",
+        trackingReference: dispatchDraft?.trackingReference ?? "",
+        dispatchNote: dispatchDraft?.dispatchNote ?? "",
+        estimatedDeliveryDate: dispatchDraft?.estimatedDeliveryDate,
       );
       ref.invalidate(businessOrdersProvider);
       if (!mounted) return;
@@ -218,6 +251,7 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
         ref: ref,
         source: "business_order_update_success",
       );
+      if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Order updated to $selected")));
@@ -227,7 +261,7 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
         "Update status failed",
         extra: {"error": e.toString()},
       );
-      if (!mounted) return;
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Status update failed: ${e.toString()}")),
       );
@@ -270,6 +304,136 @@ class _BusinessOrdersScreenState extends ConsumerState<BusinessOrdersScreen> {
             ),
             const SizedBox(height: 8),
           ],
+        );
+      },
+    );
+  }
+
+  Future<_DispatchStatusDraft?> _openDispatchDialog(BusinessOrder order) async {
+    final carrierCtrl = TextEditingController(
+      text: order.fulfillment?.carrierName ?? "",
+    );
+    final trackingCtrl = TextEditingController(
+      text: order.fulfillment?.trackingReference ?? "",
+    );
+    final noteCtrl = TextEditingController(
+      text: order.fulfillment?.dispatchNote ?? "",
+    );
+
+    return showDialog<_DispatchStatusDraft>(
+      context: context,
+      builder: (context) {
+        String? errorText;
+        DateTime? selectedDate =
+            order.fulfillment?.estimatedDeliveryDate ?? DateTime.now();
+
+        return StatefulBuilder(
+          builder: (context, setLocalState) {
+            return AlertDialog(
+              title: const Text("Add dispatch info"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: carrierCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Carrier name",
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: trackingCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Tracking reference",
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () async {
+                        final now = DateTime.now();
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDate ?? now,
+                          firstDate: DateTime(now.year, now.month, now.day),
+                          lastDate: DateTime(kDatePickerLastYear),
+                        );
+                        if (picked != null) {
+                          setLocalState(() => selectedDate = picked);
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: "Estimated delivery date",
+                        ),
+                        child: Text(
+                          formatDateLabel(
+                            selectedDate,
+                            fallback: "Select a delivery date",
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: noteCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: "Dispatch note",
+                      ),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        errorText!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text("Cancel"),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (carrierCtrl.text.trim().isEmpty) {
+                      setLocalState(
+                        () => errorText = "Carrier name is required",
+                      );
+                      return;
+                    }
+                    if (trackingCtrl.text.trim().isEmpty) {
+                      setLocalState(
+                        () => errorText = "Tracking reference is required",
+                      );
+                      return;
+                    }
+                    if (selectedDate == null) {
+                      setLocalState(
+                        () => errorText = "Estimated delivery date is required",
+                      );
+                      return;
+                    }
+                    Navigator.of(context).pop(
+                      _DispatchStatusDraft(
+                        carrierName: carrierCtrl.text.trim(),
+                        trackingReference: trackingCtrl.text.trim(),
+                        dispatchNote: noteCtrl.text.trim(),
+                        estimatedDeliveryDate: selectedDate!,
+                      ),
+                    );
+                  },
+                  child: const Text("Mark shipped"),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -336,7 +500,7 @@ class _BusinessOrderCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: scheme.shadow.withOpacity(0.08),
+              color: scheme.shadow.withValues(alpha: 0.08),
               blurRadius: 14,
               offset: const Offset(0, 10),
             ),
@@ -561,6 +725,20 @@ class _AnalyticsHeader extends StatelessWidget {
   }
 }
 
+class _DispatchStatusDraft {
+  final String carrierName;
+  final String trackingReference;
+  final String dispatchNote;
+  final DateTime estimatedDeliveryDate;
+
+  const _DispatchStatusDraft({
+    required this.carrierName,
+    required this.trackingReference,
+    required this.dispatchNote,
+    required this.estimatedDeliveryDate,
+  });
+}
+
 class _AnalyticsTile extends StatelessWidget {
   final String label;
   final String value;
@@ -574,7 +752,7 @@ class _AnalyticsTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: scheme.surface.withOpacity(0.12),
+          color: scheme.surface.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -642,7 +820,7 @@ class _StatusBadgesRow extends StatelessWidget {
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: entries.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            separatorBuilder: (context, index) => const SizedBox(width: 10),
             itemBuilder: (context, index) {
               final entry = entries[index];
               final status = entry["status"] as String;
@@ -668,7 +846,7 @@ class _StatusBadgesRow extends StatelessWidget {
                     boxShadow: [
                       if (isActive)
                         BoxShadow(
-                          color: accent.withOpacity(0.25),
+                          color: accent.withValues(alpha: 0.25),
                           blurRadius: 12,
                           offset: const Offset(0, 6),
                         ),
@@ -694,7 +872,7 @@ class _StatusBadgesRow extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: isActive
-                              ? scheme.onPrimary.withOpacity(0.2)
+                              ? scheme.onPrimary.withValues(alpha: 0.2)
                               : scheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(999),
                         ),
@@ -770,6 +948,55 @@ class _EmptyState extends StatelessWidget {
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
+      ),
+    );
+  }
+}
+
+class _SellerRequestQueueCard extends StatelessWidget {
+  final VoidCallback onOpenQueue;
+
+  const _SellerRequestQueueCard({required this.onOpenQueue});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Purchase requests are handled in chat first",
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Temporary buyer requests stay in the chat request queue until you attend them and convert them into a normal order flow.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: onOpenQueue,
+              icon: const Icon(Icons.forum_outlined),
+              label: const Text("Open request queue"),
+            ),
+          ),
+        ],
       ),
     );
   }
