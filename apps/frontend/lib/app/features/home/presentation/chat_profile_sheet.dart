@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/chat_models.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "CHAT_PROFILE_SHEET";
 const String _logOpen = "profile_sheet_open";
@@ -47,18 +48,16 @@ Future<void> showChatProfileSheet({
   required BuildContext context,
   required List<ChatParticipantSummary> participants,
 }) async {
-  AppDebug.log(
-    _logTag,
-    _logOpen,
-    extra: {"count": participants.length},
-  );
+  AppDebug.log(_logTag, _logOpen, extra: {"count": participants.length});
 
   await showModalBottomSheet<void>(
     context: context,
     useSafeArea: true,
-    showDragHandle: true,
-    builder: (context) => _ChatProfileSheet(
-      participants: participants,
+    backgroundColor: Colors.transparent,
+    showDragHandle: false,
+    builder: (context) => Theme(
+      data: AppTheme.business(),
+      child: _ChatProfileSheet(participants: participants),
     ),
   );
 }
@@ -66,48 +65,81 @@ Future<void> showChatProfileSheet({
 class _ChatProfileSheet extends StatelessWidget {
   final List<ChatParticipantSummary> participants;
 
-  const _ChatProfileSheet({
-    required this.participants,
-  });
+  const _ChatProfileSheet({required this.participants});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Padding(
-      padding: const EdgeInsets.all(_sheetPadding),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(_title, style: theme.textTheme.titleMedium),
-              const Spacer(),
-              IconButton(
-                onPressed: () {
-                  AppDebug.log(_logTag, _logTapClose);
-                  Navigator.of(context).pop();
-                },
-                icon: const Icon(Icons.close),
-                tooltip: _tooltipClose,
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(_sheetPadding),
+        child: Container(
+          padding: const EdgeInsets.all(_sheetPadding),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: colorScheme.outlineVariant),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 22,
+                offset: const Offset(0, 12),
               ),
             ],
           ),
-          const SizedBox(height: _cardSpacing),
-          Text(
-            _sectionMembers,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 56,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: _cardSpacing),
+              Row(
+                children: [
+                  Text(_title, style: theme.textTheme.titleMedium),
+                  const Spacer(),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: colorScheme.outlineVariant),
+                    ),
+                    child: IconButton(
+                      onPressed: () {
+                        AppDebug.log(_logTag, _logTapClose);
+                        Navigator.of(context).pop();
+                      },
+                      icon: const Icon(Icons.close),
+                      tooltip: _tooltipClose,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: _cardSpacing),
+              Text(
+                _sectionMembers,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: _cardSpacing),
+              ...participants.map(
+                (participant) =>
+                    _ParticipantProfileCard(participant: participant),
+              ),
+            ],
           ),
-          const SizedBox(height: _cardSpacing),
-          ...participants.map(
-            (participant) =>
-                _ParticipantProfileCard(participant: participant),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -116,9 +148,7 @@ class _ChatProfileSheet extends StatelessWidget {
 class _ParticipantProfileCard extends StatelessWidget {
   final ChatParticipantSummary participant;
 
-  const _ParticipantProfileCard({
-    required this.participant,
-  });
+  const _ParticipantProfileCard({required this.participant});
 
   @override
   Widget build(BuildContext context) {
@@ -131,13 +161,13 @@ class _ParticipantProfileCard extends StatelessWidget {
     final businessLabel = participant.businessName.trim().isNotEmpty
         ? participant.businessName
         : (participant.businessId.trim().isNotEmpty
-            ? participant.businessId
-            : _fallbackBusiness);
+              ? participant.businessId
+              : _fallbackBusiness);
     final estateLabel = participant.estateName.trim().isNotEmpty
         ? participant.estateName
         : participant.estateAssetId.trim().isNotEmpty
-            ? participant.estateAssetId
-            : _fallbackEstate;
+        ? participant.estateAssetId
+        : _fallbackEstate;
     final roleLabel = participant.role.trim().isEmpty
         ? _fallbackRole
         : participant.role.replaceAll("_", " ");
@@ -146,9 +176,16 @@ class _ParticipantProfileCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: _cardSpacing),
       padding: const EdgeInsets.all(_sheetPadding),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 14,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,8 +194,7 @@ class _ParticipantProfileCard extends StatelessWidget {
             radius: _avatarRadius,
             backgroundColor: colorScheme.primaryContainer,
             // WHY: Use avatar when provided to improve recognition.
-            backgroundImage:
-                avatarUrl.isEmpty ? null : NetworkImage(avatarUrl),
+            backgroundImage: avatarUrl.isEmpty ? null : NetworkImage(avatarUrl),
             child: avatarUrl.isEmpty
                 ? Text(
                     displayName.isNotEmpty
@@ -190,18 +226,9 @@ class _ParticipantProfileCard extends StatelessWidget {
                   spacing: _chipSpacing,
                   runSpacing: _chipSpacing,
                   children: [
-                    _MetaChip(
-                      label: _labelRole,
-                      value: roleLabel,
-                    ),
-                    _MetaChip(
-                      label: _labelBusiness,
-                      value: businessLabel,
-                    ),
-                    _MetaChip(
-                      label: _labelEstate,
-                      value: estateLabel,
-                    ),
+                    _MetaChip(label: _labelRole, value: roleLabel),
+                    _MetaChip(label: _labelBusiness, value: businessLabel),
+                    _MetaChip(label: _labelEstate, value: estateLabel),
                     _MetaChip(
                       label: _labelStatus,
                       // WHY: Status reflects membership (not online presence).
@@ -222,10 +249,7 @@ class _MetaChip extends StatelessWidget {
   final String label;
   final String value;
 
-  const _MetaChip({
-    required this.label,
-    required this.value,
-  });
+  const _MetaChip({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -237,9 +261,10 @@ class _MetaChip extends StatelessWidget {
         "$label: $value",
         style: theme.textTheme.labelSmall?.copyWith(
           color: colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
         ),
       ),
-      backgroundColor: colorScheme.surface,
+      backgroundColor: colorScheme.surfaceContainerLow,
       side: BorderSide(color: colorScheme.outlineVariant),
     );
   }

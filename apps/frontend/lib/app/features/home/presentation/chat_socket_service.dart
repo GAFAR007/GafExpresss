@@ -60,19 +60,33 @@ class ChatSocketReadEvent {
 
 class ChatSocketService {
   io.Socket? _socket;
+  String? _token;
+  final Map<String, int> _conversationRefs = <String, int>{};
   final _messageController =
       StreamController<ChatSocketMessageEvent>.broadcast();
-  final _readController =
-      StreamController<ChatSocketReadEvent>.broadcast();
+  final _readController = StreamController<ChatSocketReadEvent>.broadcast();
 
-  Stream<ChatSocketMessageEvent> get messageStream =>
-      _messageController.stream;
+  Stream<ChatSocketMessageEvent> get messageStream => _messageController.stream;
   Stream<ChatSocketReadEvent> get readStream => _readController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
   void connect({required String token}) {
-    if (isConnected) return;
+    final normalizedToken = token.trim();
+    if (normalizedToken.isEmpty) return;
+
+    if (_socket != null && _token == normalizedToken) {
+      if (isConnected) {
+        _rejoinTrackedConversations();
+        return;
+      }
+      _socket?.connect();
+      return;
+    }
+
+    final tokenChanged = _token != null && _token != normalizedToken;
+    _disposeSocket(clearTrackedConversations: tokenChanged);
+    _token = normalizedToken;
 
     AppDebug.log(_logTag, _logConnectStart);
 
@@ -80,13 +94,15 @@ class ChatSocketService {
       AppConstants.apiBaseUrl,
       io.OptionBuilder()
           .setTransports(['websocket'])
-          .setAuth({"token": "Bearer $token"})
+          .disableAutoConnect()
+          .setAuth({"token": "Bearer $normalizedToken"})
           .enableForceNew()
           .build(),
     );
 
     _socket?.onConnect((_) {
       AppDebug.log(_logTag, _logConnectOk);
+      _rejoinTrackedConversations();
     });
 
     _socket?.onDisconnect((_) {
@@ -146,24 +162,61 @@ class ChatSocketService {
         extra: {"payload": payload.toString()},
       );
     });
+
+    _socket?.connect();
+  }
+
+  void _rejoinTrackedConversations() {
+    if (!isConnected) return;
+    for (final conversationId in _conversationRefs.keys) {
+      _emitJoin(conversationId);
+    }
+  }
+
+  void _emitJoin(String conversationId) {
+    _socket?.emit(chatEventConversationJoin, {
+      "conversationId": conversationId,
+    });
   }
 
   void joinConversation(String conversationId) {
-    if (!isConnected || conversationId.trim().isEmpty) return;
-    AppDebug.log(_logTag, _logJoin, extra: {"conversationId": conversationId});
-    _socket?.emit(
-      chatEventConversationJoin,
-      {"conversationId": conversationId},
-    );
+    final normalizedId = conversationId.trim();
+    if (normalizedId.isEmpty) return;
+
+    final currentCount = _conversationRefs[normalizedId] ?? 0;
+    _conversationRefs[normalizedId] = currentCount + 1;
+
+    if (currentCount > 0) {
+      return;
+    }
+
+    AppDebug.log(_logTag, _logJoin, extra: {"conversationId": normalizedId});
+
+    if (isConnected) {
+      _emitJoin(normalizedId);
+      return;
+    }
+
+    _socket?.connect();
   }
 
   void leaveConversation(String conversationId) {
-    if (!isConnected || conversationId.trim().isEmpty) return;
-    AppDebug.log(_logTag, _logLeave, extra: {"conversationId": conversationId});
-    _socket?.emit(
-      chatEventConversationLeave,
-      {"conversationId": conversationId},
-    );
+    final normalizedId = conversationId.trim();
+    if (normalizedId.isEmpty) return;
+
+    final currentCount = _conversationRefs[normalizedId] ?? 0;
+    if (currentCount <= 1) {
+      _conversationRefs.remove(normalizedId);
+      AppDebug.log(_logTag, _logLeave, extra: {"conversationId": normalizedId});
+      if (isConnected) {
+        _socket?.emit(chatEventConversationLeave, {
+          "conversationId": normalizedId,
+        });
+      }
+      return;
+    }
+
+    _conversationRefs[normalizedId] = currentCount - 1;
   }
 
   void emitRead({
@@ -172,19 +225,24 @@ class ChatSocketService {
   }) {
     if (!isConnected || conversationId.trim().isEmpty) return;
     AppDebug.log(_logTag, _logReadEmit, extra: {"count": messageIds.length});
-    _socket?.emit(
-      chatEventMessageRead,
-      {
-        "conversationId": conversationId,
-        "messageIds": messageIds,
-      },
-    );
+    _socket?.emit(chatEventMessageRead, {
+      "conversationId": conversationId,
+      "messageIds": messageIds,
+    });
   }
 
   void disconnect() {
+    _token = null;
+    _disposeSocket(clearTrackedConversations: true);
+  }
+
+  void _disposeSocket({required bool clearTrackedConversations}) {
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;
+    if (clearTrackedConversations) {
+      _conversationRefs.clear();
+    }
   }
 
   void dispose() {

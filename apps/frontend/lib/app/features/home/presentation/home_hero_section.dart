@@ -30,7 +30,7 @@ class HomeHeroSection extends StatelessWidget {
   final String promoLabel;
   final int cartBadgeCount;
   final List<HomeHeroMetric> metrics;
-  final VoidCallback onCartTap;
+  final VoidCallback? onCartTap;
   final VoidCallback onPrimaryTap;
   final VoidCallback onSecondaryTap;
   final VoidCallback onPromoTap;
@@ -84,7 +84,10 @@ class HomeHeroSection extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              _CartButton(badgeCount: cartBadgeCount, onTap: onCartTap),
+              if (onCartTap != null)
+                _CartButton(badgeCount: cartBadgeCount, onTap: onCartTap!)
+              else
+                const SizedBox(width: 44, height: 44),
             ],
           ),
           const SizedBox(height: AppSpacing.lg),

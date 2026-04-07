@@ -24,6 +24,7 @@ import 'package:frontend/app/features/home/presentation/presentation/forgot_pass
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
 import 'package:frontend/app/features/home/presentation/cart_screen.dart';
@@ -54,6 +55,7 @@ import 'package:frontend/app/features/home/presentation/tenant_dashboard_screen.
 import 'package:frontend/app/features/home/presentation/my_orders_screen.dart';
 import 'package:frontend/app/features/home/presentation/order_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/chat_inbox_screen.dart';
+import 'package:frontend/app/features/home/presentation/chat_profile_screen.dart';
 import 'package:frontend/app/features/home/presentation/chat_thread_screen.dart';
 import 'package:frontend/app/features/home/presentation/chat_routes.dart';
 import 'package:frontend/app/features/home/presentation/chat_models.dart';
@@ -113,6 +115,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final bool isBusinessInvite = path.startsWith('/business-invite');
       final bool isTenantVerification = path == '/tenant-verification';
       final bool isTenantDashboard = path.startsWith('/tenant-dashboard');
+      final bool isBuyerProtectedRoute =
+          path == '/cart' || path.startsWith('/orders');
       final bool isPublicRoute =
           isAuthRoute ||
           isPublicProduct ||
@@ -224,6 +228,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
       }
 
+      if (isAuthed && isBuyerProtectedRoute) {
+        final role = session.user.role;
+        if (!isBuyerRole(role)) {
+          AppDebug.log(
+            "ROUTER",
+            "redirect -> /settings (buyer guard)",
+            extra: {"role": role},
+          );
+          return '/settings';
+        }
+      }
+
       return null;
     },
     routes: [
@@ -283,6 +299,20 @@ final routerProvider = Provider<GoRouter>((ref) {
               ? ChatThreadArgs(conversation: extra)
               : null;
           return ChatThreadScreen(conversationId: conversationId, args: args);
+        },
+      ),
+      GoRoute(
+        path:
+            "$chatThreadRouteBase/:$chatThreadRouteParam/$chatProfileRouteSegment",
+        builder: (context, state) {
+          AppDebug.log("ROUTER", "-> /chat/:id/profile");
+          final conversationId =
+              state.pathParameters[chatThreadRouteParam] ?? "";
+          final focusUserId = state.uri.queryParameters[chatProfileUserQuery];
+          return ChatProfileScreen(
+            conversationId: conversationId,
+            focusUserId: focusUserId,
+          );
         },
       ),
       GoRoute(

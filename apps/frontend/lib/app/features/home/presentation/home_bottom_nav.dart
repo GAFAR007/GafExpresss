@@ -19,6 +19,7 @@ class HomeBottomNav extends StatelessWidget {
   final ValueChanged<int> onTap;
   final int cartBadgeCount;
   final bool showTenantTab;
+  final bool showBuyerTabs;
 
   const HomeBottomNav({
     super.key,
@@ -26,6 +27,7 @@ class HomeBottomNav extends StatelessWidget {
     required this.onTap,
     required this.cartBadgeCount,
     required this.showTenantTab,
+    this.showBuyerTabs = true,
   });
 
   @override
@@ -39,16 +41,18 @@ class HomeBottomNav extends StatelessWidget {
         selectedIcon: Icon(Icons.home_rounded),
         label: "Home",
       ),
-      NavigationDestination(
-        icon: _CartIcon(count: cartBadgeCount, selected: false),
-        selectedIcon: _CartIcon(count: cartBadgeCount, selected: true),
-        label: "Cart",
-      ),
-      const NavigationDestination(
-        icon: Icon(Icons.receipt_long_outlined),
-        selectedIcon: Icon(Icons.receipt_long_rounded),
-        label: "Orders",
-      ),
+      if (showBuyerTabs)
+        NavigationDestination(
+          icon: _CartIcon(count: cartBadgeCount, selected: false),
+          selectedIcon: _CartIcon(count: cartBadgeCount, selected: true),
+          label: "Cart",
+        ),
+      if (showBuyerTabs)
+        const NavigationDestination(
+          icon: Icon(Icons.receipt_long_outlined),
+          selectedIcon: Icon(Icons.receipt_long_rounded),
+          label: "Orders",
+        ),
       const NavigationDestination(
         icon: Icon(Icons.chat_bubble_outline_rounded),
         selectedIcon: Icon(Icons.chat_bubble_rounded),
@@ -116,7 +120,9 @@ class _CartIcon extends StatelessWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Icon(selected ? Icons.shopping_cart_rounded : Icons.shopping_cart_outlined),
+        Icon(
+          selected ? Icons.shopping_cart_rounded : Icons.shopping_cart_outlined,
+        ),
         if (count > 0)
           Positioned(
             right: -8,

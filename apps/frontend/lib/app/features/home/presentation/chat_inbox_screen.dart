@@ -13,6 +13,8 @@
 /// - Allows business roles to start new chats.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,11 +25,11 @@ import 'package:frontend/app/features/home/presentation/chat_new_conversation_sh
 import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_routes.dart';
 import 'package:frontend/app/features/home/presentation/chat_widgets.dart';
-import 'package:frontend/app/features/home/presentation/business_profile_action.dart';
 import 'package:frontend/app/features/home/presentation/cart_providers.dart';
 import 'package:frontend/app/features/home/presentation/home_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "CHAT_INBOX";
 const String _logBuild = "build()";
@@ -71,6 +73,9 @@ class ChatInboxScreen extends ConsumerStatefulWidget {
 class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
   // WHY: Persist search input across rebuilds.
   final TextEditingController _searchController = TextEditingController();
+  final Set<String> _joinedConversationIds = <String>{};
+  StreamSubscription? _messageSub;
+  StreamSubscription? _readSub;
   _ChatInboxFilter _filter = _ChatInboxFilter.direct;
 
   void _log(String message, {Map<String, dynamic>? extra}) {
@@ -78,8 +83,64 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _bindRealtime();
+  }
+
+  void _bindRealtime() {
+    final session = ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      return;
+    }
+
+    final socket = ref.read(chatSocketProvider);
+    socket.connect(token: session.token);
+
+    _messageSub ??= socket.messageStream.listen((_) {
+      if (!mounted) {
+        return;
+      }
+      ref.invalidate(chatInboxProvider);
+    });
+
+    _readSub ??= socket.readStream.listen((_) {
+      if (!mounted) {
+        return;
+      }
+      ref.invalidate(chatInboxProvider);
+    });
+  }
+
+  void _syncConversationRooms(List<ChatConversation> conversations) {
+    final socket = ref.read(chatSocketProvider);
+    final nextIds = conversations
+        .map((conversation) => conversation.id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    for (final conversationId in nextIds.difference(_joinedConversationIds)) {
+      socket.joinConversation(conversationId);
+    }
+
+    for (final conversationId in _joinedConversationIds.difference(nextIds)) {
+      socket.leaveConversation(conversationId);
+    }
+
+    _joinedConversationIds
+      ..clear()
+      ..addAll(nextIds);
+  }
+
+  @override
   void dispose() {
     // WHY: Prevent controller leaks when leaving the inbox screen.
+    final socket = ref.read(chatSocketProvider);
+    for (final conversationId in _joinedConversationIds) {
+      socket.leaveConversation(conversationId);
+    }
+    _messageSub?.cancel();
+    _readSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -125,106 +186,172 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
 
     final conversationsAsync = ref.watch(chatInboxProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(_ChatInboxCopy.title),
-        actions: isBusiness
-            ? const [BusinessProfileAction(logTag: _logTag)]
-            : null,
-      ),
-      floatingActionButton: canCreate
-          ? FloatingActionButton(
-              onPressed: () => _openNewChat(context),
-              child: const Icon(Icons.add),
-            )
-          : null,
-      bottomNavigationBar: isBusiness
-          ? BusinessBottomNav(
-              currentIndex: 4,
-              onTap: (index) {
-                _log("business_nav", extra: {"index": index});
-                switch (index) {
-                  case 0:
-                    context.go('/home');
-                    return;
-                  case 1:
-                    context.go('/business-products');
-                    return;
-                  case 2:
-                    context.go('/business-dashboard');
-                    return;
-                  case 3:
-                    context.go('/business-orders');
-                    return;
-                  case 4:
-                    context.go('/chat');
-                    return;
-                  case 5:
-                    context.go('/settings');
-                    return;
-                }
-              },
-            )
-          : HomeBottomNav(
-              currentIndex: 3,
-              cartBadgeCount: cartBadgeCount,
-              showTenantTab: isTenant,
-              onTap: (index) {
-                _log("home_nav", extra: {"index": index});
-                if (index == 0) {
-                  context.go('/home');
-                  return;
-                }
-                if (index == 1) {
-                  context.go('/cart');
-                  return;
-                }
-                if (index == 2) {
-                  context.go('/orders');
-                  return;
-                }
-                if (index == 3) {
-                  context.go('/chat');
-                  return;
-                }
-                if (isTenant && index == 4) {
-                  context.go('/tenant-verification');
-                  return;
-                }
-                if (index == (isTenant ? 5 : 4)) {
-                  context.go('/settings');
-                }
-              },
+    return Theme(
+      data: AppTheme.business(),
+      child: Builder(
+        builder: (context) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Scaffold(
+            backgroundColor: colorScheme.surfaceContainerLowest,
+            appBar: AppBar(
+              title: const Text(_ChatInboxCopy.title),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _ChatToolbarButton(
+                    icon: Icons.person_outline_rounded,
+                    tooltip: "Profile",
+                    onPressed: () => context.go('/settings'),
+                  ),
+                ),
+              ],
             ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          _log(_logRefresh);
-          // WHY: Refresh ensures the inbox stays in sync with server changes.
-          ref.invalidate(chatInboxProvider);
+            floatingActionButton: canCreate
+                ? FloatingActionButton(
+                    onPressed: () => _openNewChat(context),
+                    child: const Icon(Icons.add_rounded),
+                  )
+                : null,
+            bottomNavigationBar: isBusiness
+                ? BusinessBottomNav(
+                    currentIndex: 4,
+                    onTap: (index) {
+                      _log("business_nav", extra: {"index": index});
+                      switch (index) {
+                        case 0:
+                          context.go('/home');
+                          return;
+                        case 1:
+                          context.go('/business-products');
+                          return;
+                        case 2:
+                          context.go('/business-dashboard');
+                          return;
+                        case 3:
+                          context.go('/business-orders');
+                          return;
+                        case 4:
+                          context.go('/chat');
+                          return;
+                        case 5:
+                          context.go('/settings');
+                          return;
+                      }
+                    },
+                  )
+                : HomeBottomNav(
+                    currentIndex: 3,
+                    cartBadgeCount: cartBadgeCount,
+                    showTenantTab: isTenant,
+                    onTap: (index) {
+                      _log("home_nav", extra: {"index": index});
+                      if (index == 0) {
+                        context.go('/home');
+                        return;
+                      }
+                      if (index == 1) {
+                        context.go('/cart');
+                        return;
+                      }
+                      if (index == 2) {
+                        context.go('/orders');
+                        return;
+                      }
+                      if (index == 3) {
+                        context.go('/chat');
+                        return;
+                      }
+                      if (isTenant && index == 4) {
+                        context.go('/tenant-verification');
+                        return;
+                      }
+                      if (index == (isTenant ? 5 : 4)) {
+                        context.go('/settings');
+                      }
+                    },
+                  ),
+            body: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    colorScheme.surfaceContainerLowest,
+                    colorScheme.surfaceContainerLow,
+                    colorScheme.surfaceContainerLowest,
+                  ],
+                ),
+              ),
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  _log(_logRefresh);
+                  // WHY: Refresh ensures the inbox stays in sync with server changes.
+                  ref.invalidate(chatInboxProvider);
+                },
+                child: conversationsAsync.when(
+                  data: (items) {
+                    _syncConversationRooms(items);
+                    return _ChatInboxContent(
+                      conversations: items,
+                      filter: _filter,
+                      searchController: _searchController,
+                      onFilterChange: (value) {
+                        _log(_logFilterChange, extra: {"filter": value.name});
+                        setState(() => _filter = value);
+                      },
+                      onSearchChanged: (value) {
+                        _log(
+                          _logSearchChange,
+                          extra: {"length": value.trim().length},
+                        );
+                        setState(() {});
+                      },
+                      onConversationTap: _handleOpenThread,
+                      onContactTap: (conversation) {
+                        _log(_logContactTap, extra: {"id": conversation.id});
+                        _handleOpenThread(conversation);
+                      },
+                    );
+                  },
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (error, _) =>
+                      const Center(child: Text("Unable to load conversations")),
+                ),
+              ),
+            ),
+          );
         },
-        child: conversationsAsync.when(
-          data: (items) => _ChatInboxContent(
-            conversations: items,
-            filter: _filter,
-            searchController: _searchController,
-            onFilterChange: (value) {
-              _log(_logFilterChange, extra: {"filter": value.name});
-              setState(() => _filter = value);
-            },
-            onSearchChanged: (value) {
-              _log(_logSearchChange, extra: {"length": value.trim().length});
-              setState(() {});
-            },
-            onConversationTap: _handleOpenThread,
-            onContactTap: (conversation) {
-              _log(_logContactTap, extra: {"id": conversation.id});
-              _handleOpenThread(conversation);
-            },
-          ),
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) =>
-              const Center(child: Text("Unable to load conversations")),
-        ),
+      ),
+    );
+  }
+}
+
+class _ChatToolbarButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  const _ChatToolbarButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: IconButton(
+        icon: Icon(icon),
+        tooltip: tooltip,
+        onPressed: onPressed,
       ),
     );
   }

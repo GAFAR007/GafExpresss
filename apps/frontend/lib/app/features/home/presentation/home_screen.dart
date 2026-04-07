@@ -25,6 +25,7 @@ import 'package:frontend/app/features/home/presentation/home_filter_sheet.dart';
 import 'package:frontend/app/features/home/presentation/home_hero_section.dart';
 import 'package:frontend/app/features/home/presentation/home_product_section.dart';
 import 'package:frontend/app/features/home/presentation/home_promo_section.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/features/home/presentation/home_search_results_section.dart';
 import 'package:frontend/app/features/home/presentation/home_search_section.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -176,6 +177,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
+    final session = ref.read(authSessionProvider);
+    if (!isBuyerRole(session?.user.role)) {
+      AppDebug.log(
+        "HOME",
+        "Quick add blocked for non-buyer role",
+        extra: {"role": session?.user.role ?? "", "productId": product.id},
+      );
+      context.go("/product/${product.id}");
+      return;
+    }
+
     ref.read(cartProvider.notifier).addProduct(product);
     ScaffoldMessenger.of(
       context,
@@ -186,9 +198,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final productsAsync = ref.watch(productsProvider);
     final cart = ref.watch(cartProvider);
-    final cartBadgeCount = cart.hasUnseenChanges ? cart.totalItems : 0;
     final session = ref.watch(authSessionProvider);
-    final isTenant = session?.user.role == "tenant";
+    final role = session?.user.role;
+    final isTenant = role == "tenant";
+    final canAccessBuyerFlows = isBuyerRole(role);
+    final cartBadgeCount = canAccessBuyerFlows && cart.hasUnseenChanges
+        ? cart.totalItems
+        : 0;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -196,24 +212,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         currentIndex: 0,
         cartBadgeCount: cartBadgeCount,
         showTenantTab: isTenant,
+        showBuyerTabs: canAccessBuyerFlows,
         onTap: (index) {
           if (index == 0) {
             context.go("/home");
             return;
           }
-          if (index == 1) {
+          var nextIndex = 1;
+          if (canAccessBuyerFlows && index == nextIndex) {
             context.go("/cart");
             return;
           }
-          if (index == 2) {
+          if (canAccessBuyerFlows) {
+            nextIndex += 1;
+          }
+          if (canAccessBuyerFlows && index == nextIndex) {
             context.go("/orders");
             return;
           }
-          if (index == 3) {
+          if (canAccessBuyerFlows) {
+            nextIndex += 1;
+          }
+          if (index == nextIndex) {
             context.go("/chat");
             return;
           }
-          if (isTenant && index == 4) {
+          nextIndex += 1;
+          if (isTenant && index == nextIndex) {
             context.go("/tenant-verification");
             return;
           }
@@ -228,6 +253,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               context: context,
               products: products,
               cartBadgeCount: cartBadgeCount,
+              canAccessBuyerFlows: canAccessBuyerFlows,
             ),
             loading: _buildLoadingState,
             error: (error, _) {
@@ -268,6 +294,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     required BuildContext context,
     required List<Product> products,
     required int cartBadgeCount,
+    required bool canAccessBuyerFlows,
   }) {
     if (products.isEmpty) {
       return SingleChildScrollView(
@@ -358,7 +385,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 : "Shop $highlightedCategory",
             cartBadgeCount: cartBadgeCount,
             metrics: heroMetrics,
-            onCartTap: () => context.go("/cart"),
+            onCartTap: canAccessBuyerFlows ? () => context.go("/cart") : null,
             onPrimaryTap: () => _scrollToKey(_featuredKey),
             onSecondaryTap: () => _scrollToKey(_categoriesKey),
             onPromoTap: highlightedCategory == null
