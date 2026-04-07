@@ -22,6 +22,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
+import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
@@ -119,6 +121,8 @@ const String _taskStatusSuccess = "Task status updated.";
 const String _taskStatusFailure = "Unable to update task status.";
 const String _taskProgressSuccess = "Daily progress logged.";
 const String _taskProgressFailure = "Unable to log daily progress.";
+const String _taskProgressNeedsAssignedStaff =
+    "Assign staff to this task before logging daily progress.";
 const String _approveTaskSuccess = "Task approved.";
 const String _approveTaskFailure = "Unable to approve task.";
 const String _rejectTaskSuccess = "Task rejected.";
@@ -206,6 +210,8 @@ const double _calendarSpacing = 8;
 const double _dayTileRadius = 14;
 const double _dayTilePadding = 10;
 const double _agendaCardPadding = 14;
+const int _workspaceAssetQueryPage = 1;
+const int _workspaceAssetQueryLimit = 200;
 final RegExp _importedProjectDayPattern = RegExp(
   r"Project day\s+\d+\s+\((\d{4}-\d{2}-\d{2})\)\.",
   caseSensitive: false,
@@ -315,6 +321,14 @@ class _ProductionPlanWorkspaceScreenState
             ),
           ),
           data: (detail) {
+            final assetsAsync = ref.watch(
+              businessAssetsProvider(
+                const BusinessAssetsQuery(
+                  page: _workspaceAssetQueryPage,
+                  limit: _workspaceAssetQueryLimit,
+                ),
+              ),
+            );
             final staffList =
                 staffAsync.valueOrNull ?? <BusinessStaffProfileSummary>[];
             final staffMap = _buildStaffMap(staffList);
@@ -360,6 +374,27 @@ class _ProductionPlanWorkspaceScreenState
             final phaseById = {
               for (final phase in detail.phases) phase.id: phase,
             };
+            final selectedEstateName = assetsAsync.maybeWhen(
+              data: (result) {
+                for (final asset in result.assets) {
+                  if (asset.id == detail.plan.estateAssetId) {
+                    return asset.name;
+                  }
+                }
+                return "";
+              },
+              orElse: () => "",
+            );
+            final inferredProductName = _inferProductNameFromPlanTitle(
+              detail.plan.title,
+            );
+            final productAsync = detail.plan.productId.trim().isEmpty
+                ? null
+                : ref.watch(businessProductByIdProvider(detail.plan.productId));
+            final selectedProductName =
+                productAsync?.valueOrNull?.name.trim().isNotEmpty == true
+                ? productAsync!.valueOrNull!.name.trim()
+                : inferredProductName;
             void selectDay(DateTime next) {
               AppDebug.log(
                 _logTag,
@@ -376,7 +411,10 @@ class _ProductionPlanWorkspaceScreenState
               padding: const EdgeInsets.all(_pagePadding),
               children: [
                 _WorkspaceSummaryCard(
+                  detail: detail,
                   plan: detail.plan,
+                  selectedEstateName: selectedEstateName,
+                  selectedProductName: selectedProductName,
                   selectedDay: selectedDay,
                   scheduledTaskCount: tasksForDay.length,
                   timelineRows: detail.timelineRows,
@@ -595,12 +633,14 @@ class _ProductionPlanWorkspaceScreenState
                     final rowsForTask = rowsForDay
                         .where((row) => row.taskId == task.id)
                         .toList();
+                    final assignedStaffIdsForTask = _resolveAssignedStaffIds(
+                      task,
+                    );
                     final canLogProgressForTask =
-                        canManageCalendar ||
-                        (canSubmitOwnProgress &&
-                            _resolveAssignedStaffIds(
-                              task,
-                            ).contains(selfStaffId));
+                        assignedStaffIdsForTask.isNotEmpty &&
+                        (canManageCalendar ||
+                            (canSubmitOwnProgress &&
+                                assignedStaffIdsForTask.contains(selfStaffId)));
                     return Padding(
                       padding: const EdgeInsets.only(bottom: _cardSpacing),
                       child: _AgendaTaskCard(
@@ -815,8 +855,13 @@ class _ProductionPlanWorkspaceScreenState
                                         planId: widget.planId,
                                       );
                                   _showSnackSafe(_taskProgressSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_taskProgressFailure);
+                                } catch (error) {
+                                  _showSnackSafe(
+                                    _resolveProductionWorkspaceErrorMessage(
+                                      error,
+                                      fallback: _taskProgressFailure,
+                                    ),
+                                  );
                                 }
                               }
                             : null,
@@ -946,8 +991,40 @@ class _ProductionPlanWorkspaceScreenState
   }
 }
 
+class _WorkspaceSummaryMetrics {
+  final int phaseCount;
+  final int totalTasks;
+  final int unassignedTasks;
+  final int totalProjectDays;
+
+  const _WorkspaceSummaryMetrics({
+    required this.phaseCount,
+    required this.totalTasks,
+    required this.unassignedTasks,
+    required this.totalProjectDays,
+  });
+
+  factory _WorkspaceSummaryMetrics.fromDetail(ProductionPlanDetail detail) {
+    final totalProjectDays =
+        detail.plan.startDate == null || detail.plan.endDate == null
+        ? 0
+        : detail.plan.endDate!.difference(detail.plan.startDate!).inDays + 1;
+    return _WorkspaceSummaryMetrics(
+      phaseCount: detail.phases.length,
+      totalTasks: detail.tasks.length,
+      unassignedTasks: detail.tasks
+          .where((task) => task.assignedStaffIds.isEmpty)
+          .length,
+      totalProjectDays: math.max(0, totalProjectDays),
+    );
+  }
+}
+
 class _WorkspaceSummaryCard extends StatelessWidget {
+  final ProductionPlanDetail detail;
   final ProductionPlan plan;
+  final String selectedEstateName;
+  final String selectedProductName;
   final DateTime selectedDay;
   final int scheduledTaskCount;
   final List<ProductionTimelineRow> timelineRows;
@@ -956,7 +1033,10 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   final VoidCallback? onReturnToDraft;
 
   const _WorkspaceSummaryCard({
+    required this.detail,
     required this.plan,
+    required this.selectedEstateName,
+    required this.selectedProductName,
     required this.selectedDay,
     required this.scheduledTaskCount,
     required this.timelineRows,
@@ -969,47 +1049,190 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final metrics = _WorkspaceSummaryMetrics.fromDetail(detail);
     final farmQuantitySummary = _summarizeFarmQuantities(
       plan: plan,
       timelineRows: timelineRows,
     );
+    final lastSavedLabel = plan.lastDraftSavedBy?.displayLabel ?? "";
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(20),
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stackHeader = constraints.maxWidth < 860;
+              final titleBlock = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Production workspace",
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    plan.title.trim().isEmpty
+                        ? "Untitled production plan"
+                        : plan.title.trim(),
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Run the live schedule here, keep staffing and progress current day by day, and jump back to the draft only when you need to revise the saved baseline.",
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              );
+              final statusBlock = Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ProductionStatusPill(label: plan.status),
+                  Chip(
+                    avatar: const Icon(Icons.history_outlined, size: 16),
+                    label: Text(
+                      "${plan.draftRevisionCount} saved revision${plan.draftRevisionCount == 1 ? '' : 's'}",
+                    ),
+                  ),
+                ],
+              );
+              if (stackHeader) {
+                return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      plan.title,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _formatDisplayDateRange(plan.startDate, plan.endDate),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                    titleBlock,
+                    const SizedBox(height: 14),
+                    statusBlock,
                   ],
-                ),
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: titleBlock),
+                  const SizedBox(width: 16),
+                  Flexible(child: statusBlock),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _SummaryPill(
+                icon: Icons.location_on_outlined,
+                label: selectedEstateName.trim().isEmpty
+                    ? "Estate not resolved"
+                    : selectedEstateName,
               ),
-              const SizedBox(width: 12),
-              ProductionStatusPill(label: plan.status),
+              _SummaryPill(
+                icon: Icons.spa_outlined,
+                label: selectedProductName.trim().isEmpty
+                    ? _inferProductNameFromPlanTitle(plan.title)
+                    : selectedProductName,
+              ),
+              _SummaryPill(
+                icon: Icons.schedule_outlined,
+                label: _formatDisplayDateRange(plan.startDate, plan.endDate),
+              ),
+              if (productionDomainRequiresPlantingTargets(plan.domainContext))
+                _SummaryPill(
+                  icon: Icons.grass_outlined,
+                  label: plan.plantingTargets?.isConfigured == true
+                      ? "${_formatProductionQuantity(plan.plantingTargets!.plannedPlantingQuantity)} ${plan.plantingTargets!.plannedPlantingUnit} ${formatProductionPlantingMaterialType(plan.plantingTargets!.materialType).toLowerCase()} → ${_formatProductionQuantity(plan.plantingTargets!.estimatedHarvestQuantity)} ${plan.plantingTargets!.estimatedHarvestUnit}"
+                      : "Planting baseline pending",
+                ),
             ],
+          ),
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wideTile = constraints.maxWidth >= 980;
+              final tileWidth = wideTile
+                  ? (constraints.maxWidth - 36) / 4
+                  : math.min(constraints.maxWidth, 220.0);
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    child: _WorkspaceHeroMetricTile(
+                      label: "Phases",
+                      value: metrics.phaseCount.toString(),
+                      helper: "Stage groups",
+                      icon: Icons.alt_route_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _WorkspaceHeroMetricTile(
+                      label: "Tasks",
+                      value: metrics.totalTasks.toString(),
+                      helper: "Live workload",
+                      icon: Icons.checklist_rtl_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _WorkspaceHeroMetricTile(
+                      label: "Needs staff",
+                      value: metrics.unassignedTasks.toString(),
+                      helper: "Unassigned tasks",
+                      icon: Icons.person_search_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _WorkspaceHeroMetricTile(
+                      label: "Project days",
+                      value: metrics.totalProjectDays.toString(),
+                      helper: metrics.totalProjectDays == 0
+                          ? "Dates missing"
+                          : "Schedule window",
+                      icon: Icons.calendar_month_outlined,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: colorScheme.outlineVariant),
+            ),
+            child: Text(
+              plan.lastDraftSavedAt == null
+                  ? "This production plan does not have a recorded draft save yet."
+                  : "Draft baseline last saved ${formatDateTimeLabel(plan.lastDraftSavedAt)}${lastSavedLabel.trim().isEmpty ? '' : ' by $lastSavedLabel'}.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
           ),
           const SizedBox(height: 14),
           Wrap(
@@ -1045,7 +1268,7 @@ class _WorkspaceSummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            "Keep this screen operational. Open draft to compare or update the saved draft, and use insights for KPIs, governance, and long-form reporting.",
+            "Keep this screen operational. Open draft to compare or revise the saved plan, and use insights for KPIs, governance, and longer-form reporting.",
             style: theme.textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
@@ -1072,6 +1295,75 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 label: const Text(_viewInsightsLabel),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceHeroMetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final String helper;
+  final IconData icon;
+
+  const _WorkspaceHeroMetricTile({
+    required this.label,
+    required this.value,
+    required this.helper,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(icon, color: colorScheme.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  helper,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2255,6 +2547,27 @@ String _formatDisplayDateRange(DateTime? start, DateTime? end) {
   return _formatShortCalendarDate(start ?? end!);
 }
 
+String _inferProductNameFromPlanTitle(String title) {
+  var normalizedTitle = title.trim();
+  normalizedTitle = normalizedTitle.replaceAll(
+    RegExp(r"\s+production\s+plan$", caseSensitive: false),
+    "",
+  );
+  normalizedTitle = normalizedTitle.replaceAll(
+    RegExp(r"\s+plan$", caseSensitive: false),
+    "",
+  );
+  return normalizedTitle.trim();
+}
+
+String _formatProductionQuantity(num value) {
+  final rounded = value.roundToDouble();
+  if ((value - rounded).abs() < 0.0001) {
+    return rounded.toInt().toString();
+  }
+  return value.toStringAsFixed(value.abs() >= 100 ? 1 : 2);
+}
+
 String _formatCalendarDate(DateTime value) {
   return "${_weekdayName(value.weekday)}, ${value.day} ${_monthName(value.month)} ${value.year}";
 }
@@ -3089,6 +3402,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   required bool canPickAnyAssignedStaff,
 }) async {
   final assignedStaffIds = _resolveAssignedStaffIds(task);
+  if (assignedStaffIds.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(_taskProgressNeedsAssignedStaff)),
+    );
+    return null;
+  }
   final assignedUnitIds = task.assignedUnitIds
       .map((value) => value.trim())
       .where((value) => value.isNotEmpty)

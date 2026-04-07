@@ -60,6 +60,9 @@ const String _logSupportTabChanged = "support_tab_changed";
 const String _logSaveDraftStart = "save_draft_start";
 const String _logSaveDraftSuccess = "save_draft_success";
 const String _logSaveDraftFailure = "save_draft_failure";
+const String _logStartProductionStart = "start_production_start";
+const String _logStartProductionSuccess = "start_production_success";
+const String _logStartProductionFailure = "start_production_failure";
 const String _logReturnToDraftStart = "return_to_draft_start";
 const String _logReturnToDraftSuccess = "return_to_draft_success";
 const String _logReturnToDraftFailure = "return_to_draft_failure";
@@ -68,6 +71,10 @@ const String _extraPlanIdKey = "planId";
 const String _extraMobileSectionKey = "mobileSection";
 const String _extraSupportTabKey = "supportTab";
 const String _extraDraftStatusKey = "draftStatus";
+const String _startProductionConfirmTitle = "Start this production plan?";
+const String _startProductionConfirmMessage =
+    "We will save the latest draft changes, activate the plan, and open the live production workspace.";
+const String _startProductionConfirmLabel = "Start production";
 
 class _DraftEditorLayoutMetrics {
   final int totalTasks;
@@ -490,6 +497,9 @@ class _ProductionPlanDraftEditorScreenState
                 ? 1
                 : task.requiredHeadcount,
             weight: task.weight < 1 ? 1 : task.weight,
+            scheduledStart: task.startDate,
+            scheduledDue: task.dueDate,
+            manualSortOrder: task.manualSortOrder,
             instructions: task.instructions,
             taskType: task.taskType,
             sourceTemplateKey: task.sourceTemplateKey,
@@ -568,6 +578,81 @@ class _ProductionPlanDraftEditorScreenState
     }
   }
 
+  Future<bool> _confirmStartProduction() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text(_startProductionConfirmTitle),
+          content: const Text(_startProductionConfirmMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text("Cancel"),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text(_startProductionConfirmLabel),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed == true;
+  }
+
+  Future<ProductionPlanDetail> _persistDraft({
+    String? existingPlanStatus,
+    bool showSuccessSnack = true,
+    bool syncEditorRoute = true,
+  }) async {
+    final controller = ref.read(productionPlanDraftProvider.notifier);
+    final actions = ref.read(productionPlanActionsProvider);
+    final planId = (widget.planId ?? "").trim();
+    final normalizedStatus = (existingPlanStatus ?? "").trim().toLowerCase();
+    final shouldUpdateExistingDraft =
+        planId.isNotEmpty && normalizedStatus == "draft";
+    final detail = shouldUpdateExistingDraft
+        ? await actions.updateDraft(
+            planId: planId,
+            payload: controller.toPayload(),
+          )
+        : await actions.saveDraft(payload: controller.toPayload());
+    if (!mounted) {
+      return detail;
+    }
+    final resolvedPlanId = detail.plan.id.trim();
+    final createdDraftCopy = planId.isNotEmpty && !shouldUpdateExistingDraft;
+    if (showSuccessSnack) {
+      _showSnack(
+        createdDraftCopy
+            ? "Draft copy saved."
+            : planId.isEmpty
+            ? "Draft saved."
+            : "Draft updated.",
+      );
+    }
+    AppDebug.log(
+      _draftEditorLogTag,
+      _logSaveDraftSuccess,
+      extra: <String, Object?>{
+        _extraPlanIdKey: resolvedPlanId,
+        _extraDraftStatusKey: normalizedStatus,
+      },
+    );
+    ref.invalidate(productionPlanDetailProvider(resolvedPlanId));
+    if (planId != resolvedPlanId) {
+      if (syncEditorRoute) {
+        context.go(productionPlanDraftStudioPath(planId: resolvedPlanId));
+      } else {
+        _hydratedPlanId = null;
+      }
+    } else {
+      _hydratedPlanId = null;
+    }
+    return detail;
+  }
+
   Future<void> _saveDraft({String? existingPlanStatus}) async {
     if (_isSaving) {
       return;
@@ -583,7 +668,6 @@ class _ProductionPlanDraftEditorScreenState
       _isSaving = true;
     });
     try {
-      final actions = ref.read(productionPlanActionsProvider);
       final planId = (widget.planId ?? "").trim();
       final normalizedStatus = (existingPlanStatus ?? "").trim().toLowerCase();
       AppDebug.log(
@@ -594,40 +678,7 @@ class _ProductionPlanDraftEditorScreenState
           _extraDraftStatusKey: normalizedStatus,
         },
       );
-      final shouldUpdateExistingDraft =
-          planId.isNotEmpty && normalizedStatus == "draft";
-      final detail = shouldUpdateExistingDraft
-          ? await actions.updateDraft(
-              planId: planId,
-              payload: controller.toPayload(),
-            )
-          : await actions.saveDraft(payload: controller.toPayload());
-      if (!mounted) {
-        return;
-      }
-      final resolvedPlanId = detail.plan.id.trim();
-      final createdDraftCopy = planId.isNotEmpty && !shouldUpdateExistingDraft;
-      _showSnack(
-        createdDraftCopy
-            ? "Draft copy saved."
-            : planId.isEmpty
-            ? "Draft saved."
-            : "Draft updated.",
-      );
-      AppDebug.log(
-        _draftEditorLogTag,
-        _logSaveDraftSuccess,
-        extra: <String, Object?>{
-          _extraPlanIdKey: resolvedPlanId,
-          _extraDraftStatusKey: normalizedStatus,
-        },
-      );
-      ref.invalidate(productionPlanDetailProvider(resolvedPlanId));
-      if (planId != resolvedPlanId) {
-        context.go(productionPlanDraftStudioPath(planId: resolvedPlanId));
-      } else {
-        _hydratedPlanId = null;
-      }
+      await _persistDraft(existingPlanStatus: existingPlanStatus);
     } catch (error) {
       AppDebug.log(
         _draftEditorLogTag,
@@ -643,6 +694,87 @@ class _ProductionPlanDraftEditorScreenState
           fallback: "Unable to save draft.",
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _startProduction({String? existingPlanStatus}) async {
+    if (_isSaving) {
+      return;
+    }
+    final controller = ref.read(productionPlanDraftProvider.notifier);
+    final errors = controller.validate();
+    if (errors.isNotEmpty) {
+      _showSnack(errors.first);
+      return;
+    }
+    final confirmed = await _confirmStartProduction();
+    if (!confirmed) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+    String resolvedPlanId = "";
+    try {
+      AppDebug.log(
+        _draftEditorLogTag,
+        _logStartProductionStart,
+        extra: <String, Object?>{
+          _extraPlanIdKey: (widget.planId ?? "").trim(),
+          _extraDraftStatusKey: (existingPlanStatus ?? "").trim().toLowerCase(),
+        },
+      );
+      final detail = await _persistDraft(
+        existingPlanStatus: existingPlanStatus,
+        showSuccessSnack: false,
+        syncEditorRoute: false,
+      );
+      resolvedPlanId = detail.plan.id.trim();
+      await ref
+          .read(productionPlanActionsProvider)
+          .updatePlanStatus(planId: resolvedPlanId, status: "active");
+      if (!mounted) {
+        return;
+      }
+      AppDebug.log(
+        _draftEditorLogTag,
+        _logStartProductionSuccess,
+        extra: <String, Object?>{_extraPlanIdKey: resolvedPlanId},
+      );
+      _showSnack("Production started.");
+      context.go(productionPlanDetailPath(resolvedPlanId));
+    } catch (error) {
+      AppDebug.log(
+        _draftEditorLogTag,
+        _logStartProductionFailure,
+        extra: <String, Object?>{
+          _extraPlanIdKey: resolvedPlanId.isEmpty
+              ? (widget.planId ?? "").trim()
+              : resolvedPlanId,
+          "error": error.toString(),
+        },
+      );
+      if (!mounted) {
+        return;
+      }
+      if (resolvedPlanId.isNotEmpty &&
+          (widget.planId ?? "").trim() != resolvedPlanId) {
+        context.go(productionPlanDraftStudioPath(planId: resolvedPlanId));
+      } else {
+        _showSnack(
+          _resolveDraftEditorErrorMessage(
+            error,
+            fallback: "Unable to start production.",
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -2452,6 +2584,9 @@ class _ProductionPlanDraftEditorScreenState
   Widget build(BuildContext context) {
     final planId = (widget.planId ?? "").trim();
     final draft = ref.watch(productionPlanDraftProvider);
+    final schedulePolicyAsync = ref.watch(
+      productionSchedulePolicyProvider(draft.estateAssetId),
+    );
     _syncControllers(draft);
 
     final assetsAsync = ref.watch(
@@ -2497,6 +2632,11 @@ class _ProductionPlanDraftEditorScreenState
     final saveDraftLabel = savesIntoExistingDraft
         ? "Save draft"
         : "Save draft copy";
+    final canStartProduction =
+        canManageLifecycle &&
+        (planId.isEmpty ||
+            existingPlanStatus.isEmpty ||
+            existingPlanStatus == "draft");
     final canReturnToDraft =
         planId.isNotEmpty &&
         canManageLifecycle &&
@@ -2603,6 +2743,32 @@ class _ProductionPlanDraftEditorScreenState
                                     spacing: 10,
                                     runSpacing: 10,
                                     children: [
+                                      if (canStartProduction)
+                                        FilledButton.icon(
+                                          onPressed:
+                                              _isSaving ||
+                                                  _isRefiningDraft ||
+                                                  _isImportingDraftDocument ||
+                                                  _isDownloadingDraft
+                                              ? null
+                                              : () => _startProduction(
+                                                  existingPlanStatus:
+                                                      existingPlanStatus,
+                                                ),
+                                          icon: _isSaving
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                      ),
+                                                )
+                                              : const Icon(
+                                                  Icons.play_arrow_outlined,
+                                                ),
+                                          label: const Text("Start production"),
+                                        ),
                                       if (canReturnToDraft)
                                         OutlinedButton.icon(
                                           onPressed:
@@ -2735,6 +2901,8 @@ class _ProductionPlanDraftEditorScreenState
                               final taskTable = _DraftEditorTaskCard(
                                 draft: draft,
                                 staffList: staffList,
+                                schedulePolicy:
+                                    schedulePolicyAsync.valueOrNull?.policy,
                               );
                               final interactiveTaskTable = canEditDraft
                                   ? taskTable
@@ -3085,8 +3253,13 @@ class _DraftEditorSummaryCard extends StatelessWidget {
 class _DraftEditorTaskCard extends StatelessWidget {
   final ProductionPlanDraftState draft;
   final List<BusinessStaffProfileSummary> staffList;
+  final ProductionSchedulePolicy? schedulePolicy;
 
-  const _DraftEditorTaskCard({required this.draft, required this.staffList});
+  const _DraftEditorTaskCard({
+    required this.draft,
+    required this.staffList,
+    required this.schedulePolicy,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3161,8 +3334,7 @@ class _DraftEditorTaskCard extends StatelessWidget {
           ProductionPlanTaskTable(
             draft: draft,
             staff: staffList,
-            listOnly: true,
-            showLayoutToggle: false,
+            schedulePolicy: schedulePolicy,
             showPhaseNavigator: true,
             onAddTask: (phaseIndex) {
               final notifier = ProviderScope.containerOf(
@@ -3171,6 +3343,29 @@ class _DraftEditorTaskCard extends StatelessWidget {
               ).read(productionPlanDraftProvider.notifier);
               notifier.addTask(phaseIndex);
             },
+            onAddTaskAt:
+                (
+                  phaseIndex,
+                  taskIndex,
+                  day,
+                  suggestedStart,
+                  suggestedDue,
+                ) async {
+                  final notifier = ProviderScope.containerOf(
+                    context,
+                    listen: false,
+                  ).read(productionPlanDraftProvider.notifier);
+                  final taskId = notifier.addTaskAt(phaseIndex, taskIndex);
+                  if (taskId == null) {
+                    return;
+                  }
+                  notifier.updateTaskSchedule(
+                    phaseIndex,
+                    taskId,
+                    startDate: suggestedStart,
+                    dueDate: suggestedDue,
+                  );
+                },
             onRemoveTask: (phaseIndex, taskId) {
               final notifier = ProviderScope.containerOf(
                 context,
