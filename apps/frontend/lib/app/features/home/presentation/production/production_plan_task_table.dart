@@ -60,13 +60,18 @@ const String _layoutCalendarLabel = "Calendar";
 const String _layoutListLabel = "List";
 const String _calendarViewTitle = "Production calendar";
 const String _calendarViewHint =
-    "Tap any date to view scheduled tasks for that day.";
+    "Tap a task to edit it directly, or drag it to reschedule.";
 const String _calendarViewRangeMissing =
     "Select start and end dates to render the calendar schedule.";
 const String _expandLabel = "Expand task";
 const String _collapseLabel = "Collapse task";
 const String _unassignedLabel = "Unassigned";
 const String _metaLabelSuffix = ":";
+const String _calendarTaskEditorTitle = "Edit task";
+const String _calendarTaskEditorHint =
+    "Changes update the draft immediately. Use Save draft to persist them.";
+const String _calendarDuplicateTaskLabel = "Duplicate";
+const String _calendarDeleteTaskLabel = "Delete";
 
 const String _phaseProgressLabel = "Progress";
 const String _addTaskLabel = "Add task";
@@ -87,6 +92,8 @@ const String _selectPlaceholder = "Select";
 const String _instructionsHint = "Add instructions";
 const String _completedPlaceholder = "-";
 const String _removeTaskTooltip = "Remove task";
+const String _duplicateTaskTooltip = "Duplicate task";
+const String _dragTaskTooltip = "Drag task";
 
 const String _statusNotStarted = "Not started";
 const String _statusInProgress = "In progress";
@@ -150,6 +157,34 @@ const List<_CalendarDefaultSlot> _calendarDefaultSlots = [
 
 enum _TaskLayoutMode { calendar, list }
 
+class _TaskListDragData {
+  final int sourcePhaseIndex;
+  final int sourceTaskIndex;
+  final String taskId;
+  final String title;
+
+  const _TaskListDragData({
+    required this.sourcePhaseIndex,
+    required this.sourceTaskIndex,
+    required this.taskId,
+    required this.title,
+  });
+}
+
+class _DraftTaskLookup {
+  final int phaseIndex;
+  final int taskIndex;
+  final ProductionPhaseDraft phase;
+  final ProductionTaskDraft task;
+
+  const _DraftTaskLookup({
+    required this.phaseIndex,
+    required this.taskIndex,
+    required this.phase,
+    required this.task,
+  });
+}
+
 class ProductionPlanTaskTable extends ConsumerStatefulWidget {
   final ProductionPlanDraftState draft;
   final List<BusinessStaffProfileSummary> staff;
@@ -158,6 +193,7 @@ class ProductionPlanTaskTable extends ConsumerStatefulWidget {
   final bool showLayoutToggle;
   final bool showPhaseNavigator;
   final VoidCallback? onOpenListScreen;
+  final ProductionSchedulePolicy? schedulePolicy;
   final void Function(int phaseIndex) onAddTask;
   final Future<void> Function(
     int phaseIndex,
@@ -179,6 +215,7 @@ class ProductionPlanTaskTable extends ConsumerStatefulWidget {
     this.showLayoutToggle = true,
     this.showPhaseNavigator = false,
     this.onOpenListScreen,
+    this.schedulePolicy,
     required this.onAddTask,
     this.onAddTaskAt,
     this.taskScheduleOverrides = const <String, DateTimeRange>{},
@@ -262,6 +299,7 @@ class _ProductionPlanTaskTableState
           _TaskCalendarPreviewPanel(
             draft: draft,
             staff: staff,
+            schedulePolicy: widget.schedulePolicy,
             onAddTask: widget.onAddTask,
             onAddTaskAt: widget.onAddTaskAt,
             taskScheduleOverrides: widget.taskScheduleOverrides,
@@ -359,6 +397,7 @@ class _TaskLayoutToggle extends ConsumerWidget {
 class _TaskCalendarPreviewPanel extends StatelessWidget {
   final ProductionPlanDraftState draft;
   final List<BusinessStaffProfileSummary> staff;
+  final ProductionSchedulePolicy? schedulePolicy;
   final void Function(int phaseIndex) onAddTask;
   final Future<void> Function(
     int phaseIndex,
@@ -373,6 +412,7 @@ class _TaskCalendarPreviewPanel extends StatelessWidget {
   const _TaskCalendarPreviewPanel({
     required this.draft,
     required this.staff,
+    required this.schedulePolicy,
     required this.onAddTask,
     this.onAddTaskAt,
     required this.taskScheduleOverrides,
@@ -382,9 +422,59 @@ class _TaskCalendarPreviewPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final projected = _TaskCalendarProjection.build(
       draft: draft,
+      schedulePolicy: schedulePolicy,
       taskScheduleOverrides: taskScheduleOverrides,
     );
     final tasks = projected.tasks;
+    Future<void> updateTaskSchedule(
+      String taskId,
+      DateTime startLocal,
+      DateTime dueLocal,
+    ) async {
+      final controller = ProviderScope.containerOf(
+        context,
+        listen: false,
+      ).read(productionPlanDraftProvider.notifier);
+      for (final phaseEntry in draft.phases.asMap().entries) {
+        final hasTask = phaseEntry.value.tasks.any(
+          (candidate) => candidate.id == taskId,
+        );
+        if (!hasTask) {
+          continue;
+        }
+        controller.updateTaskSchedule(
+          phaseEntry.key,
+          taskId,
+          startDate: startLocal,
+          dueDate: dueLocal,
+        );
+        return;
+      }
+    }
+
+    Future<void> openTaskEditor(String taskId) async {
+      final currentDraft = ProviderScope.containerOf(
+        context,
+        listen: false,
+      ).read(productionPlanDraftProvider);
+      final lookup = _findDraftTaskLookup(currentDraft, taskId);
+      if (lookup == null || !context.mounted) {
+        return;
+      }
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (sheetContext) {
+          return _CalendarTaskEditSheet(
+            taskId: taskId,
+            staff: staff,
+            onOpenTaskEditor: openTaskEditor,
+          );
+        },
+      );
+    }
+
     Future<void> addTaskForDay(DateTime day, String phaseNameHint) async {
       if (draft.phases.isEmpty) {
         return;
@@ -487,9 +577,385 @@ class _TaskCalendarPreviewPanel extends StatelessWidget {
             tasks: tasks,
             schedulePolicy: projected.schedulePolicy,
             staffProfiles: staff,
+            onTaskScheduleChanged: updateTaskSchedule,
+            onTaskEditRequested: openTaskEditor,
             onAddTaskForDay: addTaskForDay,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CalendarTaskEditSheet extends ConsumerWidget {
+  final String taskId;
+  final List<BusinessStaffProfileSummary> staff;
+  final Future<void> Function(String taskId)? onOpenTaskEditor;
+
+  const _CalendarTaskEditSheet({
+    required this.taskId,
+    required this.staff,
+    this.onOpenTaskEditor,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final draftState = ref.watch(productionPlanDraftProvider);
+    final controller = ref.read(productionPlanDraftProvider.notifier);
+    final lookup = _findDraftTaskLookup(draftState, taskId);
+    final theme = Theme.of(context);
+
+    if (lookup == null) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          child: Text(
+            "This task is no longer available in the draft.",
+            style: theme.textTheme.bodyMedium,
+          ),
+        ),
+      );
+    }
+
+    final task = lookup.task;
+    final roleStaff = staff
+        .where((member) => member.staffRole == task.roleRequired)
+        .toList();
+    final selectedStaffId =
+        roleStaff.any((member) => member.id == task.assignedStaffId)
+        ? task.assignedStaffId
+        : null;
+    final scheduleLabel = _taskScheduleLabel(task);
+    final scheduleWarning = _taskScheduleWarning(task: task, draft: draftState);
+    final dayLabel = _extractProjectDayLabel(task);
+
+    Future<void> pickTaskSchedule({required bool isStart}) async {
+      final baseDateTime = isStart
+          ? (task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
+          : (task.scheduledDue ??
+              ((task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
+                  .add(_taskScheduleDuration(task))));
+      final pickedDate = await showDatePicker(
+        context: context,
+        initialDate: baseDateTime,
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2100),
+      );
+      if (pickedDate == null || !context.mounted) {
+        return;
+      }
+      final pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(baseDateTime),
+      );
+      if (pickedTime == null) {
+        return;
+      }
+      final nextDateTime = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+      if (isStart) {
+        final nextDue =
+            task.scheduledDue != null && task.scheduledDue!.isAfter(nextDateTime)
+            ? task.scheduledDue!
+            : nextDateTime.add(_taskScheduleDuration(task));
+        controller.updateTaskSchedule(
+          lookup.phaseIndex,
+          task.id,
+          startDate: nextDateTime,
+          dueDate: nextDue,
+        );
+        return;
+      }
+      final baseStart =
+          task.scheduledStart ??
+          nextDateTime.subtract(_taskScheduleDuration(task));
+      final safeDue = nextDateTime.isAfter(baseStart)
+          ? nextDateTime
+          : baseStart.add(const Duration(minutes: 30));
+      controller.updateTaskSchedule(
+        lookup.phaseIndex,
+        task.id,
+        startDate: baseStart,
+        dueDate: safeDue,
+      );
+    }
+
+    Future<void> duplicateTaskAndEdit() async {
+      final duplicatedTaskId = controller.duplicateTask(lookup.phaseIndex, task.id);
+      if (duplicatedTaskId == null) {
+        return;
+      }
+      Navigator.of(context).pop();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        onOpenTaskEditor?.call(duplicatedTaskId);
+      });
+    }
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          8,
+          16,
+          16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _calendarTaskEditorTitle,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _calendarTaskEditorHint,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    tooltip: "Close",
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: _chipSpacing,
+                runSpacing: _chipSpacing,
+                children: [
+                  _MetaChip(
+                    label: "Phase",
+                    value: lookup.phase.name,
+                    tone: AppStatusTone.neutral,
+                  ),
+                  _MetaChip(
+                    label: _columnStatus,
+                    value: _statusLabel(task.status),
+                    tone: _statusTone(task.status),
+                  ),
+                  if (dayLabel != null)
+                    _MetaChip(
+                      label: "Day",
+                      value: dayLabel,
+                      tone: AppStatusTone.info,
+                    ),
+                  if (scheduleLabel != null)
+                    _MetaChip(
+                      label: "Schedule",
+                      value: _shortenMetaValue(scheduleLabel, maxLength: 44),
+                      tone: AppStatusTone.info,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                key: ValueKey("calendar-title-${task.id}"),
+                initialValue: task.title,
+                minLines: 1,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: "Task title",
+                  hintText: "Describe task",
+                ),
+                onChanged: (value) =>
+                    controller.updateTaskTitle(lookup.phaseIndex, task.id, value),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                "Execution notes",
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _TaskMobileInstructionsField(
+                key: ValueKey("calendar-notes-${task.id}"),
+                value: task.instructions,
+                onChanged: (value) => controller.updateTaskInstructions(
+                  lookup.phaseIndex,
+                  task.id,
+                  value,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: _sectionSpacing,
+                runSpacing: _mobileFieldSpacing,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await pickTaskSchedule(isStart: true);
+                    },
+                    icon: const Icon(Icons.play_arrow_outlined),
+                    label: Text(
+                      task.scheduledStart == null
+                          ? "Set start"
+                          : "Start ${_formatTaskDateTime(task.scheduledStart!)}",
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await pickTaskSchedule(isStart: false);
+                    },
+                    icon: const Icon(Icons.stop_outlined),
+                    label: Text(
+                      task.scheduledDue == null
+                          ? "Set end"
+                          : "End ${_formatTaskDateTime(task.scheduledDue!)}",
+                    ),
+                  ),
+                  if (task.scheduledStart != null || task.scheduledDue != null)
+                    TextButton.icon(
+                      onPressed: () {
+                        controller.updateTaskSchedule(
+                          lookup.phaseIndex,
+                          task.id,
+                          startDate: null,
+                          dueDate: null,
+                        );
+                      },
+                      icon: const Icon(Icons.clear_outlined),
+                      label: const Text("Clear timing"),
+                    ),
+                ],
+              ),
+              if (scheduleWarning != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  scheduleWarning,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final useSingleColumn = constraints.maxWidth < 760;
+                  final halfWidth = (constraints.maxWidth - _sectionSpacing) / 2;
+                  return Wrap(
+                    spacing: _sectionSpacing,
+                    runSpacing: _mobileFieldSpacing,
+                    children: [
+                      SizedBox(
+                        width: useSingleColumn ? double.infinity : halfWidth,
+                        child: _TaskMobileStatusField(
+                          key: ValueKey(
+                            "calendar-status-${task.id}-${task.status.name}",
+                          ),
+                          value: task.status,
+                          onChanged: (value) => controller.updateTaskStatus(
+                            lookup.phaseIndex,
+                            task.id,
+                            value,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: useSingleColumn ? double.infinity : halfWidth,
+                        child: _TaskMobileRoleField(
+                          key: ValueKey(
+                            "calendar-role-${task.id}-${task.roleRequired}",
+                          ),
+                          value: task.roleRequired,
+                          onChanged: (value) => controller.updateTaskRole(
+                            lookup.phaseIndex,
+                            task.id,
+                            value,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: useSingleColumn ? double.infinity : halfWidth,
+                        child: _TaskMobileStaffField(
+                          key: ValueKey(
+                            "calendar-staff-${task.id}-${task.roleRequired}-${selectedStaffId ?? 'none'}",
+                          ),
+                          staff: roleStaff,
+                          selectedStaffId: selectedStaffId,
+                          onChanged: (value) => controller.updateTaskStaff(
+                            lookup.phaseIndex,
+                            task.id,
+                            value,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: useSingleColumn ? double.infinity : halfWidth,
+                        child: _TaskMobileWeightRow(
+                          key: ValueKey(
+                            "calendar-weight-${task.id}-${task.weight}-${task.requiredHeadcount}",
+                          ),
+                          weight: task.weight,
+                          requiredHeadcount: task.requiredHeadcount,
+                          assignedCount: task.assignedStaffProfileIds.length,
+                          completedAt: task.completedAt,
+                          status: task.status,
+                          onHeadcountChanged: (value) =>
+                              controller.updateTaskRequiredHeadcount(
+                                lookup.phaseIndex,
+                                task.id,
+                                value,
+                              ),
+                          onChanged: (value) => controller.updateTaskWeight(
+                            lookup.phaseIndex,
+                            task.id,
+                            value,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: () async {
+                      await duplicateTaskAndEdit();
+                    },
+                    icon: const Icon(Icons.copy_all_outlined),
+                    label: const Text(_calendarDuplicateTaskLabel),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      controller.removeTask(lookup.phaseIndex, task.id);
+                      Navigator.of(context).pop();
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                    ),
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text(_calendarDeleteTaskLabel),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -997,18 +1463,12 @@ class _PhaseTaskList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: phase.tasks.asMap().entries.map((entry) {
-        final task = entry.value;
-        return _TaskEditorCard(
-          phaseIndex: phaseIndex,
-          taskIndex: entry.key,
-          task: task,
-          staff: staff,
-          compactLayout: true,
-          onRemove: () => onRemoveTask(task.id),
-        );
-      }).toList(),
+    return _PhaseTaskDropList(
+      phaseIndex: phaseIndex,
+      phase: phase,
+      staff: staff,
+      compactLayout: true,
+      onRemoveTask: onRemoveTask,
     );
   }
 }
@@ -1028,18 +1488,142 @@ class _PhaseTaskTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: phase.tasks.asMap().entries.map((entry) {
-        final task = entry.value;
-        return _TaskEditorCard(
+    return _PhaseTaskDropList(
+      phaseIndex: phaseIndex,
+      phase: phase,
+      staff: staff,
+      compactLayout: false,
+      onRemoveTask: onRemoveTask,
+    );
+  }
+}
+
+class _PhaseTaskDropList extends StatelessWidget {
+  final int phaseIndex;
+  final ProductionPhaseDraft phase;
+  final List<BusinessStaffProfileSummary> staff;
+  final bool compactLayout;
+  final ValueChanged<String> onRemoveTask;
+
+  const _PhaseTaskDropList({
+    required this.phaseIndex,
+    required this.phase,
+    required this.staff,
+    required this.compactLayout,
+    required this.onRemoveTask,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final children = <Widget>[
+      _TaskDropZone(phaseIndex: phaseIndex, insertIndex: 0),
+    ];
+    for (final entry in phase.tasks.asMap().entries) {
+      final task = entry.value;
+      children.add(
+        _TaskEditorCard(
           phaseIndex: phaseIndex,
           taskIndex: entry.key,
           task: task,
           staff: staff,
-          compactLayout: false,
+          compactLayout: compactLayout,
           onRemove: () => onRemoveTask(task.id),
+        ),
+      );
+      children.add(
+        _TaskDropZone(
+          phaseIndex: phaseIndex,
+          insertIndex: entry.key + 1,
+        ),
+      );
+    }
+    return Column(children: children);
+  }
+}
+
+class _TaskDropZone extends StatefulWidget {
+  final int phaseIndex;
+  final int insertIndex;
+
+  const _TaskDropZone({
+    required this.phaseIndex,
+    required this.insertIndex,
+  });
+
+  @override
+  State<_TaskDropZone> createState() => _TaskDropZoneState();
+}
+
+class _TaskDropZoneState extends State<_TaskDropZone> {
+  bool _isHovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DragTarget<_TaskListDragData>(
+      onWillAcceptWithDetails: (details) {
+        final data = details.data;
+        return data.taskId.trim().isNotEmpty;
+      },
+      onAcceptWithDetails: (details) {
+        final controller = ProviderScope.containerOf(
+          context,
+          listen: false,
+        ).read(productionPlanDraftProvider.notifier);
+        final data = details.data;
+        if (data.sourcePhaseIndex == widget.phaseIndex) {
+          controller.moveTaskWithinPhase(
+            widget.phaseIndex,
+            data.sourceTaskIndex,
+            widget.insertIndex,
+          );
+        } else {
+          controller.moveTaskAcrossPhases(
+            data.sourcePhaseIndex,
+            data.sourceTaskIndex,
+            widget.phaseIndex,
+            widget.insertIndex,
+          );
+        }
+        setState(() {
+          _isHovering = false;
+        });
+      },
+      onMove: (_) {
+        if (_isHovering) {
+          return;
+        }
+        setState(() {
+          _isHovering = true;
+        });
+      },
+      onLeave: (_) {
+        if (!_isHovering) {
+          return;
+        }
+        setState(() {
+          _isHovering = false;
+        });
+      },
+      builder: (context, candidateData, rejectedData) {
+        final active = _isHovering || candidateData.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          height: active ? 20 : 10,
+          width: double.infinity,
+          alignment: Alignment.center,
+          child: Container(
+            height: active ? 4 : 2,
+            decoration: BoxDecoration(
+              color: active
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
         );
-      }).toList(),
+      },
     );
   }
 }
@@ -1064,6 +1648,7 @@ class _TaskEditorCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(productionPlanDraftProvider.notifier);
+    final draftState = ref.watch(productionPlanDraftProvider);
     final theme = Theme.of(context);
     final expandedTasks = ref.watch(_expandedTaskIdsProvider);
     final isExpanded = expandedTasks.contains(task.id);
@@ -1092,6 +1677,64 @@ class _TaskEditorCard extends ConsumerWidget {
     );
     final staffLabel = _resolveStaffLabel(roleStaff, selectedStaffId);
     final dayLabel = _extractProjectDayLabel(task);
+    final scheduleLabel = _taskScheduleLabel(task);
+    final scheduleWarning = _taskScheduleWarning(task: task, draft: draftState);
+
+    Future<void> pickTaskSchedule({required bool isStart}) async {
+      final baseDateTime = isStart
+          ? (task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
+          : (task.scheduledDue ??
+              ((task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
+                  .add(_taskScheduleDuration(task))));
+      final pickedDate = await showDatePicker(
+        context: context,
+        initialDate: baseDateTime,
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2100),
+      );
+      if (pickedDate == null || !context.mounted) {
+        return;
+      }
+      final pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(baseDateTime),
+      );
+      if (pickedTime == null) {
+        return;
+      }
+      final nextDateTime = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+      if (isStart) {
+        final nextDue =
+            task.scheduledDue != null && task.scheduledDue!.isAfter(nextDateTime)
+            ? task.scheduledDue!
+            : nextDateTime.add(_taskScheduleDuration(task));
+        controller.updateTaskSchedule(
+          phaseIndex,
+          task.id,
+          startDate: nextDateTime,
+          dueDate: nextDue,
+        );
+        return;
+      }
+      final baseStart =
+          task.scheduledStart ??
+          nextDateTime.subtract(_taskScheduleDuration(task));
+      final safeDue = nextDateTime.isAfter(baseStart)
+          ? nextDateTime
+          : baseStart.add(const Duration(minutes: 30));
+      controller.updateTaskSchedule(
+        phaseIndex,
+        task.id,
+        startDate: baseStart,
+        dueDate: safeDue,
+      );
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: _taskCardSpacing),
@@ -1199,6 +1842,7 @@ class _TaskEditorCard extends ConsumerWidget {
                       assignmentLabel:
                           "$assignedCount/${task.requiredHeadcount}",
                       weight: task.weight,
+                      scheduleLabel: scheduleLabel,
                       completedAt: task.completedAt,
                       status: task.status,
                     ),
@@ -1240,6 +1884,70 @@ class _TaskEditorCard extends ConsumerWidget {
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     onPressed: () {
+                      final duplicatedTaskId = controller.duplicateTask(
+                        phaseIndex,
+                        task.id,
+                      );
+                      if (duplicatedTaskId == null) {
+                        return;
+                      }
+                      ref.read(_expandedTaskIdsProvider.notifier).update((
+                        state,
+                      ) {
+                        final next = {...state};
+                        next.add(duplicatedTaskId);
+                        return next;
+                      });
+                    },
+                    icon: const Icon(Icons.copy_all_outlined),
+                    tooltip: _duplicateTaskTooltip,
+                  ),
+                  LongPressDraggable<_TaskListDragData>(
+                    data: _TaskListDragData(
+                      sourcePhaseIndex: phaseIndex,
+                      sourceTaskIndex: taskIndex,
+                      taskId: task.id,
+                      title: task.title,
+                    ),
+                    feedback: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        constraints: const BoxConstraints(maxWidth: 260),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        child: Text(
+                          task.title.trim().isEmpty ? _columnTask : task.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    child: Tooltip(
+                      message: _dragTaskTooltip,
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Icon(
+                          Icons.drag_indicator,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
                       ref.read(_expandedTaskIdsProvider.notifier).update((
                         state,
                       ) {
@@ -1275,6 +1983,58 @@ class _TaskEditorCard extends ConsumerWidget {
               onChanged: (value) =>
                   controller.updateTaskInstructions(phaseIndex, task.id, value),
             ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: _sectionSpacing,
+              runSpacing: _mobileFieldSpacing,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await pickTaskSchedule(isStart: true);
+                  },
+                  icon: const Icon(Icons.play_arrow_outlined),
+                  label: Text(
+                    task.scheduledStart == null
+                        ? "Set start"
+                        : "Start ${_formatTaskDateTime(task.scheduledStart!)}",
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await pickTaskSchedule(isStart: false);
+                  },
+                  icon: const Icon(Icons.stop_outlined),
+                  label: Text(
+                    task.scheduledDue == null
+                        ? "Set end"
+                        : "End ${_formatTaskDateTime(task.scheduledDue!)}",
+                  ),
+                ),
+                if (task.scheduledStart != null || task.scheduledDue != null)
+                  TextButton.icon(
+                    onPressed: () {
+                      controller.updateTaskSchedule(
+                        phaseIndex,
+                        task.id,
+                        startDate: null,
+                        dueDate: null,
+                      );
+                    },
+                    icon: const Icon(Icons.clear_outlined),
+                    label: const Text("Clear timing"),
+                  ),
+              ],
+            ),
+            if (scheduleWarning != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                scheduleWarning,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1368,6 +2128,7 @@ class _TaskEditorPreviewMeta extends StatelessWidget {
   final String staffLabel;
   final String assignmentLabel;
   final int weight;
+  final String? scheduleLabel;
   final DateTime? completedAt;
   final ProductionTaskStatus status;
 
@@ -1376,6 +2137,7 @@ class _TaskEditorPreviewMeta extends StatelessWidget {
     required this.staffLabel,
     required this.assignmentLabel,
     required this.weight,
+    required this.scheduleLabel,
     required this.completedAt,
     required this.status,
   });
@@ -1408,6 +2170,12 @@ class _TaskEditorPreviewMeta extends StatelessWidget {
           value: weight.toString(),
           tone: AppStatusTone.neutral,
         ),
+        if (scheduleLabel != null)
+          _MetaChip(
+            label: "Schedule",
+            value: _shortenMetaValue(scheduleLabel!, maxLength: 36),
+            tone: AppStatusTone.info,
+          ),
         _MetaChip(
           label: _columnCompleted,
           value: completedAt == null
@@ -1426,7 +2194,11 @@ class _TaskMobileStatusField extends StatelessWidget {
   final ProductionTaskStatus value;
   final ValueChanged<ProductionTaskStatus> onChanged;
 
-  const _TaskMobileStatusField({required this.value, required this.onChanged});
+  const _TaskMobileStatusField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1474,7 +2246,11 @@ class _TaskMobileRoleField extends StatelessWidget {
   final String value;
   final ValueChanged<String> onChanged;
 
-  const _TaskMobileRoleField({required this.value, required this.onChanged});
+  const _TaskMobileRoleField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1508,6 +2284,7 @@ class _TaskMobileStaffField extends StatelessWidget {
   final ValueChanged<String?>? onChanged;
 
   const _TaskMobileStaffField({
+    super.key,
     required this.staff,
     required this.selectedStaffId,
     required this.onChanged,
@@ -1521,17 +2298,21 @@ class _TaskMobileStaffField extends StatelessWidget {
       decoration: const InputDecoration(isDense: true, labelText: _columnStaff),
       isExpanded: true,
       hint: const Text(_selectPlaceholder),
-      items: staff
-          .map(
-            (member) => DropdownMenuItem(
-              value: member.id,
-              child: Text(
-                member.userName ?? member.userEmail ?? member.id,
-                overflow: TextOverflow.ellipsis,
-              ),
+      items: [
+        const DropdownMenuItem<String>(
+          value: null,
+          child: Text(_unassignedLabel, overflow: TextOverflow.ellipsis),
+        ),
+        ...staff.map(
+          (member) => DropdownMenuItem(
+            value: member.id,
+            child: Text(
+              member.userName ?? member.userEmail ?? member.id,
+              overflow: TextOverflow.ellipsis,
             ),
-          )
-          .toList(),
+          ),
+        ),
+      ],
       onChanged: onChanged,
     );
   }
@@ -1547,6 +2328,7 @@ class _TaskMobileWeightRow extends StatelessWidget {
   final ValueChanged<int> onHeadcountChanged;
 
   const _TaskMobileWeightRow({
+    super.key,
     required this.weight,
     required this.requiredHeadcount,
     required this.assignedCount,
@@ -1643,6 +2425,7 @@ class _TaskMobileInstructionsField extends StatelessWidget {
   final ValueChanged<String> onChanged;
 
   const _TaskMobileInstructionsField({
+    super.key,
     required this.value,
     required this.onChanged,
   });
@@ -1781,6 +2564,26 @@ class _EmptyTableMessage extends StatelessWidget {
   }
 }
 
+_DraftTaskLookup? _findDraftTaskLookup(
+  ProductionPlanDraftState draft,
+  String taskId,
+) {
+  for (final phaseEntry in draft.phases.asMap().entries) {
+    for (final taskEntry in phaseEntry.value.tasks.asMap().entries) {
+      if (taskEntry.value.id != taskId) {
+        continue;
+      }
+      return _DraftTaskLookup(
+        phaseIndex: phaseEntry.key,
+        taskIndex: taskEntry.key,
+        phase: phaseEntry.value,
+        task: taskEntry.value,
+      );
+    }
+  }
+  return null;
+}
+
 // WHY: Calendar day add action should map to a sensible phase without extra prompts.
 int _resolvePhaseIndexForCalendarDayAdd({
   required ProductionPlanDraftState draft,
@@ -1911,18 +2714,11 @@ class _TaskCalendarProjection {
 
   static _TaskCalendarProjection build({
     required ProductionPlanDraftState draft,
+    ProductionSchedulePolicy? schedulePolicy,
     Map<String, DateTimeRange> taskScheduleOverrides =
         const <String, DateTimeRange>{},
   }) {
-    final defaultPolicy = ProductionAiDraftSchedulePolicy(
-      workWeekDays: const [1, 2, 3, 4, 5, 6, 7],
-      blocks: const [
-        ProductionAiDraftScheduleBlock(start: "09:00", end: "13:00"),
-        ProductionAiDraftScheduleBlock(start: "14:00", end: "17:00"),
-      ],
-      minSlotMinutes: 30,
-      timezone: "",
-    );
+    final effectivePolicy = _resolveDraftCalendarPolicy(schedulePolicy);
 
     final flattened = <_FlattenedPhaseTask>[];
     for (final phase in draft.phases) {
@@ -1934,7 +2730,7 @@ class _TaskCalendarProjection {
     if (flattened.isEmpty) {
       return _TaskCalendarProjection(
         tasks: const <ProductionAiDraftTaskPreview>[],
-        schedulePolicy: defaultPolicy,
+        schedulePolicy: effectivePolicy,
         message: _summaryEmpty,
       );
     }
@@ -1957,7 +2753,7 @@ class _TaskCalendarProjection {
     if (startDate == null || endDate == null) {
       return _TaskCalendarProjection(
         tasks: const <ProductionAiDraftTaskPreview>[],
-        schedulePolicy: defaultPolicy,
+        schedulePolicy: effectivePolicy,
         message: _calendarViewRangeMissing,
       );
     }
@@ -1965,7 +2761,8 @@ class _TaskCalendarProjection {
     final normalizedEndDate = endDate.isBefore(startDate) ? startDate : endDate;
     final totalDays = normalizedEndDate.difference(startDate).inDays + 1;
 
-    final mapped = flattened.asMap().entries.map((entry) {
+    final mapped =
+        flattened.asMap().entries.map((entry) {
       final index = entry.key;
       final flatTask = entry.value;
       final scheduleOverride = taskScheduleOverrides[flatTask.task.id];
@@ -1976,6 +2773,11 @@ class _TaskCalendarProjection {
         taskDue = scheduleOverride.end.isAfter(scheduleOverride.start)
             ? scheduleOverride.end
             : scheduleOverride.start.add(const Duration(minutes: 30));
+      } else if (flatTask.task.scheduledStart != null &&
+          flatTask.task.scheduledDue != null &&
+          flatTask.task.scheduledDue!.isAfter(flatTask.task.scheduledStart!)) {
+        taskStart = flatTask.task.scheduledStart!;
+        taskDue = flatTask.task.scheduledDue!;
       } else {
         final ratio = flattened.length <= 1
             ? 0.0
@@ -2007,30 +2809,78 @@ class _TaskCalendarProjection {
           : flatTask.task.requiredHeadcount;
       final assignedCount = assignedIds.length;
 
-      return ProductionAiDraftTaskPreview(
-        id: flatTask.task.id,
-        title: flatTask.task.title.trim().isEmpty
-            ? _columnTask
-            : flatTask.task.title.trim(),
-        phaseName: flatTask.phaseName,
-        roleRequired: flatTask.task.roleRequired,
-        requiredHeadcount: requiredHeadcount,
-        assignedCount: assignedCount,
-        assignedStaffProfileIds: assignedIds,
-        status: _statusLabel(flatTask.task.status),
-        startDate: taskStart,
-        dueDate: taskDue,
-        instructions: flatTask.task.instructions,
-        hasShortage: assignedCount < requiredHeadcount,
+      return (
+        preview: ProductionAiDraftTaskPreview(
+          id: flatTask.task.id,
+          title: flatTask.task.title.trim().isEmpty
+              ? _columnTask
+              : flatTask.task.title.trim(),
+          phaseName: flatTask.phaseName,
+          roleRequired: flatTask.task.roleRequired,
+          requiredHeadcount: requiredHeadcount,
+          assignedCount: assignedCount,
+          assignedStaffProfileIds: assignedIds,
+          status: _statusLabel(flatTask.task.status),
+          startDate: taskStart,
+          dueDate: taskDue,
+          manualSortOrder: flatTask.task.manualSortOrder,
+          instructions: flatTask.task.instructions,
+          hasShortage: assignedCount < requiredHeadcount,
+        ),
+        manualSortOrder: flatTask.task.manualSortOrder,
       );
-    }).toList();
+    }).toList()
+          ..sort((left, right) {
+            final startCompare = (left.preview.startDate ?? startDate)
+                .compareTo(right.preview.startDate ?? startDate);
+            if (startCompare != 0) {
+              return startCompare;
+            }
+            final dueCompare = (left.preview.dueDate ?? left.preview.startDate ?? startDate)
+                .compareTo(
+                  right.preview.dueDate ?? right.preview.startDate ?? startDate,
+                );
+            if (dueCompare != 0) {
+              return dueCompare;
+            }
+            return left.manualSortOrder.compareTo(right.manualSortOrder);
+          });
 
     return _TaskCalendarProjection(
-      tasks: mapped,
-      schedulePolicy: defaultPolicy,
+      tasks: mapped.map((entry) => entry.preview).toList(),
+      schedulePolicy: effectivePolicy,
       message: "",
     );
   }
+}
+
+ProductionAiDraftSchedulePolicy _resolveDraftCalendarPolicy(
+  ProductionSchedulePolicy? schedulePolicy,
+) {
+  if (schedulePolicy == null) {
+    return const ProductionAiDraftSchedulePolicy(
+      workWeekDays: [1, 2, 3, 4, 5, 6, 7],
+      blocks: [
+        ProductionAiDraftScheduleBlock(start: "09:00", end: "13:00"),
+        ProductionAiDraftScheduleBlock(start: "14:00", end: "17:00"),
+      ],
+      minSlotMinutes: 30,
+      timezone: "",
+    );
+  }
+  return ProductionAiDraftSchedulePolicy(
+    workWeekDays: schedulePolicy.workWeekDays,
+    blocks: schedulePolicy.blocks
+        .map(
+          (block) => ProductionAiDraftScheduleBlock(
+            start: block.start,
+            end: block.end,
+          ),
+        )
+        .toList(),
+    minSlotMinutes: schedulePolicy.minSlotMinutes,
+    timezone: schedulePolicy.timezone,
+  );
 }
 
 class _FlattenedPhaseTask {
@@ -2237,6 +3087,72 @@ String? _extractProjectDayLabel(ProductionTaskDraft task) {
   ).firstMatch(task.instructions);
   final dayNumber = match?.group(1)?.trim() ?? "";
   return dayNumber.isEmpty ? null : dayNumber;
+}
+
+String? _taskScheduleLabel(ProductionTaskDraft task) {
+  if (task.scheduledStart == null || task.scheduledDue == null) {
+    return null;
+  }
+  return "${formatDateLabel(task.scheduledStart)} ${_clockLabel(task.scheduledStart!)}-${_clockLabel(task.scheduledDue!)}";
+}
+
+String? _taskScheduleWarning({
+  required ProductionTaskDraft task,
+  required ProductionPlanDraftState draft,
+}) {
+  final hasStart = task.scheduledStart != null;
+  final hasDue = task.scheduledDue != null;
+  if (hasStart != hasDue) {
+    return "Set both start and end time.";
+  }
+  if (!hasStart || !hasDue) {
+    return null;
+  }
+  if (!task.scheduledDue!.isAfter(task.scheduledStart!)) {
+    return "End time must be after start time.";
+  }
+  if (draft.startDate == null || draft.endDate == null) {
+    return null;
+  }
+  final planStart = DateTime(
+    draft.startDate!.year,
+    draft.startDate!.month,
+    draft.startDate!.day,
+  );
+  final planEndExclusive = DateTime(
+    draft.endDate!.year,
+    draft.endDate!.month,
+    draft.endDate!.day + 1,
+  );
+  if (task.scheduledStart!.isBefore(planStart) ||
+      task.scheduledDue!.isAfter(planEndExclusive)) {
+    return "Task timing is outside the plan window.";
+  }
+  return null;
+}
+
+DateTime _fallbackTaskScheduleStart(ProductionPlanDraftState draft) {
+  final base = draft.startDate ?? DateTime.now();
+  return DateTime(base.year, base.month, base.day, 9, 0);
+}
+
+Duration _taskScheduleDuration(ProductionTaskDraft task) {
+  if (task.scheduledStart != null &&
+      task.scheduledDue != null &&
+      task.scheduledDue!.isAfter(task.scheduledStart!)) {
+    return task.scheduledDue!.difference(task.scheduledStart!);
+  }
+  return const Duration(minutes: 60);
+}
+
+String _formatTaskDateTime(DateTime value) {
+  return "${formatDateLabel(value)} ${_clockLabel(value)}";
+}
+
+String _clockLabel(DateTime value) {
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  return "$hour:$minute";
 }
 
 String _shortenMetaValue(String value, {int maxLength = 28}) {

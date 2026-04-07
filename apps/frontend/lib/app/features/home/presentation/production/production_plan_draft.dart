@@ -82,6 +82,12 @@ const String _errorTaskTitleRequired = "Task title is required.";
 const String _errorTaskRoleRequired = "Task role is required.";
 const String _errorTaskHeadcountRequired =
     "Task required headcount must be at least 1.";
+const String _errorTaskScheduleIncomplete =
+    "Task schedule must include both start and end time.";
+const String _errorTaskScheduleInvalid =
+    "Task end time must be after start time.";
+const String _errorTaskScheduleOutsideWindow =
+    "Task schedule must stay inside the plan date window.";
 
 // WHY: Payload keys should be consistent with backend expectations.
 const String _payloadEstateId = "estateAssetId";
@@ -122,6 +128,9 @@ const String _payloadTaskType = "taskType";
 const String _payloadTaskSourceTemplateKey = "sourceTemplateKey";
 const String _payloadTaskRecurrenceGroupKey = "recurrenceGroupKey";
 const String _payloadTaskOccurrenceIndex = "occurrenceIndex";
+const String _payloadTaskStartDate = "startDate";
+const String _payloadTaskDueDate = "dueDate";
+const String _payloadTaskManualSortOrder = "manualSortOrder";
 const String _payloadSummary = "summary";
 const String _payloadSummaryTotalTasks = "totalTasks";
 const String _payloadSummaryTotalEstimatedDays = "totalEstimatedDays";
@@ -672,6 +681,7 @@ class ProductionAiDraftTaskPreview {
   final String status;
   final DateTime? startDate;
   final DateTime? dueDate;
+  final int manualSortOrder;
   final String instructions;
   final bool hasShortage;
 
@@ -686,6 +696,7 @@ class ProductionAiDraftTaskPreview {
     required this.status,
     required this.startDate,
     required this.dueDate,
+    required this.manualSortOrder,
     required this.instructions,
     required this.hasShortage,
   });
@@ -724,6 +735,9 @@ class ProductionAiDraftTaskPreview {
       status: (json["status"] ?? "").toString().trim(),
       startDate: DateTime.tryParse((json[_payloadStartDate] ?? "").toString()),
       dueDate: DateTime.tryParse((json["dueDate"] ?? "").toString()),
+      manualSortOrder:
+          int.tryParse(json[_payloadTaskManualSortOrder]?.toString() ?? "") ??
+          index,
       instructions: (json[_payloadTaskInstructions] ?? "").toString().trim(),
       // WHY: Show shortage when required exceeds available, including zero-capacity roles.
       hasShortage: hasCapacitySnapshot
@@ -769,6 +783,9 @@ class ProductionTaskDraft {
   final List<String> assignedStaffProfileIds;
   final int requiredHeadcount;
   final int weight;
+  final DateTime? scheduledStart;
+  final DateTime? scheduledDue;
+  final int manualSortOrder;
   final String instructions;
   final String taskType;
   final String sourceTemplateKey;
@@ -786,6 +803,9 @@ class ProductionTaskDraft {
     required this.assignedStaffProfileIds,
     required this.requiredHeadcount,
     required this.weight,
+    required this.scheduledStart,
+    required this.scheduledDue,
+    this.manualSortOrder = 0,
     required this.instructions,
     this.taskType = _emptyText,
     this.sourceTemplateKey = _emptyText,
@@ -799,10 +819,13 @@ class ProductionTaskDraft {
   ProductionTaskDraft copyWith({
     String? title,
     String? roleRequired,
-    String? assignedStaffId,
+    Object? assignedStaffId = _unsetValue,
     List<String>? assignedStaffProfileIds,
     int? requiredHeadcount,
     int? weight,
+    Object? scheduledStart = _unsetValue,
+    Object? scheduledDue = _unsetValue,
+    int? manualSortOrder,
     String? instructions,
     String? taskType,
     String? sourceTemplateKey,
@@ -818,15 +841,27 @@ class ProductionTaskDraft {
     final resolvedCompletedBy = completedByStaffId == _unsetValue
         ? this.completedByStaffId
         : completedByStaffId as String?;
+    final resolvedAssignedStaffId = assignedStaffId == _unsetValue
+        ? this.assignedStaffId
+        : assignedStaffId as String?;
+    final resolvedScheduledStart = scheduledStart == _unsetValue
+        ? this.scheduledStart
+        : scheduledStart as DateTime?;
+    final resolvedScheduledDue = scheduledDue == _unsetValue
+        ? this.scheduledDue
+        : scheduledDue as DateTime?;
     return ProductionTaskDraft(
       id: id,
       title: title ?? this.title,
       roleRequired: roleRequired ?? this.roleRequired,
-      assignedStaffId: assignedStaffId ?? this.assignedStaffId,
+      assignedStaffId: resolvedAssignedStaffId,
       assignedStaffProfileIds:
           assignedStaffProfileIds ?? this.assignedStaffProfileIds,
       requiredHeadcount: requiredHeadcount ?? this.requiredHeadcount,
       weight: weight ?? this.weight,
+      scheduledStart: resolvedScheduledStart,
+      scheduledDue: resolvedScheduledDue,
+      manualSortOrder: manualSortOrder ?? this.manualSortOrder,
       instructions: instructions ?? this.instructions,
       taskType: taskType ?? this.taskType,
       sourceTemplateKey: sourceTemplateKey ?? this.sourceTemplateKey,
@@ -1172,7 +1207,7 @@ class ProductionPlanDraftController
 
   void applyDraft(ProductionPlanDraftState draft) {
     // WHY: Replace the entire draft when AI provides a new structure.
-    state = draft;
+    state = _withComputedSummary(draft);
     AppDebug.log(
       _logTag,
       _logDraftApplied,
@@ -1189,6 +1224,9 @@ class ProductionPlanDraftController
       assignedStaffProfileIds: const [],
       requiredHeadcount: 1,
       weight: _defaultTaskWeight,
+      scheduledStart: null,
+      scheduledDue: null,
+      manualSortOrder: 0,
       instructions: _emptyText,
       taskType: _emptyText,
       sourceTemplateKey: _emptyText,
@@ -1200,9 +1238,9 @@ class ProductionPlanDraftController
     );
   }
 
-  void addTask(int phaseIndex) {
+  String? addTask(int phaseIndex) {
     if (phaseIndex < _minIndex || phaseIndex >= state.phases.length) {
-      return;
+      return null;
     }
 
     final task = _buildDefaultTaskDraft();
@@ -1214,11 +1252,12 @@ class ProductionPlanDraftController
 
     state = _withComputedSummary(state.copyWith(phases: phases));
     AppDebug.log(_logTag, _logTaskAdded, extra: {_extraPhaseKey: phase.name});
+    return task.id;
   }
 
-  void addTaskAt(int phaseIndex, int taskIndex) {
+  String? addTaskAt(int phaseIndex, int taskIndex) {
     if (phaseIndex < _minIndex || phaseIndex >= state.phases.length) {
-      return;
+      return null;
     }
 
     final task = _buildDefaultTaskDraft();
@@ -1234,6 +1273,138 @@ class ProductionPlanDraftController
       _logTag,
       _logTaskAdded,
       extra: {_extraPhaseKey: phase.name, _extraTaskIndexKey: safeTaskIndex},
+    );
+    return task.id;
+  }
+
+  String? duplicateTask(int phaseIndex, String taskId) {
+    if (phaseIndex < _minIndex || phaseIndex >= state.phases.length) {
+      return null;
+    }
+
+    final phases = [...state.phases];
+    final phase = phases[phaseIndex];
+    final taskIndex = phase.tasks.indexWhere((task) => task.id == taskId);
+    if (taskIndex < 0) {
+      return null;
+    }
+
+    final source = phase.tasks[taskIndex];
+    final duplicate = source.copyWith(
+      title: source.title.trim().isEmpty ? _defaultTaskTitle : source.title,
+      status: _defaultTaskStatus,
+      completedAt: null,
+      completedByStaffId: null,
+      manualSortOrder: source.manualSortOrder,
+    );
+    final duplicatedTask = ProductionTaskDraft(
+      id: _buildTaskId(),
+      title: duplicate.title,
+      roleRequired: duplicate.roleRequired,
+      assignedStaffId: duplicate.assignedStaffId,
+      assignedStaffProfileIds: duplicate.assignedStaffProfileIds,
+      requiredHeadcount: duplicate.requiredHeadcount,
+      weight: duplicate.weight,
+      scheduledStart: duplicate.scheduledStart,
+      scheduledDue: duplicate.scheduledDue,
+      manualSortOrder: duplicate.manualSortOrder,
+      instructions: duplicate.instructions,
+      taskType: duplicate.taskType,
+      sourceTemplateKey: duplicate.sourceTemplateKey,
+      recurrenceGroupKey: duplicate.recurrenceGroupKey,
+      occurrenceIndex: duplicate.occurrenceIndex,
+      status: duplicate.status,
+      completedAt: duplicate.completedAt,
+      completedByStaffId: duplicate.completedByStaffId,
+    );
+    final updatedTasks = [...phase.tasks];
+    updatedTasks.insert(taskIndex + 1, duplicatedTask);
+    phases[phaseIndex] = phase.copyWith(tasks: updatedTasks);
+
+    state = _withComputedSummary(state.copyWith(phases: phases));
+    AppDebug.log(
+      _logTag,
+      _logTaskAdded,
+      extra: {
+        _extraPhaseKey: phase.name,
+        _extraTaskIdKey: duplicatedTask.id,
+        "duplicatedFrom": taskId,
+      },
+    );
+    return duplicatedTask.id;
+  }
+
+  void moveTaskWithinPhase(int phaseIndex, int fromTaskIndex, int toTaskIndex) {
+    if (phaseIndex < _minIndex || phaseIndex >= state.phases.length) {
+      return;
+    }
+    final phases = [...state.phases];
+    final phase = phases[phaseIndex];
+    if (fromTaskIndex < 0 || fromTaskIndex >= phase.tasks.length) {
+      return;
+    }
+    final boundedTarget = toTaskIndex.clamp(0, phase.tasks.length);
+    final updatedTasks = [...phase.tasks];
+    final movedTask = updatedTasks.removeAt(fromTaskIndex);
+    final insertIndex = fromTaskIndex < boundedTarget
+        ? boundedTarget - 1
+        : boundedTarget;
+    updatedTasks.insert(insertIndex.clamp(0, updatedTasks.length), movedTask);
+    phases[phaseIndex] = phase.copyWith(tasks: updatedTasks);
+    state = _withComputedSummary(state.copyWith(phases: phases));
+  }
+
+  void moveTaskAcrossPhases(
+    int fromPhaseIndex,
+    int fromTaskIndex,
+    int toPhaseIndex,
+    int toTaskIndex,
+  ) {
+    if (fromPhaseIndex < _minIndex ||
+        fromPhaseIndex >= state.phases.length ||
+        toPhaseIndex < _minIndex ||
+        toPhaseIndex >= state.phases.length) {
+      return;
+    }
+    final phases = [...state.phases];
+    final sourcePhase = phases[fromPhaseIndex];
+    final targetPhase = phases[toPhaseIndex];
+    if (fromTaskIndex < 0 || fromTaskIndex >= sourcePhase.tasks.length) {
+      return;
+    }
+    final sourceTasks = [...sourcePhase.tasks];
+    final movedTask = sourceTasks.removeAt(fromTaskIndex);
+    final targetTasks = fromPhaseIndex == toPhaseIndex
+        ? sourceTasks
+        : [...targetPhase.tasks];
+    final safeInsertIndex = toTaskIndex.clamp(0, targetTasks.length);
+    targetTasks.insert(safeInsertIndex, movedTask);
+    phases[fromPhaseIndex] = sourcePhase.copyWith(tasks: sourceTasks);
+    phases[toPhaseIndex] = targetPhase.copyWith(tasks: targetTasks);
+    state = _withComputedSummary(state.copyWith(phases: phases));
+  }
+
+  void updateTaskSchedule(
+    int phaseIndex,
+    String taskId, {
+    DateTime? startDate,
+    DateTime? dueDate,
+  }) {
+    _updateTask(
+      phaseIndex,
+      taskId,
+      (task) => task.copyWith(
+        scheduledStart: startDate,
+        scheduledDue: dueDate,
+      ),
+    );
+  }
+
+  void updateTaskSortOrder(int phaseIndex, String taskId, int manualSortOrder) {
+    _updateTask(
+      phaseIndex,
+      taskId,
+      (task) => task.copyWith(manualSortOrder: manualSortOrder),
     );
   }
 
@@ -1410,32 +1581,71 @@ class ProductionPlanDraftController
         errors.add(_errorTaskHeadcountRequired);
         break;
       }
+      final hasScheduledStart = task.scheduledStart != null;
+      final hasScheduledDue = task.scheduledDue != null;
+      if (hasScheduledStart != hasScheduledDue) {
+        errors.add(_errorTaskScheduleIncomplete);
+        break;
+      }
+      if (hasScheduledStart && hasScheduledDue) {
+        if (!task.scheduledDue!.isAfter(task.scheduledStart!)) {
+          errors.add(_errorTaskScheduleInvalid);
+          break;
+        }
+        if (state.startDate != null && state.endDate != null) {
+          final planStart = DateTime(
+            state.startDate!.year,
+            state.startDate!.month,
+            state.startDate!.day,
+          );
+          final planEndExclusive = DateTime(
+            state.endDate!.year,
+            state.endDate!.month,
+            state.endDate!.day + 1,
+          );
+          if (task.scheduledStart!.isBefore(planStart) ||
+              task.scheduledDue!.isAfter(planEndExclusive)) {
+            errors.add(_errorTaskScheduleOutsideWindow);
+            break;
+          }
+        }
+      }
     }
 
     return errors;
   }
 
   Map<String, dynamic> toPayload() {
+    var taskSortCursor = 0;
     final phasesPayload = state.phases.map((phase) {
       final taskPayloads = phase.tasks
           .map(
-            (task) => {
-              _payloadTaskTitle: task.title.trim(),
-              _payloadTaskRole: task.roleRequired,
-              _payloadTaskStaff: task.assignedStaffId,
-              _payloadTaskStaffProfileIds: task.assignedStaffProfileIds,
-              _payloadTaskRequiredHeadcount:
-                  // WHY: Payload keeps required slots aligned with selected assignees.
-                  task.requiredHeadcount < task.assignedStaffProfileIds.length
-                  ? task.assignedStaffProfileIds.length
-                  : (task.requiredHeadcount < 1 ? 1 : task.requiredHeadcount),
-              _payloadTaskWeight: task.weight,
-              _payloadTaskInstructions: task.instructions.trim(),
-              _payloadTaskType: task.taskType.trim(),
-              _payloadTaskSourceTemplateKey: task.sourceTemplateKey.trim(),
-              _payloadTaskRecurrenceGroupKey: task.recurrenceGroupKey.trim(),
-              _payloadTaskOccurrenceIndex: task.occurrenceIndex,
-              _payloadTaskDependencies: const [],
+            (task) {
+              final normalizedSortOrder = taskSortCursor;
+              taskSortCursor += 1;
+              return {
+                _payloadTaskTitle: task.title.trim(),
+                _payloadTaskRole: task.roleRequired,
+                _payloadTaskStaff: task.assignedStaffId,
+                _payloadTaskStaffProfileIds: task.assignedStaffProfileIds,
+                _payloadTaskRequiredHeadcount:
+                    // WHY: Payload keeps required slots aligned with selected assignees.
+                    task.requiredHeadcount < task.assignedStaffProfileIds.length
+                    ? task.assignedStaffProfileIds.length
+                    : (task.requiredHeadcount < 1 ? 1 : task.requiredHeadcount),
+                _payloadTaskWeight: task.weight,
+                _payloadTaskInstructions: task.instructions.trim(),
+                _payloadTaskType: task.taskType.trim(),
+                _payloadTaskSourceTemplateKey: task.sourceTemplateKey.trim(),
+                _payloadTaskRecurrenceGroupKey: task.recurrenceGroupKey.trim(),
+                _payloadTaskOccurrenceIndex: task.occurrenceIndex,
+                _payloadTaskManualSortOrder: normalizedSortOrder,
+                if (task.scheduledStart != null && task.scheduledDue != null) ...{
+                  _payloadTaskStartDate: task.scheduledStart!.toIso8601String(),
+                  _payloadTaskDueDate: task.scheduledDue!.toIso8601String(),
+                },
+                _payloadTaskDependencies: const [],
+              };
             },
           )
           .toList();
@@ -1493,6 +1703,7 @@ class ProductionPlanDraftController
 
 ProductionPlanDraftState _withComputedSummary(ProductionPlanDraftState draft) {
   // WHY: Keep summary counters synchronized with local task edits.
+  final normalizedPhases = _withNormalizedTaskSortOrders(draft.phases);
   final totalTasks = draft.phases.fold<int>(
     0,
     (sum, phase) => sum + phase.tasks.length,
@@ -1504,7 +1715,22 @@ ProductionPlanDraftState _withComputedSummary(ProductionPlanDraftState draft) {
   return draft.copyWith(
     totalTasks: totalTasks,
     totalEstimatedDays: totalEstimatedDays,
+    phases: normalizedPhases,
   );
+}
+
+List<ProductionPhaseDraft> _withNormalizedTaskSortOrders(
+  List<ProductionPhaseDraft> phases,
+) {
+  var sortCursor = 0;
+  return phases.map((phase) {
+    final normalizedTasks = phase.tasks.map((task) {
+      final nextTask = task.copyWith(manualSortOrder: sortCursor);
+      sortCursor += 1;
+      return nextTask;
+    }).toList();
+    return phase.copyWith(tasks: normalizedTasks);
+  }).toList();
 }
 
 final productionPlanDraftProvider =
@@ -2271,6 +2497,17 @@ ProductionPlanDraftState _buildStrictDraftState(Map<String, dynamic> draft) {
           assignedStaffProfileIds: normalizedAssignedIds,
           requiredHeadcount: normalizedRequiredHeadcount,
           weight: _parseStrictInt(taskMap[_payloadTaskWeight])!,
+          scheduledStart: DateTime.tryParse(
+            (taskMap[_payloadTaskStartDate] ?? "").toString().trim(),
+          ),
+          scheduledDue: DateTime.tryParse(
+            (taskMap[_payloadTaskDueDate] ?? "").toString().trim(),
+          ),
+          manualSortOrder:
+              int.tryParse(
+                taskMap[_payloadTaskManualSortOrder]?.toString() ?? "",
+              ) ??
+              taskIndex,
           instructions: taskMap[_payloadTaskInstructions].toString().trim(),
           taskType: (taskMap[_payloadTaskType] ?? "").toString().trim(),
           sourceTemplateKey: (taskMap[_payloadTaskSourceTemplateKey] ?? "")

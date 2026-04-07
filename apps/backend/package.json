@@ -18,6 +18,7 @@
     "ops:business:clear": "./scripts/run-with-project-node.sh node scripts/clear-business-data.js",
     "ops:reset:razak": "./scripts/run-with-project-node.sh node scripts/reset-razak-business-state.js",
     "ops:production:simulate": "./scripts/run-with-project-node.sh node scripts/simulate-production-plans.js",
+    "ops:production:seed-imported-draft": "./scripts/run-with-project-node.sh node scripts/seed-imported-production-draft.js",
     "ops:farm-audit:simulate": "./scripts/run-with-project-node.sh node scripts/simulate-farm-asset-audits.js",
     "ops:lifecycle:refresh": "./scripts/run-with-project-node.sh node scripts/refresh-production-lifecycle-store.js",
     "ops:crop-profiles:seed": "./scripts/run-with-project-node.sh node scripts/seed-production-crop-profile-manifest.js",

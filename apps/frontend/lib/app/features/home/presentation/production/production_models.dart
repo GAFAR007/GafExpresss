@@ -108,6 +108,7 @@ const String _keyAssignedUnitIds = "assignedUnitIds";
 const String _keyRequiredHeadcount = "requiredHeadcount";
 const String _keyAssignedCount = "assignedCount";
 const String _keyWeight = "weight";
+const String _keyManualSortOrder = "manualSortOrder";
 const String _keyTaskType = "taskType";
 const String _keySourceTemplateKey = "sourceTemplateKey";
 const String _keyRecurrenceGroupKey = "recurrenceGroupKey";
@@ -665,6 +666,7 @@ class ProductionTask {
   final int requiredHeadcount;
   final int assignedCount;
   final int weight;
+  final int manualSortOrder;
   final String taskType;
   final String sourceTemplateKey;
   final String recurrenceGroupKey;
@@ -690,6 +692,7 @@ class ProductionTask {
     required this.requiredHeadcount,
     required this.assignedCount,
     required this.weight,
+    required this.manualSortOrder,
     required this.taskType,
     required this.sourceTemplateKey,
     required this.recurrenceGroupKey,
@@ -736,6 +739,7 @@ class ProductionTask {
         fallback: assignedStaffIds.length,
       ),
       weight: _parseInt(json[_keyWeight], fallback: 1),
+      manualSortOrder: _parseInt(json[_keyManualSortOrder]),
       taskType: _parseString(json[_keyTaskType]),
       sourceTemplateKey: _parseString(json[_keySourceTemplateKey]),
       recurrenceGroupKey: _parseString(json[_keyRecurrenceGroupKey]),

@@ -139,6 +139,13 @@ const productionTaskSchema = new mongoose.Schema(
       min: 1,
       default: 1,
     },
+    // WHY: Manual sort order keeps same-slot draft ordering stable after rescheduling.
+    manualSortOrder: {
+      type: Number,
+      min: 0,
+      default: 0,
+      index: true,
+    },
     // WHY: Auto-calculated dates keep schedules consistent.
     startDate: {
       type: Date,
@@ -220,6 +227,14 @@ productionTaskSchema.index({
   planId: 1,
   phaseId: 1,
   assignedUnitIds: 1,
+});
+
+// WHY: Calendar/detail views need deterministic ordering for tasks that share the same time window.
+productionTaskSchema.index({
+  planId: 1,
+  startDate: 1,
+  dueDate: 1,
+  manualSortOrder: 1,
 });
 
 const ProductionTask = mongoose.model(

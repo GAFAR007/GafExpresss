@@ -36,6 +36,7 @@ const String _logAssistantHeadcount = "assistant_headcount_recommendation";
 const String _logOverrideUpdated = "override_updated";
 const String _logDayAddTask = "day_add_task";
 const String _logDayAddTaskResult = "day_add_task_result";
+const String _logTaskRescheduled = "task_rescheduled";
 
 const String _title = "Draft production calendar";
 const String _emptyCopy = "No draft tasks scheduled for this period";
@@ -56,13 +57,12 @@ const String _statusFallback = "pending";
 const String _daySheetEmptyCopy = "No tasks scheduled for this day";
 const String _daySheetAssignButton = "Select staff";
 const String _daySheetAddTaskButton = "Add task";
+const String _slotDropHint = "Drag a task to any time slot to reschedule.";
 
 const double _calendarSurfaceRadius = 12;
 const double _calendarToolbarControlRadius = 999;
 const double _calendarDayCellRadius = 12;
-const double _monthCellHeaderIndicatorIconSize = 10;
 const double _monthCellHeaderHeight = 18;
-const double _monthCellIndicatorBaseSize = 12;
 const List<String> _weekdays = [
   "Mon",
   "Tue",
@@ -96,6 +96,13 @@ class ProductionDraftCalendarPreview extends StatefulWidget {
   final ValueChanged<Map<int, ProductionDraftTaskOverride>>? onOverridesChanged;
   final Future<void> Function(DateTime day, String phaseNameHint)?
   onAddTaskForDay;
+  final Future<void> Function(
+    String taskId,
+    DateTime startLocal,
+    DateTime dueLocal,
+  )?
+  onTaskScheduleChanged;
+  final Future<void> Function(String taskId)? onTaskEditRequested;
 
   const ProductionDraftCalendarPreview({
     super.key,
@@ -104,6 +111,8 @@ class ProductionDraftCalendarPreview extends StatefulWidget {
     this.staffProfiles = const <BusinessStaffProfileSummary>[],
     this.onOverridesChanged,
     this.onAddTaskForDay,
+    this.onTaskScheduleChanged,
+    this.onTaskEditRequested,
   });
 
   @override
@@ -219,11 +228,30 @@ class _ProductionDraftCalendarPreviewState
                   key: const ValueKey("day"),
                   day: _selectedDay,
                   tasks: _tasksForDay(day: _selectedDay, tasks: resolvedTasks),
+                  schedulePolicy:
+                      widget.schedulePolicy ??
+                      const ProductionAiDraftSchedulePolicy(
+                        workWeekDays: [1, 2, 3, 4, 5, 6, 7],
+                        blocks: [
+                          ProductionAiDraftScheduleBlock(
+                            start: "09:00",
+                            end: "13:00",
+                          ),
+                          ProductionAiDraftScheduleBlock(
+                            start: "14:00",
+                            end: "17:00",
+                          ),
+                        ],
+                        minSlotMinutes: 30,
+                        timezone: "",
+                      ),
                   staffProfiles: widget.staffProfiles,
                   onPrev: () => _shiftSelectedDay(-1),
                   onNext: () => _shiftSelectedDay(1),
                   onToday: _jumpToToday,
-                  onTaskTap: (task) => _openTaskStaffPicker(task),
+                  onTaskTap: _handleTaskTap,
+                  onTaskReschedule: (task, startLocal) =>
+                      _moveTaskToSchedule(task, startLocal),
                   onHeadcountChange: (task, delta) =>
                       _adjustTaskHeadcount(task: task, delta: delta),
                   onAddTask: widget.onAddTaskForDay == null
@@ -255,12 +283,36 @@ class _ProductionDraftCalendarPreviewState
                   key: const ValueKey("week"),
                   selectedDay: _selectedDay,
                   tasks: resolvedTasks,
+                  schedulePolicy:
+                      widget.schedulePolicy ??
+                      const ProductionAiDraftSchedulePolicy(
+                        workWeekDays: [1, 2, 3, 4, 5, 6, 7],
+                        blocks: [
+                          ProductionAiDraftScheduleBlock(
+                            start: "09:00",
+                            end: "13:00",
+                          ),
+                          ProductionAiDraftScheduleBlock(
+                            start: "14:00",
+                            end: "17:00",
+                          ),
+                        ],
+                        minSlotMinutes: 30,
+                        timezone: "",
+                      ),
                   onPrevWeek: () => _shiftSelectedDay(-7),
                   onNextWeek: () => _shiftSelectedDay(7),
                   onToday: _jumpToToday,
                   onDayTap: (day) {
                     _openDaySheet(day);
                   },
+                  onTaskTap: widget.onTaskEditRequested == null
+                      ? null
+                      : (task) async {
+                          await widget.onTaskEditRequested?.call(task.id);
+                        },
+                  onTaskReschedule: (task, startLocal) =>
+                      _moveTaskToSchedule(task, startLocal),
                 ),
                 _DraftCalendarMode.month => _MonthModePanel(
                   key: const ValueKey("month"),
@@ -272,6 +324,16 @@ class _ProductionDraftCalendarPreviewState
                   onToday: _jumpToToday,
                   onDayTap: (day) {
                     _openDaySheet(day);
+                  },
+                  onTaskDropToDay: (task, day) async {
+                    final nextStart = DateTime(
+                      day.year,
+                      day.month,
+                      day.day,
+                      task.startDate.hour,
+                      task.startDate.minute,
+                    );
+                    await _moveTaskToSchedule(task, nextStart);
                   },
                 ),
                 _DraftCalendarMode.year => _YearModePanel(
@@ -350,11 +412,23 @@ class _ProductionDraftCalendarPreviewState
           status: base.status,
           startDate: start,
           dueDate: due,
+          manualSortOrder: base.manualSortOrder,
           instructions: base.instructions,
           hasShortage: hasShortage,
         ),
       );
     }
+    resolved.sort((left, right) {
+      final startCompare = left.startDate.compareTo(right.startDate);
+      if (startCompare != 0) {
+        return startCompare;
+      }
+      final dueCompare = left.dueDate.compareTo(right.dueDate);
+      if (dueCompare != 0) {
+        return dueCompare;
+      }
+      return left.manualSortOrder.compareTo(right.manualSortOrder);
+    });
     return resolved;
   }
 
@@ -475,6 +549,14 @@ class _ProductionDraftCalendarPreviewState
       taskIndex: task.index,
       requiredHeadcount: next,
     );
+  }
+
+  Future<void> _handleTaskTap(_ResolvedDraftTask task) async {
+    if (widget.onTaskEditRequested != null) {
+      await widget.onTaskEditRequested?.call(task.id);
+      return;
+    }
+    await _openTaskStaffPicker(task);
   }
 
   Future<void> _openTaskStaffPicker(_ResolvedDraftTask task) async {
@@ -807,6 +889,26 @@ class _ProductionDraftCalendarPreviewState
     );
   }
 
+  Future<void> _moveTaskToSchedule(
+    _ResolvedDraftTask task,
+    DateTime startLocal,
+  ) async {
+    final duration = task.dueDate.isAfter(task.startDate)
+        ? task.dueDate.difference(task.startDate)
+        : const Duration(minutes: 30);
+    final dueLocal = startLocal.add(duration);
+    AppDebug.log(
+      _logTag,
+      _logTaskRescheduled,
+      extra: {
+        "taskId": task.id,
+        "start": startLocal.toIso8601String(),
+        "due": dueLocal.toIso8601String(),
+      },
+    );
+    await widget.onTaskScheduleChanged?.call(task.id, startLocal, dueLocal);
+  }
+
   void _shiftSelectedDay(int deltaDays) {
     final next = _selectedDay.add(Duration(days: deltaDays));
     AppDebug.log(
@@ -881,6 +983,17 @@ class _ProductionDraftCalendarPreviewState
                 taskIndex: task.index,
                 assignedStaffProfileIds: assignedStaffProfileIds,
               ),
+          onEditTask: widget.onTaskEditRequested == null
+              ? null
+              : (task) async {
+                  Navigator.of(context).pop();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) {
+                      return;
+                    }
+                    widget.onTaskEditRequested?.call(task.id);
+                  });
+                },
           onAddTask: widget.onAddTaskForDay == null
               ? null
               : () async {
@@ -941,16 +1054,15 @@ class _TopCommandBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isCompact = constraints.maxWidth < 840;
-        // WHY: Week mode is intentionally hidden to keep the UX focused on
-        // month navigation + per-day task sheet editing.
-        final effectiveMode = mode == _DraftCalendarMode.week
-            ? _DraftCalendarMode.month
-            : mode;
         final segmented = SegmentedButton<_DraftCalendarMode>(
           segments: const [
             ButtonSegment(
               value: _DraftCalendarMode.day,
               label: Text("Day", maxLines: 1, softWrap: false),
+            ),
+            ButtonSegment(
+              value: _DraftCalendarMode.week,
+              label: Text("Week", maxLines: 1, softWrap: false),
             ),
             ButtonSegment(
               value: _DraftCalendarMode.month,
@@ -962,7 +1074,7 @@ class _TopCommandBar extends StatelessWidget {
             ),
           ],
           showSelectedIcon: false,
-          selected: <_DraftCalendarMode>{effectiveMode},
+          selected: <_DraftCalendarMode>{mode},
           onSelectionChanged: (selection) {
             if (selection.isEmpty) return;
             onModeChanged(selection.first);
@@ -1145,6 +1257,8 @@ class _MonthModePanel extends StatelessWidget {
   final VoidCallback onNextMonth;
   final VoidCallback onToday;
   final ValueChanged<DateTime> onDayTap;
+  final Future<void> Function(_ResolvedDraftTask task, DateTime day)
+  onTaskDropToDay;
 
   const _MonthModePanel({
     super.key,
@@ -1155,6 +1269,7 @@ class _MonthModePanel extends StatelessWidget {
     required this.onNextMonth,
     required this.onToday,
     required this.onDayTap,
+    required this.onTaskDropToDay,
   });
 
   @override
@@ -1203,6 +1318,7 @@ class _MonthModePanel extends StatelessWidget {
                     isSelected: _isSameDay(day, selectedDay),
                     tasks: dayTasks,
                     onTap: () => onDayTap(day),
+                    onTaskDropToDay: (task) => onTaskDropToDay(task, day),
                   );
                 },
               );
@@ -1331,81 +1447,96 @@ class _MonthDayCell extends StatelessWidget {
   final bool isSelected;
   final List<_ResolvedDraftTask> tasks;
   final VoidCallback onTap;
+  final Future<void> Function(_ResolvedDraftTask task) onTaskDropToDay;
 
   const _MonthDayCell({
     required this.day,
     required this.isSelected,
     required this.tasks,
     required this.onTap,
+    required this.onTaskDropToDay,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: onTap,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final hasTasks = tasks.isNotEmpty;
-          final baseBackground = isSelected
-              ? colorScheme.surfaceContainerLow
-              : colorScheme.surface;
-          final borderColor = isSelected
-              ? colorScheme.primary
-              : colorScheme.outlineVariant;
-
-          return Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(_calendarDayCellRadius),
-              color: baseBackground,
-              border: Border.all(
-                color: borderColor,
-                width: isSelected ? 1.8 : 1,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  height: _monthCellHeaderHeight,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        // WHY: Reserve indicator space so day number never gets covered.
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: Text(
-                            day.day.toString(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelMedium
-                                ?.copyWith(
-                                  color: isSelected
-                                      ? colorScheme.primary
-                                      : colorScheme.onSurfaceVariant,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                        ),
-                      ),
-                      if (hasTasks)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 1),
-                          child: _DayTaskSummaryIndicator(tasks: tasks),
-                        ),
-                    ],
+    return DragTarget<_ResolvedDraftTask>(
+      onWillAcceptWithDetails: (details) => true,
+      onAcceptWithDetails: (details) async {
+        await onTaskDropToDay(details.data);
+      },
+      builder: (context, candidateData, rejectedData) {
+        final hasTasks = tasks.isNotEmpty;
+        final isDropActive = candidateData.isNotEmpty;
+        final baseBackground = isSelected
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surface;
+        final borderColor = isDropActive
+            ? colorScheme.primary
+            : isSelected
+            ? colorScheme.primary
+            : colorScheme.outlineVariant;
+        return InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(_calendarDayCellRadius),
+                  color: isDropActive
+                      ? colorScheme.primaryContainer
+                      : baseBackground,
+                  border: Border.all(
+                    color: borderColor,
+                    width: isSelected || isDropActive ? 1.8 : 1,
                   ),
                 ),
-              ],
-            ),
-          );
-        },
-      ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      height: _monthCellHeaderHeight,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: Text(
+                                day.day.toString(),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      color: isSelected || isDropActive
+                                          ? colorScheme.primary
+                                          : colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (hasTasks) ...[
+                      const Spacer(),
+                      Align(
+                        alignment: Alignment.bottomLeft,
+                        child: _DayTaskSummaryIndicator(tasks: tasks),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -1417,22 +1548,48 @@ class _DayTaskSummaryIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    // WHY: Keep day number legible by using a compact icon-only task marker.
-    final core = SizedBox(
-      width: _monthCellIndicatorBaseSize,
-      height: _monthCellIndicatorBaseSize,
-      child: Icon(
-        Icons.event_note_outlined,
-        size: _monthCellHeaderIndicatorIconSize,
-        color: colorScheme.onSurfaceVariant,
+    final theme = Theme.of(context);
+    final hasShortage = tasks.any((task) => task.hasShortage);
+    final accent = hasShortage
+        ? theme.colorScheme.tertiary
+        : theme.colorScheme.primary;
+    final density = tasks.length.clamp(1, 6);
+    final width = 10.0 + ((density - 1) * 3.0);
+    final fillWidthFactor = (tasks.length / 4).clamp(0.35, 1.0);
+    final core = Container(
+      width: width,
+      height: 6,
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          accent.withValues(alpha: 0.14),
+          theme.colorScheme.surfaceContainerHighest,
+        ),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withValues(alpha: 0.2)),
+      ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FractionallySizedBox(
+          widthFactor: fillWidthFactor,
+          child: Container(
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ),
       ),
     );
+    final semanticLabel =
+        "${tasks.length} scheduled task${tasks.length == 1 ? "" : "s"}";
     if (!_supportsHoverTooltip(context)) {
-      return core;
+      return Semantics(label: semanticLabel, child: core);
     }
     // WHY: Hover hint keeps the grid clean while still exposing task detail.
-    return Tooltip(message: _daySummaryTooltipMessage(tasks), child: core);
+    return Tooltip(
+      message: _daySummaryTooltipMessage(tasks),
+      child: Semantics(label: semanticLabel, child: core),
+    );
   }
 }
 
@@ -1465,19 +1622,26 @@ bool _supportsHoverTooltip(BuildContext context) {
 class _WeekModePanel extends StatelessWidget {
   final DateTime selectedDay;
   final List<_ResolvedDraftTask> tasks;
+  final ProductionAiDraftSchedulePolicy schedulePolicy;
   final VoidCallback onPrevWeek;
   final VoidCallback onNextWeek;
   final VoidCallback onToday;
   final ValueChanged<DateTime> onDayTap;
+  final Future<void> Function(_ResolvedDraftTask task)? onTaskTap;
+  final Future<void> Function(_ResolvedDraftTask task, DateTime startLocal)
+  onTaskReschedule;
 
   const _WeekModePanel({
     super.key,
     required this.selectedDay,
     required this.tasks,
+    required this.schedulePolicy,
     required this.onPrevWeek,
     required this.onNextWeek,
     required this.onToday,
     required this.onDayTap,
+    this.onTaskTap,
+    required this.onTaskReschedule,
   });
 
   @override
@@ -1497,6 +1661,10 @@ class _WeekModePanel extends StatelessWidget {
           onNext: onNextWeek,
           onToday: onToday,
         ),
+        if (tasks.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const _CalendarDropHint(),
+        ],
         const SizedBox(height: 8),
         Expanded(
           child: SingleChildScrollView(
@@ -1506,6 +1674,18 @@ class _WeekModePanel extends StatelessWidget {
               child: Row(
                 children: weekDays.map((day) {
                   final dayTasks = _tasksForDay(day: day, tasks: tasks);
+                  final slotStarts = _buildScheduleSlotStartsForDay(
+                    day: day,
+                    schedulePolicy: schedulePolicy,
+                  );
+                  final slotDuration = Duration(
+                    minutes: schedulePolicy.minSlotMinutes.clamp(15, 240),
+                  );
+                  final visibleSlotStarts = _occupiedSlotStartsForTasks(
+                    slotStarts: slotStarts,
+                    slotDuration: slotDuration,
+                    tasks: dayTasks,
+                  );
                   return SizedBox(
                     width: 210,
                     child: Card(
@@ -1525,39 +1705,34 @@ class _WeekModePanel extends StatelessWidget {
                               ),
                               const SizedBox(height: 6),
                               Expanded(
-                                child: dayTasks.isEmpty
-                                    ? Text(
-                                        "No tasks",
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
+                                child: visibleSlotStarts.isEmpty
+                                    ? const _TimelineEmptyState(
+                                        message: _daySheetEmptyCopy,
+                                        compact: true,
                                       )
-                                    : ListView.builder(
-                                        itemCount: dayTasks.length,
+                                    : ListView.separated(
+                                        itemCount: visibleSlotStarts.length,
+                                        separatorBuilder: (_, _) =>
+                                            const SizedBox(height: 6),
                                         itemBuilder: (context, index) {
-                                          final task = dayTasks[index];
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 6,
+                                          final slotStart =
+                                              visibleSlotStarts[index];
+                                          return _ScheduleSlotDropCell(
+                                            slotStart: slotStart,
+                                            slotDuration: slotDuration,
+                                            tasks: _tasksForSlot(
+                                              slotStart: slotStart,
+                                              slotDuration: slotDuration,
+                                              tasks: dayTasks,
                                             ),
-                                            child: Container(
-                                              padding: const EdgeInsets.all(6),
-                                              decoration: BoxDecoration(
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .surfaceContainerHighest,
-                                              ),
-                                              child: Text(
-                                                "${_clockLabel(task.startDate)}-${_clockLabel(task.dueDate)} ${task.title}",
-                                                maxLines: 3,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: Theme.of(
-                                                  context,
-                                                ).textTheme.labelSmall,
-                                              ),
-                                            ),
+                                            onTaskTap: (task) async {
+                                              if (onTaskTap != null) {
+                                                await onTaskTap!(task);
+                                                return;
+                                              }
+                                              onDayTap(day);
+                                            },
+                                            onTaskReschedule: onTaskReschedule,
                                           );
                                         },
                                       ),
@@ -1581,11 +1756,14 @@ class _WeekModePanel extends StatelessWidget {
 class _DayModePanel extends StatelessWidget {
   final DateTime day;
   final List<_ResolvedDraftTask> tasks;
+  final ProductionAiDraftSchedulePolicy schedulePolicy;
   final List<BusinessStaffProfileSummary> staffProfiles;
   final VoidCallback onPrev;
   final VoidCallback onNext;
   final VoidCallback onToday;
-  final ValueChanged<_ResolvedDraftTask> onTaskTap;
+  final Future<void> Function(_ResolvedDraftTask task) onTaskTap;
+  final Future<void> Function(_ResolvedDraftTask task, DateTime startLocal)
+  onTaskReschedule;
   final void Function(_ResolvedDraftTask task, int delta) onHeadcountChange;
   final Future<void> Function()? onAddTask;
 
@@ -1593,17 +1771,31 @@ class _DayModePanel extends StatelessWidget {
     super.key,
     required this.day,
     required this.tasks,
+    required this.schedulePolicy,
     required this.staffProfiles,
     required this.onPrev,
     required this.onNext,
     required this.onToday,
     required this.onTaskTap,
+    required this.onTaskReschedule,
     required this.onHeadcountChange,
     this.onAddTask,
   });
 
   @override
   Widget build(BuildContext context) {
+    final slotStarts = _buildScheduleSlotStartsForDay(
+      day: day,
+      schedulePolicy: schedulePolicy,
+    );
+    final slotDuration = Duration(
+      minutes: schedulePolicy.minSlotMinutes.clamp(15, 240),
+    );
+    final visibleSlotStarts = _occupiedSlotStartsForTasks(
+      slotStarts: slotStarts,
+      slotDuration: slotDuration,
+      tasks: tasks,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1626,26 +1818,31 @@ class _DayModePanel extends StatelessWidget {
             ),
           ),
         ],
+        if (tasks.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          const _CalendarDropHint(),
+        ],
         const SizedBox(height: 8),
         Expanded(
-          child: tasks.isEmpty
-              ? Center(
-                  child: Text(
-                    _daySheetEmptyCopy,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                )
+          child: visibleSlotStarts.isEmpty
+              ? const _TimelineEmptyState(message: _daySheetEmptyCopy)
               : ListView.separated(
-                  itemCount: tasks.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemCount: visibleSlotStarts.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final task = tasks[index];
-                    return _DayTaskCard(
-                      task: task,
+                    final slotStart = visibleSlotStarts[index];
+                    return _ScheduleSlotDropCell(
+                      slotStart: slotStart,
+                      slotDuration: slotDuration,
+                      tasks: _tasksForSlot(
+                        slotStart: slotStart,
+                        slotDuration: slotDuration,
+                        tasks: tasks,
+                      ),
+                      onTaskTap: onTaskTap,
+                      onTaskReschedule: onTaskReschedule,
                       staffProfiles: staffProfiles,
-                      onTap: () => onTaskTap(task),
-                      onHeadcountChange: (delta) =>
-                          onHeadcountChange(task, delta),
+                      onHeadcountChange: onHeadcountChange,
                     );
                   },
                 ),
@@ -1655,16 +1852,239 @@ class _DayModePanel extends StatelessWidget {
   }
 }
 
+class _TimelineEmptyState extends StatelessWidget {
+  final String message;
+  final bool compact;
+
+  const _TimelineEmptyState({required this.message, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 14,
+          vertical: compact ? 12 : 18,
+        ),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScheduleSlotDropCell extends StatelessWidget {
+  final DateTime slotStart;
+  final Duration slotDuration;
+  final List<_ResolvedDraftTask> tasks;
+  final Future<void> Function(_ResolvedDraftTask task)? onTaskTap;
+  final Future<void> Function(_ResolvedDraftTask task, DateTime startLocal)
+  onTaskReschedule;
+  final List<BusinessStaffProfileSummary> staffProfiles;
+  final void Function(_ResolvedDraftTask task, int delta)? onHeadcountChange;
+
+  const _ScheduleSlotDropCell({
+    required this.slotStart,
+    required this.slotDuration,
+    required this.tasks,
+    required this.onTaskTap,
+    required this.onTaskReschedule,
+    this.staffProfiles = const <BusinessStaffProfileSummary>[],
+    this.onHeadcountChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DragTarget<_ResolvedDraftTask>(
+      onWillAcceptWithDetails: (details) => true,
+      onAcceptWithDetails: (details) async {
+        await onTaskReschedule(details.data, slotStart);
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isActive = candidateData.isNotEmpty;
+        return Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: isActive
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.surface,
+            border: Border.all(
+              color: isActive
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outlineVariant,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _clockLabel(slotStart),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              if (tasks.isEmpty && isActive)
+                Text(
+                  "Drop task here",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else if (tasks.isEmpty)
+                const SizedBox.shrink()
+              else
+                ...tasks.map(
+                  (task) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _ScheduledTaskCard(
+                      task: task,
+                      onTap: onTaskTap == null
+                          ? null
+                          : () async {
+                              await onTaskTap!(task);
+                            },
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _CalendarDropHint extends StatelessWidget {
+  const _CalendarDropHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.open_with_rounded,
+            size: 16,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _slotDropHint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ScheduledTaskCard extends StatelessWidget {
+  final _ResolvedDraftTask task;
+  final Future<void> Function()? onTap;
+
+  const _ScheduledTaskCard({required this.task, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return LongPressDraggable<_ResolvedDraftTask>(
+      data: task,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 260),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: theme.colorScheme.primary),
+          ),
+          child: Text(
+            "${_clockLabel(task.startDate)} ${task.title}",
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap == null
+            ? null
+            : () async {
+                await onTap?.call();
+              },
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "${_clockLabel(task.startDate)}-${_clockLabel(task.dueDate)}",
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                task.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _DayTaskCard extends StatelessWidget {
   final _ResolvedDraftTask task;
   final List<BusinessStaffProfileSummary> staffProfiles;
   final VoidCallback onTap;
+  final Future<void> Function()? onEditTask;
   final ValueChanged<int> onHeadcountChange;
 
   const _DayTaskCard({
     required this.task,
     required this.staffProfiles,
     required this.onTap,
+    this.onEditTask,
     required this.onHeadcountChange,
   });
 
@@ -1799,6 +2219,14 @@ class _DayTaskCard extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
+              if (onEditTask != null)
+                FilledButton.icon(
+                  onPressed: () async {
+                    await onEditTask?.call();
+                  },
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text("Edit task"),
+                ),
               OutlinedButton.icon(
                 onPressed: onTap,
                 icon: const Icon(Icons.group_outlined),
@@ -2142,6 +2570,7 @@ class _DayTasksSheet extends StatefulWidget {
   final void Function(_ResolvedDraftTask task, int delta) onHeadcountChange;
   final void Function(_ResolvedDraftTask task, List<String> assignedIds)?
   onAssignedStaffChange;
+  final Future<void> Function(_ResolvedDraftTask task)? onEditTask;
   final Future<void> Function()? onAddTask;
 
   const _DayTasksSheet({
@@ -2150,6 +2579,7 @@ class _DayTasksSheet extends StatefulWidget {
     required this.staffProfiles,
     required this.onHeadcountChange,
     this.onAssignedStaffChange,
+    this.onEditTask,
     this.onAddTask,
   });
 
@@ -2372,6 +2802,11 @@ class _DayTasksSheetState extends State<_DayTasksSheet> {
                     return _DayTaskCard(
                       task: task,
                       staffProfiles: widget.staffProfiles,
+                      onEditTask: widget.onEditTask == null
+                          ? null
+                          : () async {
+                              await widget.onEditTask?.call(task);
+                            },
                       onTap: () => _openStaffPickerLocal(task),
                       onHeadcountChange: (delta) =>
                           _onHeadcountChangeLocal(task, delta),
@@ -2397,6 +2832,7 @@ class _ResolvedDraftTask {
   final String status;
   final DateTime startDate;
   final DateTime dueDate;
+  final int manualSortOrder;
   final String instructions;
   final bool hasShortage;
 
@@ -2411,6 +2847,7 @@ class _ResolvedDraftTask {
     required this.status,
     required this.startDate,
     required this.dueDate,
+    required this.manualSortOrder,
     required this.instructions,
     required this.hasShortage,
   });
@@ -2418,6 +2855,7 @@ class _ResolvedDraftTask {
   _ResolvedDraftTask copyWith({
     int? requiredHeadcount,
     List<String>? assignedStaffProfileIds,
+    int? manualSortOrder,
     bool? hasShortage,
   }) {
     return _ResolvedDraftTask(
@@ -2432,6 +2870,7 @@ class _ResolvedDraftTask {
       status: status,
       startDate: startDate,
       dueDate: dueDate,
+      manualSortOrder: manualSortOrder ?? this.manualSortOrder,
       instructions: instructions,
       hasShortage: hasShortage ?? this.hasShortage,
     );
@@ -2627,7 +3066,124 @@ List<_ResolvedDraftTask> _tasksForDay({
     final end = task.dueDate;
     return start.isBefore(dayEnd) &&
         (end.isAtSameMomentAs(dayStart) || end.isAfter(dayStart));
-  }).toList()..sort((left, right) => left.startDate.compareTo(right.startDate));
+  }).toList()..sort((left, right) {
+    final startCompare = left.startDate.compareTo(right.startDate);
+    if (startCompare != 0) {
+      return startCompare;
+    }
+    return left.manualSortOrder.compareTo(right.manualSortOrder);
+  });
+}
+
+List<_ResolvedDraftTask> _tasksForSlot({
+  required DateTime slotStart,
+  required Duration slotDuration,
+  required List<_ResolvedDraftTask> tasks,
+}) {
+  final slotEnd = slotStart.add(slotDuration);
+  return tasks.where((task) {
+    return !task.startDate.isBefore(slotStart) &&
+        task.startDate.isBefore(slotEnd);
+  }).toList()..sort((left, right) {
+    final startCompare = left.startDate.compareTo(right.startDate);
+    if (startCompare != 0) {
+      return startCompare;
+    }
+    return left.manualSortOrder.compareTo(right.manualSortOrder);
+  });
+}
+
+List<DateTime> _occupiedSlotStartsForTasks({
+  required List<DateTime> slotStarts,
+  required Duration slotDuration,
+  required List<_ResolvedDraftTask> tasks,
+}) {
+  final occupied = slotStarts.where((slotStart) {
+    return _tasksForSlot(
+      slotStart: slotStart,
+      slotDuration: slotDuration,
+      tasks: tasks,
+    ).isNotEmpty;
+  }).toList();
+  if (occupied.isNotEmpty || tasks.isEmpty) {
+    return occupied;
+  }
+
+  final fallbackStarts =
+      tasks
+          .map(
+            (task) => DateTime(
+              task.startDate.year,
+              task.startDate.month,
+              task.startDate.day,
+              task.startDate.hour,
+              task.startDate.minute,
+            ),
+          )
+          .toSet()
+          .toList()
+        ..sort();
+  return fallbackStarts;
+}
+
+List<DateTime> _buildScheduleSlotStartsForDay({
+  required DateTime day,
+  required ProductionAiDraftSchedulePolicy schedulePolicy,
+}) {
+  final slotMinutes = schedulePolicy.minSlotMinutes.clamp(15, 240);
+  final blocks = schedulePolicy.blocks.isNotEmpty
+      ? schedulePolicy.blocks
+      : const <ProductionAiDraftScheduleBlock>[
+          ProductionAiDraftScheduleBlock(start: "09:00", end: "13:00"),
+          ProductionAiDraftScheduleBlock(start: "14:00", end: "17:00"),
+        ];
+  final slots = <DateTime>[];
+  for (final block in blocks) {
+    final startParts = _parseClockParts(block.start);
+    final endParts = _parseClockParts(block.end);
+    if (startParts == null || endParts == null) {
+      continue;
+    }
+    var cursor = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      startParts.$1,
+      startParts.$2,
+    );
+    final blockEnd = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      endParts.$1,
+      endParts.$2,
+    );
+    while (cursor.isBefore(blockEnd)) {
+      slots.add(cursor);
+      cursor = cursor.add(Duration(minutes: slotMinutes));
+    }
+  }
+  if (slots.isEmpty) {
+    return <DateTime>[DateTime(day.year, day.month, day.day, 9, 0)];
+  }
+  return slots;
+}
+
+(int, int)? _parseClockParts(String value) {
+  final safe = value.trim();
+  final parts = safe.split(":");
+  if (parts.length < 2) {
+    return null;
+  }
+  final hour = int.tryParse(parts[0]);
+  final minute = int.tryParse(parts[1]);
+  if (hour == null || minute == null) {
+    return null;
+  }
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return (hour, minute);
 }
 
 bool _isSameDay(DateTime left, DateTime right) {

@@ -7756,6 +7756,9 @@ class _ProductionPlanAssistantScreenState
                       ? 1
                       : task.requiredHeadcount,
                   weight: task.weight < 1 ? 1 : task.weight,
+                  scheduledStart: task.startDate,
+                  scheduledDue: task.dueDate,
+                  manualSortOrder: entry.key,
                   instructions: task.instructions.trim(),
                   taskType: task.taskType.trim(),
                   sourceTemplateKey: task.sourceTemplateKey.trim(),
@@ -13524,6 +13527,9 @@ class _ProductionPlanAssistantScreenState
                         ? 1
                         : entry.value.requiredHeadcount,
                     weight: entry.value.weight < 1 ? 1 : entry.value.weight,
+                    scheduledStart: entry.value.startDate,
+                    scheduledDue: entry.value.dueDate,
+                    manualSortOrder: entry.key,
                     instructions: entry.value.instructions,
                     taskType: entry.value.taskType,
                     sourceTemplateKey: entry.value.sourceTemplateKey,

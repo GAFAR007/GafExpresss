@@ -275,7 +275,7 @@ class _ProductionPlanCreateBodyState
       0,
       before.phases[phaseIndex].tasks.length,
     );
-    controller.addTaskAt(phaseIndex, safeTaskIndex);
+    final createdTaskId = controller.addTaskAt(phaseIndex, safeTaskIndex);
 
     final after = ref.read(productionPlanDraftProvider);
     if (phaseIndex < 0 || phaseIndex >= after.phases.length) {
@@ -292,6 +292,14 @@ class _ProductionPlanCreateBodyState
     if (suggestedStart != null &&
         suggestedDue != null &&
         suggestedDue.isAfter(suggestedStart)) {
+      if (createdTaskId != null) {
+        controller.updateTaskSchedule(
+          phaseIndex,
+          createdTaskId,
+          startDate: suggestedStart,
+          dueDate: suggestedDue,
+        );
+      }
       setState(() {
         _taskScheduleOverrides[task.id] = DateTimeRange(
           start: suggestedStart,
@@ -1341,6 +1349,9 @@ class _ProductionPlanCreateBodyState
   @override
   Widget build(BuildContext context) {
     final draft = ref.watch(productionPlanDraftProvider);
+    final schedulePolicyAsync = ref.watch(
+      productionSchedulePolicyProvider(draft.estateAssetId),
+    );
     // WHY: Fetch estates and products to populate selectors.
     final assetsAsync = ref.watch(
       businessAssetsProvider(
@@ -1385,6 +1396,7 @@ class _ProductionPlanCreateBodyState
         ProductionPlanTaskTable(
           draft: draft,
           staff: staffList,
+          schedulePolicy: schedulePolicyAsync.valueOrNull?.policy,
           taskScheduleOverrides: _taskScheduleOverrides,
           onAddTask: (phaseIndex) {
             final phaseName = draft.phases[phaseIndex].name;
@@ -1621,6 +1633,7 @@ ProductionAiDraftResult _applyFocusedStaffToAiDraftResult({
       status: task.status,
       startDate: task.startDate,
       dueDate: task.dueDate,
+      manualSortOrder: task.manualSortOrder,
       instructions: task.instructions,
       hasShortage: hasShortage,
     );
@@ -2614,6 +2627,9 @@ class _PlanAiSectionState extends ConsumerState<_PlanAiSection> {
       assignedStaffProfileIds: const <String>[],
       requiredHeadcount: nextRequiredHeadcount,
       weight: 1,
+      scheduledStart: startLocal,
+      scheduledDue: dueLocal,
+      manualSortOrder: flatInsertIndex + insertTaskIndex,
       instructions: "Task added from draft calendar day view.",
       status: ProductionTaskStatus.notStarted,
       completedAt: null,
@@ -2640,6 +2656,7 @@ class _PlanAiSectionState extends ConsumerState<_PlanAiSection> {
       status: "not_started",
       startDate: startLocal.toUtc(),
       dueDate: dueLocal.toUtc(),
+      manualSortOrder: nextDraftTask.manualSortOrder,
       instructions: nextDraftTask.instructions,
       hasShortage: generated.capacity != null
           ? nextRequiredHeadcount >
@@ -2978,13 +2995,14 @@ class _PlanAiSectionState extends ConsumerState<_PlanAiSection> {
                             roleRequired: selectedRole,
                             requiredHeadcount: nextRequiredHeadcount,
                             assignedCount: nextAssignedIds.length,
-                            assignedStaffProfileIds: nextAssignedIds,
-                            status: _taskStatusApiValue(selectedStatus),
-                            startDate: basePreviewTask.startDate,
-                            dueDate: basePreviewTask.dueDate,
-                            instructions: nextInstructions,
-                            hasShortage: hasShortage,
-                          );
+                          assignedStaffProfileIds: nextAssignedIds,
+                          status: _taskStatusApiValue(selectedStatus),
+                          startDate: basePreviewTask.startDate,
+                          dueDate: basePreviewTask.dueDate,
+                          manualSortOrder: basePreviewTask.manualSortOrder,
+                          instructions: nextInstructions,
+                          hasShortage: hasShortage,
+                        );
                     }
 
                     setState(() {

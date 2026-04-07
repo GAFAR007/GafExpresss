@@ -438,6 +438,10 @@ const PRODUCTION_COPY = {
     "Production phases are required",
   TASKS_REQUIRED:
     "Production tasks are required",
+  TASK_SCHEDULE_INVALID:
+    "Pinned task dates must include valid startDate and dueDate values, and dueDate must be after startDate",
+  TASK_SCHEDULE_OUTSIDE_PLAN:
+    "Pinned task dates must stay within the plan schedule window",
   TASK_NOT_FOUND:
     "Production task not found",
   TASK_STATUS_REQUIRED:
@@ -5168,44 +5172,204 @@ function resolveImportedTaskPinnedDay(
   );
 }
 
-function applyPinnedImportedTaskDates({
+function normalizeTaskManualSortOrder(
+  value,
+  fallback = 0,
+) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return Math.max(
+      0,
+      Math.floor(Number(fallback) || 0),
+    );
+  }
+  return Math.max(
+    0,
+    Math.floor(parsed),
+  );
+}
+
+function resolveTaskPinnedDateRange({
+  task,
+  schedulePolicy,
+}) {
+  const explicitStart =
+    parseDateInput(task?.startDate);
+  const explicitDue =
+    parseDateInput(task?.dueDate);
+  if (
+    explicitStart &&
+    explicitDue &&
+    explicitDue > explicitStart
+  ) {
+    return {
+      startDate: explicitStart,
+      dueDate: explicitDue,
+      source: "explicit_datetime",
+    };
+  }
+
+  const defaultBlock =
+    schedulePolicy?.blocks?.[0] ||
+    WORK_SCHEDULE_FALLBACK_BLOCKS[0];
+  const pinnedDay =
+    resolveImportedTaskPinnedDay(task);
+  if (!pinnedDay) {
+    return null;
+  }
+  const pinnedStart =
+    parseDateInput(
+      buildIsoDateTimeFromDayClock({
+        day: pinnedDay,
+        clock:
+          defaultBlock?.start,
+      }),
+    );
+  const pinnedDue =
+    parseDateInput(
+      buildIsoDateTimeFromDayClock({
+        day: pinnedDay,
+        clock:
+          defaultBlock?.end ||
+          defaultBlock?.start,
+      }),
+    );
+  if (
+    !pinnedStart ||
+    !pinnedDue ||
+    pinnedDue <= pinnedStart
+  ) {
+    return null;
+  }
+  return {
+    startDate: pinnedStart,
+    dueDate: pinnedDue,
+    source: "imported_day",
+  };
+}
+
+function isPinnedTaskDateRangeWithinPlan({
+  startDate,
+  dueDate,
+  planStart,
+  planEnd,
+}) {
+  if (
+    !startDate ||
+    !dueDate ||
+    !planStart ||
+    !planEnd
+  ) {
+    return false;
+  }
+  const normalizedPlanStart =
+    new Date(
+      planStart.getFullYear(),
+      planStart.getMonth(),
+      planStart.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+  const normalizedPlanEndExclusive =
+    new Date(
+      planEnd.getFullYear(),
+      planEnd.getMonth(),
+      planEnd.getDate() + 1,
+      0,
+      0,
+      0,
+      0,
+    );
+  return (
+    startDate >= normalizedPlanStart &&
+    dueDate <= normalizedPlanEndExclusive
+  );
+}
+
+function assertPinnedTaskDateRanges({
+  tasks,
+  planStart,
+  planEnd,
+}) {
+  (Array.isArray(tasks) ? tasks : []).forEach(
+    (task) => {
+      const startProvided =
+        task?.startDate != null &&
+        `${task.startDate}`.trim()
+          .length > 0;
+      const dueProvided =
+        task?.dueDate != null &&
+        `${task.dueDate}`.trim()
+          .length > 0;
+      if (
+        !startProvided &&
+        !dueProvided
+      ) {
+        return;
+      }
+      const pinnedRange =
+        resolveTaskPinnedDateRange({
+          task,
+        });
+      if (!pinnedRange) {
+        throw new Error(
+          PRODUCTION_COPY.TASK_SCHEDULE_INVALID,
+        );
+      }
+      if (
+        !isPinnedTaskDateRangeWithinPlan(
+          {
+            startDate:
+              pinnedRange.startDate,
+            dueDate:
+              pinnedRange.dueDate,
+            planStart,
+            planEnd,
+          },
+        )
+      ) {
+        throw new Error(
+          PRODUCTION_COPY.TASK_SCHEDULE_OUTSIDE_PLAN,
+        );
+      }
+    },
+  );
+}
+
+function applyPinnedTaskScheduleOverrides({
   sourceTasks,
   scheduledTasks,
   schedulePolicy,
 }) {
-  const defaultBlock =
-    schedulePolicy?.blocks?.[0] ||
-    WORK_SCHEDULE_FALLBACK_BLOCKS[0];
   return scheduledTasks.map(
     (scheduledTask, index) => {
-      const pinnedDay =
-        resolveImportedTaskPinnedDay(
-          sourceTasks[index],
+      const sourceTask =
+        sourceTasks[index];
+      const pinnedRange =
+        resolveTaskPinnedDateRange({
+          task: sourceTask,
+          schedulePolicy,
+        });
+      const manualSortOrder =
+        normalizeTaskManualSortOrder(
+          sourceTask?.manualSortOrder,
+          index,
         );
-      if (!pinnedDay) {
-        return scheduledTask;
+      if (!pinnedRange) {
+        return {
+          ...scheduledTask,
+          manualSortOrder,
+        };
       }
-      const pinnedStart =
-        parseDateInput(
-          buildIsoDateTimeFromDayClock({
-            day: pinnedDay,
-            clock:
-              defaultBlock?.start,
-          }),
-        ) || scheduledTask.startDate;
-      const pinnedDue =
-        parseDateInput(
-          buildIsoDateTimeFromDayClock({
-            day: pinnedDay,
-            clock:
-              defaultBlock?.end ||
-              defaultBlock?.start,
-          }),
-        ) || scheduledTask.dueDate;
       return {
         ...scheduledTask,
-        startDate: pinnedStart,
-        dueDate: pinnedDue,
+        startDate:
+          pinnedRange.startDate,
+        dueDate:
+          pinnedRange.dueDate,
+        manualSortOrder,
       };
     },
   );
@@ -10931,7 +11095,7 @@ function buildTaskScheduleSequential({
       phaseEnd: normalizedPhaseEnd,
       logContext,
     });
-  return applyPinnedImportedTaskDates(
+  return applyPinnedTaskScheduleOverrides(
     {
       sourceTasks: tasks,
       scheduledTasks,
@@ -19185,6 +19349,11 @@ async function persistProductionPlanScheduleRows(
           assignedUnitIds,
           requiredHeadcount,
           weight: task.weight || 1,
+          manualSortOrder:
+            normalizeTaskManualSortOrder(
+              task.manualSortOrder,
+              tasksToCreate.length,
+            ),
           startDate: task.startDate,
           dueDate: task.dueDate,
           status:
@@ -19266,6 +19435,45 @@ async function persistProductionPlanScheduleRows(
       });
   }
 
+  const sortedCreatedTasks = [
+    ...createdTasks,
+  ].sort((left, right) => {
+    const leftStart =
+      parseDateInput(left?.startDate) ||
+      new Date(0);
+    const rightStart =
+      parseDateInput(right?.startDate) ||
+      new Date(0);
+    if (leftStart < rightStart) {
+      return -1;
+    }
+    if (leftStart > rightStart) {
+      return 1;
+    }
+    const leftDue =
+      parseDateInput(left?.dueDate) ||
+      leftStart;
+    const rightDue =
+      parseDateInput(right?.dueDate) ||
+      rightStart;
+    if (leftDue < rightDue) {
+      return -1;
+    }
+    if (leftDue > rightDue) {
+      return 1;
+    }
+    return (
+      normalizeTaskManualSortOrder(
+        left?.manualSortOrder,
+        0,
+      ) -
+      normalizeTaskManualSortOrder(
+        right?.manualSortOrder,
+        0,
+      )
+    );
+  });
+
   logProductionLifecycleBoundary({
     operation: "schedule_commit",
     stage: "success",
@@ -19289,7 +19497,8 @@ async function persistProductionPlanScheduleRows(
 
   return {
     createdPhases,
-    createdTasks,
+    createdTasks:
+      sortedCreatedTasks,
     unitScheduleSeedResult,
   };
 }
@@ -19682,6 +19891,14 @@ async function createProductionPlan(
       scheduledPhases.map(
         (phase) => phase.tasks || [],
       );
+    tasksInputByPhase.forEach(
+      (phaseTasks) =>
+        assertPinnedTaskDateRanges({
+          tasks: phaseTasks,
+          planStart: startDate,
+          planEnd: endDate,
+        }),
+    );
 
     const assignedStaffIds =
       tasksInputByPhase
@@ -20442,6 +20659,14 @@ async function updateProductionPlanDraft(
       scheduledPhases.map(
         (phase) => phase.tasks || [],
       );
+    tasksInputByPhase.forEach(
+      (phaseTasks) =>
+        assertPinnedTaskDateRanges({
+          tasks: phaseTasks,
+          planStart: startDate,
+          planEnd: endDate,
+        }),
+    );
     const assignedStaffIds =
       tasksInputByPhase
         .flat()
@@ -21305,6 +21530,7 @@ async function listProductionCalendar(
         .sort({
           startDate: 1,
           dueDate: 1,
+          manualSortOrder: 1,
           _id: 1,
         })
         .populate("planId", "title")
@@ -22867,7 +23093,12 @@ async function getProductionPlanDetail(
       await ProductionTask.find({
         planId: plan._id,
       })
-        .sort({ startDate: 1 })
+        .sort({
+          startDate: 1,
+          dueDate: 1,
+          manualSortOrder: 1,
+          _id: 1,
+        })
         .lean();
     const progressRecords =
       await TaskProgress.find({
