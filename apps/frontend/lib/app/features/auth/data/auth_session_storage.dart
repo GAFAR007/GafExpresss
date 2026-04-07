@@ -11,10 +11,10 @@
 /// HOW:
 /// - Stores token and user JSON separately using flutter_secure_storage.
 /// - Rebuilds AuthSession on load.
-/// - Stores the last email under a dedicated key (no password saved).
+/// - Stores the last successful email + password under dedicated secure keys.
 ///
 /// SAFETY:
-/// - Never logs token or password.
+/// - Never logs token or password and only keeps credentials in secure storage.
 /// ------------------------------------------------------------
 library;
 
@@ -25,11 +25,67 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 
 import '../domain/models/auth_session.dart';
 
+class StoredLoginCredentials {
+  final String? email;
+  final String? password;
+  final Map<String, String> passwordsByEmail;
+
+  const StoredLoginCredentials({
+    this.email,
+    this.password,
+    this.passwordsByEmail = const {},
+  });
+
+  bool matchesEmail(String email) {
+    final normalizedStoredEmail = (this.email ?? '').trim().toLowerCase();
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedStoredEmail.isEmpty || normalizedEmail.isEmpty) {
+      return false;
+    }
+    return normalizedStoredEmail == normalizedEmail;
+  }
+
+  String? passwordFor(String email) {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty) {
+      return null;
+    }
+
+    final rememberedPassword =
+        passwordsByEmail[normalizedEmail] ??
+        (matchesEmail(email) ? password : null);
+    final trimmedPassword = (rememberedPassword ?? '').trim();
+    if (trimmedPassword.isEmpty) {
+      return null;
+    }
+    return rememberedPassword;
+  }
+
+  StoredLoginCredentials withSavedPassword({
+    required String email,
+    required String password,
+  }) {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty || password.isEmpty) {
+      return this;
+    }
+
+    return StoredLoginCredentials(
+      email: email.trim(),
+      password: password,
+      passwordsByEmail: {...passwordsByEmail, normalizedEmail: password},
+    );
+  }
+}
+
 class AuthSessionStorage {
   // WHY: Use consistent keys for read/write/clear.
   static const String _tokenKey = "auth_token";
   static const String _userKey = "auth_user";
   static const String _lastEmailKey = "auth_last_email";
+  static const String _lastPasswordKey = "auth_last_password";
+  static const String _lastPasswordEmailKey = "auth_last_password_email";
+  static const String _savedPasswordsKey = "auth_saved_passwords";
   static const String _pendingInviteKey = "auth_pending_invite";
 
   final FlutterSecureStorage _storage;
@@ -66,6 +122,38 @@ class AuthSessionStorage {
   }
 
   /// ------------------------------------------------------
+  /// SAVE LAST PASSWORD
+  /// ------------------------------------------------------
+  Future<void> saveLastPassword({
+    required String email,
+    required String password,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail.isEmpty || password.isEmpty) {
+      AppDebug.log("AUTH_STORAGE", "Skipped saveLastPassword (missing data)");
+      return;
+    }
+
+    AppDebug.log("AUTH_STORAGE", "Saving last password");
+    final savedPasswords = await _readSavedPasswordMap();
+    savedPasswords[normalizedEmail] = password;
+    await _writeSavedPasswordMap(savedPasswords);
+    await _storage.write(key: _lastPasswordKey, value: password);
+    await _storage.write(key: _lastPasswordEmailKey, value: normalizedEmail);
+  }
+
+  /// ------------------------------------------------------
+  /// SAVE LAST LOGIN CREDENTIALS
+  /// ------------------------------------------------------
+  Future<void> saveLastCredentials({
+    required String email,
+    required String password,
+  }) async {
+    await saveLastEmail(email);
+    await saveLastPassword(email: email, password: password);
+  }
+
+  /// ------------------------------------------------------
   /// READ LAST EMAIL
   /// ------------------------------------------------------
   Future<String?> readLastEmail() async {
@@ -81,11 +169,77 @@ class AuthSessionStorage {
   }
 
   /// ------------------------------------------------------
+  /// READ LAST PASSWORD
+  /// ------------------------------------------------------
+  Future<String?> readLastPassword({String? forEmail}) async {
+    AppDebug.log("AUTH_STORAGE", "Reading last password");
+
+    final targetEmail = (forEmail ?? "").trim().toLowerCase();
+    final savedPasswords = await _readSavedPasswordMap();
+    final savedPassword = savedPasswords[targetEmail];
+    if ((savedPassword ?? '').isNotEmpty) {
+      return savedPassword;
+    }
+
+    final password = await _storage.read(key: _lastPasswordKey);
+    final passwordEmail = await _storage.read(key: _lastPasswordEmailKey);
+    if (password == null || password.isEmpty) {
+      AppDebug.log("AUTH_STORAGE", "No last password found");
+      return null;
+    }
+
+    final normalizedPasswordEmail = (passwordEmail ?? "").trim().toLowerCase();
+    if (targetEmail.isNotEmpty &&
+        normalizedPasswordEmail.isNotEmpty &&
+        normalizedPasswordEmail != targetEmail) {
+      AppDebug.log("AUTH_STORAGE", "Skipped last password (email mismatch)");
+      return null;
+    }
+
+    return password;
+  }
+
+  /// ------------------------------------------------------
+  /// READ LAST LOGIN CREDENTIALS
+  /// ------------------------------------------------------
+  Future<StoredLoginCredentials> readLastCredentials() async {
+    AppDebug.log("AUTH_STORAGE", "Reading last credentials");
+
+    final email = await readLastEmail();
+    final savedPasswords = await _readSavedPasswordMap();
+    if (email == null || email.isEmpty) {
+      return StoredLoginCredentials(passwordsByEmail: savedPasswords);
+    }
+
+    final password = await readLastPassword(forEmail: email);
+    final normalizedEmail = email.trim().toLowerCase();
+
+    return StoredLoginCredentials(
+      email: email,
+      password: password,
+      passwordsByEmail: {
+        ...savedPasswords,
+        if ((password ?? '').isNotEmpty) normalizedEmail: password!,
+      },
+    );
+  }
+
+  /// ------------------------------------------------------
   /// CLEAR LAST EMAIL
   /// ------------------------------------------------------
   Future<void> clearLastEmail() async {
     AppDebug.log("AUTH_STORAGE", "Clearing last email");
     await _storage.delete(key: _lastEmailKey);
+  }
+
+  /// ------------------------------------------------------
+  /// CLEAR LAST PASSWORD
+  /// ------------------------------------------------------
+  Future<void> clearLastPassword() async {
+    AppDebug.log("AUTH_STORAGE", "Clearing last password");
+    await _storage.delete(key: _lastPasswordKey);
+    await _storage.delete(key: _lastPasswordEmailKey);
+    await _storage.delete(key: _savedPasswordsKey);
   }
 
   /// ------------------------------------------------------
@@ -155,5 +309,36 @@ class AuthSessionStorage {
 
     await _storage.delete(key: _tokenKey);
     await _storage.delete(key: _userKey);
+  }
+
+  Future<Map<String, String>> _readSavedPasswordMap() async {
+    final rawValue = await _storage.read(key: _savedPasswordsKey);
+    if (rawValue == null || rawValue.trim().isEmpty) {
+      return {};
+    }
+
+    try {
+      final decoded = jsonDecode(rawValue);
+      if (decoded is! Map) {
+        return {};
+      }
+
+      final entries = <String, String>{};
+      for (final entry in decoded.entries) {
+        final email = entry.key.toString().trim().toLowerCase();
+        final password = entry.value?.toString() ?? '';
+        if (email.isEmpty || password.isEmpty) {
+          continue;
+        }
+        entries[email] = password;
+      }
+      return entries;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _writeSavedPasswordMap(Map<String, String> passwords) async {
+    await _storage.write(key: _savedPasswordsKey, value: jsonEncode(passwords));
   }
 }

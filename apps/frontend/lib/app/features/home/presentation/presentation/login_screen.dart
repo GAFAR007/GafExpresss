@@ -19,8 +19,11 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/auth/data/auth_session_storage.dart';
+import 'package:frontend/app/features/auth/domain/models/login_shortcut_bundle.dart';
 import 'package:frontend/app/features/home/presentation/app_ui.dart';
 import 'package:frontend/app/features/home/presentation/home_categories_section.dart';
 import 'package:frontend/app/features/home/presentation/home_filter_sheet.dart';
@@ -58,6 +61,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _isLoading = false;
   String? _loginErrorMessage;
   bool _showPassword = false;
+  StoredLoginCredentials _storedCredentials = const StoredLoginCredentials();
+  _LoginShortcutRole _selectedShortcutRole = _LoginShortcutRole.user;
+  final Map<_LoginShortcutRole, Future<LoginShortcutBundle>>
+  _loginShortcutFutures = {};
 
   String _pendingQuery = "";
   String _activeQuery = "";
@@ -77,45 +84,132 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    _emailCtrl.addListener(_handleCredentialFieldChanged);
+    _passwordCtrl.addListener(_handleCredentialFieldChanged);
+    _primeLoginAccountsFuture(_selectedShortcutRole);
     final initialEmail = (widget.initialEmail ?? "").trim();
     if (initialEmail.isNotEmpty) {
       _emailCtrl.text = initialEmail;
       AppDebug.log("LOGIN", "Prefilled route email");
     }
-    _loadSavedEmail();
+    _loadSavedCredentials();
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _emailCtrl.removeListener(_handleCredentialFieldChanged);
+    _passwordCtrl.removeListener(_handleCredentialFieldChanged);
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadSavedEmail() async {
-    AppDebug.log("LOGIN", "Loading saved email");
+  void _handleCredentialFieldChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+  }
+
+  Future<LoginShortcutBundle> _createLoginAccountsFuture(
+    _LoginShortcutRole role,
+  ) {
+    AppDebug.log("LOGIN", "Load login accounts", extra: {"role": role.apiRole});
+    return ref.read(authApiProvider).fetchLoginShortcuts(role: role.apiRole);
+  }
+
+  Future<LoginShortcutBundle> _primeLoginAccountsFuture(
+    _LoginShortcutRole role,
+  ) {
+    return _loginShortcutFutures.putIfAbsent(
+      role,
+      () => _createLoginAccountsFuture(role),
+    );
+  }
+
+  void _refreshLoginAccountsFuture(
+    _LoginShortcutRole role, {
+    void Function(void Function())? setModalState,
+  }) {
+    _loginShortcutFutures[role] = _createLoginAccountsFuture(role);
+    if (mounted) {
+      setState(() {});
+    }
+    if (setModalState != null) {
+      setModalState(() {});
+    }
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    AppDebug.log("LOGIN", "Loading saved credentials");
     final storage = ref.read(authSessionStorageProvider);
-    final savedEmail = await storage.readLastEmail();
+    final storedCredentials = await storage.readLastCredentials();
 
     if (!mounted) {
-      AppDebug.log("LOGIN", "Skip saved email (screen disposed)");
+      AppDebug.log("LOGIN", "Skip saved credentials (screen disposed)");
       return;
     }
 
-    if (savedEmail == null || savedEmail.isEmpty) {
-      AppDebug.log("LOGIN", "No saved email to prefill");
+    _storedCredentials = storedCredentials;
+
+    final savedEmail = storedCredentials.email;
+    if ((savedEmail ?? "").isNotEmpty && _emailCtrl.text.trim().isEmpty) {
+      _emailCtrl.text = savedEmail!;
+      AppDebug.log("LOGIN", "Prefilled saved email");
+    }
+
+    _maybeApplyStoredPassword(
+      email: _emailCtrl.text,
+      overwrite: _passwordCtrl.text.isEmpty,
+    );
+    setState(() {});
+  }
+
+  void _maybeApplyStoredPassword({
+    required String email,
+    bool overwrite = false,
+    void Function(void Function())? setModalState,
+  }) {
+    final storedPassword = _storedCredentials.passwordFor(email);
+    if (storedPassword == null || storedPassword.isEmpty) {
       return;
     }
 
-    if (_emailCtrl.text.trim().isNotEmpty) {
-      AppDebug.log("LOGIN", "Skip saved email (email already present)");
+    if (!overwrite && _passwordCtrl.text.isNotEmpty) {
       return;
     }
 
-    _emailCtrl.text = savedEmail;
-    AppDebug.log("LOGIN", "Prefilled saved email");
+    _passwordCtrl.text = storedPassword;
+    if (mounted) {
+      setState(() {});
+    }
+    if (setModalState != null) {
+      setModalState(() {});
+    }
+  }
+
+  String? _resolveShortcutPassword(LoginShortcutAccount account) {
+    return _storedCredentials.passwordFor(account.email);
+  }
+
+  void _applyLoginShortcut(
+    LoginShortcutAccount account, {
+    void Function(void Function())? setModalState,
+  }) {
+    final password = _resolveShortcutPassword(account);
+
+    _emailCtrl.text = account.email;
+    _passwordCtrl.text = password ?? "";
+    _setLoginError(null, setModalState: setModalState);
+
+    if (mounted) {
+      setState(() {});
+    }
+    if (setModalState != null) {
+      setModalState(() {});
+    }
   }
 
   Future<void> _handleRefresh() async {
@@ -158,6 +252,43 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return raw.substring("Exception: ".length).trim();
     }
     return raw;
+  }
+
+  String _formatAccountLabel(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+
+    return trimmed
+        .split('_')
+        .where((segment) => segment.trim().isNotEmpty)
+        .map(
+          (segment) =>
+              segment[0].toUpperCase() + segment.substring(1).toLowerCase(),
+        )
+        .join(' ');
+  }
+
+  void _togglePasswordVisibility({
+    required void Function(void Function()) setModalState,
+  }) {
+    final selection = _passwordCtrl.selection;
+    setState(() => _showPassword = !_showPassword);
+    setModalState(() {});
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      final fallbackSelection = TextSelection.collapsed(
+        offset: _passwordCtrl.text.length,
+      );
+      _passwordCtrl.selection = selection.isValid
+          ? selection
+          : fallbackSelection;
+    });
   }
 
   void _goToForgotPassword(BuildContext sheetContext) {
@@ -243,7 +374,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         extra: {"userId": session.user.id},
       );
 
-      await storage.saveLastEmail(email);
+      await storage.saveLastCredentials(email: email, password: password);
+      _storedCredentials = _storedCredentials.withSavedPassword(
+        email: email,
+        password: password,
+      );
+      TextInput.finishAutofillContext(shouldSave: true);
       await ref.read(authSessionProvider.notifier).setSession(session);
 
       final rawRedirect = widget.redirectTo;
@@ -314,6 +450,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void _openSignInSheet() {
     AppDebug.log("LOGIN", "Open sign-in sheet");
     _setLoginError(null);
+    _maybeApplyStoredPassword(
+      email: _emailCtrl.text,
+      overwrite: _passwordCtrl.text.isEmpty,
+    );
 
     showModalBottomSheet(
       context: context,
@@ -342,102 +482,630 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final theme = Theme.of(sheetContext);
     final scheme = theme.colorScheme;
     final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
+    final shortcutBundleFuture = _primeLoginAccountsFuture(
+      _selectedShortcutRole,
+    );
 
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
       child: Container(
+        constraints: const BoxConstraints(maxWidth: 860),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         decoration: BoxDecoration(
           color: scheme.surface,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: SingleChildScrollView(
+          child: AutofillGroup(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Align(
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: scheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "Sign in to continue checkout",
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "Browse in guest mode, then sign back into the right workspace with your email and password.",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                AppSectionCard(
+                  tone: AppPanelTone.hero,
+                  padding: const EdgeInsets.all(AppSpacing.xl),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          AppIconBadge(
+                            icon: _selectedShortcutRole.icon,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Choose account",
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: AppSpacing.xs),
+                                Text(
+                                  "Pick a role, then tap any real account from MongoDB to fill the email field. If this device already remembers that password, it will be applied automatically.",
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final isCompact = constraints.maxWidth < 640;
+                          final buttons = _LoginShortcutRole.values
+                              .map(
+                                (role) => SizedBox(
+                                  width: isCompact
+                                      ? constraints.maxWidth
+                                      : (constraints.maxWidth -
+                                                AppSpacing.md * 2) /
+                                            3,
+                                  child: _buildShortcutRoleButton(
+                                    context: context,
+                                    role: role,
+                                    setModalState: setModalState,
+                                  ),
+                                ),
+                              )
+                              .toList();
+
+                          return Wrap(
+                            spacing: AppSpacing.md,
+                            runSpacing: AppSpacing.md,
+                            children: buttons,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      _buildShortcutAccountsSection(
+                        context: sheetContext,
+                        shortcutBundleFuture: shortcutBundleFuture,
+                        setModalState: setModalState,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  autofillHints: const [
+                    AutofillHints.username,
+                    AutofillHints.email,
+                  ],
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  onChanged: (value) {
+                    _setLoginError(null, setModalState: setModalState);
+                    _maybeApplyStoredPassword(
+                      email: value,
+                      overwrite: _passwordCtrl.text.isEmpty,
+                      setModalState: setModalState,
+                    );
+                  },
+                  decoration: const InputDecoration(labelText: "Email"),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: ValueKey(
+                    'login-password-field-${_showPassword ? "visible" : "hidden"}',
+                  ),
+                  controller: _passwordCtrl,
+                  keyboardType: TextInputType.visiblePassword,
+                  obscureText: !_showPassword,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
+                  autofillHints: const [AutofillHints.password],
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) =>
+                      _onLoginPressed(setModalState: setModalState),
+                  onChanged: (_) =>
+                      _setLoginError(null, setModalState: setModalState),
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    helperText:
+                        _storedCredentials.passwordFor(_emailCtrl.text) != null
+                        ? "Saved password available for this email on this device."
+                        : "Tap an account above to fill your email faster.",
+                    suffixIcon: IconButton(
+                      onPressed: () {
+                        AppDebug.log("LOGIN", "Toggle password visibility");
+                        _togglePasswordVisibility(setModalState: setModalState);
+                      },
+                      icon: Icon(
+                        _showPassword ? Icons.visibility_off : Icons.visibility,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isCompact = constraints.maxWidth < 520;
+                    final actions = [
+                      TextButton.icon(
+                        onPressed: _isLoading
+                            ? null
+                            : () => _goToForgotPassword(sheetContext),
+                        icon: const Icon(Icons.key_outlined, size: 16),
+                        label: const Text("Forgot password?"),
+                      ),
+                      TextButton(
+                        onPressed: _isLoading
+                            ? null
+                            : () {
+                                AppDebug.log("LOGIN", "Go Register tapped");
+                                Navigator.of(sheetContext).pop();
+                                context.go("/register");
+                              },
+                        child: const Text("Create account"),
+                      ),
+                    ];
+
+                    if (isCompact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: actions
+                            .map(
+                              (action) => Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: action,
+                              ),
+                            )
+                            .toList(),
+                      );
+                    }
+
+                    return Row(
+                      children: [actions.first, const Spacer(), actions.last],
+                    );
+                  },
+                ),
+                _buildLoginErrorCard(sheetContext),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _isLoading
+                        ? null
+                        : () => _onLoginPressed(setModalState: setModalState),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.xl),
+                      ),
+                    ),
+                    child: Text(_isLoading ? "Signing in..." : "Sign in"),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShortcutRoleButton({
+    required BuildContext context,
+    required _LoginShortcutRole role,
+    required void Function(void Function()) setModalState,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isSelected = _selectedShortcutRole == role;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        onTap: () {
+          if (_selectedShortcutRole == role) {
+            return;
+          }
+          setState(() => _selectedShortcutRole = role);
+          _primeLoginAccountsFuture(role);
+          setModalState(() {});
+        },
+        child: Ink(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.lg,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? scheme.primary.withValues(alpha: 0.12)
+                : scheme.surface,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+              color: isSelected ? scheme.primary : scheme.outlineVariant,
+              width: isSelected ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                role.icon,
+                size: 18,
+                color: isSelected ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      role.label,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: isSelected
+                            ? scheme.primary
+                            : theme.textTheme.labelLarge?.color,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      role.description,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShortcutAccountsSection({
+    required BuildContext context,
+    required Future<LoginShortcutBundle> shortcutBundleFuture,
+    required void Function(void Function()) setModalState,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return FutureBuilder<LoginShortcutBundle>(
+      future: shortcutBundleFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting ||
+            snapshot.connectionState == ConnectionState.active) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Loading ${_selectedShortcutRole.label.toLowerCase()} accounts...",
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                const LinearProgressIndicator(minHeight: 3),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: scheme.errorContainer.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _friendlyLoginErrorText(snapshot.error!),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onErrorContainer,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                OutlinedButton.icon(
+                  onPressed: () => _refreshLoginAccountsFuture(
+                    _selectedShortcutRole,
+                    setModalState: setModalState,
+                  ),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text("Retry"),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final bundle = snapshot.data;
+        if (bundle == null) {
+          return const SizedBox.shrink();
+        }
+
+        final savedPasswordCount = bundle.accounts
+            .where(
+              (account) =>
+                  _storedCredentials.passwordFor(account.email) != null,
+            )
+            .length;
+        final verifiedCount = bundle.accounts
+            .where((account) => account.isFullyVerified)
+            .length;
+
+        if (bundle.accounts.isEmpty) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: Text(
+              "No ${_selectedShortcutRole.label.toLowerCase()} accounts are available right now.",
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                AppStatusChip(
+                  label: "${bundle.accounts.length} accounts",
+                  tone: AppStatusTone.info,
+                  icon: Icons.groups_rounded,
+                ),
+                AppStatusChip(
+                  label: savedPasswordCount > 0
+                      ? "$savedPasswordCount saved on this device"
+                      : "No saved passwords yet",
+                  tone: savedPasswordCount > 0
+                      ? AppStatusTone.success
+                      : AppStatusTone.warning,
+                  icon: savedPasswordCount > 0
+                      ? Icons.lock_person_rounded
+                      : Icons.password_rounded,
+                ),
+                AppStatusChip(
+                  label: verifiedCount > 0
+                      ? "$verifiedCount verified"
+                      : "No verified accounts yet",
+                  tone: verifiedCount > 0
+                      ? AppStatusTone.success
+                      : AppStatusTone.warning,
+                  icon: verifiedCount > 0
+                      ? Icons.verified_rounded
+                      : Icons.pending_outlined,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 680 ? 2 : 1;
+                final gap = AppSpacing.md;
+                final width = columns == 1
+                    ? constraints.maxWidth
+                    : (constraints.maxWidth - gap) / columns;
+
+                return Wrap(
+                  spacing: gap,
+                  runSpacing: gap,
+                  children: bundle.accounts
+                      .map(
+                        (account) => SizedBox(
+                          width: width,
+                          child: _buildShortcutAccountCard(
+                            context: context,
+                            account: account,
+                            setModalState: setModalState,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildShortcutAccountCard({
+    required BuildContext context,
+    required LoginShortcutAccount account,
+    required void Function(void Function()) setModalState,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isSelected =
+        _emailCtrl.text.trim().toLowerCase() == account.email.toLowerCase();
+    final password = _resolveShortcutPassword(account);
+    final hasPassword = (password ?? "").isNotEmpty;
+    final accountRoleLabel = _formatAccountLabel(
+      (account.staffRole ?? '').isNotEmpty ? account.staffRole! : account.role,
+    );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        onTap: () => _applyLoginShortcut(account, setModalState: setModalState),
+        child: Ink(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+              color: isSelected ? scheme.primary : scheme.outlineVariant,
+              width: isSelected ? 1.4 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: scheme.primary.withValues(alpha: 0.12),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Align(
-                alignment: Alignment.center,
-                child: Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: scheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(999),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      account.fullName,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
-                ),
+                  if (isSelected)
+                    Icon(Icons.check_circle_rounded, color: scheme.primary),
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpacing.xs),
               Text(
-                "Sign in to unlock checkout",
-                style: theme.textTheme.titleLarge,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                "Browse the storefront in guest mode, then sign in to add items, pay, and track orders.",
+                account.email,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                onChanged: (_) =>
-                    _setLoginError(null, setModalState: setModalState),
-                decoration: const InputDecoration(labelText: "Email"),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passwordCtrl,
-                obscureText: !_showPassword,
-                onChanged: (_) =>
-                    _setLoginError(null, setModalState: setModalState),
-                decoration: InputDecoration(
-                  labelText: "Password",
-                  suffixIcon: IconButton(
-                    onPressed: () {
-                      AppDebug.log("LOGIN", "Toggle password visibility");
-                      setState(() => _showPassword = !_showPassword);
-                    },
-                    icon: Icon(
-                      _showPassword ? Icons.visibility_off : Icons.visibility,
-                    ),
-                  ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                "ID: ${account.id}",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _isLoading
-                        ? null
-                        : () => _goToForgotPassword(sheetContext),
-                    icon: const Icon(Icons.key_outlined, size: 16),
-                    label: const Text("Forgot password?"),
+              if ((account.subtitle ?? "").isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  account.subtitle!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: _isLoading
-                        ? null
-                        : () {
-                            AppDebug.log("LOGIN", "Go Register tapped");
-                            Navigator.of(sheetContext).pop();
-                            context.go("/register");
-                          },
-                    child: const Text("Create account"),
+                ),
+              ],
+              if ((account.addressLabel ?? "").isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.location_on_outlined,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    Expanded(
+                      child: Text(
+                        account.addressLabel!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: AppSpacing.md),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  AppStatusChip(
+                    label: accountRoleLabel,
+                    tone: AppStatusTone.info,
+                    icon: (account.staffRole ?? '').isNotEmpty
+                        ? Icons.badge_rounded
+                        : _selectedShortcutRole.icon,
+                  ),
+                  AppStatusChip(
+                    label: account.isFullyVerified
+                        ? "Verified"
+                        : "Verification pending",
+                    tone: account.isFullyVerified
+                        ? AppStatusTone.success
+                        : AppStatusTone.warning,
+                    icon: account.isFullyVerified
+                        ? Icons.verified_rounded
+                        : Icons.pending_outlined,
+                  ),
+                  AppStatusChip(
+                    label: hasPassword ? "Saved on device" : "Enter password",
+                    tone: hasPassword
+                        ? AppStatusTone.success
+                        : AppStatusTone.warning,
+                    icon: hasPassword
+                        ? Icons.password_rounded
+                        : Icons.edit_rounded,
                   ),
                 ],
-              ),
-              _buildLoginErrorCard(sheetContext),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading
-                      ? null
-                      : () => _onLoginPressed(setModalState: setModalState),
-                  child: Text(_isLoading ? "Signing in..." : "Sign in"),
-                ),
               ),
             ],
           ),
@@ -1485,6 +2153,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
     );
   }
+}
+
+enum _LoginShortcutRole { user, businessOwner, tenant, staff, admin }
+
+extension on _LoginShortcutRole {
+  String get apiRole => switch (this) {
+    _LoginShortcutRole.user => 'customer',
+    _LoginShortcutRole.businessOwner => 'business_owner',
+    _LoginShortcutRole.tenant => 'tenant',
+    _LoginShortcutRole.staff => 'staff',
+    _LoginShortcutRole.admin => 'admin',
+  };
+
+  String get label => switch (this) {
+    _LoginShortcutRole.user => 'User',
+    _LoginShortcutRole.businessOwner => 'Business owner',
+    _LoginShortcutRole.tenant => 'Tenant',
+    _LoginShortcutRole.staff => 'Staff',
+    _LoginShortcutRole.admin => 'Admin',
+  };
+
+  String get description => switch (this) {
+    _LoginShortcutRole.user => 'Customers and shoppers',
+    _LoginShortcutRole.businessOwner => 'Owners and operators',
+    _LoginShortcutRole.tenant => 'Residents and lease customers',
+    _LoginShortcutRole.staff => 'Team members and field staff',
+    _LoginShortcutRole.admin => 'Platform control account',
+  };
+
+  IconData get icon => switch (this) {
+    _LoginShortcutRole.user => Icons.person_rounded,
+    _LoginShortcutRole.businessOwner => Icons.storefront_rounded,
+    _LoginShortcutRole.tenant => Icons.apartment_rounded,
+    _LoginShortcutRole.staff => Icons.badge_rounded,
+    _LoginShortcutRole.admin => Icons.admin_panel_settings_rounded,
+  };
 }
 
 class _LoadingBlock extends StatelessWidget {

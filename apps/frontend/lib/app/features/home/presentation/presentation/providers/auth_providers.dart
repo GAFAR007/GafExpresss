@@ -29,6 +29,7 @@ import 'package:frontend/app/core/network/dio_client.dart';
 import 'package:frontend/app/features/auth/data/auth_api.dart';
 import 'package:frontend/app/features/auth/data/auth_session_storage.dart';
 import 'package:frontend/app/features/auth/data/profile_api.dart';
+import 'package:frontend/app/features/auth/domain/models/login_shortcut_bundle.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_user.dart';
 import 'package:frontend/app/features/auth/domain/models/user_profile.dart';
@@ -97,6 +98,17 @@ final authSessionStorageProvider = Provider<AuthSessionStorage>((ref) {
   AppDebug.log("PROVIDERS", "authSessionStorageProvider created");
   return AuthSessionStorage();
 });
+
+/// Loads public login accounts for a selected auth role.
+final loginShortcutBundleProvider = FutureProvider.autoDispose
+    .family<LoginShortcutBundle, String>((ref, role) {
+      AppDebug.log(
+        "PROVIDERS",
+        "loginShortcutBundleProvider fetch",
+        extra: {"role": role},
+      );
+      return ref.read(authApiProvider).fetchLoginShortcuts(role: role);
+    });
 
 /// Holds a pending business invite token in memory.
 ///
@@ -215,11 +227,7 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
     AppDebug.log(
       "AUTH_SESSION",
       "updateUserRole()",
-      extra: {
-        "source": source,
-        "from": session.user.role,
-        "to": trimmedRole,
-      },
+      extra: {"source": source, "from": session.user.role, "to": trimmedRole},
     );
 
     // WHY: Preserve identity fields while only updating role.

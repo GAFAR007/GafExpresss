@@ -200,6 +200,35 @@ async function login(req, res) {
   }
 }
 
+async function loginAccounts(req, res) {
+  try {
+    debug('================ LOGIN ACCOUNTS START ================');
+    debug('Login accounts role:', req.params?.role);
+
+    const result = await authService.listLoginAccounts(req.params?.role);
+
+    debug('Login accounts success', {
+      role: result.role,
+      count: result.accounts.length,
+    });
+    debug('================ LOGIN ACCOUNTS END (SUCCESS) ================');
+
+    return res.status(200).json(result);
+  } catch (err) {
+    debug('================ LOGIN ACCOUNTS END (ERROR) ================');
+    debug('Login accounts error message:', err.message);
+
+    const status =
+      err.message === 'Unsupported login account role'
+        ? 400
+        : 500;
+
+    return res.status(status).json({
+      error: err.message || 'Unable to load login accounts',
+    });
+  }
+}
+
 /* =========================
    PASSWORD RESET — PUBLIC
 ========================= */
@@ -661,6 +690,7 @@ async function addressPlaceDetails(req, res) {
 module.exports = {
   register,
   login,
+  loginAccounts,
   requestPasswordReset: requestPasswordResetController,
   confirmPasswordReset: confirmPasswordResetController,
   getProfile,

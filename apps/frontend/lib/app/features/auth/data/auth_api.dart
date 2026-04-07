@@ -24,6 +24,7 @@ import 'package:dio/dio.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/auth/domain/models/password_reset_result.dart';
+import 'package:frontend/app/features/auth/domain/models/login_shortcut_bundle.dart';
 
 import '../domain/models/auth_user.dart';
 import '../domain/models/auth_session.dart';
@@ -116,6 +117,47 @@ class AuthApi {
         fallback: "We couldn't sign you in right now.",
       );
       AppDebug.log("AUTH_API", "login() failed", extra: {"error": message});
+      throw Exception(message);
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// LOGIN ACCOUNTS
+  /// - Backend returns: { role, accounts[] }
+  /// - Public route; fills the login form with real Mongo-backed account data
+  /// ------------------------------------------------------
+  Future<LoginShortcutBundle> fetchLoginShortcuts({
+    required String role,
+  }) async {
+    AppDebug.log(
+      "AUTH_API",
+      "fetchLoginShortcuts() start",
+      extra: {"role": role},
+    );
+
+    try {
+      final resp = await _dio.get("/auth/login-accounts/$role");
+      final data = resp.data as Map<String, dynamic>;
+      final bundle = LoginShortcutBundle.fromJson(data);
+
+      AppDebug.log(
+        "AUTH_API",
+        "fetchLoginShortcuts() success",
+        extra: {"role": bundle.role, "count": bundle.accounts.length},
+      );
+
+      return bundle;
+    } on DioException catch (error) {
+      final message = _friendlyAuthErrorMessage(
+        error,
+        operation: "login_shortcuts",
+        fallback: "Unable to load login accounts",
+      );
+      AppDebug.log(
+        "AUTH_API",
+        "fetchLoginShortcuts() failed",
+        extra: {"role": role, "error": message},
+      );
       throw Exception(message);
     }
   }

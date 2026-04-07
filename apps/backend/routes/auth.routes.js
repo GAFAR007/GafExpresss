@@ -118,6 +118,12 @@ router.post('/register', authController.register);
 router.post('/login', authController.login);
 
 /**
+ * Public helper: list active login accounts for a role.
+ * GET /auth/login-accounts/:role
+ */
+router.get('/login-accounts/:role', authController.loginAccounts);
+
+/**
  * Request password reset code
  * POST /auth/password-reset/request
  * Public route - no auth required

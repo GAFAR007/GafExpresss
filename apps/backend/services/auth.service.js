@@ -6,6 +6,7 @@
 const bcrypt = require('bcryptjs');
 const debug = require('../utils/debug');
 const User = require('../models/User');
+const BusinessStaffProfile = require('../models/BusinessStaffProfile');
 const USER_ROLES = User.USER_ROLES;
 const { signToken } = require('../config/jwt');
 
@@ -13,6 +14,14 @@ const { signToken } = require('../config/jwt');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PASSWORD_REGEX =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+const LOGIN_ACCOUNT_ROLE_ALIASES = {
+  admin: 'admin',
+  user: 'customer',
+  customer: 'customer',
+  business_owner: 'business_owner',
+  tenant: 'tenant',
+  staff: 'staff',
+};
 
 
 
@@ -124,6 +133,208 @@ async function registerUser({
   };
 }
 
+function normalizeLoginAccountRole(role) {
+  const normalizedRole =
+    typeof role === 'string' ? role.trim().toLowerCase() : '';
+  return LOGIN_ACCOUNT_ROLE_ALIASES[normalizedRole] || null;
+}
+
+function humanizeLabel(value) {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) {
+    return '';
+  }
+
+  return trimmed
+    .split('_')
+    .filter(Boolean)
+    .map((segment) => segment[0].toUpperCase() + segment.slice(1))
+    .join(' ');
+}
+
+function buildUserDisplayName(user) {
+  const structuredName = [
+    user.firstName,
+    user.middleName,
+    user.lastName,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
+  if (structuredName) {
+    return structuredName;
+  }
+
+  const fallbackName =
+    typeof user.name === 'string' ? user.name.trim() : '';
+  if (fallbackName) {
+    return fallbackName;
+  }
+
+  return typeof user.email === 'string' ? user.email.trim() : 'Unknown user';
+}
+
+function buildAccountSubtitle({ role, user, staffProfile }) {
+  if (role === 'admin') {
+    const companyName =
+      typeof user.companyName === 'string' ? user.companyName.trim() : '';
+    return companyName || 'Platform admin';
+  }
+
+  if (role === 'business_owner') {
+    const companyName =
+      typeof user.companyName === 'string' ? user.companyName.trim() : '';
+    return companyName || 'Business owner';
+  }
+
+  if (role === 'tenant') {
+    const companyName =
+      typeof user.companyName === 'string' ? user.companyName.trim() : '';
+    return companyName || 'Tenant account';
+  }
+
+  if (role === 'staff') {
+    const parts = [];
+    const staffRole = humanizeLabel(staffProfile?.staffRole);
+    const companyName =
+      typeof user.companyName === 'string' ? user.companyName.trim() : '';
+
+    if (staffRole) {
+      parts.push(staffRole);
+    }
+    if (companyName) {
+      parts.push(companyName);
+    }
+
+    return parts.join(' • ') || 'Staff account';
+  }
+
+  const accountType = humanizeLabel(user.accountType);
+  return accountType || 'Customer account';
+}
+
+function buildAddressLine(address) {
+  if (!address || typeof address !== 'object') {
+    return '';
+  }
+
+  const formattedAddress =
+    typeof address.formattedAddress === 'string'
+      ? address.formattedAddress.trim()
+      : '';
+  if (formattedAddress) {
+    return formattedAddress;
+  }
+
+  const parts = [
+    address.houseNumber,
+    address.street,
+    address.landmark,
+    address.city,
+    address.state,
+    address.postalCode,
+    address.country,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+
+  return parts.join(', ');
+}
+
+function buildAccountAddress({ role, user }) {
+  const candidates =
+    role === 'business_owner'
+      ? [user.companyAddress, user.businessRegisteredAddress, user.homeAddress]
+      : [user.homeAddress, user.companyAddress, user.businessRegisteredAddress];
+
+  for (const address of candidates) {
+    const addressLine = buildAddressLine(address);
+    if (addressLine) {
+      return addressLine;
+    }
+  }
+
+  return '';
+}
+
+async function listLoginAccounts(role) {
+  const normalizedRole = normalizeLoginAccountRole(role);
+  if (!normalizedRole) {
+    throw new Error('Unsupported login account role');
+  }
+
+  const users = await User.find({
+    role: normalizedRole,
+    isActive: true,
+  })
+    .sort({
+      createdAt: 1,
+      firstName: 1,
+      lastName: 1,
+      email: 1,
+    })
+    .select(
+      [
+        '_id',
+        'name',
+        'firstName',
+        'middleName',
+        'lastName',
+        'email',
+        'role',
+        'companyName',
+        'accountType',
+        'homeAddress',
+        'companyAddress',
+        'businessRegisteredAddress',
+        'isEmailVerified',
+        'isPhoneVerified',
+        'isNinVerified',
+      ].join(' '),
+    )
+    .lean();
+
+  let staffProfilesByUserId = new Map();
+  if (normalizedRole === 'staff' && users.length > 0) {
+    const staffProfiles = await BusinessStaffProfile.find({
+      userId: { $in: users.map((user) => user._id) },
+      status: 'active',
+    })
+      .sort({ createdAt: 1 })
+      .select('userId staffRole')
+      .lean();
+
+    staffProfilesByUserId = new Map(
+      staffProfiles.map((profile) => [String(profile.userId), profile]),
+    );
+  }
+
+  const accounts = users.map((user) => ({
+    id: String(user._id),
+    fullName: buildUserDisplayName(user),
+    email: user.email,
+    role: user.role,
+    isEmailVerified: user.isEmailVerified === true,
+    isPhoneVerified: user.isPhoneVerified === true,
+    isNinVerified: user.isNinVerified === true,
+    staffRole: staffProfilesByUserId.get(String(user._id))?.staffRole || null,
+    subtitle: buildAccountSubtitle({
+      role: normalizedRole,
+      user,
+      staffProfile: staffProfilesByUserId.get(String(user._id)),
+    }),
+    addressLabel: buildAccountAddress({ role: normalizedRole, user }),
+  }));
+
+  return {
+    message: 'Login accounts fetched successfully',
+    role: normalizedRole,
+    accounts,
+  };
+}
+
 /* =====================================================
    LOGIN USER  ✅ THIS WAS THE BROKEN PART
 ===================================================== */
@@ -192,5 +403,6 @@ return {
 ===================================================== */
 module.exports = {
   registerUser,
+  listLoginAccounts,
   loginUser, // ✅ MUST exist and MUST be exported
 };
