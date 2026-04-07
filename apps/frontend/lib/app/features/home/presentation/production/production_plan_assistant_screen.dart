@@ -1320,6 +1320,30 @@ class _ProductionPlanAssistantScreenState
     return null;
   }
 
+  Future<String?> _resolvePlannerCropLinkedProductId({
+    required ProductionAssistantCatalogItem selected,
+  }) async {
+    final linkedProductId = selected.linkedProductId.trim();
+    if (linkedProductId.isNotEmpty) {
+      final linkedProduct = await _fetchBusinessProductById(
+        productId: linkedProductId,
+      );
+      if (linkedProduct != null) {
+        final resolvedId = linkedProduct.id.trim();
+        if (resolvedId.isNotEmpty) {
+          return resolvedId;
+        }
+      }
+      return linkedProductId;
+    }
+
+    final existingProduct = await _findExistingBusinessProductByName(
+      productName: selected.name,
+    );
+    final resolvedId = existingProduct?.id.trim() ?? "";
+    return resolvedId.isEmpty ? null : resolvedId;
+  }
+
   Future<Product?> _openPlannerCropProductSetup({
     required String productName,
     required ProductionAssistantCatalogItem? selected,
@@ -12584,13 +12608,10 @@ class _ProductionPlanAssistantScreenState
     if (selected == null) {
       return;
     }
-    final selectedProductId = await _autoCreateBusinessProductForPlannerCrop(
+    final selectedProductId = await _resolvePlannerCropLinkedProductId(
       selected: selected,
     );
     if (!mounted) {
-      return;
-    }
-    if ((selectedProductId ?? "").trim().isEmpty) {
       return;
     }
     _selectedPlannerCatalogItem = selected;
@@ -13071,10 +13092,6 @@ class _ProductionPlanAssistantScreenState
       _showSnack(_contextPromptMissingContextMessage);
       return;
     }
-    await _ensureCurrentSelectedCropLinkedProduct(announceSuccess: false);
-    if (!mounted) {
-      return;
-    }
     final plantingTargetsError = _resolvePlantingTargetsError();
     if (plantingTargetsError != null) {
       _appendMessage(
@@ -13307,20 +13324,6 @@ class _ProductionPlanAssistantScreenState
           _showSnack("Select one crop from the planner database.");
           return;
         }
-        if ((_selectedProductId ?? "").trim().isEmpty) {
-          final linkedProductId = await _ensureCurrentSelectedCropLinkedProduct(
-            announceSuccess: false,
-          );
-          if (!mounted) {
-            return;
-          }
-          if ((linkedProductId ?? "").trim().isEmpty) {
-            _showSnack(
-              "Complete the farm product setup before moving to timing and workload.",
-            );
-            return;
-          }
-        }
         setState(() {
           _currentWizardStep = _CreateWizardStep.timing;
         });
@@ -13352,16 +13355,6 @@ class _ProductionPlanAssistantScreenState
           if (!mounted) {
             return;
           }
-        }
-        await _ensureCurrentSelectedCropLinkedProduct(announceSuccess: false);
-        if (!mounted) {
-          return;
-        }
-        if ((_selectedProductId ?? "").trim().isEmpty) {
-          _showSnack(
-            "Complete the farm product setup before opening the review step.",
-          );
-          return;
         }
         setState(() {
           _currentWizardStep = _CreateWizardStep.review;
@@ -14521,7 +14514,7 @@ class _ProductionPlanAssistantScreenState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    "This crop is coming from the planner database and is not linked to a business product yet. Open the farm product form to finish price, stock, selling options, and images before saving the final production plan.",
+                    "This crop is coming from the planner database and is not linked to a business product yet. You can continue drafting now, but live production activation will still require a linked farm product.",
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onTertiaryContainer,
                     ),
@@ -14728,14 +14721,14 @@ class _ProductionPlanAssistantScreenState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "This planner crop still needs a complete farm product before the production flow can continue.",
+                        "This planner crop is not linked to a complete farm product yet. You can keep planning now and finish the farm product setup before activating live production.",
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onTertiaryContainer,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        "Finish the business product details now: category, subcategory, price, selling options, and image.",
+                        "Finish the business product details whenever you are ready: category, subcategory, price, selling options, and image.",
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onTertiaryContainer,
                         ),
