@@ -1070,6 +1070,16 @@ function canManageProductionPlanLifecycle({
   });
 }
 
+function normalizeDraftAccessStaffRole(
+  staffRole,
+) {
+  return (staffRole || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_");
+}
+
 function canEditProductionPlanDraft({
   actorRole,
   staffRole,
@@ -1078,12 +1088,20 @@ function canEditProductionPlanDraft({
     return true;
   }
 
+  const normalizedStaffRole =
+    normalizeDraftAccessStaffRole(
+      staffRole,
+    );
+
   return (
     actorRole === "staff" &&
     (
-      staffRole === STAFF_ROLE_ESTATE_MANAGER ||
-      staffRole === STAFF_ROLE_FARM_MANAGER ||
-      staffRole === STAFF_ROLE_ASSET_MANAGER
+      normalizedStaffRole ===
+        STAFF_ROLE_ESTATE_MANAGER ||
+      normalizedStaffRole ===
+        STAFF_ROLE_FARM_MANAGER ||
+      normalizedStaffRole ===
+        STAFF_ROLE_ASSET_MANAGER
     )
   );
 }
