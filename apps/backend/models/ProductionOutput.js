@@ -11,12 +11,16 @@
  * HOW:
  * - Links output to a production plan and product.
  * - Records unit type, quantity, and optional pricing.
+ * - Shares the existing productionoutputs collection with crop profiles so the app stays within the Atlas collection cap.
  */
 
 const mongoose = require('mongoose');
 const debug = require('../utils/debug');
 
 debug('Loading ProductionOutput model...');
+
+const PRODUCTION_OUTPUT_COLLECTION_NAME = 'productionoutputs';
+const PRODUCTION_OUTPUT_RECORD_TYPE = 'production_output';
 
 // WHY: Fixed units keep reporting consistent across plans.
 const PRODUCTION_OUTPUT_UNITS = [
@@ -38,6 +42,12 @@ const productionOutputSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ProductionPlan',
       required: true,
+      index: true,
+    },
+    recordType: {
+      type: String,
+      enum: [PRODUCTION_OUTPUT_RECORD_TYPE],
+      default: PRODUCTION_OUTPUT_RECORD_TYPE,
       index: true,
     },
     // WHY: Output links to product inventory for sales.
@@ -75,8 +85,32 @@ const productionOutputSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    collection: PRODUCTION_OUTPUT_COLLECTION_NAME,
   },
 );
+
+function applyProductionOutputRecordTypeFilter() {
+  this.where({
+    recordType: PRODUCTION_OUTPUT_RECORD_TYPE,
+  });
+}
+
+[
+  'find',
+  'findOne',
+  'findOneAndUpdate',
+  'findOneAndDelete',
+  'findOneAndReplace',
+  'countDocuments',
+  'deleteMany',
+  'updateOne',
+  'updateMany',
+].forEach((hook) => {
+  productionOutputSchema.pre(
+    hook,
+    applyProductionOutputRecordTypeFilter,
+  );
+});
 
 const ProductionOutput = mongoose.model(
   'ProductionOutput',

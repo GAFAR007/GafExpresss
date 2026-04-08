@@ -8,6 +8,7 @@
  * - Keeps crop lifecycle knowledge separate from commerce Product records.
  * - Lets planner V2 reuse resolved lifecycle ranges without repeated API/AI calls.
  * - Preserves tenant safety by scoping cached lifecycle lookups to one business.
+ * - Shares the existing productionoutputs collection so we do not need a new Mongo collection on capped Atlas tiers.
  *
  * HOW:
  * - Stores a normalized product key plus optional crop subtype/domain context.
@@ -23,6 +24,11 @@ const {
 } = require("../utils/production_engine.config");
 
 debug("Loading ProductionLifecycleProfile model...");
+
+const PRODUCTION_LIFECYCLE_COLLECTION_NAME =
+  "productionoutputs";
+const PRODUCTION_LIFECYCLE_RECORD_TYPE =
+  "crop_profile";
 
 const PRODUCTION_LIFECYCLE_PROFILE_SOURCES = [
   "catalog",
@@ -61,6 +67,12 @@ const productionLifecycleProfileSchema =
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
+        index: true,
+      },
+      recordType: {
+        type: String,
+        enum: [PRODUCTION_LIFECYCLE_RECORD_TYPE],
+        default: PRODUCTION_LIFECYCLE_RECORD_TYPE,
         index: true,
       },
       // WHY: Product key makes lifecycle lookups deterministic even when display names vary slightly.
@@ -406,8 +418,32 @@ const productionLifecycleProfileSchema =
       timestamps: true,
       // WHY: Planner V2 cache is optional; avoid implicit index/collection creation attempts on capped Mongo plans.
       autoIndex: false,
+      collection: PRODUCTION_LIFECYCLE_COLLECTION_NAME,
     },
   );
+
+function applyCropProfileRecordTypeFilter() {
+  this.where({
+    recordType: PRODUCTION_LIFECYCLE_RECORD_TYPE,
+  });
+}
+
+[
+  "find",
+  "findOne",
+  "findOneAndUpdate",
+  "findOneAndDelete",
+  "findOneAndReplace",
+  "countDocuments",
+  "deleteMany",
+  "updateOne",
+  "updateMany",
+].forEach((hook) => {
+  productionLifecycleProfileSchema.pre(
+    hook,
+    applyCropProfileRecordTypeFilter,
+  );
+});
 
 productionLifecycleProfileSchema.index(
   {
@@ -419,6 +455,9 @@ productionLifecycleProfileSchema.index(
   {
     unique: true,
     name: "production_lifecycle_profile_scope_lookup",
+    partialFilterExpression: {
+      recordType: PRODUCTION_LIFECYCLE_RECORD_TYPE,
+    },
   },
 );
 
@@ -430,6 +469,9 @@ productionLifecycleProfileSchema.index(
   },
   {
     name: "production_lifecycle_profile_name_lookup",
+    partialFilterExpression: {
+      recordType: PRODUCTION_LIFECYCLE_RECORD_TYPE,
+    },
   },
 );
 
@@ -441,6 +483,9 @@ productionLifecycleProfileSchema.index(
   },
   {
     name: "production_lifecycle_profile_alias_lookup",
+    partialFilterExpression: {
+      recordType: PRODUCTION_LIFECYCLE_RECORD_TYPE,
+    },
   },
 );
 
@@ -455,6 +500,9 @@ productionLifecycleProfileSchema.index(
   },
   {
     name: "production_crop_profile_discovery_lookup",
+    partialFilterExpression: {
+      recordType: PRODUCTION_LIFECYCLE_RECORD_TYPE,
+    },
   },
 );
 
