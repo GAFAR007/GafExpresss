@@ -282,48 +282,7 @@ class UserAddress {
       "lga": lga,
       "country": country,
       "landmark": landmark,
-      "formattedAddress": formattedAddress,
-      "placeId": placeId,
-      "lat": lat,
-      "lng": lng,
     };
-  }
-
-  /// WHY: Keep immutable helpers consistent with the parent model.
-  UserAddress copyWith({
-    String? houseNumber,
-    String? street,
-    String? city,
-    String? state,
-    String? postalCode,
-    String? lga,
-    String? country,
-    String? landmark,
-    bool? isVerified,
-    String? verifiedAt,
-    String? verificationSource,
-    String? formattedAddress,
-    String? placeId,
-    double? lat,
-    double? lng,
-  }) {
-    return UserAddress(
-      houseNumber: houseNumber ?? this.houseNumber,
-      street: street ?? this.street,
-      city: city ?? this.city,
-      state: state ?? this.state,
-      postalCode: postalCode ?? this.postalCode,
-      lga: lga ?? this.lga,
-      country: country ?? this.country,
-      landmark: landmark ?? this.landmark,
-      isVerified: isVerified ?? this.isVerified,
-      verifiedAt: verifiedAt ?? this.verifiedAt,
-      verificationSource: verificationSource ?? this.verificationSource,
-      formattedAddress: formattedAddress ?? this.formattedAddress,
-      placeId: placeId ?? this.placeId,
-      lat: lat ?? this.lat,
-      lng: lng ?? this.lng,
-    );
   }
 
   /// WHY: Keep optional string handling consistent and clean.

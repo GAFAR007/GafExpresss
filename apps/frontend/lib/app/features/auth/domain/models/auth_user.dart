@@ -18,6 +18,7 @@ const String _keyId = "id";
 const String _keyName = "name";
 const String _keyEmail = "email";
 const String _keyRole = "role";
+const String _keyStaffRole = "staffRole";
 const String _keyBusinessId = "businessId";
 
 class AuthUser {
@@ -25,6 +26,7 @@ class AuthUser {
   final String name;
   final String email;
   final String role;
+  final String? staffRole;
   final String? businessId;
 
   const AuthUser({
@@ -32,6 +34,7 @@ class AuthUser {
     required this.name,
     required this.email,
     required this.role,
+    this.staffRole,
     this.businessId,
   });
 
@@ -44,6 +47,7 @@ class AuthUser {
       name: (json[_keyName] ?? "").toString(),
       email: (json[_keyEmail] ?? "").toString(),
       role: (json[_keyRole] ?? "").toString(),
+      staffRole: _normalizeStaffRole(json[_keyStaffRole]),
       businessId: businessId,
     );
   }
@@ -65,7 +69,19 @@ class AuthUser {
       _keyName: name,
       _keyEmail: email,
       _keyRole: role,
+      _keyStaffRole: staffRole,
       _keyBusinessId: businessId,
     };
+  }
+
+  static String? _normalizeStaffRole(dynamic value) {
+    if (value == null) return null;
+    final normalized = value
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll("-", "_")
+        .replaceAll(" ", "_");
+    return normalized.isEmpty ? null : normalized;
   }
 }

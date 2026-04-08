@@ -346,7 +346,9 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
     final detailAsync = ref.watch(productionPlanDetailProvider(planId));
     final staffAsync = ref.watch(productionStaffProvider);
     final session = ref.watch(authSessionProvider);
-    final actorRole = session?.user.role;
+    final profileAsync = ref.watch(userProfileProvider);
+    final profileRole = profileAsync.valueOrNull?.role ?? "";
+    final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
     final isOwner = actorRole == _ownerRole;
 
     return Scaffold(
@@ -386,7 +388,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             final staffMap = _buildStaffMap(staffList);
             final selfStaffRole = _resolveSelfStaffRole(
               staffList: staffList,
-              userEmail: session?.user.email,
+              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
             );
             final canLogProgress = _canLogTaskProgress(
               actorRole: actorRole,

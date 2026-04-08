@@ -332,18 +332,14 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
       final nextToken = acceptance.token?.trim() ?? "";
       if (nextToken.isNotEmpty) {
         // WHY: Refresh the session token so backend role checks pass immediately.
-        final updatedUser = AuthUser(
-          id: session.user.id,
-          name: session.user.name,
-          email: session.user.email,
-          role: invitedUser.role,
+        final updatedUser = AuthUser.fromJson({
+          ...session.user.toJson(),
+          "role": invitedUser.role,
           // WHY: Prefer invite-linked business scope when available.
-          businessId: invitedUser.businessId ?? session.user.businessId,
-        );
-        final updatedSession = AuthSession(
-          user: updatedUser,
-          token: nextToken,
-        );
+          "businessId": invitedUser.businessId ?? session.user.businessId,
+          if (invitedUser.staffRole != null) "staffRole": invitedUser.staffRole,
+        });
+        final updatedSession = AuthSession(user: updatedUser, token: nextToken);
         await ref.read(authSessionProvider.notifier).setSession(updatedSession);
         _log(
           "session_refreshed",
@@ -351,8 +347,11 @@ class _BusinessInviteScreenState extends ConsumerState<BusinessInviteScreen> {
         );
       } else {
         // WHY: Fallback to role update if token refresh is unavailable.
-        await ref.read(authSessionProvider.notifier).updateUserRole(
+        await ref
+            .read(authSessionProvider.notifier)
+            .updateUserRole(
               role: invitedUser.role,
+              staffRole: invitedUser.staffRole,
               source: "business_invite_accept_missing_token",
             );
         _log(

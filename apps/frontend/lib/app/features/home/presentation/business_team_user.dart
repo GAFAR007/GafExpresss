@@ -19,6 +19,7 @@ class BusinessTeamUser {
   final String email;
   final String? phone;
   final String role;
+  final String? staffRole;
   final bool isNinVerified;
   final String? businessId;
   final String? estateAssetId;
@@ -28,6 +29,7 @@ class BusinessTeamUser {
     required this.name,
     required this.email,
     required this.role,
+    this.staffRole,
     required this.isNinVerified,
     this.phone,
     this.businessId,
@@ -41,6 +43,7 @@ class BusinessTeamUser {
       email: json["email"]?.toString() ?? "",
       phone: json["phone"]?.toString(),
       role: json["role"]?.toString() ?? "customer",
+      staffRole: _readOptionalString(json["staffRole"]),
       isNinVerified: json["isNinVerified"] == true,
       businessId: json["businessId"]?.toString(),
       estateAssetId: json["estateAssetId"]?.toString(),
@@ -51,4 +54,9 @@ class BusinessTeamUser {
     final trimmed = name.trim();
     return trimmed.isEmpty ? "Unnamed user" : trimmed;
   }
+}
+
+String? _readOptionalString(dynamic value) {
+  final trimmed = value?.toString().trim() ?? "";
+  return trimmed.isEmpty ? null : trimmed;
 }
