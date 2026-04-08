@@ -25,10 +25,12 @@ import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/features/home/presentation/production/production_calendar_visuals.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
+import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
@@ -293,6 +295,9 @@ class _ProductionPlanWorkspaceScreenState
     final profileAsync = ref.watch(userProfileProvider);
     final profileRole = profileAsync.valueOrNull?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
+    final presenceState = ref.watch(
+      productionDraftPresenceProvider(widget.planId),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -419,6 +424,26 @@ class _ProductionPlanWorkspaceScreenState
                 productAsync?.valueOrNull?.name.trim().isNotEmpty == true
                 ? productAsync!.valueOrNull!.name.trim()
                 : inferredProductName;
+            final currentUserId = profileAsync.valueOrNull?.id.trim();
+            final currentUserName = profileAsync.valueOrNull?.name.trim();
+            final currentUserEmail = profileAsync.valueOrNull?.email.trim();
+            final currentAccountRole = profileRole.trim();
+            final currentViewer = ProductionDraftPresenceViewer(
+              userId: (currentUserId != null && currentUserId.isNotEmpty)
+                  ? currentUserId
+                  : (session?.user.id ?? "").trim(),
+              displayName:
+                  (currentUserName != null && currentUserName.isNotEmpty)
+                  ? currentUserName
+                  : (session?.user.name ?? "").trim(),
+              email: (currentUserEmail != null && currentUserEmail.isNotEmpty)
+                  ? currentUserEmail
+                  : (session?.user.email ?? "").trim(),
+              accountRole: currentAccountRole.isNotEmpty
+                  ? currentAccountRole
+                  : (session?.user.role ?? "").trim(),
+              staffRole: selfStaffRole,
+            );
             void selectDay(DateTime next) {
               AppDebug.log(
                 _logTag,
@@ -494,6 +519,14 @@ class _ProductionPlanWorkspaceScreenState
                           }
                         }
                       : null,
+                ),
+                const SizedBox(height: _sectionSpacing),
+                ProductionPresenceBanner(
+                  currentViewer: currentViewer,
+                  remoteViewers: presenceState.viewers,
+                  isConnected: presenceState.isConnected,
+                  isSharedRoom: widget.planId.trim().isNotEmpty,
+                  errorMessage: presenceState.error,
                 ),
                 const SizedBox(height: _sectionSpacing),
                 ProductionSectionHeader(
