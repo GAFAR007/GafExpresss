@@ -40,7 +40,7 @@ function hashToken(token) {
 }
 
 function buildInviteLink(token) {
-  return `${FRONTEND_BASE_URL}/#/business-invite?token=${token}`;
+  return `${FRONTEND_BASE_URL}/business-invite?token=${token}`;
 }
 
 function inviteExpiryDate() {
