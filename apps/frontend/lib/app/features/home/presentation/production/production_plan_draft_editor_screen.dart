@@ -3347,7 +3347,11 @@ class _ProductionPlanDraftEditorScreenState
         if (profile.id.trim().isNotEmpty) profile.id.trim(): profile,
     };
     final session = ref.watch(authSessionProvider);
+    // WHY: Staff directory access is narrower than draft editing, so use the
+    // authenticated profile role first and only fall back to email matching.
+    final profileAsync = ref.watch(userProfileProvider);
     final selfStaffRole = _resolveSelfStaffRole(
+      profileStaffRole: profileAsync.valueOrNull?.staffRole,
       staffList: staffList,
       userEmail: session?.user.email,
     );
@@ -4904,9 +4908,15 @@ bool _canManageDraftLifecycle({
 }
 
 String? _resolveSelfStaffRole({
+  required String? profileStaffRole,
   required List<BusinessStaffProfileSummary> staffList,
   required String? userEmail,
 }) {
+  final directRole = (profileStaffRole ?? "").trim();
+  if (directRole.isNotEmpty) {
+    return directRole;
+  }
+
   final normalizedEmail = (userEmail ?? "").trim().toLowerCase();
   if (normalizedEmail.isEmpty) {
     return null;
