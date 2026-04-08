@@ -1709,9 +1709,14 @@ class _ProductionPlanAssistantScreenState
         : selected.linkedProductId.isEmpty
         ? null
         : selected.linkedProductId;
+    final fallbackCatalogItem = findPlannerCropFallbackByName(selected.name);
     final fallbackLifecycleLabel = selected.hasLifecycle
         ? selected.lifecycleLabel
-        : _plannerCropLifecyclePendingLabel;
+        : fallbackCatalogItem?.lifecycleLabel ??
+              _plannerCropLifecyclePendingLabel;
+    final fallbackSource = selected.source.trim().isNotEmpty
+        ? selected.source
+        : fallbackCatalogItem?.source ?? "";
     try {
       final preview = await ref
           .read(productionPlanActionsProvider)
@@ -1748,10 +1753,10 @@ class _ProductionPlanAssistantScreenState
           productId: selectedProductId,
           productName: selected.name,
           productLifecycleLabel: fallbackLifecycleLabel,
-          productSourceLabel: _resolveProductSourceLabel(selected.source),
+          productSourceLabel: _resolveProductSourceLabel(fallbackSource),
         );
       });
-      if (!selected.hasLifecycle) {
+      if (!selected.hasLifecycle && fallbackCatalogItem == null) {
         _showSnack(_plannerCropLifecycleFallbackSnack);
       }
     }

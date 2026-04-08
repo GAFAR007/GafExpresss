@@ -473,6 +473,33 @@ List<ProductionAssistantCatalogItem> buildPlannerCropFallbackCatalog() {
       .toList(growable: false);
 }
 
+ProductionAssistantCatalogItem? findPlannerCropFallbackByName(
+  String productName,
+) {
+  final normalizedTarget = _normalizeCropKey(productName);
+  if (normalizedTarget.isEmpty) {
+    return null;
+  }
+
+  final items = buildPlannerCropFallbackCatalog();
+  for (final item in items) {
+    final normalizedCandidates =
+        <String>[item.name, item.cropKey, ...item.aliases]
+            .map(_normalizeCropKey)
+            .where((entry) => entry.isNotEmpty)
+            .toList(growable: false);
+    if (normalizedCandidates.any(
+      (candidate) =>
+          candidate == normalizedTarget ||
+          candidate.contains(normalizedTarget) ||
+          normalizedTarget.contains(candidate),
+    )) {
+      return item;
+    }
+  }
+  return null;
+}
+
 int _scorePlannerCropFallbackItem({
   required ProductionAssistantCatalogItem item,
   required String normalizedQuery,
