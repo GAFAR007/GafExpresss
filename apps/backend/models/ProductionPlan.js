@@ -64,6 +64,49 @@ const productionPlantingTargetsSchema = new mongoose.Schema(
   },
 );
 
+const productionWorkloadContextSchema = new mongoose.Schema(
+  {
+    workUnitLabel: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    workUnitType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    totalWorkUnits: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    minStaffPerUnit: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    maxStaffPerUnit: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    activeStaffAvailabilityPercent: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
+    hasConfirmedWorkloadContext: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 const productionDraftActorSchema = new mongoose.Schema(
   {
     actorId: {
@@ -263,6 +306,11 @@ const productionPlanSchema = new mongoose.Schema(
     // WHY: Farm plans need explicit planting and expected harvest targets before execution starts.
     plantingTargets: {
       type: productionPlantingTargetsSchema,
+      default: null,
+    },
+    // WHY: Execution screens need the saved unit model (for example greenhouse vs plot), not only phase budgets.
+    workloadContext: {
+      type: productionWorkloadContextSchema,
       default: null,
     },
     // WHY: Flags AI-generated drafts for review workflows.

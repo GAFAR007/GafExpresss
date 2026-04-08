@@ -34,6 +34,15 @@ const String _keyApprovedAt = "approvedAt";
 const String _keyNotes = "notes";
 const String _keyNote = "note";
 const String _keyPlantingTargets = "plantingTargets";
+const String _keyWorkloadContext = "workloadContext";
+const String _keyWorkUnitLabel = "workUnitLabel";
+const String _keyWorkUnitType = "workUnitType";
+const String _keyTotalWorkUnits = "totalWorkUnits";
+const String _keyMinStaffPerUnit = "minStaffPerUnit";
+const String _keyMaxStaffPerUnit = "maxStaffPerUnit";
+const String _keyActiveStaffAvailabilityPercent =
+    "activeStaffAvailabilityPercent";
+const String _keyHasConfirmedWorkloadContext = "hasConfirmedWorkloadContext";
 const String _keyMaterialType = "materialType";
 const String _keyPlannedPlantingQuantity = "plannedPlantingQuantity";
 const String _keyPlannedPlantingUnit = "plannedPlantingUnit";
@@ -69,6 +78,7 @@ const String _keyProduct = "product";
 const String _keyPreorderSummary = "preorderSummary";
 const String _keyProgress = "progress";
 const String _keyTimelineRows = "timelineRows";
+const String _keyStaffProfiles = "staffProfiles";
 const String _keyStaffProgressScores = "staffProgressScores";
 const String _keyPhaseUnitProgress = "phaseUnitProgress";
 const String _keyUnitDivergence = "unitDivergence";
@@ -289,6 +299,7 @@ class ProductionPlan {
   final String createdBy;
   final String notes;
   final ProductionPlantingTargets? plantingTargets;
+  final ProductionWorkloadContext? workloadContext;
   final bool aiGenerated;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -311,6 +322,7 @@ class ProductionPlan {
     required this.createdBy,
     required this.notes,
     required this.plantingTargets,
+    required this.workloadContext,
     required this.aiGenerated,
     required this.createdAt,
     required this.updatedAt,
@@ -344,6 +356,11 @@ class ProductionPlan {
               json[_keyPlantingTargets] as Map<String, dynamic>,
             )
           : null,
+      workloadContext: json[_keyWorkloadContext] is Map<String, dynamic>
+          ? ProductionWorkloadContext.fromJson(
+              json[_keyWorkloadContext] as Map<String, dynamic>,
+            )
+          : null,
       aiGenerated: json[_keyAiGenerated] == true,
       createdAt: _parseDate(json[_keyCreatedAt]),
       updatedAt: _parseDate(json[_keyUpdatedAt]),
@@ -361,6 +378,55 @@ class ProductionPlan {
             )
           : null,
     );
+  }
+}
+
+class ProductionWorkloadContext {
+  final String workUnitLabel;
+  final String workUnitType;
+  final int totalWorkUnits;
+  final int minStaffPerUnit;
+  final int maxStaffPerUnit;
+  final int activeStaffAvailabilityPercent;
+  final bool hasConfirmedWorkloadContext;
+
+  const ProductionWorkloadContext({
+    required this.workUnitLabel,
+    required this.workUnitType,
+    required this.totalWorkUnits,
+    required this.minStaffPerUnit,
+    required this.maxStaffPerUnit,
+    required this.activeStaffAvailabilityPercent,
+    required this.hasConfirmedWorkloadContext,
+  });
+
+  factory ProductionWorkloadContext.fromJson(Map<String, dynamic> json) {
+    final parsedWorkUnitLabel = _parseString(json[_keyWorkUnitLabel]);
+    final parsedWorkUnitType = _parseString(json[_keyWorkUnitType]);
+    return ProductionWorkloadContext(
+      workUnitLabel: parsedWorkUnitLabel,
+      workUnitType: parsedWorkUnitType,
+      totalWorkUnits: _parseInt(json[_keyTotalWorkUnits]),
+      minStaffPerUnit: _parseInt(json[_keyMinStaffPerUnit]),
+      maxStaffPerUnit: _parseInt(json[_keyMaxStaffPerUnit]),
+      activeStaffAvailabilityPercent: _parseInt(
+        json[_keyActiveStaffAvailabilityPercent],
+      ),
+      hasConfirmedWorkloadContext:
+          json[_keyHasConfirmedWorkloadContext] == true,
+    );
+  }
+
+  String get resolvedWorkUnitLabel {
+    final explicitLabel = workUnitLabel.trim();
+    if (explicitLabel.isNotEmpty) {
+      return explicitLabel;
+    }
+    final typedLabel = workUnitType.trim();
+    if (typedLabel.isNotEmpty) {
+      return typedLabel;
+    }
+    return "";
   }
 }
 
@@ -1247,6 +1313,7 @@ class ProductionPlanDetail {
   final ProductionProductLifecycle? product;
   final ProductionPreorderSummary? preorderSummary;
   final List<ProductionTimelineRow> timelineRows;
+  final List<BusinessStaffProfileSummary> staffProfiles;
   final List<ProductionStaffProgressScore> staffProgressScores;
   final List<ProductionDraftAuditEntry> draftAuditLog;
   final List<ProductionDraftRevisionSummary> draftRevisions;
@@ -1269,6 +1336,7 @@ class ProductionPlanDetail {
     required this.product,
     required this.preorderSummary,
     required this.timelineRows,
+    required this.staffProfiles,
     required this.staffProgressScores,
     required this.draftAuditLog,
     required this.draftRevisions,
@@ -1292,6 +1360,7 @@ class ProductionPlanDetail {
     final productMap = json[_keyProduct];
     final preorderSummaryMap = json[_keyPreorderSummary];
     final timelineRowsList = (json[_keyTimelineRows] ?? []) as List<dynamic>;
+    final staffProfilesList = (json[_keyStaffProfiles] ?? []) as List<dynamic>;
     final staffProgressScoresList =
         (json[_keyStaffProgressScores] ?? []) as List<dynamic>;
     final draftAuditLogList = (json[_keyDraftAuditLog] ?? []) as List<dynamic>;
@@ -1352,6 +1421,10 @@ class ProductionPlanDetail {
             (item) =>
                 ProductionTimelineRow.fromJson(item as Map<String, dynamic>),
           )
+          .toList(),
+      staffProfiles: staffProfilesList
+          .whereType<Map<String, dynamic>>()
+          .map(BusinessStaffProfileSummary.fromJson)
           .toList(),
       staffProgressScores: staffProgressScoresList
           .map(

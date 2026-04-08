@@ -88,7 +88,6 @@ const String _columnWeight = "Weight";
 const String _columnStatus = "Status";
 const String _columnInstructions = "Instructions";
 const String _columnCompleted = "Completed";
-const String _selectPlaceholder = "Select";
 const String _instructionsHint = "Add instructions";
 const String _completedPlaceholder = "-";
 const String _removeTaskTooltip = "Remove task";
@@ -618,13 +617,12 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
     }
 
     final task = lookup.task;
-    final roleStaff = staff
-        .where((member) => member.staffRole == task.roleRequired)
-        .toList();
-    final selectedStaffId =
-        roleStaff.any((member) => member.id == task.assignedStaffId)
-        ? task.assignedStaffId
-        : null;
+    final assignedStaffIds = _resolvedTaskAssignedStaffIds(task);
+    final assignableStaff = _sortTaskStaffByRolePreference(
+      staff,
+      task.roleRequired,
+      assignedStaffIds,
+    );
     final scheduleLabel = _taskScheduleLabel(task);
     final scheduleWarning = _taskScheduleWarning(task: task, draft: draftState);
     final dayLabel = _extractProjectDayLabel(task);
@@ -633,8 +631,8 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
       final baseDateTime = isStart
           ? (task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
           : (task.scheduledDue ??
-              ((task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
-                  .add(_taskScheduleDuration(task))));
+                ((task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
+                    .add(_taskScheduleDuration(task))));
       final pickedDate = await showDatePicker(
         context: context,
         initialDate: baseDateTime,
@@ -660,7 +658,8 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
       );
       if (isStart) {
         final nextDue =
-            task.scheduledDue != null && task.scheduledDue!.isAfter(nextDateTime)
+            task.scheduledDue != null &&
+                task.scheduledDue!.isAfter(nextDateTime)
             ? task.scheduledDue!
             : nextDateTime.add(_taskScheduleDuration(task));
         controller.updateTaskSchedule(
@@ -686,7 +685,10 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
     }
 
     Future<void> duplicateTaskAndEdit() async {
-      final duplicatedTaskId = controller.duplicateTask(lookup.phaseIndex, task.id);
+      final duplicatedTaskId = controller.duplicateTask(
+        lookup.phaseIndex,
+        task.id,
+      );
       if (duplicatedTaskId == null) {
         return;
       }
@@ -776,8 +778,11 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
                   labelText: "Task title",
                   hintText: "Describe task",
                 ),
-                onChanged: (value) =>
-                    controller.updateTaskTitle(lookup.phaseIndex, task.id, value),
+                onChanged: (value) => controller.updateTaskTitle(
+                  lookup.phaseIndex,
+                  task.id,
+                  value,
+                ),
               ),
               const SizedBox(height: 14),
               Text(
@@ -852,7 +857,8 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final useSingleColumn = constraints.maxWidth < 760;
-                  final halfWidth = (constraints.maxWidth - _sectionSpacing) / 2;
+                  final halfWidth =
+                      (constraints.maxWidth - _sectionSpacing) / 2;
                   return Wrap(
                     spacing: _sectionSpacing,
                     runSpacing: _mobileFieldSpacing,
@@ -889,15 +895,18 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
                         width: useSingleColumn ? double.infinity : halfWidth,
                         child: _TaskMobileStaffField(
                           key: ValueKey(
-                            "calendar-staff-${task.id}-${task.roleRequired}-${selectedStaffId ?? 'none'}",
+                            "calendar-staff-${task.id}-${task.roleRequired}-${assignedStaffIds.join(',')}",
                           ),
-                          staff: roleStaff,
-                          selectedStaffId: selectedStaffId,
-                          onChanged: (value) => controller.updateTaskStaff(
-                            lookup.phaseIndex,
-                            task.id,
-                            value,
-                          ),
+                          staff: assignableStaff,
+                          roleRequired: task.roleRequired,
+                          assignedStaffIds: assignedStaffIds,
+                          requiredHeadcount: task.requiredHeadcount,
+                          onChanged: (value) =>
+                              controller.updateTaskAssignedStaffProfiles(
+                                lookup.phaseIndex,
+                                task.id,
+                                value,
+                              ),
                         ),
                       ),
                       SizedBox(
@@ -908,7 +917,7 @@ class _CalendarTaskEditSheet extends ConsumerWidget {
                           ),
                           weight: task.weight,
                           requiredHeadcount: task.requiredHeadcount,
-                          assignedCount: task.assignedStaffProfileIds.length,
+                          assignedCount: assignedStaffIds.length,
                           completedAt: task.completedAt,
                           status: task.status,
                           onHeadcountChanged: (value) =>
@@ -1531,10 +1540,7 @@ class _PhaseTaskDropList extends StatelessWidget {
         ),
       );
       children.add(
-        _TaskDropZone(
-          phaseIndex: phaseIndex,
-          insertIndex: entry.key + 1,
-        ),
+        _TaskDropZone(phaseIndex: phaseIndex, insertIndex: entry.key + 1),
       );
     }
     return Column(children: children);
@@ -1545,10 +1551,7 @@ class _TaskDropZone extends StatefulWidget {
   final int phaseIndex;
   final int insertIndex;
 
-  const _TaskDropZone({
-    required this.phaseIndex,
-    required this.insertIndex,
-  });
+  const _TaskDropZone({required this.phaseIndex, required this.insertIndex});
 
   @override
   State<_TaskDropZone> createState() => _TaskDropZoneState();
@@ -1663,19 +1666,18 @@ class _TaskEditorCard extends ConsumerWidget {
     final rowBorder = rowTone == AppStatusTone.neutral
         ? theme.colorScheme.outlineVariant
         : rowColors.foreground.withValues(alpha: _rowBorderOpacity);
-    final roleStaff = staff
-        .where((member) => member.staffRole == task.roleRequired)
-        .toList();
-    final selectedStaffId =
-        roleStaff.any((member) => member.id == task.assignedStaffId)
-        ? task.assignedStaffId
-        : null;
-    final assignedCount = task.assignedStaffProfileIds.length;
+    final assignedStaffIds = _resolvedTaskAssignedStaffIds(task);
+    final assignableStaff = _sortTaskStaffByRolePreference(
+      staff,
+      task.roleRequired,
+      assignedStaffIds,
+    );
+    final assignedCount = assignedStaffIds.length;
     final roleLabel = formatStaffRoleLabel(
       task.roleRequired,
       fallback: task.roleRequired,
     );
-    final staffLabel = _resolveStaffLabel(roleStaff, selectedStaffId);
+    final staffLabel = _resolveStaffLabel(assignableStaff, assignedStaffIds);
     final dayLabel = _extractProjectDayLabel(task);
     final scheduleLabel = _taskScheduleLabel(task);
     final scheduleWarning = _taskScheduleWarning(task: task, draft: draftState);
@@ -1684,8 +1686,8 @@ class _TaskEditorCard extends ConsumerWidget {
       final baseDateTime = isStart
           ? (task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
           : (task.scheduledDue ??
-              ((task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
-                  .add(_taskScheduleDuration(task))));
+                ((task.scheduledStart ?? _fallbackTaskScheduleStart(draftState))
+                    .add(_taskScheduleDuration(task))));
       final pickedDate = await showDatePicker(
         context: context,
         initialDate: baseDateTime,
@@ -1711,7 +1713,8 @@ class _TaskEditorCard extends ConsumerWidget {
       );
       if (isStart) {
         final nextDue =
-            task.scheduledDue != null && task.scheduledDue!.isAfter(nextDateTime)
+            task.scheduledDue != null &&
+                task.scheduledDue!.isAfter(nextDateTime)
             ? task.scheduledDue!
             : nextDateTime.add(_taskScheduleDuration(task));
         controller.updateTaskSchedule(
@@ -1920,9 +1923,7 @@ class _TaskEditorCard extends ConsumerWidget {
                         decoration: BoxDecoration(
                           color: theme.colorScheme.surface,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: theme.colorScheme.primary,
-                          ),
+                          border: Border.all(color: theme.colorScheme.primary),
                         ),
                         child: Text(
                           task.title.trim().isEmpty ? _columnTask : task.title,
@@ -2080,15 +2081,16 @@ class _TaskEditorCard extends ConsumerWidget {
                     SizedBox(
                       width: useSingleColumn ? double.infinity : halfWidth,
                       child: _TaskMobileStaffField(
-                        staff: roleStaff,
-                        selectedStaffId: selectedStaffId,
-                        onChanged: roleStaff.isEmpty
-                            ? null
-                            : (value) => controller.updateTaskStaff(
-                                phaseIndex,
-                                task.id,
-                                value,
-                              ),
+                        staff: assignableStaff,
+                        roleRequired: task.roleRequired,
+                        assignedStaffIds: assignedStaffIds,
+                        requiredHeadcount: task.requiredHeadcount,
+                        onChanged: (value) =>
+                            controller.updateTaskAssignedStaffProfiles(
+                              phaseIndex,
+                              task.id,
+                              value,
+                            ),
                       ),
                     ),
                     SizedBox(
@@ -2255,7 +2257,7 @@ class _TaskMobileRoleField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DropdownButtonFormField<String>(
-      // WHY: Role is required to filter staff options.
+      // WHY: Role still guides staffing even when cross-role help is allowed.
       initialValue: value,
       decoration: const InputDecoration(isDense: true, labelText: _columnRole),
       isExpanded: true,
@@ -2280,42 +2282,298 @@ class _TaskMobileRoleField extends StatelessWidget {
 
 class _TaskMobileStaffField extends StatelessWidget {
   final List<BusinessStaffProfileSummary> staff;
-  final String? selectedStaffId;
-  final ValueChanged<String?>? onChanged;
+  final String roleRequired;
+  final List<String> assignedStaffIds;
+  final int requiredHeadcount;
+  final ValueChanged<List<String>>? onChanged;
 
   const _TaskMobileStaffField({
     super.key,
     required this.staff,
-    required this.selectedStaffId,
+    required this.roleRequired,
+    required this.assignedStaffIds,
+    required this.requiredHeadcount,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButtonFormField<String>(
-      // WHY: Assignment should remain scoped to the selected role.
-      initialValue: selectedStaffId,
-      decoration: const InputDecoration(isDense: true, labelText: _columnStaff),
-      isExpanded: true,
-      hint: const Text(_selectPlaceholder),
-      items: [
-        const DropdownMenuItem<String>(
-          value: null,
-          child: Text(_unassignedLabel, overflow: TextOverflow.ellipsis),
+    final theme = Theme.of(context);
+    final assignedLabels = _resolveAssignedStaffLabels(staff, assignedStaffIds);
+    return InkWell(
+      onTap: onChanged == null
+          ? null
+          : () async {
+              final nextSelection = await _showTaskStaffPickerDialog(
+                context: context,
+                staff: staff,
+                roleRequired: roleRequired,
+                initialSelection: assignedStaffIds,
+                requiredHeadcount: requiredHeadcount,
+              );
+              if (nextSelection == null) {
+                return;
+              }
+              onChanged!(nextSelection);
+            },
+      borderRadius: BorderRadius.circular(_phaseCardRadius),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          isDense: true,
+          labelText: _columnStaff,
+          helperText: "${assignedStaffIds.length}/$requiredHeadcount assigned",
+          enabled: onChanged != null,
         ),
-        ...staff.map(
-          (member) => DropdownMenuItem(
-            value: member.id,
-            child: Text(
-              member.userName ?? member.userEmail ?? member.id,
-              overflow: TextOverflow.ellipsis,
+        isEmpty: assignedLabels.isEmpty,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: assignedLabels.isEmpty
+                  ? Text(
+                      _unassignedLabel,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  : Wrap(
+                      spacing: _denseFieldSpacing,
+                      runSpacing: _denseFieldSpacing,
+                      children: assignedLabels
+                          .map(
+                            (label) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: _chipPadding,
+                                vertical: _denseFieldSpacing,
+                              ),
+                              decoration: BoxDecoration(
+                                color:
+                                    theme.colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(
+                                  _phaseCardRadius,
+                                ),
+                              ),
+                              child: Text(
+                                label,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
             ),
-          ),
+            if (onChanged != null)
+              Padding(
+                padding: const EdgeInsets.only(left: _denseFieldSpacing),
+                child: Icon(
+                  Icons.arrow_drop_down,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
         ),
-      ],
-      onChanged: onChanged,
+      ),
     );
   }
+}
+
+Future<List<String>?> _showTaskStaffPickerDialog({
+  required BuildContext context,
+  required List<BusinessStaffProfileSummary> staff,
+  required String roleRequired,
+  required List<String> initialSelection,
+  required int requiredHeadcount,
+}) async {
+  final orderedStaff = _sortTaskStaffByRolePreference(
+    staff,
+    roleRequired,
+    initialSelection,
+  );
+  final knownStaffIds = orderedStaff.map((member) => member.id).toSet();
+  final unknownAssignedIds = initialSelection
+      .where((id) => !knownStaffIds.contains(id))
+      .toList();
+  final preferredRole = formatStaffRoleLabel(
+    roleRequired,
+    fallback: roleRequired,
+  );
+
+  return showDialog<List<String>>(
+    context: context,
+    builder: (dialogContext) {
+      final selectedIds = {...initialSelection};
+      return StatefulBuilder(
+        builder: (context, setLocalState) {
+          final theme = Theme.of(context);
+          final selectedUnknownAssignedIds = unknownAssignedIds
+              .where(selectedIds.contains)
+              .toList();
+          final recommendedStaff = orderedStaff
+              .where(
+                (member) =>
+                    _normalizeRole(member.staffRole) ==
+                    _normalizeRole(roleRequired),
+              )
+              .toList();
+          final supportingStaff = orderedStaff
+              .where(
+                (member) =>
+                    _normalizeRole(member.staffRole) !=
+                    _normalizeRole(roleRequired),
+              )
+              .toList();
+
+          List<Widget> buildStaffTiles(
+            List<BusinessStaffProfileSummary> items,
+          ) {
+            return items.map((member) {
+              final checked = selectedIds.contains(member.id);
+              return CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: checked,
+                controlAffinity: ListTileControlAffinity.leading,
+                onChanged: (value) {
+                  setLocalState(() {
+                    if (value == true) {
+                      selectedIds.add(member.id);
+                    } else {
+                      selectedIds.remove(member.id);
+                    }
+                  });
+                },
+                title: Text(_staffDisplayName(member)),
+                subtitle: Text(
+                  formatStaffRoleLabel(
+                    member.staffRole,
+                    fallback: member.staffRole,
+                  ),
+                ),
+              );
+            }).toList();
+          }
+
+          final orderedSelection = [
+            ...orderedStaff
+                .where((member) => selectedIds.contains(member.id))
+                .map((member) => member.id),
+            ...selectedUnknownAssignedIds,
+          ];
+
+          return AlertDialog(
+            title: const Text("Assign staff"),
+            content: SizedBox(
+              width: 460,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 520),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "Role: $preferredRole",
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "${orderedSelection.length}/$requiredHeadcount selected",
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      if (selectedUnknownAssignedIds.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          "Assigned but not in active staff",
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: _denseFieldSpacing,
+                          runSpacing: _denseFieldSpacing,
+                          children: selectedUnknownAssignedIds
+                              .map(
+                                (id) => InputChip(
+                                  label: Text(id),
+                                  onDeleted: () {
+                                    setLocalState(() {
+                                      selectedIds.remove(id);
+                                    });
+                                  },
+                                  backgroundColor:
+                                      theme.colorScheme.surfaceContainerHighest,
+                                  labelStyle: theme.textTheme.bodySmall,
+                                  visualDensity: VisualDensity.compact,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                      if (orderedStaff.isEmpty &&
+                          selectedUnknownAssignedIds.isEmpty)
+                        Text(
+                          "No active staff available for this draft yet.",
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      if (recommendedStaff.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          "Recommended for this role",
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        ...buildStaffTiles(recommendedStaff),
+                      ],
+                      if (supportingStaff.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          "Other active staff",
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        ...buildStaffTiles(supportingStaff),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  setLocalState(() {
+                    selectedIds.clear();
+                  });
+                },
+                child: const Text("Clear"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text("Cancel"),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(orderedSelection),
+                child: const Text("Apply"),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
 }
 
 class _TaskMobileWeightRow extends StatelessWidget {
@@ -2763,88 +3021,93 @@ class _TaskCalendarProjection {
 
     final mapped =
         flattened.asMap().entries.map((entry) {
-      final index = entry.key;
-      final flatTask = entry.value;
-      final scheduleOverride = taskScheduleOverrides[flatTask.task.id];
-      late final DateTime taskStart;
-      late final DateTime taskDue;
-      if (scheduleOverride != null) {
-        taskStart = scheduleOverride.start;
-        taskDue = scheduleOverride.end.isAfter(scheduleOverride.start)
-            ? scheduleOverride.end
-            : scheduleOverride.start.add(const Duration(minutes: 30));
-      } else if (flatTask.task.scheduledStart != null &&
-          flatTask.task.scheduledDue != null &&
-          flatTask.task.scheduledDue!.isAfter(flatTask.task.scheduledStart!)) {
-        taskStart = flatTask.task.scheduledStart!;
-        taskDue = flatTask.task.scheduledDue!;
-      } else {
-        final ratio = flattened.length <= 1
-            ? 0.0
-            : index / (flattened.length - 1);
-        final dayOffset = (ratio * (totalDays - 1)).round();
-        final day = startDate.add(Duration(days: dayOffset));
+          final index = entry.key;
+          final flatTask = entry.value;
+          final scheduleOverride = taskScheduleOverrides[flatTask.task.id];
+          late final DateTime taskStart;
+          late final DateTime taskDue;
+          if (scheduleOverride != null) {
+            taskStart = scheduleOverride.start;
+            taskDue = scheduleOverride.end.isAfter(scheduleOverride.start)
+                ? scheduleOverride.end
+                : scheduleOverride.start.add(const Duration(minutes: 30));
+          } else if (flatTask.task.scheduledStart != null &&
+              flatTask.task.scheduledDue != null &&
+              flatTask.task.scheduledDue!.isAfter(
+                flatTask.task.scheduledStart!,
+              )) {
+            taskStart = flatTask.task.scheduledStart!;
+            taskDue = flatTask.task.scheduledDue!;
+          } else {
+            final ratio = flattened.length <= 1
+                ? 0.0
+                : index / (flattened.length - 1);
+            final dayOffset = (ratio * (totalDays - 1)).round();
+            final day = startDate.add(Duration(days: dayOffset));
 
-        final slot =
-            _calendarDefaultSlots[index % _calendarDefaultSlots.length];
-        taskStart = DateTime(
-          day.year,
-          day.month,
-          day.day,
-          slot.startHour,
-          slot.startMinute,
-        );
-        taskDue = DateTime(
-          day.year,
-          day.month,
-          day.day,
-          slot.endHour,
-          slot.endMinute,
-        );
-      }
+            final slot =
+                _calendarDefaultSlots[index % _calendarDefaultSlots.length];
+            taskStart = DateTime(
+              day.year,
+              day.month,
+              day.day,
+              slot.startHour,
+              slot.startMinute,
+            );
+            taskDue = DateTime(
+              day.year,
+              day.month,
+              day.day,
+              slot.endHour,
+              slot.endMinute,
+            );
+          }
 
-      final assignedIds = flatTask.task.assignedStaffProfileIds;
-      final requiredHeadcount = flatTask.task.requiredHeadcount < 1
-          ? 1
-          : flatTask.task.requiredHeadcount;
-      final assignedCount = assignedIds.length;
+          final assignedIds = flatTask.task.assignedStaffProfileIds;
+          final requiredHeadcount = flatTask.task.requiredHeadcount < 1
+              ? 1
+              : flatTask.task.requiredHeadcount;
+          final assignedCount = assignedIds.length;
 
-      return (
-        preview: ProductionAiDraftTaskPreview(
-          id: flatTask.task.id,
-          title: flatTask.task.title.trim().isEmpty
-              ? _columnTask
-              : flatTask.task.title.trim(),
-          phaseName: flatTask.phaseName,
-          roleRequired: flatTask.task.roleRequired,
-          requiredHeadcount: requiredHeadcount,
-          assignedCount: assignedCount,
-          assignedStaffProfileIds: assignedIds,
-          status: _statusLabel(flatTask.task.status),
-          startDate: taskStart,
-          dueDate: taskDue,
-          manualSortOrder: flatTask.task.manualSortOrder,
-          instructions: flatTask.task.instructions,
-          hasShortage: assignedCount < requiredHeadcount,
-        ),
-        manualSortOrder: flatTask.task.manualSortOrder,
-      );
-    }).toList()
-          ..sort((left, right) {
-            final startCompare = (left.preview.startDate ?? startDate)
-                .compareTo(right.preview.startDate ?? startDate);
-            if (startCompare != 0) {
-              return startCompare;
-            }
-            final dueCompare = (left.preview.dueDate ?? left.preview.startDate ?? startDate)
-                .compareTo(
-                  right.preview.dueDate ?? right.preview.startDate ?? startDate,
-                );
-            if (dueCompare != 0) {
-              return dueCompare;
-            }
-            return left.manualSortOrder.compareTo(right.manualSortOrder);
-          });
+          return (
+            preview: ProductionAiDraftTaskPreview(
+              id: flatTask.task.id,
+              title: flatTask.task.title.trim().isEmpty
+                  ? _columnTask
+                  : flatTask.task.title.trim(),
+              phaseName: flatTask.phaseName,
+              roleRequired: flatTask.task.roleRequired,
+              requiredHeadcount: requiredHeadcount,
+              assignedCount: assignedCount,
+              assignedStaffProfileIds: assignedIds,
+              status: _statusLabel(flatTask.task.status),
+              startDate: taskStart,
+              dueDate: taskDue,
+              manualSortOrder: flatTask.task.manualSortOrder,
+              instructions: flatTask.task.instructions,
+              hasShortage: assignedCount < requiredHeadcount,
+            ),
+            manualSortOrder: flatTask.task.manualSortOrder,
+          );
+        }).toList()..sort((left, right) {
+          final startCompare = (left.preview.startDate ?? startDate).compareTo(
+            right.preview.startDate ?? startDate,
+          );
+          if (startCompare != 0) {
+            return startCompare;
+          }
+          final dueCompare =
+              (left.preview.dueDate ?? left.preview.startDate ?? startDate)
+                  .compareTo(
+                    right.preview.dueDate ??
+                        right.preview.startDate ??
+                        startDate,
+                  );
+          if (dueCompare != 0) {
+            return dueCompare;
+          }
+          return left.manualSortOrder.compareTo(right.manualSortOrder);
+        });
 
     return _TaskCalendarProjection(
       tasks: mapped.map((entry) => entry.preview).toList(),
@@ -3054,7 +3317,7 @@ class _TaskSummary {
         .where((task) => task.status == ProductionTaskStatus.blocked)
         .length;
     final unassigned = tasks
-        .where((task) => task.assignedStaffProfileIds.isEmpty)
+        .where((task) => _resolvedTaskAssignedStaffIds(task).isEmpty)
         .length;
     final ratio = tasks.isEmpty ? 0.0 : done / tasks.length;
 
@@ -3068,16 +3331,93 @@ class _TaskSummary {
   }
 }
 
+List<String> _resolvedTaskAssignedStaffIds(ProductionTaskDraft task) {
+  final assignedIds = _normalizeStaffIdList(task.assignedStaffProfileIds);
+  if (assignedIds.isNotEmpty) {
+    return assignedIds;
+  }
+  final fallbackId = task.assignedStaffId?.trim() ?? "";
+  if (fallbackId.isEmpty) {
+    return const <String>[];
+  }
+  return [fallbackId];
+}
+
+List<String> _normalizeStaffIdList(List<String> input) {
+  return input
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet()
+      .toList();
+}
+
+String _normalizeRole(String value) {
+  return value.trim().toLowerCase();
+}
+
+String _staffDisplayName(BusinessStaffProfileSummary profile) {
+  final name = profile.userName?.trim() ?? "";
+  if (name.isNotEmpty) {
+    return name;
+  }
+  final email = profile.userEmail?.trim() ?? "";
+  if (email.isNotEmpty) {
+    return email;
+  }
+  return profile.id;
+}
+
+List<BusinessStaffProfileSummary> _sortTaskStaffByRolePreference(
+  List<BusinessStaffProfileSummary> staff,
+  String roleRequired,
+  List<String> assignedStaffIds,
+) {
+  final selectedIds = assignedStaffIds.toSet();
+  final preferredRole = _normalizeRole(roleRequired);
+  final next = [...staff];
+  next.sort((left, right) {
+    final leftSelected = selectedIds.contains(left.id);
+    final rightSelected = selectedIds.contains(right.id);
+    if (leftSelected != rightSelected) {
+      return leftSelected ? -1 : 1;
+    }
+    final leftPreferred = _normalizeRole(left.staffRole) == preferredRole;
+    final rightPreferred = _normalizeRole(right.staffRole) == preferredRole;
+    if (leftPreferred != rightPreferred) {
+      return leftPreferred ? -1 : 1;
+    }
+    return _staffDisplayName(
+      left,
+    ).toLowerCase().compareTo(_staffDisplayName(right).toLowerCase());
+  });
+  return next;
+}
+
+List<String> _resolveAssignedStaffLabels(
+  List<BusinessStaffProfileSummary> staff,
+  List<String> staffIds,
+) {
+  if (staffIds.isEmpty) {
+    return const <String>[];
+  }
+  final labelsById = {
+    for (final member in staff) member.id: _staffDisplayName(member),
+  };
+  return staffIds
+      .map((id) => labelsById[id] ?? id)
+      .where((label) => label.trim().isNotEmpty)
+      .toList();
+}
+
 String _resolveStaffLabel(
   List<BusinessStaffProfileSummary> staff,
-  String? staffId,
+  List<String> staffIds,
 ) {
-  // WHY: Keep collapsed meta consistent for assigned/unassigned staff.
-  if (staffId == null) return _unassignedLabel;
-  final match = staff.where((member) => member.id == staffId).toList();
-  if (match.isEmpty) return _unassignedLabel;
-  final profile = match.first;
-  return profile.userName ?? profile.userEmail ?? _unassignedLabel;
+  final labels = _resolveAssignedStaffLabels(staff, staffIds);
+  if (labels.isEmpty) {
+    return _unassignedLabel;
+  }
+  return labels.join(", ");
 }
 
 String? _extractProjectDayLabel(ProductionTaskDraft task) {

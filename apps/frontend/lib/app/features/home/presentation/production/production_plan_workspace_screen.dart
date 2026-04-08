@@ -25,6 +25,7 @@ import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_calendar_visuals.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
@@ -73,6 +74,7 @@ const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
 const String _removeStaffHint = "Leave everything unchecked to remove staff.";
 const String _logProgressLabel = "Log progress";
+const String _editProgressLabel = "Edit progress";
 const String _taskApproveLabel = "Approve task";
 const String _taskRejectLabel = "Reject task";
 const String _progressApproveLabel = "Approve log";
@@ -80,21 +82,30 @@ const String _progressRejectLabel = "Review log";
 const String _scheduleLabel = "Schedule";
 const String _roleLabel = "Role";
 const String _assignedLabel = "Assigned";
+const String _assignedStaffFallbackLabel = "Assigned staff";
 const String _unitsLabel = "Units";
 const String _instructionsLabel = "Notes";
 const String _activityLabel = "Activity";
 const String _logsLabel = "Logs";
 const String _expectedLabel = "Expected";
 const String _actualLabel = "Actual";
-const String _actualTodayLabel = "Actual for this day";
+const String _workingOnLabel = "Working on";
+const String _doneTodayLabel = "Done today";
+const String _leftTodayLabel = "Left today";
 const String _approvalLabel = "Approval";
 const String _noActivityLabel = "No progress logs yet for this day.";
 const String _estimatedDatesLabel = "Estimated";
-const String _attendanceUnsetLabel =
-    "No clock-in or clock-out set for this day.";
-const String _attendanceOpenLabel = "Open";
+const String _clockedInLabel = "Clocked in";
+const String _clockedOutLabel = "Clocked out";
+const String _attendanceClockInUnsetLabel = "Not clocked in";
+const String _attendanceClockOutUnsetLabel = "Not clocked out";
+const String _attendanceClockOutPendingLabel = "Awaiting clock-out";
 const String _setAttendanceLabel = "Set time";
 const String _editAttendanceLabel = "Edit time";
+const String _attendanceQuickClockInSuccess = "Clock-in recorded.";
+const String _attendanceQuickClockOutSuccess = "Clock-out recorded.";
+const String _attendanceNotStartedHint =
+    "Use Clock in to start this shift, or Set time if you need to backfill the exact hours.";
 const String _attendanceShiftOpenHint =
     "Clock-in is set. Add clock-out to close this shift for the day.";
 const String _attendanceReadyForProgressHint =
@@ -140,10 +151,8 @@ const String _logDialogSaveLabel = "Save daily log";
 const String _logDialogCancelLabel = "Cancel";
 const String _logDialogDelayRequired =
     "Choose a delay reason if this staff completed 0 today.";
+const String _logDialogActualInvalid = "Select a valid progress amount.";
 const String _logDialogStaffLabel = "Staff who did this work today";
-const String _logDialogUnitLabel = "Assigned plot / unit";
-const String _logDialogActualLabel =
-    "Actual plots/units this staff completed today";
 const String _logDialogDelayLabel = "Delay reason";
 const String _logDialogDelayHelper =
     "Use None when work was completed. Choose the real reason only if this staff completed 0 today.";
@@ -152,10 +161,6 @@ const String _logDialogQuantityAmountLabel = "Quantity completed today";
 const String _logDialogQuantityHelper =
     "Track planting, transplant, or harvest quantities against the farm estimate. This updates the remaining target immediately.";
 const String _logDialogNotesLabel = "Daily notes";
-const String _logDialogWorkflowHint =
-    "Record what one assigned staff actually completed on this date. This is not the total for the whole task. Example: if 6 plots are planned and Aisha completed 2.7, enter 2.7 here.";
-const String _logDialogNotesHint =
-    "Example: Inspected 2.7 plots and confirmed irrigation status.";
 const String _rejectDialogTitle = "Reject task";
 const String _rejectDialogHint = "Add a short reason";
 const String _rejectProgressDialogTitle = "Mark progress for review";
@@ -208,10 +213,19 @@ const double _sectionSpacing = 18;
 const double _cardSpacing = 12;
 const double _calendarSpacing = 8;
 const double _dayTileRadius = 14;
-const double _dayTilePadding = 10;
 const double _agendaCardPadding = 14;
 const int _workspaceAssetQueryPage = 1;
 const int _workspaceAssetQueryLimit = 200;
+const Color _workspaceBlue = Color(0xFF2856C3);
+const Color _workspaceTeal = Color(0xFF127B68);
+const Color _workspaceAmber = Color(0xFFC57612);
+const Color _workspaceBerry = Color(0xFF8B4DC9);
+const Color _workspaceNavy = Color(0xFF1C3159);
+const Color _workspaceSoftBlue = Color(0xFFE7F0FF);
+const Color _workspaceSoftTeal = Color(0xFFE1F5EF);
+const Color _workspaceSoftAmber = Color(0xFFFFF0D9);
+const Color _workspaceSoftBerry = Color(0xFFF4E7FF);
+const Color _workspaceSoftSlate = Color(0xFFEEF4FC);
 final RegExp _importedProjectDayPattern = RegExp(
   r"Project day\s+\d+\s+\((\d{4}-\d{2}-\d{2})\)\.",
   caseSensitive: false,
@@ -285,7 +299,9 @@ class _ProductionPlanWorkspaceScreenState
           onPressed: () {
             if (context.canPop()) {
               context.pop();
+              return;
             }
+            context.go(productionPlansRoute);
           },
         ),
         actions: [
@@ -329,8 +345,10 @@ class _ProductionPlanWorkspaceScreenState
                 ),
               ),
             );
-            final staffList =
-                staffAsync.valueOrNull ?? <BusinessStaffProfileSummary>[];
+            final staffList = <BusinessStaffProfileSummary>[
+              ...(staffAsync.valueOrNull ?? <BusinessStaffProfileSummary>[]),
+              ...detail.staffProfiles,
+            ];
             final staffMap = _buildStaffMap(staffList);
             final selfStaffRole = _resolveSelfStaffRole(
               staffList: staffList,
@@ -360,15 +378,18 @@ class _ProductionPlanWorkspaceScreenState
             );
             final selectedDay = _selectedDay ?? _resolveInitialDay(detail.plan);
             final visibleMonth = _visibleMonth ?? _firstDayOfMonth(selectedDay);
+            final planUnitsResponse = ref
+                .watch(productionPlanUnitsProvider(widget.planId))
+                .valueOrNull;
             final planUnitLabelById = <String, String>{
               for (final unit
-                  in (ref
-                          .watch(productionPlanUnitsProvider(widget.planId))
-                          .valueOrNull
-                          ?.units ??
-                      const <ProductionPlanUnit>[]))
+                  in (planUnitsResponse?.units ?? const <ProductionPlanUnit>[]))
                 unit.id: unit.label,
             };
+            final workScopeSummary = _resolveWorkspaceWorkScopeSummary(
+              plan: detail.plan,
+              planUnitsResponse: planUnitsResponse,
+            );
             final tasksForDay = _tasksForDay(detail.tasks, selectedDay);
             final rowsForDay = _rowsForDay(detail.timelineRows, selectedDay);
             final phaseById = {
@@ -413,6 +434,7 @@ class _ProductionPlanWorkspaceScreenState
                 _WorkspaceSummaryCard(
                   detail: detail,
                   plan: detail.plan,
+                  workScopeSummary: workScopeSummary,
                   selectedEstateName: selectedEstateName,
                   selectedProductName: selectedProductName,
                   selectedDay: selectedDay,
@@ -471,9 +493,10 @@ class _ProductionPlanWorkspaceScreenState
                       : null,
                 ),
                 const SizedBox(height: _sectionSpacing),
-                const ProductionSectionHeader(
+                ProductionSectionHeader(
                   title: _workspaceTitle,
-                  subtitle: _workspaceSubtitle,
+                  subtitle:
+                      "$_workspaceSubtitle Working on ${workScopeSummary.countLabel}.",
                 ),
                 const SizedBox(height: _cardSpacing),
                 _WorkspaceCalendarModeBar(
@@ -491,6 +514,7 @@ class _ProductionPlanWorkspaceScreenState
                     month: visibleMonth,
                     selectedDay: selectedDay,
                     plan: detail.plan,
+                    workScopeSummary: workScopeSummary,
                     tasks: detail.tasks,
                     timelineRows: detail.timelineRows,
                     onPreviousMonth: () {
@@ -550,6 +574,7 @@ class _ProductionPlanWorkspaceScreenState
                   _WorkspaceCalendarMode.year => _YearCalendarCard(
                     year: visibleMonth.year,
                     selectedDay: selectedDay,
+                    workScopeSummary: workScopeSummary,
                     tasks: detail.tasks,
                     onPreviousYear: () {
                       final next = DateTime(visibleMonth.year - 1, 1, 1);
@@ -607,6 +632,7 @@ class _ProductionPlanWorkspaceScreenState
                     day: selectedDay,
                     taskCount: tasksForDay.length,
                     logCount: rowsForDay.length,
+                    workScopeSummary: workScopeSummary,
                   ),
                   showDayNavigation:
                       _calendarMode == _WorkspaceCalendarMode.day,
@@ -641,6 +667,185 @@ class _ProductionPlanWorkspaceScreenState
                         (canManageCalendar ||
                             (canSubmitOwnProgress &&
                                 assignedStaffIdsForTask.contains(selfStaffId)));
+                    final progressEnabledStaffIds = canManageCalendar
+                        ? assignedStaffIdsForTask.toSet()
+                        : (canSubmitOwnProgress &&
+                              selfStaffId.trim().isNotEmpty &&
+                              assignedStaffIdsForTask.contains(selfStaffId))
+                        ? <String>{selfStaffId}
+                        : <String>{};
+                    final attendanceActions = StaffAttendanceActions(ref);
+
+                    Future<ProductionAttendanceRecord?>
+                    setAttendanceForTaskStaff(
+                      String staffProfileId,
+                      ProductionAttendanceRecord? existingAttendance,
+                    ) async {
+                      final staffLabel = _resolveStaffDisplayLabel(
+                        staffProfileId,
+                        staffMap,
+                        fallbackRole: task.roleRequired,
+                      );
+                      final input = await _showAttendanceDialog(
+                        context,
+                        staffLabel: staffLabel,
+                        taskTitle: task.title,
+                        workDate: selectedDay,
+                        existingAttendance: existingAttendance,
+                      );
+                      if (input == null) {
+                        return null;
+                      }
+                      try {
+                        final note = "Updated from production workspace";
+                        StaffAttendanceRecord attendanceRecord;
+                        final existingClockInAt = existingAttendance?.clockInAt
+                            ?.toLocal();
+                        final existingClockOutAt = existingAttendance
+                            ?.clockOutAt
+                            ?.toLocal();
+                        final shouldSetClockOutFirst =
+                            existingAttendance != null &&
+                            input.clockOutAt != null &&
+                            existingClockOutAt != null &&
+                            input.clockInAt.isAfter(existingClockOutAt) &&
+                            !(existingClockInAt != null &&
+                                input.clockOutAt!.isBefore(existingClockInAt));
+                        if (shouldSetClockOutFirst) {
+                          final updatedClockOut = await attendanceActions
+                              .clockOut(
+                                staffProfileId: staffProfileId,
+                                attendanceId: existingAttendance.id,
+                                clockOutAt: input.clockOutAt,
+                                workDate: selectedDay,
+                                planId: widget.planId,
+                                taskId: task.id,
+                                notes: note,
+                              );
+                          attendanceRecord = await attendanceActions.clockIn(
+                            staffProfileId: staffProfileId,
+                            attendanceId: updatedClockOut.id,
+                            clockInAt: input.clockInAt,
+                            workDate: selectedDay,
+                            planId: widget.planId,
+                            taskId: task.id,
+                            notes: note,
+                          );
+                        } else {
+                          attendanceRecord = await attendanceActions.clockIn(
+                            staffProfileId: staffProfileId,
+                            attendanceId: existingAttendance?.id,
+                            clockInAt: input.clockInAt,
+                            workDate: selectedDay,
+                            planId: widget.planId,
+                            taskId: task.id,
+                            notes: note,
+                          );
+                          if (input.clockOutAt != null) {
+                            attendanceRecord = await attendanceActions.clockOut(
+                              staffProfileId: staffProfileId,
+                              attendanceId: attendanceRecord.id,
+                              clockOutAt: input.clockOutAt,
+                              workDate: selectedDay,
+                              planId: widget.planId,
+                              taskId: task.id,
+                              notes: note,
+                            );
+                          }
+                        }
+                        ref.invalidate(
+                          productionPlanDetailProvider(widget.planId),
+                        );
+                        _showSnackSafe(_attendanceUpdateSuccess);
+                        return _toProductionAttendanceRecord(attendanceRecord);
+                      } catch (_) {
+                        _showSnackSafe(_attendanceUpdateFailure);
+                        return null;
+                      }
+                    }
+
+                    Future<ProductionAttendanceRecord?>
+                    quickClockInForTaskStaff(
+                      String staffProfileId,
+                      ProductionAttendanceRecord? existingAttendance,
+                    ) async {
+                      if (existingAttendance != null) {
+                        return null;
+                      }
+                      try {
+                        final clockInAt = _resolveQuickAttendanceTime(
+                          selectedDay,
+                        );
+                        final attendanceRecord = await attendanceActions
+                            .clockIn(
+                              staffProfileId: staffProfileId,
+                              clockInAt: clockInAt,
+                              workDate: selectedDay,
+                              planId: widget.planId,
+                              taskId: task.id,
+                              notes: "Clocked in from production workspace",
+                            );
+                        ref.invalidate(
+                          productionPlanDetailProvider(widget.planId),
+                        );
+                        _showSnackSafe(_attendanceQuickClockInSuccess);
+                        return _toProductionAttendanceRecord(attendanceRecord);
+                      } catch (error) {
+                        _showSnackSafe(
+                          _resolveProductionWorkspaceErrorMessage(
+                            error,
+                            fallback: _attendanceUpdateFailure,
+                          ),
+                        );
+                        return null;
+                      }
+                    }
+
+                    Future<ProductionAttendanceRecord?>
+                    quickClockOutForTaskStaff(
+                      String staffProfileId,
+                      ProductionAttendanceRecord? existingAttendance,
+                    ) async {
+                      final openAttendance = existingAttendance;
+                      if (openAttendance == null ||
+                          openAttendance.clockOutAt != null) {
+                        return null;
+                      }
+                      final clockInAt = openAttendance.clockInAt?.toLocal();
+                      if (clockInAt == null) {
+                        return null;
+                      }
+                      try {
+                        final clockOutAt = _resolveQuickClockOutTime(
+                          workDate: selectedDay,
+                          clockInAt: clockInAt,
+                        );
+                        final attendanceRecord = await attendanceActions
+                            .clockOut(
+                              staffProfileId: staffProfileId,
+                              attendanceId: openAttendance.id,
+                              clockOutAt: clockOutAt,
+                              workDate: selectedDay,
+                              planId: widget.planId,
+                              taskId: task.id,
+                              notes: "Clocked out from production workspace",
+                            );
+                        ref.invalidate(
+                          productionPlanDetailProvider(widget.planId),
+                        );
+                        _showSnackSafe(_attendanceQuickClockOutSuccess);
+                        return _toProductionAttendanceRecord(attendanceRecord);
+                      } catch (error) {
+                        _showSnackSafe(
+                          _resolveProductionWorkspaceErrorMessage(
+                            error,
+                            fallback: _attendanceUpdateFailure,
+                          ),
+                        );
+                        return null;
+                      }
+                    }
+
                     return Padding(
                       padding: const EdgeInsets.only(bottom: _cardSpacing),
                       child: _AgendaTaskCard(
@@ -649,6 +854,10 @@ class _ProductionPlanWorkspaceScreenState
                             phaseById[task.phaseId]?.name ?? task.phaseId,
                         staffMap: staffMap,
                         planUnitLabelById: planUnitLabelById,
+                        fallbackTotalUnits: workScopeSummary.totalUnits,
+                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
+                        planContextText:
+                            "${detail.plan.title} ${detail.plan.notes}",
                         selectedDay: selectedDay,
                         attendanceRecords: detail.attendanceRecords,
                         rowsForDay: rowsForTask,
@@ -656,6 +865,7 @@ class _ProductionPlanWorkspaceScreenState
                         canManageTaskAttendance: canManageTaskAttendance,
                         canReviewProgress: canReviewProgress,
                         isOwner: actorRole == "business_owner",
+                        progressEnabledStaffIds: progressEnabledStaffIds,
                         onManageStaff: canManageCalendar
                             ? () async {
                                 final selectedIds =
@@ -693,96 +903,99 @@ class _ProductionPlanWorkspaceScreenState
                             : null,
                         onSetAttendanceForStaff: canManageTaskAttendance
                             ? (staffProfileId, existingAttendance) async {
-                                final staffLabel = _resolveStaffDisplayName(
+                                await setAttendanceForTaskStaff(
                                   staffProfileId,
-                                  staffMap,
+                                  existingAttendance,
                                 );
-                                final input = await _showAttendanceDialog(
+                              }
+                            : null,
+                        onQuickClockInForStaff: canManageTaskAttendance
+                            ? (staffProfileId, existingAttendance) async {
+                                await quickClockInForTaskStaff(
+                                  staffProfileId,
+                                  existingAttendance,
+                                );
+                              }
+                            : null,
+                        onQuickClockOutForStaff: canManageTaskAttendance
+                            ? (staffProfileId, existingAttendance) async {
+                                await quickClockOutForTaskStaff(
+                                  staffProfileId,
+                                  existingAttendance,
+                                );
+                              }
+                            : null,
+                        onLogProgressForStaff: progressEnabledStaffIds.isEmpty
+                            ? null
+                            : (staffProfileId) async {
+                                final input = await _showWorkspaceLogDialog(
                                   context,
-                                  staffLabel: staffLabel,
-                                  taskTitle: task.title,
                                   workDate: selectedDay,
-                                  existingAttendance: existingAttendance,
+                                  task: task,
+                                  plan: detail.plan,
+                                  timelineRows: detail.timelineRows,
+                                  staffMap: staffMap,
+                                  planUnitLabelById: planUnitLabelById,
+                                  fallbackTotalUnits:
+                                      workScopeSummary.totalUnits,
+                                  fallbackWorkUnitLabel:
+                                      workScopeSummary.singularLabel,
+                                  attendanceRecords: detail.attendanceRecords,
+                                  actorStaffId: staffProfileId,
+                                  canPickAnyAssignedStaff: false,
+                                  canManageAttendance: canManageTaskAttendance,
+                                  onSetAttendanceForStaff:
+                                      canManageTaskAttendance
+                                      ? setAttendanceForTaskStaff
+                                      : null,
+                                  onQuickClockInForStaff:
+                                      canManageTaskAttendance
+                                      ? quickClockInForTaskStaff
+                                      : null,
+                                  onQuickClockOutForStaff:
+                                      canManageTaskAttendance
+                                      ? quickClockOutForTaskStaff
+                                      : null,
                                 );
                                 if (input == null) {
                                   return;
                                 }
+                                AppDebug.log(
+                                  _logTag,
+                                  _logProgress,
+                                  extra: {
+                                    "planId": widget.planId,
+                                    "taskId": task.id,
+                                    "staffId": input.staffId,
+                                  },
+                                );
                                 try {
-                                  final attendanceActions =
-                                      StaffAttendanceActions(ref);
-                                  final note =
-                                      "Updated from production workspace";
-                                  StaffAttendanceRecord attendanceRecord;
-                                  final existingClockInAt = existingAttendance
-                                      ?.clockInAt
-                                      ?.toLocal();
-                                  final existingClockOutAt = existingAttendance
-                                      ?.clockOutAt
-                                      ?.toLocal();
-                                  final shouldSetClockOutFirst =
-                                      existingAttendance != null &&
-                                      input.clockOutAt != null &&
-                                      existingClockOutAt != null &&
-                                      input.clockInAt.isAfter(
-                                        existingClockOutAt,
-                                      ) &&
-                                      !(existingClockInAt != null &&
-                                          input.clockOutAt!.isBefore(
-                                            existingClockInAt,
-                                          ));
-                                  if (shouldSetClockOutFirst) {
-                                    final updatedClockOut =
-                                        await attendanceActions.clockOut(
-                                          staffProfileId: staffProfileId,
-                                          attendanceId: existingAttendance.id,
-                                          clockOutAt: input.clockOutAt,
-                                          workDate: selectedDay,
-                                          planId: widget.planId,
-                                          taskId: task.id,
-                                          notes: note,
-                                        );
-                                    attendanceRecord = await attendanceActions
-                                        .clockIn(
-                                          staffProfileId: staffProfileId,
-                                          attendanceId: updatedClockOut.id,
-                                          clockInAt: input.clockInAt,
-                                          workDate: selectedDay,
-                                          planId: widget.planId,
-                                          taskId: task.id,
-                                          notes: note,
-                                        );
-                                  } else {
-                                    attendanceRecord = await attendanceActions
-                                        .clockIn(
-                                          staffProfileId: staffProfileId,
-                                          attendanceId: existingAttendance?.id,
-                                          clockInAt: input.clockInAt,
-                                          workDate: selectedDay,
-                                          planId: widget.planId,
-                                          taskId: task.id,
-                                          notes: note,
-                                        );
-                                    if (input.clockOutAt != null) {
-                                      await attendanceActions.clockOut(
-                                        staffProfileId: staffProfileId,
-                                        attendanceId: attendanceRecord.id,
-                                        clockOutAt: input.clockOutAt,
-                                        workDate: selectedDay,
-                                        planId: widget.planId,
+                                  await ref
+                                      .read(productionPlanActionsProvider)
+                                      .logTaskProgress(
                                         taskId: task.id,
-                                        notes: note,
+                                        workDate: selectedDay,
+                                        staffId: input.staffId,
+                                        unitId: input.unitId,
+                                        actualPlots: input.actualPlots,
+                                        quantityActivityType:
+                                            input.quantityActivityType,
+                                        quantityAmount: input.quantityAmount,
+                                        quantityUnit: input.quantityUnit,
+                                        delayReason: input.delayReason,
+                                        notes: input.notes,
+                                        planId: widget.planId,
                                       );
-                                    }
-                                  }
-                                  ref.invalidate(
-                                    productionPlanDetailProvider(widget.planId),
+                                  _showSnackSafe(_taskProgressSuccess);
+                                } catch (error) {
+                                  _showSnackSafe(
+                                    _resolveProductionWorkspaceErrorMessage(
+                                      error,
+                                      fallback: _taskProgressFailure,
+                                    ),
                                   );
-                                  _showSnackSafe(_attendanceUpdateSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_attendanceUpdateFailure);
                                 }
-                              }
-                            : null,
+                              },
                         onStatusSelected: canManageCalendar
                             ? (status) async {
                                 if (status == task.status) {
@@ -821,10 +1034,28 @@ class _ProductionPlanWorkspaceScreenState
                                   timelineRows: detail.timelineRows,
                                   staffMap: staffMap,
                                   planUnitLabelById: planUnitLabelById,
+                                  fallbackTotalUnits:
+                                      workScopeSummary.totalUnits,
+                                  fallbackWorkUnitLabel:
+                                      workScopeSummary.singularLabel,
+                                  attendanceRecords: detail.attendanceRecords,
                                   actorStaffId: selfStaffId.trim().isEmpty
                                       ? null
                                       : selfStaffId,
                                   canPickAnyAssignedStaff: canManageCalendar,
+                                  canManageAttendance: canManageTaskAttendance,
+                                  onSetAttendanceForStaff:
+                                      canManageTaskAttendance
+                                      ? setAttendanceForTaskStaff
+                                      : null,
+                                  onQuickClockInForStaff:
+                                      canManageTaskAttendance
+                                      ? quickClockInForTaskStaff
+                                      : null,
+                                  onQuickClockOutForStaff:
+                                      canManageTaskAttendance
+                                      ? quickClockOutForTaskStaff
+                                      : null,
                                 );
                                 if (input == null) {
                                   return;
@@ -1020,9 +1251,59 @@ class _WorkspaceSummaryMetrics {
   }
 }
 
+class _WorkspaceWorkScopeSummary {
+  final int totalUnits;
+  final String baseUnitLabel;
+
+  const _WorkspaceWorkScopeSummary({
+    required this.totalUnits,
+    required this.baseUnitLabel,
+  });
+
+  String get singularLabel => _normalizeWorkspaceUnitLabel(baseUnitLabel);
+
+  String get pluralLabel => _pluralizeWorkspaceUnitLabel(baseUnitLabel);
+
+  String get countLabel =>
+      "${totalUnits < 0 ? 0 : totalUnits} ${totalUnits == 1 ? singularLabel : pluralLabel}";
+
+  String get helperLabel =>
+      "${_capitalizeWorkspaceLabel(pluralLabel)} from draft";
+}
+
+class _TaskUnitProgressSummary {
+  final String singularUnitLabel;
+  final num plannedAmount;
+  final num loggedAmount;
+
+  const _TaskUnitProgressSummary({
+    required this.singularUnitLabel,
+    required this.plannedAmount,
+    required this.loggedAmount,
+  });
+
+  num get remainingAmount => math.max(0, plannedAmount - loggedAmount);
+
+  String get workingOnLabel => _formatProgressAmountWithUnit(
+    amount: plannedAmount,
+    singularUnitLabel: singularUnitLabel,
+  );
+
+  String get doneTodayLabel => _formatProgressAmountWithUnit(
+    amount: loggedAmount,
+    singularUnitLabel: singularUnitLabel,
+  );
+
+  String get leftTodayLabel => _formatProgressAmountWithUnit(
+    amount: remainingAmount,
+    singularUnitLabel: singularUnitLabel,
+  );
+}
+
 class _WorkspaceSummaryCard extends StatelessWidget {
   final ProductionPlanDetail detail;
   final ProductionPlan plan;
+  final _WorkspaceWorkScopeSummary workScopeSummary;
   final String selectedEstateName;
   final String selectedProductName;
   final DateTime selectedDay;
@@ -1035,6 +1316,7 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   const _WorkspaceSummaryCard({
     required this.detail,
     required this.plan,
+    required this.workScopeSummary,
     required this.selectedEstateName,
     required this.selectedProductName,
     required this.selectedDay,
@@ -1059,9 +1341,30 @@ class _WorkspaceSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.surface,
+            Color.alphaBlend(
+              _workspaceSoftBlue.withValues(alpha: 0.72),
+              colorScheme.surfaceContainerLow,
+            ),
+            Color.alphaBlend(
+              _workspaceSoftTeal.withValues(alpha: 0.42),
+              colorScheme.surfaceContainerLow,
+            ),
+          ],
+        ),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: _workspaceBlue.withValues(alpha: 0.14)),
+        boxShadow: [
+          BoxShadow(
+            color: _workspaceNavy.withValues(alpha: 0.06),
+            blurRadius: 28,
+            offset: const Offset(0, 12),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1154,6 +1457,10 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 icon: Icons.schedule_outlined,
                 label: _formatDisplayDateRange(plan.startDate, plan.endDate),
               ),
+              _SummaryPill(
+                icon: Icons.grid_view_rounded,
+                label: "Working on ${workScopeSummary.countLabel}",
+              ),
               if (productionDomainRequiresPlantingTargets(plan.domainContext))
                 _SummaryPill(
                   icon: Icons.grass_outlined,
@@ -1181,6 +1488,8 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       value: metrics.phaseCount.toString(),
                       helper: "Stage groups",
                       icon: Icons.alt_route_outlined,
+                      accentColor: _workspaceBlue,
+                      softColor: _workspaceSoftBlue,
                     ),
                   ),
                   SizedBox(
@@ -1190,6 +1499,8 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       value: metrics.totalTasks.toString(),
                       helper: "Live workload",
                       icon: Icons.checklist_rtl_outlined,
+                      accentColor: _workspaceNavy,
+                      softColor: _workspaceSoftSlate,
                     ),
                   ),
                   SizedBox(
@@ -1199,17 +1510,23 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       value: metrics.unassignedTasks.toString(),
                       helper: "Unassigned tasks",
                       icon: Icons.person_search_outlined,
+                      accentColor: metrics.unassignedTasks == 0
+                          ? _workspaceTeal
+                          : _workspaceAmber,
+                      softColor: metrics.unassignedTasks == 0
+                          ? _workspaceSoftTeal
+                          : _workspaceSoftAmber,
                     ),
                   ),
                   SizedBox(
                     width: tileWidth,
                     child: _WorkspaceHeroMetricTile(
-                      label: "Project days",
-                      value: metrics.totalProjectDays.toString(),
-                      helper: metrics.totalProjectDays == 0
-                          ? "Dates missing"
-                          : "Schedule window",
-                      icon: Icons.calendar_month_outlined,
+                      label: "Work units",
+                      value: workScopeSummary.totalUnits.toString(),
+                      helper: workScopeSummary.helperLabel,
+                      icon: Icons.grid_view_rounded,
+                      accentColor: _workspaceBerry,
+                      softColor: _workspaceSoftBerry,
                     ),
                   ),
                 ],
@@ -1307,12 +1624,16 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
   final String value;
   final String helper;
   final IconData icon;
+  final Color accentColor;
+  final Color softColor;
 
   const _WorkspaceHeroMetricTile({
     required this.label,
     required this.value,
     required this.helper,
     required this.icon,
+    required this.accentColor,
+    required this.softColor,
   });
 
   @override
@@ -1322,9 +1643,26 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.surface,
+            Color.alphaBlend(
+              softColor.withValues(alpha: 0.88),
+              colorScheme.surface,
+            ),
+          ],
+        ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.10),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -1332,10 +1670,17 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: colorScheme.primaryContainer,
+              color: accentColor,
               borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: accentColor.withValues(alpha: 0.22),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            child: Icon(icon, color: colorScheme.primary),
+            child: Icon(icon, color: Colors.white),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1345,14 +1690,16 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                    color: accentColor,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   value,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: _workspaceNavy,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -1360,6 +1707,7 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
                   helper,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -1503,6 +1851,7 @@ class _MonthCalendarCard extends StatelessWidget {
   final DateTime month;
   final DateTime selectedDay;
   final ProductionPlan plan;
+  final _WorkspaceWorkScopeSummary workScopeSummary;
   final List<ProductionTask> tasks;
   final List<ProductionTimelineRow> timelineRows;
   final VoidCallback onPreviousMonth;
@@ -1514,6 +1863,7 @@ class _MonthCalendarCard extends StatelessWidget {
     required this.month,
     required this.selectedDay,
     required this.plan,
+    required this.workScopeSummary,
     required this.tasks,
     required this.timelineRows,
     required this.onPreviousMonth,
@@ -1528,39 +1878,183 @@ class _MonthCalendarCard extends StatelessWidget {
     final monthTasks = tasks.where((task) {
       return _taskTouchesMonth(task: task, month: month);
     }).toList();
+    final monthRows = timelineRows.where((row) {
+      final workDate = row.workDate?.toLocal();
+      return workDate?.year == month.year && workDate?.month == month.month;
+    }).toList();
+    final theme = Theme.of(context);
+    final completedCount = monthTasks
+        .where((task) => task.status == _taskStatusDone)
+        .length;
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: monthTasks.length,
+      completedCount: completedCount,
+      warning: monthTasks.any(_workspaceTaskHasStaffGap),
+    );
+    final shellColor = palette.badgeBackground;
+    final shellForeground = palette.badgeForeground;
+    final shellSurface = shellForeground.withValues(alpha: 0.12);
+    final shellBorder = shellForeground.withValues(alpha: 0.16);
+    final metricIconColor = shellForeground.withValues(alpha: 0.82);
+    final completedMetricAccent = completedCount > 0
+        ? ProductionCalendarVisuals.palette(
+            theme: theme,
+            taskCount: completedCount,
+            completedCount: completedCount,
+          ).accent
+        : metricIconColor;
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: shellBorder, width: 1.4),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.alphaBlend(
+              shellForeground.withValues(alpha: 0.04),
+              shellColor,
+            ),
+            shellColor,
+            Color.alphaBlend(
+              palette.accent.withValues(alpha: 0.08),
+              shellColor,
+            ),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: palette.shadow.withValues(alpha: 0.22),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         children: [
           Row(
             children: [
               Expanded(
-                child: Text(
-                  _monthTitle(month),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: shellSurface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: shellBorder),
+                      ),
+                      child: Icon(
+                        Icons.calendar_view_month_rounded,
+                        color: shellForeground,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _monthTitle(month),
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: shellForeground,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 6,
+                            children: [
+                              ProductionCalendarMetricPill(
+                                icon: Icons.checklist_rounded,
+                                value: "${monthTasks.length}",
+                                accent: shellForeground,
+                                compact: true,
+                                filled: false,
+                                padding: EdgeInsets.zero,
+                                foregroundColor: shellForeground,
+                                iconColor: metricIconColor,
+                                tooltip: "Tasks",
+                              ),
+                              ProductionCalendarMetricPill(
+                                icon: Icons.done_all_rounded,
+                                value: "$completedCount",
+                                accent: completedMetricAccent,
+                                compact: true,
+                                filled: false,
+                                padding: EdgeInsets.zero,
+                                foregroundColor: shellForeground,
+                                iconColor: completedMetricAccent,
+                                tooltip: "Completed",
+                              ),
+                              ProductionCalendarMetricPill(
+                                icon: Icons.grid_view_rounded,
+                                value: workScopeSummary.countLabel,
+                                accent: shellForeground,
+                                compact: true,
+                                filled: false,
+                                padding: EdgeInsets.zero,
+                                foregroundColor: shellForeground,
+                                iconColor: metricIconColor,
+                                tooltip: "Draft work scope",
+                              ),
+                              if (timelineRows.isNotEmpty)
+                                ProductionCalendarMetricPill(
+                                  icon: Icons.waterfall_chart_rounded,
+                                  value: "${monthRows.length}",
+                                  accent: shellForeground,
+                                  compact: true,
+                                  filled: false,
+                                  padding: EdgeInsets.zero,
+                                  foregroundColor: shellForeground,
+                                  iconColor: metricIconColor,
+                                  tooltip: "Logs",
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               IconButton(
+                style: IconButton.styleFrom(
+                  foregroundColor: shellForeground,
+                  backgroundColor: shellSurface,
+                ),
                 onPressed: onPreviousMonth,
                 icon: const Icon(Icons.chevron_left),
               ),
-              TextButton(onPressed: onToday, child: const Text(_todayLabel)),
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: shellForeground,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                onPressed: onToday,
+                child: const Text(_todayLabel),
+              ),
               IconButton(
+                style: IconButton.styleFrom(
+                  foregroundColor: shellForeground,
+                  backgroundColor: shellSurface,
+                ),
                 onPressed: onNextMonth,
                 icon: const Icon(Icons.chevron_right),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          const _MonthWeekdayHeader(),
+          const SizedBox(height: 12),
+          _MonthWeekdayHeader(
+            textColor: shellForeground.withValues(alpha: 0.86),
+            backgroundColor: shellSurface,
+            borderColor: shellBorder,
+          ),
           const SizedBox(height: 8),
           if (monthTasks.isEmpty)
             const Padding(
@@ -1620,11 +2114,20 @@ class _MonthCalendarCard extends StatelessWidget {
 }
 
 class _MonthWeekdayHeader extends StatelessWidget {
-  const _MonthWeekdayHeader();
+  final Color? textColor;
+  final Color? backgroundColor;
+  final Color? borderColor;
+
+  const _MonthWeekdayHeader({
+    this.textColor,
+    this.backgroundColor,
+    this.borderColor,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Row(
       children: _weekdayLabels
           .map(
@@ -1632,10 +2135,25 @@ class _MonthWeekdayHeader extends StatelessWidget {
               child: Container(
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(vertical: 6),
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color:
+                      backgroundColor ??
+                      Color.alphaBlend(
+                        colorScheme.primary.withValues(alpha: 0.08),
+                        colorScheme.surfaceContainerHighest,
+                      ),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color:
+                        borderColor ??
+                        colorScheme.primary.withValues(alpha: 0.12),
+                  ),
+                ),
                 child: Text(
                   label,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: textColor ?? colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1650,6 +2168,7 @@ class _MonthWeekdayHeader extends StatelessWidget {
 class _YearCalendarCard extends StatelessWidget {
   final int year;
   final DateTime selectedDay;
+  final _WorkspaceWorkScopeSummary workScopeSummary;
   final List<ProductionTask> tasks;
   final VoidCallback onPreviousYear;
   final VoidCallback onNextYear;
@@ -1659,6 +2178,7 @@ class _YearCalendarCard extends StatelessWidget {
   const _YearCalendarCard({
     required this.year,
     required this.selectedDay,
+    required this.workScopeSummary,
     required this.tasks,
     required this.onPreviousYear,
     required this.onNextYear,
@@ -1668,23 +2188,94 @@ class _YearCalendarCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final yearTasks = tasks.where((task) {
+      final start = task.startDate?.toLocal();
+      final due = task.dueDate?.toLocal();
+      return (start?.year == year) || (due?.year == year);
+    }).toList();
+    final completedCount = yearTasks
+        .where((task) => task.status == _taskStatusDone)
+        .length;
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: yearTasks.length,
+      completedCount: completedCount,
+      warning: yearTasks.any(_workspaceTaskHasStaffGap),
+    );
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      decoration: ProductionCalendarVisuals.shellDecoration(
+        theme: theme,
+        palette: palette,
+        radius: 22,
       ),
       child: Column(
         children: [
           Row(
             children: [
               Expanded(
-                child: Text(
-                  "$year",
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: palette.badgeBackground,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        Icons.grid_view_rounded,
+                        color: palette.badgeForeground,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "$year",
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              ProductionCalendarMetricPill(
+                                icon: Icons.checklist_rounded,
+                                value: "${yearTasks.length}",
+                                accent: palette.accent,
+                                compact: true,
+                              ),
+                              ProductionCalendarMetricPill(
+                                icon: Icons.done_all_rounded,
+                                value: "$completedCount",
+                                accent: completedCount > 0
+                                    ? ProductionCalendarVisuals.palette(
+                                        theme: theme,
+                                        taskCount: completedCount,
+                                        completedCount: completedCount,
+                                      ).accent
+                                    : palette.accent,
+                                compact: true,
+                              ),
+                              ProductionCalendarMetricPill(
+                                icon: Icons.grid_view_rounded,
+                                value: workScopeSummary.countLabel,
+                                accent: palette.accent,
+                                compact: true,
+                                tooltip: "Draft work scope",
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               IconButton(
@@ -1698,7 +2289,7 @@ class _YearCalendarCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
               final crossAxisCount = constraints.maxWidth >= 1180
@@ -1752,22 +2343,46 @@ class _MiniMonthCard extends StatelessWidget {
     final days = _buildMonthGridDays(month);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final monthTasks = tasks.where((task) {
+      return _taskTouchesMonth(task: task, month: month);
+    }).toList();
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: monthTasks.length,
+      completedCount: monthTasks
+          .where((task) => task.status == _taskStatusDone)
+          .length,
+      warning: monthTasks.any(_workspaceTaskHasStaffGap),
+    );
 
     return Container(
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: colorScheme.outlineVariant),
+      decoration: ProductionCalendarVisuals.tileDecoration(
+        theme: theme,
+        palette: palette,
+        radius: 18,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _monthName(month.month),
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _monthName(month.month),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: palette.badgeForeground,
+                  ),
+                ),
+              ),
+              if (monthTasks.isNotEmpty)
+                ProductionCalendarActivityDots(
+                  count: monthTasks.length,
+                  accent: palette.accent,
+                  compact: true,
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
@@ -1803,29 +2418,55 @@ class _MiniMonthCard extends StatelessWidget {
                 }
                 final isSelected = _isSameDay(day, selectedDay);
                 final dayTasks = _tasksForDay(tasks, day);
+                final cellPalette = ProductionCalendarVisuals.palette(
+                  theme: theme,
+                  taskCount: dayTasks.length,
+                  completedCount: dayTasks
+                      .where((task) => task.status == _taskStatusDone)
+                      .length,
+                  selected: isSelected,
+                  today: _isSameDay(day, DateTime.now()),
+                  warning: dayTasks.any(_workspaceTaskHasStaffGap),
+                );
                 return InkWell(
                   borderRadius: BorderRadius.circular(8),
                   onTap: () => onSelectDay(day),
                   child: Container(
-                    alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? colorScheme.primaryContainer
-                          : dayTasks.isNotEmpty
-                          ? colorScheme.surfaceContainerHighest
-                          : Colors.transparent,
+                      color: dayTasks.isEmpty
+                          ? Colors.transparent
+                          : cellPalette.badgeBackground,
                       borderRadius: BorderRadius.circular(8),
+                      border: isSelected
+                          ? Border.all(color: cellPalette.border)
+                          : null,
                     ),
-                    child: Text(
-                      "${day.day}",
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontWeight: dayTasks.isNotEmpty
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: isSelected
-                            ? colorScheme.onPrimaryContainer
-                            : colorScheme.onSurface,
-                      ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "${day.day}",
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            fontWeight: dayTasks.isNotEmpty
+                                ? FontWeight.w800
+                                : FontWeight.w500,
+                            color: isSelected
+                                ? cellPalette.badgeForeground
+                                : colorScheme.onSurface,
+                          ),
+                        ),
+                        if (dayTasks.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Container(
+                            width: 5,
+                            height: 5,
+                            decoration: BoxDecoration(
+                              color: cellPalette.accent,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 );
@@ -1862,44 +2503,32 @@ class _MonthDayTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final completed = tasks
         .where((task) => task.status == _taskStatusDone)
         .length;
-    final background = selected
-        ? colorScheme.primaryContainer
-        : inPlanRange
-        ? colorScheme.surfaceContainerHighest
-        : colorScheme.surface;
-    final foreground = selected
-        ? colorScheme.onPrimaryContainer
-        : colorScheme.onSurface;
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: tasks.length,
+      completedCount: completed,
+      selected: selected,
+      today: _isSameDay(day, DateTime.now()),
+      warning: tasks.any(_workspaceTaskHasStaffGap),
+    );
     final previewTaskTitle = tasks.isNotEmpty ? tasks.first.title : null;
-    final taskSummary = tasks.length == 1 ? '1 task' : '${tasks.length} tasks';
-    final doneSummary = completed == 1 ? '1 done' : '$completed done';
-    final tilePadding = compact ? 8.0 : _dayTilePadding;
+    final tilePadding = compact ? 6.0 : 8.0;
     final titleStyle = compact
-        ? theme.textTheme.titleSmall?.copyWith(
-            color: foreground,
-            fontWeight: FontWeight.w700,
+        ? theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w800,
           )
         : theme.textTheme.titleSmall?.copyWith(
-            color: foreground,
-            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w800,
           );
-    final summaryStyle =
-        (compact ? theme.textTheme.labelSmall : theme.textTheme.labelMedium)
-            ?.copyWith(
-              color: foreground.withValues(alpha: 0.88),
-              fontWeight: FontWeight.w700,
-            );
-    final doneStyle = theme.textTheme.labelSmall?.copyWith(
-      color: foreground.withValues(alpha: compact ? 0.72 : 0.76),
-      fontWeight: compact ? FontWeight.w600 : FontWeight.w500,
-    );
     final previewStyle = theme.textTheme.bodySmall?.copyWith(
-      color: foreground.withValues(alpha: 0.88),
+      color: theme.colorScheme.onSurface,
       height: 1.15,
+      fontWeight: FontWeight.w600,
     );
 
     return InkWell(
@@ -1908,12 +2537,11 @@ class _MonthDayTile extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         padding: EdgeInsets.all(tilePadding),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(_dayTileRadius),
-          border: Border.all(
-            color: selected ? colorScheme.primary : colorScheme.outlineVariant,
-          ),
+        decoration: ProductionCalendarVisuals.tileDecoration(
+          theme: theme,
+          palette: palette,
+          radius: _dayTileRadius,
+          emphasized: selected || _isSameDay(day, DateTime.now()),
         ),
         child: Opacity(
           opacity: inPlanRange ? 1 : 0.55,
@@ -1925,52 +2553,99 @@ class _MonthDayTile extends StatelessWidget {
                   Text("${day.day}", style: titleStyle),
                   const Spacer(),
                   if (rows.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? colorScheme.primary
-                            : colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        "${rows.length}",
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: selected
-                              ? colorScheme.onPrimary
-                              : colorScheme.onSecondaryContainer,
-                          fontWeight: FontWeight.w700,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.waterfall_chart_rounded,
+                          size: compact ? 12 : 13,
+                          color: palette.accent,
                         ),
-                      ),
+                        const SizedBox(width: 4),
+                        Text(
+                          "${rows.length}",
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ),
                 ],
               ),
-              SizedBox(height: compact ? 4 : 8),
-              Text(
-                taskSummary,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: summaryStyle,
-              ),
+              SizedBox(height: compact ? 4 : 6),
               if (tasks.isNotEmpty) ...[
-                SizedBox(height: compact ? 2 : 6),
-                Text(
-                  doneSummary,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: doneStyle,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.checklist_rounded,
+                      size: compact ? 12 : 13,
+                      color: palette.accent,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      "${tasks.length}",
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (tasks.any(_workspaceTaskHasStaffGap)) ...[
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: compact ? 12 : 13,
+                        color: Theme.of(context).colorScheme.tertiary,
+                      ),
+                    ] else if (completed > 0) ...[
+                      const SizedBox(width: 6),
+                      Icon(
+                        Icons.done_all_rounded,
+                        size: compact ? 12 : 13,
+                        color: ProductionCalendarVisuals.palette(
+                          theme: theme,
+                          taskCount: completed,
+                          completedCount: completed,
+                        ).accent,
+                      ),
+                    ],
+                  ],
                 ),
               ],
               if (showPreview && previewTaskTitle != null) ...[
                 const Spacer(),
-                Text(
-                  previewTaskTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: previewStyle,
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Color.alphaBlend(
+                      palette.accent.withValues(alpha: 0.08),
+                      theme.colorScheme.surface,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.spa_outlined,
+                        size: 14,
+                        color: palette.badgeForeground,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          previewTaskTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: previewStyle,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ],
@@ -1996,24 +2671,135 @@ class _SelectedDayMetricsRow extends StatelessWidget {
     final doneCount = tasks
         .where((task) => task.status == _taskStatusDone)
         .length;
+    const metricWidth = 168.0;
     return Wrap(
       spacing: _cardSpacing,
       runSpacing: _cardSpacing,
       children: [
-        ProductionKpiCard(
-          label: _daySummaryTasksLabel,
-          value: "${tasks.length}",
+        SizedBox(
+          width: metricWidth,
+          child: _WorkspaceDayMetricCard(
+            label: _daySummaryTasksLabel,
+            value: "${tasks.length}",
+            accentColor: _workspaceBlue,
+            softColor: _workspaceSoftBlue,
+            icon: Icons.checklist_outlined,
+          ),
         ),
-        ProductionKpiCard(
-          label: _daySummaryAssignedLabel,
-          value: "$assignedCount",
+        SizedBox(
+          width: metricWidth,
+          child: _WorkspaceDayMetricCard(
+            label: _daySummaryAssignedLabel,
+            value: "$assignedCount",
+            accentColor: _workspaceTeal,
+            softColor: _workspaceSoftTeal,
+            icon: Icons.groups_2_outlined,
+          ),
         ),
-        ProductionKpiCard(
-          label: _daySummaryLoggedLabel,
-          value: "${rows.length}",
+        SizedBox(
+          width: metricWidth,
+          child: _WorkspaceDayMetricCard(
+            label: _daySummaryLoggedLabel,
+            value: "${rows.length}",
+            accentColor: _workspaceAmber,
+            softColor: _workspaceSoftAmber,
+            icon: Icons.edit_note_outlined,
+          ),
         ),
-        ProductionKpiCard(label: _daySummaryDoneLabel, value: "$doneCount"),
+        SizedBox(
+          width: metricWidth,
+          child: _WorkspaceDayMetricCard(
+            label: _daySummaryDoneLabel,
+            value: "$doneCount",
+            accentColor: _workspaceBerry,
+            softColor: _workspaceSoftBerry,
+            icon: Icons.task_alt_outlined,
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _WorkspaceDayMetricCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color accentColor;
+  final Color softColor;
+  final IconData icon;
+
+  const _WorkspaceDayMetricCard({
+    required this.label,
+    required this.value,
+    this.accentColor = _workspaceBlue,
+    this.softColor = _workspaceSoftBlue,
+    this.icon = Icons.analytics_outlined,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.surface,
+            Color.alphaBlend(
+              softColor.withValues(alpha: 0.92),
+              colorScheme.surface,
+            ),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: accentColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: accentColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: _workspaceNavy,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2023,6 +2809,9 @@ class _AgendaTaskCard extends StatelessWidget {
   final String phaseName;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final Map<String, String> planUnitLabelById;
+  final int fallbackTotalUnits;
+  final String fallbackWorkUnitLabel;
+  final String planContextText;
   final DateTime selectedDay;
   final List<ProductionAttendanceRecord> attendanceRecords;
   final List<ProductionTimelineRow> rowsForDay;
@@ -2030,12 +2819,24 @@ class _AgendaTaskCard extends StatelessWidget {
   final bool canManageTaskAttendance;
   final bool canReviewProgress;
   final bool isOwner;
+  final Set<String> progressEnabledStaffIds;
   final Future<void> Function()? onManageStaff;
   final Future<void> Function(
     String staffProfileId,
     ProductionAttendanceRecord? attendance,
   )?
   onSetAttendanceForStaff;
+  final Future<void> Function(
+    String staffProfileId,
+    ProductionAttendanceRecord? attendance,
+  )?
+  onQuickClockInForStaff;
+  final Future<void> Function(
+    String staffProfileId,
+    ProductionAttendanceRecord? attendance,
+  )?
+  onQuickClockOutForStaff;
+  final Future<void> Function(String staffProfileId)? onLogProgressForStaff;
   final Future<void> Function(String status)? onStatusSelected;
   final Future<void> Function()? onLogProgress;
   final Future<void> Function()? onApproveTask;
@@ -2048,6 +2849,9 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.phaseName,
     required this.staffMap,
     required this.planUnitLabelById,
+    required this.fallbackTotalUnits,
+    required this.fallbackWorkUnitLabel,
+    required this.planContextText,
     required this.selectedDay,
     required this.attendanceRecords,
     required this.rowsForDay,
@@ -2055,8 +2859,12 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.canManageTaskAttendance,
     required this.canReviewProgress,
     required this.isOwner,
+    required this.progressEnabledStaffIds,
     required this.onManageStaff,
     required this.onSetAttendanceForStaff,
+    required this.onQuickClockInForStaff,
+    required this.onQuickClockOutForStaff,
+    required this.onLogProgressForStaff,
     required this.onStatusSelected,
     required this.onLogProgress,
     required this.onApproveTask,
@@ -2067,27 +2875,57 @@ class _AgendaTaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final assignedStaffIds = _resolveAssignedStaffIds(task);
+    final assignedUnitIds = task.assignedUnitIds
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    final effectiveWindow = _resolveEffectiveTaskWindow(task);
+    final estimatedWindow = _formatTaskWindow(
+      startDate: effectiveWindow.startDate,
+      dueDate: effectiveWindow.dueDate,
+    );
     final assignedUnitsLabel = _buildAssignedUnitLabel(
-      assignedUnitIds: task.assignedUnitIds,
+      assignedUnitIds: assignedUnitIds,
       planUnitLabelById: planUnitLabelById,
+      fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+      contextText:
+          "${task.title} ${task.instructions} ${task.taskType} $fallbackWorkUnitLabel",
     );
-    final actualTotal = rowsForDay.fold<num>(
-      0,
-      (sum, row) => sum + row.actualPlots,
-    );
-    final expectedTotal = rowsForDay.fold<num>(
-      0,
-      (sum, row) => sum + row.expectedPlots,
+    final taskProgressSummary = _buildTaskUnitProgressSummary(
+      task: task,
+      timelineRows: rowsForDay,
+      planUnitLabelById: planUnitLabelById,
+      fallbackTotalUnits: fallbackTotalUnits,
+      fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+      contextText: "$planContextText ${task.title} ${task.instructions}",
     );
 
     return Container(
       padding: const EdgeInsets.all(_agendaCardPadding),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.surface,
+            Color.alphaBlend(
+              _workspaceSoftSlate.withValues(alpha: 0.96),
+              colorScheme.surface,
+            ),
+          ],
+        ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: _workspaceBlue.withValues(alpha: 0.14)),
+        boxShadow: [
+          BoxShadow(
+            color: _workspaceNavy.withValues(alpha: 0.06),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2101,15 +2939,17 @@ class _AgendaTaskCard extends StatelessWidget {
                   children: [
                     Text(
                       task.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        color: _workspaceNavy,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       phaseName,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -2125,30 +2965,107 @@ class _AgendaTaskCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               _InfoChip(
-                label:
-                    "$_scheduleLabel: ${_formatTaskWindow(startDate: _resolveEffectiveTaskWindow(task).startDate, dueDate: _resolveEffectiveTaskWindow(task).dueDate)}",
+                label: "$_scheduleLabel: $estimatedWindow",
+                icon: Icons.schedule_outlined,
+                backgroundColor: _workspaceSoftBlue,
+                foregroundColor: _workspaceBlue,
+                borderColor: _workspaceBlue.withValues(alpha: 0.18),
               ),
               _InfoChip(
                 label:
                     "$_roleLabel: ${formatStaffRoleLabel(task.roleRequired, fallback: task.roleRequired)} x${task.requiredHeadcount}",
+                icon: Icons.shield_outlined,
+                backgroundColor: _workspaceSoftBerry,
+                foregroundColor: _workspaceBerry,
+                borderColor: _workspaceBerry.withValues(alpha: 0.18),
               ),
-              _InfoChip(label: "$_assignedLabel: ${assignedStaffIds.length}"),
+              _InfoChip(
+                label: "$_assignedLabel: ${assignedStaffIds.length}",
+                icon: Icons.groups_outlined,
+                backgroundColor: _workspaceSoftTeal,
+                foregroundColor: _workspaceTeal,
+                borderColor: _workspaceTeal.withValues(alpha: 0.18),
+              ),
               if (assignedUnitsLabel != "-")
-                _InfoChip(label: "$_unitsLabel: $assignedUnitsLabel"),
-              _InfoChip(label: "$_logsLabel: ${rowsForDay.length}"),
-              if (rowsForDay.isNotEmpty)
                 _InfoChip(
-                  label: "$_actualLabel: $actualTotal / $expectedTotal",
+                  label: "$_unitsLabel: $assignedUnitsLabel",
+                  icon: Icons.grid_view_outlined,
+                  backgroundColor: _workspaceSoftAmber,
+                  foregroundColor: _workspaceAmber,
+                  borderColor: _workspaceAmber.withValues(alpha: 0.18),
                 ),
+              _InfoChip(
+                label: "$_logsLabel: ${rowsForDay.length}",
+                icon: Icons.receipt_long_outlined,
+                backgroundColor: _workspaceSoftSlate,
+                foregroundColor: _workspaceNavy,
+                borderColor: _workspaceNavy.withValues(alpha: 0.12),
+              ),
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            _assignedLabel,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-            ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked = constraints.maxWidth < 680;
+              final workingOnCard = _TaskSnapshotCard(
+                label: _workingOnLabel,
+                value: taskProgressSummary.workingOnLabel,
+                helper: "Planned task scope for today",
+                accentColor: _workspaceAmber,
+                softColor: _workspaceSoftAmber,
+                icon: Icons.event_note_outlined,
+              );
+              final doneTodayCard = _TaskSnapshotCard(
+                label: _doneTodayLabel,
+                value: taskProgressSummary.doneTodayLabel,
+                helper: "Captured from today’s logs",
+                accentColor: _workspaceTeal,
+                softColor: _workspaceSoftTeal,
+                icon: Icons.insights_outlined,
+              );
+              final leftTodayCard = _TaskSnapshotCard(
+                label: _leftTodayLabel,
+                value: taskProgressSummary.leftTodayLabel,
+                helper: "Still open on this task today",
+                accentColor: _workspaceBlue,
+                softColor: _workspaceSoftBlue,
+                icon: Icons.track_changes_outlined,
+              );
+              if (stacked) {
+                return Column(
+                  children: [
+                    workingOnCard,
+                    const SizedBox(height: 10),
+                    doneTodayCard,
+                    const SizedBox(height: 10),
+                    leftTodayCard,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: workingOnCard),
+                  const SizedBox(width: 10),
+                  Expanded(child: doneTodayCard),
+                  const SizedBox(width: 10),
+                  Expanded(child: leftTodayCard),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(Icons.badge_outlined, size: 18, color: _workspaceBlue),
+              const SizedBox(width: 8),
+              Text(
+                _assignedLabel,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: _workspaceNavy,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           if (assignedStaffIds.isEmpty)
@@ -2166,33 +3083,77 @@ class _AgendaTaskCard extends StatelessWidget {
                   staffProfileId: staffId,
                   day: selectedDay,
                 );
+                final clockInAt = attendance?.clockInAt?.toLocal();
+                final clockOutAt = attendance?.clockOutAt?.toLocal();
+                final hasLoggedProgress = rowsForDay.any(
+                  (row) => row.staffId == staffId,
+                );
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: _AssignedStaffAttendanceRow(
-                    staffLabel: _resolveStaffDisplayName(staffId, staffMap),
-                    estimatedWindow: _formatTaskWindow(
-                      startDate: _resolveEffectiveTaskWindow(task).startDate,
-                      dueDate: _resolveEffectiveTaskWindow(task).dueDate,
-                    ),
-                    actualWindow: _formatAttendanceWindow(attendance),
-                    hasClockIn: attendance?.clockInAt != null,
-                    hasClockOut: attendance?.clockOutAt != null,
-                    canManageAttendance: canManageTaskAttendance,
-                    onSetAttendance: onSetAttendanceForStaff == null
-                        ? null
-                        : () => onSetAttendanceForStaff!(staffId, attendance),
+                  child: Builder(
+                    builder: (context) {
+                      final staffIdentity = _resolveStaffIdentity(
+                        staffId,
+                        staffMap,
+                        fallbackRole: task.roleRequired,
+                      );
+                      return _AssignedStaffAttendanceRow(
+                        staffName: staffIdentity.displayName,
+                        staffRoleLabel: staffIdentity.roleLabel,
+                        estimatedWindow: estimatedWindow,
+                        clockInValue: _formatAttendanceTimeValue(
+                          clockInAt,
+                          emptyLabel: _attendanceClockInUnsetLabel,
+                        ),
+                        clockOutValue: clockOutAt != null
+                            ? _clockLabel(clockOutAt)
+                            : (clockInAt != null
+                                  ? _attendanceClockOutPendingLabel
+                                  : _attendanceClockOutUnsetLabel),
+                        hasClockIn: attendance?.clockInAt != null,
+                        hasClockOut: attendance?.clockOutAt != null,
+                        canManageAttendance: canManageTaskAttendance,
+                        canLogProgress: progressEnabledStaffIds.contains(
+                          staffId,
+                        ),
+                        hasLoggedProgress: hasLoggedProgress,
+                        onQuickClockIn: onQuickClockInForStaff == null
+                            ? null
+                            : () =>
+                                  onQuickClockInForStaff!(staffId, attendance),
+                        onQuickClockOut: onQuickClockOutForStaff == null
+                            ? null
+                            : () =>
+                                  onQuickClockOutForStaff!(staffId, attendance),
+                        onSetAttendance: onSetAttendanceForStaff == null
+                            ? null
+                            : () =>
+                                  onSetAttendanceForStaff!(staffId, attendance),
+                        onLogProgress:
+                            onLogProgressForStaff == null ||
+                                !progressEnabledStaffIds.contains(staffId)
+                            ? null
+                            : () => onLogProgressForStaff!(staffId),
+                      );
+                    },
                   ),
                 );
               }).toList(),
             ),
           if (task.instructions.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(
-              _instructionsLabel,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
+            Row(
+              children: [
+                Icon(Icons.notes_outlined, size: 18, color: _workspaceBerry),
+                const SizedBox(width: 8),
+                Text(
+                  _instructionsLabel,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: _workspaceNavy,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 4),
             Text(task.instructions),
@@ -2244,12 +3205,18 @@ class _AgendaTaskCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Text(
-            _activityLabel,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-            ),
+          Row(
+            children: [
+              Icon(Icons.timeline_outlined, size: 18, color: _workspaceTeal),
+              const SizedBox(width: 8),
+              Text(
+                _activityLabel,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: _workspaceNavy,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           if (rowsForDay.isEmpty)
@@ -2265,6 +3232,8 @@ class _AgendaTaskCard extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: _TimelineLogRow(
                   row: row,
+                  expectedTargetAmount: taskProgressSummary.plannedAmount,
+                  singularUnitLabel: taskProgressSummary.singularUnitLabel,
                   canReviewProgress: canReviewProgress,
                   onApprove: onApproveProgress == null
                       ? null
@@ -2283,45 +3252,469 @@ class _AgendaTaskCard extends StatelessWidget {
 
 class _InfoChip extends StatelessWidget {
   final String label;
+  final IconData? icon;
+  final Color? backgroundColor;
+  final Color? foregroundColor;
+  final Color? borderColor;
 
-  const _InfoChip({required this.label});
+  const _InfoChip({
+    required this.label,
+    this.icon,
+    this.backgroundColor,
+    this.foregroundColor,
+    this.borderColor,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final resolvedForeground = foregroundColor ?? colorScheme.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: backgroundColor ?? colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
+        border: borderColor == null ? null : Border.all(color: borderColor!),
       ),
-      child: Text(
-        label,
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 14, color: resolvedForeground),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: resolvedForeground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TaskSnapshotCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String helper;
+  final Color accentColor;
+  final Color softColor;
+  final IconData icon;
+
+  const _TaskSnapshotCard({
+    required this.label,
+    required this.value,
+    required this.helper,
+    required this.accentColor,
+    required this.softColor,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.alphaBlend(
+              accentColor.withValues(alpha: 0.16),
+              colorScheme.surface,
+            ),
+            Color.alphaBlend(
+              softColor.withValues(alpha: 0.98),
+              colorScheme.surface,
+            ),
+            Color.alphaBlend(
+              accentColor.withValues(alpha: 0.08),
+              colorScheme.surfaceContainerHigh,
+            ),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: accentColor.withValues(alpha: 0.34),
+          width: 1.4,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.14),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accentColor,
+                  Color.alphaBlend(
+                    accentColor.withValues(alpha: 0.24),
+                    _workspaceNavy,
+                  ),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: [
+                BoxShadow(
+                  color: accentColor.withValues(alpha: 0.18),
+                  blurRadius: 12,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.20),
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: accentColor,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.22),
+                    ),
+                  ),
+                  child: Text(
+                    value,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: _workspaceNavy,
+                      fontWeight: FontWeight.w900,
+                      height: 1.15,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  helper,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _workspaceNavy.withValues(alpha: 0.72),
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _AssignedStaffAttendanceRow extends StatelessWidget {
-  final String staffLabel;
+  final String staffName;
+  final String staffRoleLabel;
   final String estimatedWindow;
-  final String actualWindow;
+  final String clockInValue;
+  final String clockOutValue;
   final bool hasClockIn;
   final bool hasClockOut;
   final bool canManageAttendance;
+  final bool canLogProgress;
+  final bool hasLoggedProgress;
+  final Future<void> Function()? onQuickClockIn;
+  final Future<void> Function()? onQuickClockOut;
   final Future<void> Function()? onSetAttendance;
+  final Future<void> Function()? onLogProgress;
 
   const _AssignedStaffAttendanceRow({
-    required this.staffLabel,
+    required this.staffName,
+    required this.staffRoleLabel,
     required this.estimatedWindow,
-    required this.actualWindow,
+    required this.clockInValue,
+    required this.clockOutValue,
     required this.hasClockIn,
     required this.hasClockOut,
     required this.canManageAttendance,
+    required this.canLogProgress,
+    required this.hasLoggedProgress,
+    required this.onQuickClockIn,
+    required this.onQuickClockOut,
     required this.onSetAttendance,
+    required this.onLogProgress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final actualAccent = hasClockIn && hasClockOut
+        ? _workspaceTeal
+        : hasClockIn || hasClockOut
+        ? _workspaceBlue
+        : _workspaceNavy;
+    final actualSoft = hasClockIn && hasClockOut
+        ? _workspaceSoftTeal
+        : hasClockIn || hasClockOut
+        ? _workspaceSoftBlue
+        : _workspaceSoftSlate;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.surface,
+            Color.alphaBlend(
+              _workspaceSoftSlate.withValues(alpha: 0.96),
+              colorScheme.surface,
+            ),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: actualAccent.withValues(alpha: 0.16)),
+        boxShadow: [
+          BoxShadow(
+            color: actualAccent.withValues(alpha: 0.07),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: _workspaceSoftBlue,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.person_outline, color: _workspaceBlue),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      staffName,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: _workspaceNavy,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (staffRoleLabel.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        staffRoleLabel,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.end,
+                children: [
+                  if (canManageAttendance &&
+                      !hasClockIn &&
+                      !hasClockOut &&
+                      onQuickClockIn != null)
+                    FilledButton.tonalIcon(
+                      onPressed: onQuickClockIn,
+                      icon: const Icon(Icons.login_outlined, size: 18),
+                      label: const Text(_attendanceDialogClockInLabel),
+                    ),
+                  if (canManageAttendance &&
+                      hasClockIn &&
+                      !hasClockOut &&
+                      onQuickClockOut != null)
+                    FilledButton.tonalIcon(
+                      onPressed: onQuickClockOut,
+                      icon: const Icon(Icons.logout_outlined, size: 18),
+                      label: const Text(_attendanceDialogClockOutLabel),
+                    ),
+                  if (canManageAttendance && onSetAttendance != null)
+                    OutlinedButton.icon(
+                      onPressed: onSetAttendance,
+                      icon: Icon(
+                        hasClockIn || hasClockOut
+                            ? Icons.edit_calendar_outlined
+                            : Icons.schedule_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        hasClockIn || hasClockOut
+                            ? _editAttendanceLabel
+                            : _setAttendanceLabel,
+                      ),
+                    ),
+                  if (canLogProgress)
+                    FilledButton.tonalIcon(
+                      onPressed: onLogProgress,
+                      icon: Icon(
+                        hasLoggedProgress
+                            ? Icons.edit_note_outlined
+                            : Icons.playlist_add_check_circle_outlined,
+                        size: 18,
+                      ),
+                      label: Text(
+                        hasLoggedProgress
+                            ? _editProgressLabel
+                            : _logProgressLabel,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stacked = constraints.maxWidth < 820;
+              final estimatedCard = _AttendanceTimingCard(
+                label: _estimatedDatesLabel,
+                value: estimatedWindow,
+                accentColor: _workspaceAmber,
+                softColor: _workspaceSoftAmber,
+                icon: Icons.event_outlined,
+              );
+              final clockInCard = _AttendanceTimingCard(
+                label: _clockedInLabel,
+                value: clockInValue,
+                accentColor: hasClockIn ? _workspaceTeal : _workspaceBlue,
+                softColor: hasClockIn ? _workspaceSoftTeal : _workspaceSoftBlue,
+                icon: Icons.login_outlined,
+              );
+              final clockOutCard = _AttendanceTimingCard(
+                label: _clockedOutLabel,
+                value: clockOutValue,
+                accentColor: hasClockOut
+                    ? _workspaceBerry
+                    : (hasClockIn ? _workspaceBlue : _workspaceNavy),
+                softColor: hasClockOut
+                    ? _workspaceSoftBerry
+                    : (hasClockIn ? _workspaceSoftBlue : _workspaceSoftSlate),
+                icon: hasClockOut
+                    ? Icons.logout_outlined
+                    : (hasClockIn
+                          ? Icons.timelapse_outlined
+                          : Icons.pending_outlined),
+              );
+              if (stacked) {
+                return Column(
+                  children: [
+                    estimatedCard,
+                    const SizedBox(height: 10),
+                    clockInCard,
+                    const SizedBox(height: 10),
+                    clockOutCard,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: estimatedCard),
+                  const SizedBox(width: 10),
+                  Expanded(child: clockInCard),
+                  const SizedBox(width: 10),
+                  Expanded(child: clockOutCard),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Color.alphaBlend(
+                actualSoft.withValues(alpha: 0.92),
+                colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: actualAccent.withValues(alpha: 0.14)),
+            ),
+            child: Text(
+              hasClockIn && hasClockOut
+                  ? _attendanceReadyForProgressHint
+                  : hasClockIn
+                  ? _attendanceShiftOpenHint
+                  : _attendanceNotStartedHint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: actualAccent,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttendanceTimingCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color accentColor;
+  final Color softColor;
+  final IconData icon;
+
+  const _AttendanceTimingCard({
+    required this.label,
+    required this.value,
+    required this.accentColor,
+    required this.softColor,
+    required this.icon,
   });
 
   @override
@@ -2330,63 +3723,59 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     final colorScheme = theme.colorScheme;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  staffLabel,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (canManageAttendance)
-                TextButton(
-                  onPressed: onSetAttendance,
-                  child: Text(
-                    hasClockIn || hasClockOut
-                        ? _editAttendanceLabel
-                        : _setAttendanceLabel,
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "$_estimatedDatesLabel: $estimatedWindow",
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "$_actualTodayLabel: $actualWindow",
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          if (hasClockIn || hasClockOut) ...[
-            const SizedBox(height: 6),
-            Text(
-              hasClockIn && hasClockOut
-                  ? _attendanceReadyForProgressHint
-                  : _attendanceShiftOpenHint,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
-              ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.surface,
+            Color.alphaBlend(
+              softColor.withValues(alpha: 0.96),
+              colorScheme.surface,
             ),
           ],
+        ),
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: accentColor.withValues(alpha: 0.20)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: accentColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: accentColor,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: _workspaceNavy,
+                    fontWeight: FontWeight.w900,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -2395,12 +3784,16 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
 
 class _TimelineLogRow extends StatelessWidget {
   final ProductionTimelineRow row;
+  final num expectedTargetAmount;
+  final String singularUnitLabel;
   final bool canReviewProgress;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
 
   const _TimelineLogRow({
     required this.row,
+    required this.expectedTargetAmount,
+    required this.singularUnitLabel,
     required this.canReviewProgress,
     required this.onApprove,
     required this.onReject,
@@ -2426,12 +3819,34 @@ class _TimelineLogRow extends StatelessWidget {
                 label: row.farmerName.isEmpty
                     ? _unassignedLabel
                     : row.farmerName,
+                icon: Icons.person_outline,
+                backgroundColor: _workspaceSoftBlue,
+                foregroundColor: _workspaceBlue,
+                borderColor: _workspaceBlue.withValues(alpha: 0.16),
               ),
-              _InfoChip(label: "$_expectedLabel: ${row.expectedPlots}"),
-              _InfoChip(label: "$_actualLabel: ${row.actualPlots}"),
+              _InfoChip(
+                label:
+                    "$_expectedLabel: ${_formatProgressAmountWithUnit(amount: expectedTargetAmount, singularUnitLabel: singularUnitLabel)}",
+                icon: Icons.event_outlined,
+                backgroundColor: _workspaceSoftAmber,
+                foregroundColor: _workspaceAmber,
+                borderColor: _workspaceAmber.withValues(alpha: 0.16),
+              ),
+              _InfoChip(
+                label:
+                    "$_actualLabel: ${_formatProgressAmountWithUnit(amount: row.actualPlots, singularUnitLabel: singularUnitLabel)}",
+                icon: Icons.insights_outlined,
+                backgroundColor: _workspaceSoftTeal,
+                foregroundColor: _workspaceTeal,
+                borderColor: _workspaceTeal.withValues(alpha: 0.16),
+              ),
               _InfoChip(
                 label:
                     "$_approvalLabel: ${_formatProgressApproval(row.approvalState)}",
+                icon: Icons.verified_user_outlined,
+                backgroundColor: _workspaceSoftBerry,
+                foregroundColor: _workspaceBerry,
+                borderColor: _workspaceBerry.withValues(alpha: 0.16),
               ),
               if (row.quantityAmount > 0 &&
                   row.quantityActivityType.trim().isNotEmpty &&
@@ -2439,6 +3854,10 @@ class _TimelineLogRow extends StatelessWidget {
                 _InfoChip(
                   label:
                       "${_formatQuantityActivityLabel(row.quantityActivityType)}: ${_formatProgressAmount(row.quantityAmount)} ${row.quantityUnit}",
+                  icon: Icons.agriculture_outlined,
+                  backgroundColor: _workspaceSoftSlate,
+                  foregroundColor: _workspaceNavy,
+                  borderColor: _workspaceNavy.withValues(alpha: 0.12),
                 ),
             ],
           ),
@@ -2533,8 +3952,81 @@ String _formatSelectedDaySubtitle({
   required DateTime day,
   required int taskCount,
   required int logCount,
+  required _WorkspaceWorkScopeSummary workScopeSummary,
 }) {
-  return "${_formatCalendarDate(day)} • $taskCount tasks • $logCount logs";
+  return "${_formatCalendarDate(day)} • $taskCount tasks • $logCount logs • ${workScopeSummary.countLabel}";
+}
+
+_WorkspaceWorkScopeSummary _resolveWorkspaceWorkScopeSummary({
+  required ProductionPlan plan,
+  ProductionPlanUnitsResponse? planUnitsResponse,
+}) {
+  final workloadContext = plan.workloadContext;
+  final explicitLabel = workloadContext?.resolvedWorkUnitLabel.trim() ?? "";
+  final inferredLabel = _resolveWorkspaceUnitStemFromPlanUnits(
+    planUnitsResponse?.units ?? const <ProductionPlanUnit>[],
+  );
+  final preferredContextLabel = _resolvePreferredProgressUnitStem(
+    fallbackWorkUnitLabel: explicitLabel,
+    contextText: "${plan.title} ${plan.notes}",
+  );
+  final baseUnitLabel = inferredLabel.isNotEmpty
+      ? preferredContextLabel.isNotEmpty
+            ? preferredContextLabel
+            : inferredLabel
+      : preferredContextLabel.isNotEmpty
+      ? preferredContextLabel
+      : explicitLabel.isNotEmpty
+      ? explicitLabel
+      : "work unit";
+  final workloadUnits = workloadContext?.totalWorkUnits ?? 0;
+  final responseUnits = planUnitsResponse?.totalUnits ?? 0;
+  final totalUnits = responseUnits > 0
+      ? responseUnits
+      : workloadUnits > 0
+      ? workloadUnits
+      : (planUnitsResponse?.units.length ?? 0);
+  return _WorkspaceWorkScopeSummary(
+    totalUnits: totalUnits < 0 ? 0 : totalUnits,
+    baseUnitLabel: baseUnitLabel,
+  );
+}
+
+String _resolveWorkspaceUnitStemFromPlanUnits(
+  List<ProductionPlanUnit> planUnits,
+) {
+  final stems =
+      planUnits
+          .map((unit) => _extractUnitStem(unit.label))
+          .where((stem) => stem.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+  if (stems.length == 1) {
+    return stems.first;
+  }
+  return "";
+}
+
+String _normalizeWorkspaceUnitLabel(String value) {
+  final normalized = value.trim();
+  return normalized.isEmpty ? "work unit" : normalized;
+}
+
+String _pluralizeWorkspaceUnitLabel(String value) {
+  final normalized = _normalizeWorkspaceUnitLabel(value);
+  if (normalized.toLowerCase().endsWith("s")) {
+    return normalized;
+  }
+  return _pluralizeUnitPhrase(normalized);
+}
+
+String _capitalizeWorkspaceLabel(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  return "${normalized[0].toUpperCase()}${normalized.substring(1)}";
 }
 
 String _formatDisplayDateRange(DateTime? start, DateTime? end) {
@@ -2780,10 +4272,38 @@ ProductionAttendanceRecord? _attendanceForStaffOnDay({
   return items.first;
 }
 
+ProductionAttendanceRecord _toProductionAttendanceRecord(
+  StaffAttendanceRecord record,
+) {
+  final computedDurationMinutes = record.clockOutAt != null
+      ? record.clockOutAt!.difference(record.clockInAt).inMinutes
+      : 0;
+  return ProductionAttendanceRecord(
+    id: record.id,
+    staffProfileId: record.staffProfileId,
+    clockInAt: record.clockInAt,
+    clockOutAt: record.clockOutAt,
+    durationMinutes: record.durationMinutes ?? computedDurationMinutes,
+    notes: record.notes ?? "",
+    createdAt: record.createdAt,
+  );
+}
+
 Map<String, BusinessStaffProfileSummary> _buildStaffMap(
   List<BusinessStaffProfileSummary> staff,
 ) {
-  return {for (final member in staff) member.id: member};
+  final map = <String, BusinessStaffProfileSummary>{};
+  for (final member in staff) {
+    final profileId = member.id.trim();
+    if (profileId.isNotEmpty) {
+      map[profileId] = member;
+    }
+    final userId = member.userId.trim();
+    if (userId.isNotEmpty) {
+      map[userId] = member;
+    }
+  }
+  return map;
 }
 
 String? _resolveSelfStaffRole({
@@ -2978,16 +4498,82 @@ List<String> _resolveAssignedStaffIds(ProductionTask task) {
   return <String>[fallback];
 }
 
-String _resolveStaffDisplayName(
+bool _workspaceTaskHasStaffGap(ProductionTask task) {
+  final assignedCount = _resolveAssignedStaffIds(task).length;
+  final requiredHeadcount = task.requiredHeadcount < 1
+      ? 1
+      : task.requiredHeadcount;
+  return assignedCount < requiredHeadcount;
+}
+
+String _resolveStaffDisplayLabel(
   String staffId,
-  Map<String, BusinessStaffProfileSummary> staffMap,
-) {
-  return staffMap[staffId]?.userName ?? staffMap[staffId]?.userEmail ?? staffId;
+  Map<String, BusinessStaffProfileSummary> staffMap, {
+  String fallbackRole = "",
+}) {
+  final identity = _resolveStaffIdentity(
+    staffId,
+    staffMap,
+    fallbackRole: fallbackRole,
+  );
+  if (identity.roleLabel.trim().isEmpty) {
+    return identity.displayName;
+  }
+  return "${identity.displayName} • ${identity.roleLabel}";
+}
+
+class _WorkspaceStaffIdentity {
+  final String displayName;
+  final String roleLabel;
+
+  const _WorkspaceStaffIdentity({
+    required this.displayName,
+    required this.roleLabel,
+  });
+}
+
+_WorkspaceStaffIdentity _resolveStaffIdentity(
+  String staffId,
+  Map<String, BusinessStaffProfileSummary> staffMap, {
+  String fallbackRole = "",
+}) {
+  final normalizedStaffId = staffId.trim();
+  final profile = staffMap[normalizedStaffId];
+  final displayName =
+      _staffListLabel(profile) ??
+      (_looksLikeOpaqueId(normalizedStaffId)
+          ? _assignedStaffFallbackLabel
+          : normalizedStaffId);
+  final resolvedRole = profile == null
+      ? (fallbackRole.trim().isEmpty
+            ? ""
+            : formatStaffRoleLabel(fallbackRole, fallback: fallbackRole))
+      : formatStaffRoleLabel(profile.staffRole, fallback: profile.staffRole);
+  if (profile == null) {
+    return _WorkspaceStaffIdentity(
+      displayName: displayName,
+      roleLabel: resolvedRole,
+    );
+  }
+  return _WorkspaceStaffIdentity(
+    displayName: displayName,
+    roleLabel: resolvedRole,
+  );
+}
+
+bool _looksLikeOpaqueId(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return RegExp(r"^[a-f0-9]{24}$", caseSensitive: false).hasMatch(normalized);
 }
 
 String _buildAssignedUnitLabel({
   required List<String> assignedUnitIds,
   required Map<String, String> planUnitLabelById,
+  String fallbackWorkUnitLabel = "",
+  String contextText = "",
 }) {
   if (assignedUnitIds.isEmpty) {
     return "-";
@@ -2998,7 +4584,18 @@ String _buildAssignedUnitLabel({
         if (normalized.isEmpty) {
           return "";
         }
-        return planUnitLabelById[normalized] ?? normalized;
+        if (!planUnitLabelById.containsKey(normalized) &&
+            RegExp(
+              r"^[a-f0-9]{24}$",
+              caseSensitive: false,
+            ).hasMatch(normalized)) {
+          return "";
+        }
+        return _normalizeProgressUnitDisplayLabel(
+          planUnitLabelById[normalized] ?? normalized,
+          fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+          contextText: contextText,
+        );
       })
       .where((label) => label.isNotEmpty)
       .toList();
@@ -3006,6 +4603,297 @@ String _buildAssignedUnitLabel({
     return "-";
   }
   return labels.join(", ");
+}
+
+List<String> _resolveAssignedUnitLabels({
+  required List<String> assignedUnitIds,
+  required Map<String, String> planUnitLabelById,
+  String fallbackWorkUnitLabel = "",
+  String contextText = "",
+}) {
+  return assignedUnitIds
+      .map((unitId) {
+        final normalized = unitId.trim();
+        if (normalized.isEmpty) {
+          return "";
+        }
+        if (!planUnitLabelById.containsKey(normalized) &&
+            RegExp(
+              r"^[a-f0-9]{24}$",
+              caseSensitive: false,
+            ).hasMatch(normalized)) {
+          return "";
+        }
+        return _normalizeProgressUnitDisplayLabel(
+          planUnitLabelById[normalized] ?? normalized,
+          fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+          contextText: contextText,
+        );
+      })
+      .where((label) => label.isNotEmpty)
+      .toList();
+}
+
+bool _looksLikeUnitIdentifierToken(String token) {
+  final normalized = token.trim().replaceAll("#", "");
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return RegExp(r"^[A-Za-z]?\d+[A-Za-z]?$").hasMatch(normalized) ||
+      RegExp(r"^[A-Za-z]$").hasMatch(normalized);
+}
+
+String _extractUnitStem(String label) {
+  final normalized = label
+      .trim()
+      .replaceAll(RegExp(r"[_-]+"), " ")
+      .replaceAll(RegExp(r"\s+"), " ");
+  if (normalized.isEmpty) {
+    return "";
+  }
+  if (RegExp(r"^[a-f0-9]{24}$", caseSensitive: false).hasMatch(normalized)) {
+    return "";
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  while (tokens.length > 1 && _looksLikeUnitIdentifierToken(tokens.last)) {
+    tokens.removeLast();
+  }
+  final stem = tokens.join(" ").trim().toLowerCase();
+  return stem.isEmpty ? normalized.toLowerCase() : stem;
+}
+
+String _pluralizeWord(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final lower = normalized.toLowerCase();
+  if (lower.endsWith("s")) {
+    return normalized;
+  }
+  if (RegExp(r"[^aeiou]y$").hasMatch(lower)) {
+    return "${normalized.substring(0, normalized.length - 1)}ies";
+  }
+  if (lower.endsWith("ch") ||
+      lower.endsWith("sh") ||
+      lower.endsWith("x") ||
+      lower.endsWith("z")) {
+    return "${normalized}es";
+  }
+  return "${normalized}s";
+}
+
+String _pluralizeUnitPhrase(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (tokens.isEmpty) {
+    return normalized;
+  }
+  final lastToken = tokens.removeLast();
+  tokens.add(_pluralizeWord(lastToken));
+  return tokens.join(" ");
+}
+
+String _resolveProgressUnitSingularLabel({
+  required List<String> assignedUnitIds,
+  required Map<String, String> planUnitLabelById,
+  required String? selectedUnitId,
+  String fallbackWorkUnitLabel = "",
+  String contextText = "",
+}) {
+  final preferredFallbackStem = _resolvePreferredProgressUnitStem(
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  final selectedUnitLabel = _normalizeProgressUnitDisplayLabel(
+    (selectedUnitId != null && selectedUnitId.trim().isNotEmpty)
+        ? (planUnitLabelById[selectedUnitId.trim()] ?? selectedUnitId.trim())
+        : "",
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  final selectedStem = _extractUnitStem(selectedUnitLabel);
+  if (selectedStem.isNotEmpty) {
+    return _isGenericProgressUnitStem(selectedStem) &&
+            preferredFallbackStem.isNotEmpty
+        ? preferredFallbackStem
+        : selectedStem;
+  }
+  final labels = _resolveAssignedUnitLabels(
+    assignedUnitIds: assignedUnitIds,
+    planUnitLabelById: planUnitLabelById,
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  final stems = labels
+      .map(_extractUnitStem)
+      .where((stem) => stem.isNotEmpty)
+      .toSet();
+  if (stems.length == 1) {
+    final onlyStem = stems.first;
+    return _isGenericProgressUnitStem(onlyStem) &&
+            preferredFallbackStem.isNotEmpty
+        ? preferredFallbackStem
+        : onlyStem;
+  }
+  if (labels.length == 1) {
+    final labelStem = _extractUnitStem(labels.first);
+    if (labelStem.isNotEmpty) {
+      return _isGenericProgressUnitStem(labelStem) &&
+              preferredFallbackStem.isNotEmpty
+          ? preferredFallbackStem
+          : labelStem;
+    }
+  }
+  if (preferredFallbackStem.isNotEmpty) {
+    return preferredFallbackStem;
+  }
+  return "work unit";
+}
+
+bool _isGenericProgressUnitStem(String value) {
+  final normalized = _extractUnitStem(value);
+  return normalized.isEmpty ||
+      normalized == "plot" ||
+      normalized == "unit" ||
+      normalized == "work unit";
+}
+
+String _resolvePreferredProgressUnitStem({
+  required String fallbackWorkUnitLabel,
+  String contextText = "",
+}) {
+  final inferredStem = _inferProgressUnitStemFromContext(
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  if (!_isGenericProgressUnitStem(inferredStem)) {
+    return inferredStem;
+  }
+  final fallbackStem = _extractUnitStem(fallbackWorkUnitLabel);
+  if (!_isGenericProgressUnitStem(fallbackStem)) {
+    return fallbackStem;
+  }
+  return "";
+}
+
+String _normalizeProgressUnitDisplayLabel(
+  String label, {
+  String fallbackWorkUnitLabel = "",
+  String contextText = "",
+}) {
+  final normalized = label
+      .trim()
+      .replaceAll(RegExp(r"[_-]+"), " ")
+      .replaceAll(RegExp(r"\s+"), " ");
+  final preferredStem = _resolvePreferredProgressUnitStem(
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  if (normalized.isEmpty || preferredStem.isEmpty) {
+    return normalized;
+  }
+  final currentStem = _extractUnitStem(normalized);
+  if (!_isGenericProgressUnitStem(currentStem)) {
+    return normalized;
+  }
+  final labelTokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  final stemTokens = currentStem
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  final suffixTokens = labelTokens.length > stemTokens.length
+      ? labelTokens.sublist(stemTokens.length)
+      : const <String>[];
+  final preferredLabel = _titleCaseProgressUnitLabel(preferredStem);
+  if (suffixTokens.isEmpty) {
+    return preferredLabel;
+  }
+  return "$preferredLabel ${suffixTokens.join(' ')}";
+}
+
+String _titleCaseProgressUnitLabel(String value) {
+  return value
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .map(
+        (token) =>
+            "${token[0].toUpperCase()}${token.length > 1 ? token.substring(1) : ''}",
+      )
+      .join(" ");
+}
+
+String _inferProgressUnitStemFromContext({
+  required String fallbackWorkUnitLabel,
+  String contextText = "",
+}) {
+  final normalizedFallback = _extractUnitStem(fallbackWorkUnitLabel);
+  final normalizedContext = contextText.trim().toLowerCase();
+  final fallbackIsGeneric =
+      normalizedFallback.isEmpty ||
+      normalizedFallback == "plot" ||
+      normalizedFallback == "work unit";
+  if (fallbackIsGeneric &&
+      (normalizedContext.contains("greenhouse") ||
+          normalizedContext.contains("green house"))) {
+    return "greenhouse";
+  }
+  if (fallbackIsGeneric &&
+      (normalizedContext.contains("man hour") ||
+          normalizedContext.contains("man-hour") ||
+          normalizedContext.contains("labour hour") ||
+          normalizedContext.contains("labor hour") ||
+          normalizedContext.contains("work hour") ||
+          normalizedContext.contains("hours"))) {
+    return "hour";
+  }
+  return "";
+}
+
+String _formatProgressAmountWithUnit({
+  required num amount,
+  required String singularUnitLabel,
+}) {
+  final normalizedUnit = singularUnitLabel.trim().isEmpty
+      ? "work unit"
+      : singularUnitLabel.trim();
+  final unitLabel = _sameProgressAmount(amount, 1)
+      ? normalizedUnit
+      : _pluralizeUnitPhrase(normalizedUnit);
+  return "${_formatProgressAmount(amount)} $unitLabel";
+}
+
+String _buildProgressWorkflowHint({required String singularUnitLabel}) {
+  final pluralUnitLabel = _pluralizeUnitPhrase(
+    singularUnitLabel.trim().isEmpty ? "work unit" : singularUnitLabel.trim(),
+  );
+  return "Select only what one assigned staff actually completed on this date. The combined total cannot go above the planned task target. Example: if 6 $pluralUnitLabel are planned and Aisha completed 2.5, pick 2.5 here.";
+}
+
+String _buildProgressActualLabel({required String singularUnitLabel}) {
+  final pluralUnitLabel = _pluralizeUnitPhrase(
+    singularUnitLabel.trim().isEmpty ? "work unit" : singularUnitLabel.trim(),
+  );
+  return "Actual $pluralUnitLabel this staff completed today";
+}
+
+String _buildProgressNotesHint({required String singularUnitLabel}) {
+  final pluralUnitLabel = _pluralizeUnitPhrase(
+    singularUnitLabel.trim().isEmpty ? "work unit" : singularUnitLabel.trim(),
+  );
+  return "Example: completed 2.7 $pluralUnitLabel and noted any follow-up issues.";
 }
 
 bool _supportsFarmQuantityTracking(ProductionPlan plan) {
@@ -3102,17 +4990,55 @@ String _suggestQuantityActivityType(ProductionTask task) {
 num _resolveTaskProgressTargetAmount({
   required ProductionTask task,
   required List<String> assignedUnitIds,
+  int fallbackTotalUnits = 0,
 }) {
-  if (task.weight > 0) {
-    return task.weight.toDouble();
+  final unitTarget = assignedUnitIds.length;
+  final fallbackUnitTarget = fallbackTotalUnits > 0 ? fallbackTotalUnits : 0;
+  final weightTarget = task.weight < 1 ? 1 : task.weight;
+  if (unitTarget > 0) {
+    return math.max(weightTarget.toDouble(), unitTarget.toDouble());
   }
-  if (assignedUnitIds.isNotEmpty) {
-    return assignedUnitIds.length.toDouble();
+  if (fallbackUnitTarget > 0) {
+    return math.max(weightTarget.toDouble(), fallbackUnitTarget.toDouble());
   }
-  if (task.requiredHeadcount > 0) {
-    return task.requiredHeadcount.toDouble();
-  }
-  return 10.0;
+  return weightTarget.toDouble();
+}
+
+_TaskUnitProgressSummary _buildTaskUnitProgressSummary({
+  required ProductionTask task,
+  required List<ProductionTimelineRow> timelineRows,
+  required Map<String, String> planUnitLabelById,
+  int fallbackTotalUnits = 0,
+  String fallbackWorkUnitLabel = "",
+  String contextText = "",
+  String? selectedUnitId,
+}) {
+  final assignedUnitIds = task.assignedUnitIds
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList();
+  final plannedAmount = _resolveTaskProgressTargetAmount(
+    task: task,
+    assignedUnitIds: assignedUnitIds,
+    fallbackTotalUnits: fallbackTotalUnits,
+  );
+  final loggedAmount = timelineRows.fold<num>(
+    0,
+    (sum, row) => sum + row.actualPlots,
+  );
+  final singularUnitLabel = _resolveProgressUnitSingularLabel(
+    assignedUnitIds: assignedUnitIds,
+    planUnitLabelById: planUnitLabelById,
+    selectedUnitId: selectedUnitId,
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText:
+        "$contextText ${task.title} ${task.instructions} ${task.taskType} $fallbackWorkUnitLabel",
+  );
+  return _TaskUnitProgressSummary(
+    singularUnitLabel: singularUnitLabel,
+    plannedAmount: plannedAmount,
+    loggedAmount: loggedAmount,
+  );
 }
 
 String _formatProgressAmount(num value) {
@@ -3202,25 +5128,49 @@ String _buildProgressCountHelperText({
   required List<String> assignedUnitIds,
   required Map<String, String> planUnitLabelById,
   required String? selectedUnitId,
+  String fallbackWorkUnitLabel = "",
+  String contextText = "",
 }) {
-  final selectedUnitLabel =
-      (selectedUnitId != null && selectedUnitId.trim().isNotEmpty)
-      ? (planUnitLabelById[selectedUnitId.trim()] ?? selectedUnitId.trim())
-      : "";
-  final targetLabel = _formatProgressAmount(targetAmount);
-  final loggedLabel = _formatProgressAmount(loggedAmount);
-  final remainingLabel = _formatProgressAmount(remainingAmount);
+  final selectedUnitLabel = _normalizeProgressUnitDisplayLabel(
+    (selectedUnitId != null && selectedUnitId.trim().isNotEmpty)
+        ? (planUnitLabelById[selectedUnitId.trim()] ?? selectedUnitId.trim())
+        : "",
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  final singularUnitLabel = _resolveProgressUnitSingularLabel(
+    assignedUnitIds: assignedUnitIds,
+    planUnitLabelById: planUnitLabelById,
+    selectedUnitId: selectedUnitId,
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: contextText,
+  );
+  final pluralUnitLabel = _pluralizeUnitPhrase(singularUnitLabel);
+  final targetLabel = _formatProgressAmountWithUnit(
+    amount: targetAmount,
+    singularUnitLabel: singularUnitLabel,
+  );
+  final loggedLabel = _formatProgressAmountWithUnit(
+    amount: loggedAmount,
+    singularUnitLabel: singularUnitLabel,
+  );
+  final remainingLabel = _formatProgressAmountWithUnit(
+    amount: remainingAmount,
+    singularUnitLabel: singularUnitLabel,
+  );
   if (selectedUnitLabel.isNotEmpty) {
-    return "Enter only what this one staff completed today. Task target: $targetLabel. Already logged across the task: $loggedLabel. Still available to record: $remainingLabel. Unit: $selectedUnitLabel.";
+    return "Pick only what this one staff completed today. Planned target: $targetLabel. Already logged: $loggedLabel. Remaining now: $remainingLabel. Selected $singularUnitLabel: $selectedUnitLabel.";
   }
   if (assignedUnitIds.isNotEmpty) {
     final assignedUnitsLabel = _buildAssignedUnitLabel(
       assignedUnitIds: assignedUnitIds,
       planUnitLabelById: planUnitLabelById,
+      fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+      contextText: contextText,
     );
-    return "Enter only what this one staff completed today. Task target: $targetLabel. Already logged across the task: $loggedLabel. Still available to record: $remainingLabel. Assigned plots/units: $assignedUnitsLabel.";
+    return "Pick only what this one staff completed today. Planned target: $targetLabel. Already logged: $loggedLabel. Remaining now: $remainingLabel. Assigned $pluralUnitLabel: $assignedUnitsLabel.";
   }
-  return "Enter only what this one staff completed today. Task target: $targetLabel. Already logged across the task: $loggedLabel. Still available to record: $remainingLabel.";
+  return "Pick only what this one staff completed today. Planned target: $targetLabel. Already logged: $loggedLabel. Remaining now: $remainingLabel.";
 }
 
 String _normalizeRole(String value) {
@@ -3244,7 +5194,10 @@ List<BusinessStaffProfileSummary> _staffCandidatesForTask({
   return activeStaff;
 }
 
-String _staffListLabel(BusinessStaffProfileSummary staff) {
+String? _staffListLabel(BusinessStaffProfileSummary? staff) {
+  if (staff == null) {
+    return null;
+  }
   final name = staff.userName?.trim() ?? "";
   if (name.isNotEmpty) {
     return name;
@@ -3252,6 +5205,10 @@ String _staffListLabel(BusinessStaffProfileSummary staff) {
   final email = staff.userEmail?.trim() ?? "";
   if (email.isNotEmpty) {
     return email;
+  }
+  final phone = staff.userPhone?.trim() ?? "";
+  if (phone.isNotEmpty) {
+    return phone;
   }
   return staff.id;
 }
@@ -3279,27 +5236,46 @@ String _formatTaskWindow({
   return formatDateLabel(single);
 }
 
-String _formatAttendanceWindow(ProductionAttendanceRecord? attendance) {
-  if (attendance == null || attendance.clockInAt == null) {
-    return _attendanceUnsetLabel;
-  }
-  final clockInAt = attendance.clockInAt!.toLocal();
-  final clockOutAt = attendance.clockOutAt?.toLocal();
-  final clockInLabel = _clockLabel(clockInAt);
-  final clockOutLabel = clockOutAt == null
-      ? _attendanceOpenLabel
-      : _clockLabel(clockOutAt);
-  return "In $clockInLabel • Out $clockOutLabel";
-}
-
 String _clockLabel(DateTime value) {
   final hour = value.hour.toString().padLeft(2, "0");
   final minute = value.minute.toString().padLeft(2, "0");
   return "$hour:$minute";
 }
 
+String _formatAttendanceTimeValue(
+  DateTime? value, {
+  required String emptyLabel,
+}) {
+  if (value == null) {
+    return emptyLabel;
+  }
+  return _clockLabel(value);
+}
+
 DateTime _mergeDateAndTime(DateTime day, TimeOfDay time) {
   return DateTime(day.year, day.month, day.day, time.hour, time.minute);
+}
+
+DateTime _resolveQuickAttendanceTime(DateTime workDate) {
+  final now = DateTime.now();
+  return DateTime(
+    workDate.year,
+    workDate.month,
+    workDate.day,
+    now.hour,
+    now.minute,
+  );
+}
+
+DateTime _resolveQuickClockOutTime({
+  required DateTime workDate,
+  required DateTime clockInAt,
+}) {
+  final quickCandidate = _resolveQuickAttendanceTime(workDate);
+  if (quickCandidate.isAfter(clockInAt)) {
+    return quickCandidate;
+  }
+  return clockInAt.add(const Duration(minutes: 1));
 }
 
 String _formatProgressApproval(String approvalState) {
@@ -3361,7 +5337,7 @@ Future<List<String>?> _showTaskAssignmentDialog(
                             }
                           });
                         },
-                        title: Text(_staffListLabel(staff)),
+                        title: Text(_staffListLabel(staff) ?? staff.id),
                         subtitle: Text(
                           "${formatStaffRoleLabel(staff.staffRole, fallback: staff.staffRole)} • ${staffMap[staff.id]?.status ?? staff.status}",
                         ),
@@ -3396,10 +5372,29 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   required ProductionTask task,
   required ProductionPlan plan,
   required List<ProductionTimelineRow> timelineRows,
+  required List<ProductionAttendanceRecord> attendanceRecords,
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
+  required int fallbackTotalUnits,
+  required String fallbackWorkUnitLabel,
   String? actorStaffId,
   required bool canPickAnyAssignedStaff,
+  required bool canManageAttendance,
+  Future<ProductionAttendanceRecord?> Function(
+    String staffProfileId,
+    ProductionAttendanceRecord? existingAttendance,
+  )?
+  onSetAttendanceForStaff,
+  Future<ProductionAttendanceRecord?> Function(
+    String staffProfileId,
+    ProductionAttendanceRecord? existingAttendance,
+  )?
+  onQuickClockInForStaff,
+  Future<ProductionAttendanceRecord?> Function(
+    String staffProfileId,
+    ProductionAttendanceRecord? existingAttendance,
+  )?
+  onQuickClockOutForStaff,
 }) async {
   final assignedStaffIds = _resolveAssignedStaffIds(task);
   if (assignedStaffIds.isEmpty) {
@@ -3425,7 +5420,15 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   final taskTargetAmount = _resolveTaskProgressTargetAmount(
     task: task,
     assignedUnitIds: assignedUnitIds,
+    fallbackTotalUnits: fallbackTotalUnits,
   );
+  final progressContextText = [
+    plan.title,
+    plan.notes,
+    task.title,
+    task.instructions,
+    fallbackWorkUnitLabel,
+  ].join(" ");
   final farmQuantitySummary = _summarizeFarmQuantities(
     plan: plan,
     timelineRows: timelineRows,
@@ -3440,6 +5443,20 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   final notesController = TextEditingController();
   var selectedDelayReason = _delayReasonNone;
   var validationError = "";
+  final attendanceOverridesByStaffId = <String, ProductionAttendanceRecord>{};
+
+  ProductionAttendanceRecord? resolveDialogAttendance(String? staffProfileId) {
+    final normalizedStaffId = staffProfileId?.trim() ?? "";
+    if (normalizedStaffId.isEmpty) {
+      return null;
+    }
+    return attendanceOverridesByStaffId[normalizedStaffId] ??
+        _attendanceForStaffOnDay(
+          attendanceRecords: attendanceRecords,
+          staffProfileId: normalizedStaffId,
+          day: workDate,
+        );
+  }
 
   String resolveQuantityUnit(String activityType) {
     switch (activityType) {
@@ -3520,6 +5537,10 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   }
 
   syncFromExistingSelection();
+  final rowsForTaskOnWorkDate = _rowsForDay(
+    timelineRows,
+    workDate,
+  ).where((row) => row.taskId.trim() == task.id.trim()).toList();
 
   final result = await showDialog<_WorkspaceLogProgressInput>(
     context: context,
@@ -3538,13 +5559,16 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           );
           final existingSelectionAmount =
               existingSelectionRow?.actualPlots ?? 0;
-          final remainingAvailable =
-              taskTargetAmount - (loggedTotal - existingSelectionAmount);
-          final cappedRemaining = remainingAvailable < 0
+          final loggedAmountExcludingSelection =
+              loggedTotal - existingSelectionAmount;
+          final remainingAgainstPlan =
+              taskTargetAmount - loggedAmountExcludingSelection;
+          final cappedRemainingAgainstPlan = remainingAgainstPlan < 0
               ? 0
-              : remainingAvailable;
+              : remainingAgainstPlan;
+          final strictActualMax = cappedRemainingAgainstPlan.toDouble();
           final progressOptions = _buildProgressAmountOptions(
-            maxAmount: cappedRemaining,
+            maxAmount: strictActualMax,
           );
           if (progressOptions.isNotEmpty &&
               !progressOptions.any(
@@ -3554,20 +5578,92 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           }
           final actualHelperText = _buildProgressCountHelperText(
             targetAmount: taskTargetAmount,
-            loggedAmount: loggedTotal,
-            remainingAmount: cappedRemaining,
+            loggedAmount: loggedAmountExcludingSelection,
+            remainingAmount: cappedRemainingAgainstPlan,
             assignedUnitIds: assignedUnitIds,
             planUnitLabelById: planUnitLabelById,
             selectedUnitId: selectedUnitId,
+            fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+            contextText: progressContextText,
           );
+          final progressUnitSingularLabel = _resolveProgressUnitSingularLabel(
+            assignedUnitIds: assignedUnitIds,
+            planUnitLabelById: planUnitLabelById,
+            selectedUnitId: selectedUnitId,
+            fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+            contextText: progressContextText,
+          );
+          final dailyTaskProgressSummary = _buildTaskUnitProgressSummary(
+            task: task,
+            timelineRows: rowsForTaskOnWorkDate,
+            planUnitLabelById: planUnitLabelById,
+            fallbackTotalUnits: fallbackTotalUnits,
+            fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+            contextText: progressContextText,
+            selectedUnitId: selectedUnitId,
+          );
+          final progressWorkflowHint = _buildProgressWorkflowHint(
+            singularUnitLabel: progressUnitSingularLabel,
+          );
+          final progressActualLabel = _buildProgressActualLabel(
+            singularUnitLabel: progressUnitSingularLabel,
+          );
+          final editableAllowanceLabel = _formatProgressAmountWithUnit(
+            amount: strictActualMax,
+            singularUnitLabel: progressUnitSingularLabel,
+          );
+          final totalLoggedAfterSave =
+              loggedAmountExcludingSelection + selectedActualAmount;
           final remainingAfterSave =
-              (cappedRemaining - selectedActualAmount) < 0
+              (taskTargetAmount - totalLoggedAfterSave) < 0
               ? 0
-              : (cappedRemaining - selectedActualAmount);
+              : (taskTargetAmount - totalLoggedAfterSave);
+          final selectedAttendance = resolveDialogAttendance(selectedStaffId);
+          final selectedClockInAt = selectedAttendance?.clockInAt?.toLocal();
+          final selectedClockOutAt = selectedAttendance?.clockOutAt?.toLocal();
+          final selectedClockInValue = _formatAttendanceTimeValue(
+            selectedClockInAt,
+            emptyLabel: _attendanceClockInUnsetLabel,
+          );
+          final selectedClockOutValue = selectedClockOutAt != null
+              ? _clockLabel(selectedClockOutAt)
+              : (selectedClockInAt != null
+                    ? _attendanceClockOutPendingLabel
+                    : _attendanceClockOutUnsetLabel);
+          final hasSelectedClockIn = selectedAttendance?.clockInAt != null;
+          final hasSelectedClockOut = selectedAttendance?.clockOutAt != null;
           final selectedStaffLabel =
               (selectedStaffId != null && selectedStaffId!.trim().isNotEmpty)
-              ? _resolveStaffDisplayName(selectedStaffId!, staffMap)
+              ? _resolveStaffDisplayLabel(
+                  selectedStaffId!,
+                  staffMap,
+                  fallbackRole: task.roleRequired,
+                )
               : _unassignedLabel;
+
+          Future<void> applyAttendanceAction(
+            Future<ProductionAttendanceRecord?> Function(
+              String staffProfileId,
+              ProductionAttendanceRecord? existingAttendance,
+            )
+            action,
+          ) async {
+            final currentStaffId = selectedStaffId?.trim() ?? "";
+            if (currentStaffId.isEmpty) {
+              return;
+            }
+            final updatedAttendance = await action(
+              currentStaffId,
+              resolveDialogAttendance(currentStaffId),
+            );
+            if (!dialogContext.mounted || updatedAttendance == null) {
+              return;
+            }
+            setDialogState(() {
+              attendanceOverridesByStaffId[currentStaffId] = updatedAttendance;
+            });
+          }
+
           final existingSelectionQuantityAmount =
               existingSelectionRow?.quantityActivityType.trim() ==
                   selectedQuantityActivityType
@@ -3585,7 +5681,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final cappedQuantityRemaining = quantityRemaining < 0
               ? 0
               : quantityRemaining;
-          final quantityUnit = resolveQuantityUnit(
+          final selectedQuantityUnitLabel = resolveQuantityUnit(
             selectedQuantityActivityType,
           );
           final quantityOptions =
@@ -3623,7 +5719,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        _logDialogWorkflowHint,
+                        progressWorkflowHint,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -3643,7 +5739,11 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             (staffId) => DropdownMenuItem<String?>(
                               value: staffId,
                               child: Text(
-                                _resolveStaffDisplayName(staffId, staffMap),
+                                _resolveStaffDisplayLabel(
+                                  staffId,
+                                  staffMap,
+                                  fallbackRole: task.roleRequired,
+                                ),
                               ),
                             ),
                           ),
@@ -3672,11 +5772,165 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                               ),
                         ),
                       ),
+                    if (assignedStaffIds.isNotEmpty)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Theme.of(context).colorScheme.surface,
+                              Color.alphaBlend(
+                                _workspaceSoftSlate.withValues(alpha: 0.94),
+                                Theme.of(context).colorScheme.surface,
+                              ),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: _workspaceNavy.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              selectedStaffId != null &&
+                                      selectedStaffId!.trim().isNotEmpty
+                                  ? "Attendance for $selectedStaffLabel"
+                                  : "Attendance",
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: _workspaceNavy,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 10),
+                            if (selectedStaffId == null ||
+                                selectedStaffId!.trim().isEmpty)
+                              Text(
+                                "Select a staff member to view or update clock-in and clock-out time.",
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
+                              )
+                            else ...[
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  _InfoChip(
+                                    label:
+                                        "$_clockedInLabel: $selectedClockInValue",
+                                    icon: Icons.login_outlined,
+                                    backgroundColor: hasSelectedClockIn
+                                        ? _workspaceSoftTeal
+                                        : _workspaceSoftBlue,
+                                    foregroundColor: hasSelectedClockIn
+                                        ? _workspaceTeal
+                                        : _workspaceBlue,
+                                    borderColor:
+                                        (hasSelectedClockIn
+                                                ? _workspaceTeal
+                                                : _workspaceBlue)
+                                            .withValues(alpha: 0.18),
+                                  ),
+                                  _InfoChip(
+                                    label:
+                                        "$_clockedOutLabel: $selectedClockOutValue",
+                                    icon: Icons.logout_outlined,
+                                    backgroundColor: hasSelectedClockOut
+                                        ? _workspaceSoftTeal
+                                        : _workspaceSoftSlate,
+                                    foregroundColor: hasSelectedClockOut
+                                        ? _workspaceTeal
+                                        : _workspaceNavy,
+                                    borderColor:
+                                        (hasSelectedClockOut
+                                                ? _workspaceTeal
+                                                : _workspaceNavy)
+                                            .withValues(alpha: 0.14),
+                                  ),
+                                ],
+                              ),
+                              if (canManageAttendance &&
+                                  (onQuickClockInForStaff != null ||
+                                      onQuickClockOutForStaff != null ||
+                                      onSetAttendanceForStaff != null)) ...[
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    if (!hasSelectedClockIn &&
+                                        !hasSelectedClockOut &&
+                                        onQuickClockInForStaff != null)
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => applyAttendanceAction(
+                                          onQuickClockInForStaff,
+                                        ),
+                                        icon: const Icon(
+                                          Icons.login_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          _attendanceDialogClockInLabel,
+                                        ),
+                                      ),
+                                    if (hasSelectedClockIn &&
+                                        !hasSelectedClockOut &&
+                                        onQuickClockOutForStaff != null)
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => applyAttendanceAction(
+                                          onQuickClockOutForStaff,
+                                        ),
+                                        icon: const Icon(
+                                          Icons.logout_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          _attendanceDialogClockOutLabel,
+                                        ),
+                                      ),
+                                    if (onSetAttendanceForStaff != null)
+                                      OutlinedButton.icon(
+                                        onPressed: () => applyAttendanceAction(
+                                          onSetAttendanceForStaff,
+                                        ),
+                                        icon: Icon(
+                                          hasSelectedClockIn ||
+                                                  hasSelectedClockOut
+                                              ? Icons.edit_calendar_outlined
+                                              : Icons.schedule_outlined,
+                                          size: 18,
+                                        ),
+                                        label: Text(
+                                          hasSelectedClockIn ||
+                                                  hasSelectedClockOut
+                                              ? _editAttendanceLabel
+                                              : _setAttendanceLabel,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ],
+                        ),
+                      ),
                     if (assignedUnitIds.isNotEmpty)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedUnitId,
-                        decoration: const InputDecoration(
-                          labelText: _logDialogUnitLabel,
+                        decoration: InputDecoration(
+                          labelText:
+                              "Assigned ${progressUnitSingularLabel.trim().isEmpty ? 'work unit' : progressUnitSingularLabel}",
                         ),
                         items: [
                           const DropdownMenuItem<String?>(
@@ -3686,7 +5940,13 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           ...assignedUnitIds.map(
                             (unitId) => DropdownMenuItem<String?>(
                               value: unitId,
-                              child: Text(planUnitLabelById[unitId] ?? unitId),
+                              child: Text(
+                                _normalizeProgressUnitDisplayLabel(
+                                  planUnitLabelById[unitId] ?? unitId,
+                                  fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+                                  contextText: progressContextText,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -3700,33 +5960,200 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         },
                       ),
                     if (assignedUnitIds.isNotEmpty) const SizedBox(height: 12),
-                    DropdownButtonFormField<num>(
-                      initialValue: selectedActualAmount,
-                      decoration: InputDecoration(
-                        labelText: _logDialogActualLabel,
-                        helperText: actualHelperText,
-                        helperMaxLines: 3,
-                      ),
-                      items: progressOptions
-                          .map(
-                            (amount) => DropdownMenuItem<num>(
-                              value: amount,
-                              child: Text(_formatProgressAmount(amount)),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Theme.of(context).colorScheme.surface,
+                            Color.alphaBlend(
+                              _workspaceSoftBlue.withValues(alpha: 0.92),
+                              Theme.of(context).colorScheme.surface,
                             ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setDialogState(() {
-                          selectedActualAmount = value;
-                        });
-                      },
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: _workspaceBlue.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            progressActualLabel,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  color: _workspaceBlue,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _InfoChip(
+                                label:
+                                    "$_workingOnLabel: ${dailyTaskProgressSummary.workingOnLabel}",
+                                icon: Icons.track_changes_outlined,
+                                backgroundColor: _workspaceSoftAmber,
+                                foregroundColor: _workspaceAmber,
+                                borderColor: _workspaceAmber.withValues(
+                                  alpha: 0.16,
+                                ),
+                              ),
+                              _InfoChip(
+                                label:
+                                    "$_doneTodayLabel: ${dailyTaskProgressSummary.doneTodayLabel}",
+                                icon: Icons.insights_outlined,
+                                backgroundColor: _workspaceSoftTeal,
+                                foregroundColor: _workspaceTeal,
+                                borderColor: _workspaceTeal.withValues(
+                                  alpha: 0.16,
+                                ),
+                              ),
+                              _InfoChip(
+                                label:
+                                    "$_leftTodayLabel: ${dailyTaskProgressSummary.leftTodayLabel}",
+                                icon: Icons.rule_folder_outlined,
+                                backgroundColor: _workspaceSoftBlue,
+                                foregroundColor: _workspaceBlue,
+                                borderColor: _workspaceBlue.withValues(
+                                  alpha: 0.16,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            "Quick pick",
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: _workspaceNavy,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            existingSelectionAmount > 0
+                                ? "Allowed now: $editableAllowanceLabel. This staff/unit already has ${_formatProgressAmountWithUnit(amount: existingSelectionAmount, singularUnitLabel: progressUnitSingularLabel)} saved, so the picker frees that amount while you edit."
+                                : "Allowed now: $editableAllowanceLabel.",
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.35,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: progressOptions.map((amount) {
+                              final selected = _sameProgressAmount(
+                                amount,
+                                selectedActualAmount,
+                              );
+                              return ChoiceChip(
+                                label: Text(_formatProgressAmount(amount)),
+                                selected: selected,
+                                showCheckmark: false,
+                                labelStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      color: selected
+                                          ? Colors.white
+                                          : _workspaceNavy,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                selectedColor: _workspaceBlue,
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.surface,
+                                side: BorderSide(
+                                  color: selected
+                                      ? _workspaceBlue
+                                      : _workspaceBlue.withValues(alpha: 0.18),
+                                ),
+                                onSelected: (_) {
+                                  setDialogState(() {
+                                    selectedActualAmount = amount;
+                                    validationError = "";
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selectedActualAmount > 0
+                                  ? _workspaceSoftTeal
+                                  : _workspaceSoftSlate,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color:
+                                    (selectedActualAmount > 0
+                                            ? _workspaceTeal
+                                            : _workspaceBlue)
+                                        .withValues(alpha: 0.14),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  selectedActualAmount > 0
+                                      ? Icons.task_alt_outlined
+                                      : Icons.pending_actions_outlined,
+                                  size: 18,
+                                  color: selectedActualAmount > 0
+                                      ? _workspaceTeal
+                                      : _workspaceBlue,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    selectedActualAmount > 0
+                                        ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmount, singularUnitLabel: progressUnitSingularLabel)} for this staff."
+                                        : "Select the completed amount from the allowed values below.",
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: _workspaceNavy,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            actualHelperText,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.4,
+                                ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "Save preview: ${_formatProgressAmount(selectedActualAmount)} completed by $selectedStaffLabel today • ${_formatProgressAmount(remainingAfterSave)} still available after save.",
+                      "Save preview: ${_formatProgressAmountWithUnit(amount: selectedActualAmount, singularUnitLabel: progressUnitSingularLabel)} completed by $selectedStaffLabel today. Task total after save: ${_formatProgressAmountWithUnit(amount: totalLoggedAfterSave, singularUnitLabel: progressUnitSingularLabel)} against a planned target of ${_formatProgressAmountWithUnit(amount: taskTargetAmount, singularUnitLabel: progressUnitSingularLabel)}. Remaining against plan after save: ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)}.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -3770,7 +6197,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           decoration: InputDecoration(
                             labelText: _logDialogQuantityAmountLabel,
                             helperText:
-                                "Target ${_formatProgressAmount(quantityTarget)} $quantityUnit • logged ${_formatProgressAmount(quantityLogged)} $quantityUnit • remaining ${_formatProgressAmount(cappedQuantityRemaining)} $quantityUnit",
+                                "Target ${_formatProgressAmount(quantityTarget)} $selectedQuantityUnitLabel • logged ${_formatProgressAmount(quantityLogged)} $selectedQuantityUnitLabel • remaining ${_formatProgressAmount(cappedQuantityRemaining)} $selectedQuantityUnitLabel",
                             helperMaxLines: 2,
                           ),
                           items: quantityOptions
@@ -3778,7 +6205,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                 (amount) => DropdownMenuItem<num>(
                                   value: amount,
                                   child: Text(
-                                    "${_formatProgressAmount(amount)} $quantityUnit",
+                                    "${_formatProgressAmount(amount)} $selectedQuantityUnitLabel",
                                   ),
                                 ),
                               )
@@ -3794,7 +6221,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          "${_formatQuantityActivityLabel(selectedQuantityActivityType)} preview: ${_formatProgressAmount(selectedQuantityAmount)} $quantityUnit today • ${_formatProgressAmount(quantityRemainingAfterSave)} $quantityUnit left after save.",
+                          "${_formatQuantityActivityLabel(selectedQuantityActivityType)} preview: ${_formatProgressAmount(selectedQuantityAmount)} $selectedQuantityUnitLabel today • ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel left after save.",
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: Theme.of(
@@ -3833,9 +6260,11 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                     TextField(
                       controller: notesController,
                       maxLines: 3,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: _logDialogNotesLabel,
-                        hintText: _logDialogNotesHint,
+                        hintText: _buildProgressNotesHint(
+                          singularUnitLabel: progressUnitSingularLabel,
+                        ),
                       ),
                     ),
                     if (validationError.isNotEmpty) ...[
@@ -3858,6 +6287,16 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               ),
               FilledButton(
                 onPressed: () {
+                  final isValidActualSelection = progressOptions.any(
+                    (amount) =>
+                        _sameProgressAmount(amount, selectedActualAmount),
+                  );
+                  if (!isValidActualSelection) {
+                    setDialogState(() {
+                      validationError = _logDialogActualInvalid;
+                    });
+                    return;
+                  }
                   if (selectedActualAmount == 0 &&
                       selectedQuantityAmount == 0 &&
                       selectedDelayReason == _delayReasonNone) {

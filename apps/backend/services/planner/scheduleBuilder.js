@@ -840,6 +840,7 @@ function buildWorkloadRows({
       roleRequired: task.roleRequired,
       requiredHeadcount: availableWorkers,
       weight: 1,
+      unitCoverage: rowUnits,
       instructions: [
         `${task.taskName} for ${rowUnits} ${workUnitLabel}.`,
         `Planner V2 workload expansion from ${task.workloadUnits} total ${workUnitLabel}.`,

@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/features/home/presentation/production/production_calendar_visuals.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
@@ -57,7 +58,7 @@ const String _statusFallback = "pending";
 const String _daySheetEmptyCopy = "No tasks scheduled for this day";
 const String _daySheetAssignButton = "Select staff";
 const String _daySheetAddTaskButton = "Add task";
-const String _slotDropHint = "Drag a task to any time slot to reschedule.";
+const String _slotDropHint = "Drag to move";
 
 const double _calendarSurfaceRadius = 12;
 const double _calendarToolbarControlRadius = 999;
@@ -175,6 +176,19 @@ class _ProductionDraftCalendarPreviewState
       startInclusive: monthStart,
       endExclusive: monthEnd,
     );
+    final theme = Theme.of(context);
+    final completedCount = resolvedTasks
+        .where((task) => _isDraftTaskDone(task.status))
+        .length;
+    final shortageCount = resolvedTasks
+        .where((task) => task.hasShortage)
+        .length;
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: resolvedTasks.length,
+      completedCount: completedCount,
+      warning: shortageCount > 0,
+    );
 
     AppDebug.log(
       _logTag,
@@ -191,34 +205,99 @@ class _ProductionDraftCalendarPreviewState
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        color: Theme.of(context).colorScheme.surface,
+      padding: const EdgeInsets.all(8),
+      decoration: ProductionCalendarVisuals.shellDecoration(
+        theme: theme,
+        palette: palette,
+        radius: 20,
+        emphasized: true,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            _title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: palette.badgeBackground,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.auto_awesome_motion_rounded,
+                  color: palette.badgeForeground,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ProductionCalendarMetricPill(
+                          icon: Icons.checklist_rounded,
+                          value: "${resolvedTasks.length}",
+                          accent: palette.accent,
+                          compact: true,
+                          tooltip: "Draft tasks",
+                        ),
+                        ProductionCalendarMetricPill(
+                          icon: Icons.done_all_rounded,
+                          value: "$completedCount",
+                          accent: completedCount > 0
+                              ? ProductionCalendarVisuals.palette(
+                                  theme: theme,
+                                  taskCount: completedCount,
+                                  completedCount: completedCount,
+                                ).accent
+                              : palette.accent,
+                          compact: true,
+                          tooltip: "Completed",
+                        ),
+                        if (shortageCount > 0)
+                          ProductionCalendarMetricPill(
+                            icon: Icons.warning_amber_rounded,
+                            value: "$shortageCount",
+                            accent: ProductionCalendarVisuals.palette(
+                              theme: theme,
+                              taskCount: shortageCount,
+                              warning: true,
+                            ).accent,
+                            compact: true,
+                            tooltip: "Staffing gaps",
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _TopCommandBar(
             mode: _mode,
             onModeChanged: _onModeChanged,
             onAssistantTap: () => _openAssistantPopup(resolvedTasks),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _InfoLabels(schedulePolicy: widget.schedulePolicy),
           if (excludedCount > 0) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _WarningBanner(message: _excludedCopy),
           ],
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           SizedBox(
             height: 540,
             child: AnimatedSwitcher(
@@ -1150,8 +1229,16 @@ class _RoundIconButton extends StatelessWidget {
           width: 36,
           height: 36,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Color.alphaBlend(
+              Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+              Theme.of(context).colorScheme.surface,
+            ),
             borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.18),
+            ),
           ),
           child: Icon(icon, size: 18),
         ),
@@ -1177,11 +1264,13 @@ class _InfoLabels extends StatelessWidget {
       children: [
         _InfoPill(
           icon: Icons.public_outlined,
-          text: "$_timezoneLabelPrefix $timezone",
+          text: timezone,
+          tooltip: _timezoneLabelPrefix,
         ),
         _InfoPill(
           icon: Icons.schedule_outlined,
-          text: "$_blocksLabelPrefix $blocksLabel",
+          text: blocksLabel,
+          tooltip: _blocksLabelPrefix,
         ),
       ],
     );
@@ -1191,31 +1280,45 @@ class _InfoLabels extends StatelessWidget {
 class _InfoPill extends StatelessWidget {
   final IconData icon;
   final String text;
+  final String tooltip;
 
-  const _InfoPill({required this.icon, required this.text});
+  const _InfoPill({
+    required this.icon,
+    required this.text,
+    required this.tooltip,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(_calendarSurfaceRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: colorScheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Text(
-            text,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            colorScheme.primary.withValues(alpha: 0.08),
+            colorScheme.surfaceContainerLow,
           ),
-        ],
+          borderRadius: BorderRadius.circular(_calendarSurfaceRadius),
+          border: Border.all(
+            color: colorScheme.primary.withValues(alpha: 0.12),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: colorScheme.primary),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1237,13 +1340,22 @@ class _WarningBanner extends StatelessWidget {
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: colors.background,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.foreground.withValues(alpha: 0.12)),
       ),
-      child: Text(
-        message,
-        style: Theme.of(
-          context,
-        ).textTheme.bodySmall?.copyWith(color: colors.foreground),
+      child: Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 16, color: colors.foreground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.foreground),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1346,12 +1458,20 @@ class _ModeToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final palette = ProductionCalendarVisuals.palette(
+      theme: Theme.of(context),
+      taskCount: 2,
+      today: true,
+    );
     final controls = Container(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+        color: Color.alphaBlend(
+          palette.accent.withValues(alpha: 0.08),
+          colorScheme.surfaceContainerLow,
+        ),
         borderRadius: BorderRadius.circular(_calendarToolbarControlRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: palette.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1386,11 +1506,30 @@ class _ModeToolbar extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: palette.badgeBackground,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.event_rounded,
+                      size: 18,
+                      color: palette.badgeForeground,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 6),
               Align(alignment: Alignment.centerRight, child: controls),
@@ -1401,11 +1540,30 @@ class _ModeToolbar extends StatelessWidget {
         return Row(
           children: [
             Expanded(
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: palette.badgeBackground,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.event_rounded,
+                      size: 18,
+                      color: palette.badgeForeground,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
               ),
             ),
             controls,
@@ -1421,18 +1579,33 @@ class _WeekdayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Row(
       children: _weekdays
           .map(
             (day) => Expanded(
-              child: Text(
-                day,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: Color.alphaBlend(
+                    colorScheme.primary.withValues(alpha: 0.08),
+                    colorScheme.surfaceContainerHighest,
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: colorScheme.primary.withValues(alpha: 0.12),
+                  ),
+                ),
+                child: Text(
+                  day,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
                 ),
               ),
             ),
@@ -1459,7 +1632,12 @@ class _MonthDayCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final isToday = _isSameDay(day, DateTime.now());
+    final doneCount = tasks
+        .where((task) => _isDraftTaskDone(task.status))
+        .length;
+    final hasShortage = tasks.any((task) => task.hasShortage);
 
     return DragTarget<_ResolvedDraftTask>(
       onWillAcceptWithDetails: (details) => true,
@@ -1469,65 +1647,77 @@ class _MonthDayCell extends StatelessWidget {
       builder: (context, candidateData, rejectedData) {
         final hasTasks = tasks.isNotEmpty;
         final isDropActive = candidateData.isNotEmpty;
-        final baseBackground = isSelected
-            ? colorScheme.surfaceContainerLow
-            : colorScheme.surface;
-        final borderColor = isDropActive
-            ? colorScheme.primary
-            : isSelected
-            ? colorScheme.primary
-            : colorScheme.outlineVariant;
+        final palette = ProductionCalendarVisuals.palette(
+          theme: theme,
+          taskCount: tasks.length,
+          completedCount: doneCount,
+          warning: hasShortage,
+          selected: isSelected || isDropActive,
+          today: isToday,
+        );
         return InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
           child: LayoutBuilder(
             builder: (context, constraints) {
+              final compactSummary =
+                  constraints.maxHeight < 128 || constraints.maxWidth < 120;
               return Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_calendarDayCellRadius),
-                  color: isDropActive
-                      ? colorScheme.primaryContainer
-                      : baseBackground,
-                  border: Border.all(
-                    color: borderColor,
-                    width: isSelected || isDropActive ? 1.8 : 1,
-                  ),
+                padding: EdgeInsets.all(compactSummary ? 3.5 : 4.5),
+                decoration: ProductionCalendarVisuals.tileDecoration(
+                  theme: theme,
+                  palette: palette,
+                  radius: _calendarDayCellRadius,
+                  emphasized: isSelected || isDropActive || isToday,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SizedBox(
                       width: double.infinity,
-                      height: _monthCellHeaderHeight,
+                      height: compactSummary ? 16 : _monthCellHeaderHeight,
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 4),
-                              child: Text(
-                                day.day.toString(),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelMedium
+                          Text(
+                            day.day.toString(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                (compactSummary
+                                        ? theme.textTheme.labelLarge
+                                        : theme.textTheme.titleSmall)
                                     ?.copyWith(
-                                      color: isSelected || isDropActive
-                                          ? colorScheme.primary
-                                          : colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w600,
+                                      color: theme.colorScheme.onSurface,
+                                      fontWeight: FontWeight.w800,
                                     ),
-                              ),
-                            ),
                           ),
+                          const Spacer(),
+                          if (isToday)
+                            Icon(
+                              Icons.auto_awesome_rounded,
+                              size: compactSummary ? 12 : 14,
+                              color: palette.accent,
+                            ),
                         ],
                       ),
                     ),
                     if (hasTasks) ...[
+                      SizedBox(height: compactSummary ? 4 : 6),
+                      _DayTaskSummaryIndicator(
+                        tasks: tasks,
+                        compact: compactSummary,
+                      ),
                       const Spacer(),
-                      Align(
-                        alignment: Alignment.bottomLeft,
-                        child: _DayTaskSummaryIndicator(tasks: tasks),
+                    ] else ...[
+                      const Spacer(),
+                      Icon(
+                        Icons.wb_sunny_outlined,
+                        size: 16,
+                        color: ProductionCalendarVisuals.mutedText(
+                          theme,
+                          accent: palette.accent,
+                        ),
                       ),
                     ],
                   ],
@@ -1543,45 +1733,62 @@ class _MonthDayCell extends StatelessWidget {
 
 class _DayTaskSummaryIndicator extends StatelessWidget {
   final List<_ResolvedDraftTask> tasks;
+  final bool compact;
 
-  const _DayTaskSummaryIndicator({required this.tasks});
+  const _DayTaskSummaryIndicator({required this.tasks, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final doneCount = tasks
+        .where((task) => _isDraftTaskDone(task.status))
+        .length;
     final hasShortage = tasks.any((task) => task.hasShortage);
     final accent = hasShortage
         ? theme.colorScheme.tertiary
+        : doneCount >= tasks.length && tasks.isNotEmpty
+        ? theme.colorScheme.secondary
         : theme.colorScheme.primary;
-    final density = tasks.length.clamp(1, 6);
-    final width = 10.0 + ((density - 1) * 3.0);
-    final fillWidthFactor = (tasks.length / 4).clamp(0.35, 1.0);
-    final core = Container(
-      width: width,
-      height: 6,
-      decoration: BoxDecoration(
-        color: Color.alphaBlend(
-          accent.withValues(alpha: 0.14),
-          theme.colorScheme.surfaceContainerHighest,
-        ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: accent.withValues(alpha: 0.2)),
-      ),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: FractionallySizedBox(
-          widthFactor: fillWidthFactor,
-          child: Container(
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: BorderRadius.circular(999),
-            ),
+    final background = theme.brightness == Brightness.dark
+        ? Color.alphaBlend(
+            theme.colorScheme.primary.withValues(alpha: 0.28),
+            theme.colorScheme.surfaceContainerHighest,
+          )
+        : const Color(0xFF1A3F91);
+    final core = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.checklist_rounded, size: compact ? 12 : 13, color: accent),
+        SizedBox(width: compact ? 3 : 4),
+        Text(
+          "${tasks.length}",
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w800,
           ),
         ),
-      ),
+        if (hasShortage) ...[
+          SizedBox(width: compact ? 5 : 6),
+          Icon(
+            Icons.warning_amber_rounded,
+            size: compact ? 12 : 13,
+            color: theme.colorScheme.tertiary,
+          ),
+        ],
+        if (doneCount > 0 && !hasShortage) ...[
+          SizedBox(width: compact ? 5 : 6),
+          Icon(
+            Icons.done_all_rounded,
+            size: compact ? 12 : 13,
+            color: background,
+          ),
+        ],
+      ],
     );
     final semanticLabel =
-        "${tasks.length} scheduled task${tasks.length == 1 ? "" : "s"}";
+        "${tasks.length} scheduled task${tasks.length == 1 ? "" : "s"}"
+        "${doneCount > 0 ? ", $doneCount done" : ""}"
+        "${hasShortage ? ", staffing gap" : ""}";
     if (!_supportsHoverTooltip(context)) {
       return Semantics(label: semanticLabel, child: core);
     }
@@ -1861,6 +2068,11 @@ class _TimelineEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: 0,
+      today: true,
+    );
     return Center(
       child: Container(
         width: double.infinity,
@@ -1868,17 +2080,31 @@ class _TimelineEmptyState extends StatelessWidget {
           horizontal: compact ? 10 : 14,
           vertical: compact ? 12 : 18,
         ),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
+        decoration: ProductionCalendarVisuals.tileDecoration(
+          theme: theme,
+          palette: palette,
+          radius: 16,
         ),
-        child: Text(
-          message,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.spa_outlined,
+              size: compact ? 16 : 18,
+              color: palette.badgeForeground,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ProductionCalendarVisuals.mutedText(
+                  theme,
+                  accent: palette.accent,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1915,34 +2141,62 @@ class _ScheduleSlotDropCell extends StatelessWidget {
       },
       builder: (context, candidateData, rejectedData) {
         final isActive = candidateData.isNotEmpty;
+        final doneCount = tasks
+            .where((task) => _isDraftTaskDone(task.status))
+            .length;
+        final palette = ProductionCalendarVisuals.palette(
+          theme: theme,
+          taskCount: tasks.length,
+          completedCount: doneCount,
+          warning: tasks.any((task) => task.hasShortage),
+          selected: isActive,
+        );
         return Container(
           padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            color: isActive
-                ? theme.colorScheme.primaryContainer
-                : theme.colorScheme.surface,
-            border: Border.all(
-              color: isActive
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.outlineVariant,
-            ),
+          decoration: ProductionCalendarVisuals.tileDecoration(
+            theme: theme,
+            palette: palette,
+            radius: 14,
+            emphasized: isActive,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _clockLabel(slotStart),
-                style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  Icon(
+                    Icons.access_time_filled_rounded,
+                    size: 14,
+                    color: palette.badgeForeground,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _clockLabel(slotStart),
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: palette.badgeForeground,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (tasks.isNotEmpty)
+                    ProductionCalendarMetricPill(
+                      icon: Icons.checklist_rounded,
+                      value: "${tasks.length}",
+                      accent: palette.accent,
+                      compact: true,
+                    ),
+                ],
               ),
               const SizedBox(height: 6),
               if (tasks.isEmpty && isActive)
                 Text(
-                  "Drop task here",
+                  _slotDropHint,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: ProductionCalendarVisuals.mutedText(
+                      theme,
+                      accent: palette.accent,
+                    ),
+                    fontWeight: FontWeight.w600,
                   ),
                 )
               else if (tasks.isEmpty)
@@ -1975,12 +2229,17 @@ class _CalendarDropHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: 1,
+      today: true,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+      decoration: ProductionCalendarVisuals.tileDecoration(
+        theme: theme,
+        palette: palette,
+        radius: 999,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1988,13 +2247,17 @@ class _CalendarDropHint extends StatelessWidget {
           Icon(
             Icons.open_with_rounded,
             size: 16,
-            color: theme.colorScheme.onSurfaceVariant,
+            color: palette.badgeForeground,
           ),
           const SizedBox(width: 6),
           Text(
             _slotDropHint,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              color: ProductionCalendarVisuals.mutedText(
+                theme,
+                accent: palette.accent,
+              ),
+              fontWeight: FontWeight.w600,
             ),
             overflow: TextOverflow.ellipsis,
           ),
@@ -2013,6 +2276,12 @@ class _ScheduledTaskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: 1,
+      completedCount: _isDraftTaskDone(task.status) ? 1 : 0,
+      warning: task.hasShortage,
+    );
     return LongPressDraggable<_ResolvedDraftTask>(
       data: task,
       feedback: Material(
@@ -2020,18 +2289,32 @@ class _ScheduledTaskCard extends StatelessWidget {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 260),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: theme.colorScheme.primary),
+          decoration: ProductionCalendarVisuals.tileDecoration(
+            theme: theme,
+            palette: palette,
+            radius: 12,
+            emphasized: true,
           ),
-          child: Text(
-            "${_clockLabel(task.startDate)} ${task.title}",
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                ProductionCalendarVisuals.statusIcon(task.status),
+                size: 16,
+                color: palette.badgeForeground,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  "${_clockLabel(task.startDate)} ${task.title}",
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2045,25 +2328,63 @@ class _ScheduledTaskCard extends StatelessWidget {
         child: Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
+          decoration: ProductionCalendarVisuals.tileDecoration(
+            theme: theme,
+            palette: palette,
+            radius: 12,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                "${_clockLabel(task.startDate)}-${_clockLabel(task.dueDate)}",
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+              Row(
+                children: [
+                  Icon(
+                    ProductionCalendarVisuals.statusIcon(task.status),
+                    size: 14,
+                    color: palette.badgeForeground,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      "${_clockLabel(task.startDate)}-${_clockLabel(task.dueDate)}",
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: palette.badgeForeground,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 4),
               Text(
                 task.title,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ProductionCalendarMetricPill(
+                    icon: Icons.badge_outlined,
+                    value: formatStaffRoleLabel(
+                      task.roleRequired,
+                      fallback: task.roleRequired,
+                    ),
+                    accent: palette.accent,
+                    compact: true,
+                  ),
+                  ProductionCalendarMetricPill(
+                    icon: Icons.groups_2_outlined,
+                    value: "${task.requiredHeadcount}",
+                    accent: palette.accent,
+                    compact: true,
+                  ),
+                ],
               ),
             ],
           ),
@@ -2092,12 +2413,18 @@ class _DayTaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final statusTone = task.hasShortage
         ? AppStatusTone.warning
-        : AppStatusTone.neutral;
+        : ProductionCalendarVisuals.statusTone(task.status);
     final statusColors = AppStatusBadgeColors.fromTheme(
       theme: Theme.of(context),
       tone: statusTone,
     );
     final theme = Theme.of(context);
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: 1,
+      completedCount: _isDraftTaskDone(task.status) ? 1 : 0,
+      warning: task.hasShortage,
+    );
     final assignedStaffLabels = task.assignedStaffProfileIds
         .map((id) {
           final profileIndex = staffProfiles.indexWhere(
@@ -2118,79 +2445,139 @@ class _DayTaskCard extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: theme.colorScheme.surface,
-        border: Border.all(
-          color: task.hasShortage
-              ? statusColors.foreground.withValues(alpha: 0.28)
-              : theme.colorScheme.outlineVariant,
-        ),
+      decoration: ProductionCalendarVisuals.tileDecoration(
+        theme: theme,
+        palette: palette,
+        radius: 18,
+        emphasized: task.hasShortage,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // WHY: Time range is the highest-priority calendar context for day cards.
-          Text(
-            "${_clockLabel(task.startDate)} - ${_clockLabel(task.dueDate)}",
-            style: theme.textTheme.labelLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: statusColors.background,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  ProductionCalendarVisuals.statusIcon(task.status),
+                  size: 18,
+                  color: statusColors.foreground,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "${_clockLabel(task.startDate)} - ${_clockLabel(task.dueDate)}",
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: palette.badgeForeground,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      task.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: statusColors.background,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: statusColors.foreground.withValues(alpha: 0.18),
+                  ),
+                ),
+                child: Text(
+                  ProductionCalendarVisuals.compactStatusLabel(
+                    task.status.isEmpty ? _statusFallback : task.status,
+                  ),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: statusColors.foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            task.title,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
               _DayMetaChip(
-                label: "Status",
-                value: task.status.isEmpty ? _statusFallback : task.status,
-                tone: task.hasShortage
-                    ? AppStatusTone.warning
-                    : AppStatusTone.neutral,
-              ),
-              _DayMetaChip(
-                label: "Role",
+                icon: Icons.badge_outlined,
                 value:
                     "${formatStaffRoleLabel(task.roleRequired, fallback: task.roleRequired)} x$roleDisplayCount",
                 tone: AppStatusTone.neutral,
+                tooltip: "Role",
               ),
               _DayMetaChip(
-                label: "Headcount",
+                icon: Icons.groups_2_outlined,
                 value:
                     "${task.assignedStaffProfileIds.length}/${task.requiredHeadcount}",
                 tone: task.hasShortage
                     ? AppStatusTone.warning
                     : AppStatusTone.neutral,
+                tooltip: "Assigned / required",
               ),
               _DayMetaChip(
-                label: "Calendar week",
+                icon: Icons.calendar_view_week_outlined,
                 value: _isoWeekLabel(task.startDate),
                 tone: AppStatusTone.neutral,
+                tooltip: "Calendar week",
               ),
               _DayMetaChip(
-                label: "Phase",
+                icon: Icons.spa_outlined,
                 value: task.phaseName.isEmpty ? "-" : task.phaseName,
                 tone: AppStatusTone.neutral,
+                tooltip: "Phase",
               ),
               _DayMetaChip(
-                label: "Staff",
+                icon: task.assignedStaffProfileIds.isEmpty
+                    ? Icons.person_off_outlined
+                    : Icons.person_outline_rounded,
                 value: task.assignedStaffProfileIds.isEmpty
-                    ? "Unassigned"
-                    : "${task.assignedStaffProfileIds.length} selected",
-                tone: AppStatusTone.neutral,
+                    ? "0"
+                    : "${task.assignedStaffProfileIds.length}",
+                tone: task.assignedStaffProfileIds.isEmpty
+                    ? AppStatusTone.warning
+                    : AppStatusTone.neutral,
+                tooltip: "Selected staff",
               ),
             ],
           ),
+          if (task.instructions.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              task.instructions.trim(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: ProductionCalendarVisuals.mutedText(
+                  theme,
+                  accent: palette.accent,
+                ),
+              ),
+            ),
+          ],
           if (assignedStaffLabels.isNotEmpty) ...[
             const SizedBox(height: 8),
             Wrap(
@@ -2205,9 +2592,15 @@ class _DayTaskCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(999),
-                        color: theme.colorScheme.surfaceContainerHighest,
+                        color: palette.badgeBackground,
                       ),
-                      child: Text(label, style: theme.textTheme.labelSmall),
+                      child: Text(
+                        label,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: palette.badgeForeground,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   )
                   .toList(),
@@ -2243,19 +2636,6 @@ class _DayTaskCard extends StatelessWidget {
                 onPressed: () => onHeadcountChange(1),
                 icon: const Icon(Icons.add_circle_outline),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: statusColors.background,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  task.status.isEmpty ? _statusFallback : task.status,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: statusColors.foreground,
-                  ),
-                ),
-              ),
             ],
           ),
         ],
@@ -2265,14 +2645,16 @@ class _DayTaskCard extends StatelessWidget {
 }
 
 class _DayMetaChip extends StatelessWidget {
-  final String label;
+  final IconData icon;
   final String value;
   final AppStatusTone tone;
+  final String tooltip;
 
   const _DayMetaChip({
-    required this.label,
+    required this.icon,
     required this.value,
     required this.tone,
+    required this.tooltip,
   });
 
   @override
@@ -2282,30 +2664,29 @@ class _DayMetaChip extends StatelessWidget {
       tone: tone,
     );
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: colors.background,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colors.foreground.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            "$label: ",
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.foreground,
-              fontWeight: FontWeight.w600,
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: colors.background,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: colors.foreground.withValues(alpha: 0.22)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: colors.foreground),
+            const SizedBox(width: 6),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colors.foreground,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: colors.foreground),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2384,19 +2765,50 @@ class _MiniMonthCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cells = _buildMonthCells(month);
-    return Card(
+    final monthTasks = _tasksForRange(
+      tasks: tasks,
+      startInclusive: month,
+      endExclusive: DateTime(month.year, month.month + 1, 1),
+    );
+    final theme = Theme.of(context);
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: monthTasks.length,
+      completedCount: monthTasks
+          .where((task) => _isDraftTaskDone(task.status))
+          .length,
+    );
+    return Container(
+      decoration: ProductionCalendarVisuals.shellDecoration(
+        theme: theme,
+        palette: palette,
+        radius: 18,
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              _monthName(month.month),
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _monthName(month.month),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: palette.badgeForeground,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (monthTasks.isNotEmpty)
+                  ProductionCalendarActivityDots(
+                    count: monthTasks.length,
+                    accent: palette.accent,
+                    compact: true,
+                  ),
+              ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Row(
               children: _weekdays
                   .map(
@@ -2404,13 +2816,16 @@ class _MiniMonthCard extends StatelessWidget {
                       child: Text(
                         day.substring(0, 1),
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.labelSmall,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   )
                   .toList(),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Expanded(
               child: GridView.builder(
                 physics: const NeverScrollableScrollPhysics(),
@@ -2425,24 +2840,54 @@ class _MiniMonthCard extends StatelessWidget {
                   if (day == null) return const SizedBox.shrink();
                   final isSelected = _isSameDay(day, selectedDay);
                   final dayTasks = _tasksForDay(day: day, tasks: tasks);
+                  final cellPalette = ProductionCalendarVisuals.palette(
+                    theme: theme,
+                    taskCount: dayTasks.length,
+                    completedCount: dayTasks
+                        .where((task) => _isDraftTaskDone(task.status))
+                        .length,
+                    selected: isSelected,
+                    today: _isSameDay(day, DateTime.now()),
+                  );
                   return InkWell(
                     onTap: () => onDayTap(day),
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(8),
                     child: Container(
-                      alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? Theme.of(context).colorScheme.primaryContainer
+                        color: dayTasks.isEmpty
+                            ? Colors.transparent
+                            : cellPalette.badgeBackground,
+                        borderRadius: BorderRadius.circular(8),
+                        border: isSelected
+                            ? Border.all(color: cellPalette.border)
                             : null,
-                        borderRadius: BorderRadius.circular(6),
                       ),
-                      child: Text(
-                        day.day.toString(),
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          fontWeight: dayTasks.isNotEmpty
-                              ? FontWeight.w700
-                              : FontWeight.w400,
-                        ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            day.day.toString(),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontWeight: dayTasks.isNotEmpty
+                                  ? FontWeight.w800
+                                  : FontWeight.w500,
+                              color: isSelected
+                                  ? cellPalette.badgeForeground
+                                  : theme.colorScheme.onSurface,
+                            ),
+                          ),
+                          if (dayTasks.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Container(
+                              width: 5,
+                              height: 5,
+                              decoration: BoxDecoration(
+                                color: cellPalette.accent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   );
@@ -2478,14 +2923,19 @@ class _RoleRecommendationCard extends StatelessWidget {
       theme: Theme.of(context),
       tone: tone,
     );
+    final palette = ProductionCalendarVisuals.palette(
+      theme: Theme.of(context),
+      taskCount: recommendation.taskCount,
+      warning: shortage,
+    );
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: Theme.of(context).colorScheme.surface,
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      decoration: ProductionCalendarVisuals.tileDecoration(
+        theme: Theme.of(context),
+        palette: palette,
+        radius: 16,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2516,9 +2966,39 @@ class _RoleRecommendationCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            "Tasks: ${recommendation.taskCount} | Peak demand: ${recommendation.peakDemand} | Available: ${recommendation.availableStaff.length} | Recommended: ${recommendation.recommendedHeadcount}",
-            style: Theme.of(context).textTheme.bodySmall,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ProductionCalendarMetricPill(
+                icon: Icons.checklist_rounded,
+                value: "${recommendation.taskCount}",
+                accent: colors.foreground,
+                compact: true,
+                tooltip: "Tasks",
+              ),
+              ProductionCalendarMetricPill(
+                icon: Icons.trending_up_rounded,
+                value: "${recommendation.peakDemand}",
+                accent: colors.foreground,
+                compact: true,
+                tooltip: "Peak demand",
+              ),
+              ProductionCalendarMetricPill(
+                icon: Icons.group_outlined,
+                value: "${recommendation.availableStaff.length}",
+                accent: colors.foreground,
+                compact: true,
+                tooltip: "Available",
+              ),
+              ProductionCalendarMetricPill(
+                icon: Icons.auto_fix_high_outlined,
+                value: "${recommendation.recommendedHeadcount}",
+                accent: colors.foreground,
+                compact: true,
+                tooltip: "Recommended",
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           if (recommendation.availableStaff.isEmpty)
@@ -2755,6 +3235,17 @@ class _DayTasksSheetState extends State<_DayTasksSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final doneCount = _tasks
+        .where((task) => _isDraftTaskDone(task.status))
+        .length;
+    final palette = ProductionCalendarVisuals.palette(
+      theme: theme,
+      taskCount: _tasks.length,
+      completedCount: doneCount,
+      warning: _tasks.any((task) => task.hasShortage),
+      today: _isSameDay(widget.day, DateTime.now()),
+    );
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -2762,28 +3253,82 @@ class _DayTasksSheetState extends State<_DayTasksSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    "Tasks on ${formatDateLabel(widget.day)}",
-                    style: Theme.of(context).textTheme.titleMedium,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: ProductionCalendarVisuals.shellDecoration(
+                theme: theme,
+                palette: palette,
+                radius: 20,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: palette.badgeBackground,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.event_note_rounded,
+                      color: palette.badgeForeground,
+                    ),
                   ),
-                ),
-                if (widget.onAddTask != null)
-                  TextButton.icon(
-                    onPressed: () async {
-                      AppDebug.log(
-                        _logTag,
-                        _logDayAddTask,
-                        extra: {"day": formatDateInput(widget.day)},
-                      );
-                      await widget.onAddTask?.call();
-                    },
-                    icon: const Icon(Icons.add),
-                    label: const Text(_daySheetAddTaskButton),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          formatDateLabel(widget.day),
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ProductionCalendarMetricPill(
+                              icon: Icons.checklist_rounded,
+                              value: "${_tasks.length}",
+                              accent: palette.accent,
+                              compact: true,
+                            ),
+                            ProductionCalendarMetricPill(
+                              icon: Icons.done_all_rounded,
+                              value: "$doneCount",
+                              accent: doneCount > 0
+                                  ? ProductionCalendarVisuals.palette(
+                                      theme: theme,
+                                      taskCount: doneCount,
+                                      completedCount: doneCount,
+                                    ).accent
+                                  : palette.accent,
+                              compact: true,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-              ],
+                  if (widget.onAddTask != null)
+                    TextButton.icon(
+                      onPressed: () async {
+                        AppDebug.log(
+                          _logTag,
+                          _logDayAddTask,
+                          extra: {"day": formatDateInput(widget.day)},
+                        );
+                        await widget.onAddTask?.call();
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text(_daySheetAddTaskButton),
+                    ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             if (_tasks.isEmpty)
@@ -3190,4 +3735,8 @@ bool _isSameDay(DateTime left, DateTime right) {
   return left.year == right.year &&
       left.month == right.month &&
       left.day == right.day;
+}
+
+bool _isDraftTaskDone(String statusRaw) {
+  return statusRaw.trim().toLowerCase() == "done";
 }

@@ -22,6 +22,7 @@ import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 
@@ -357,7 +358,9 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             AppDebug.log(_logTag, _backTap);
             if (context.canPop()) {
               context.pop();
+              return;
             }
+            context.go(productionPlansRoute);
           },
         ),
         actions: [

@@ -16,10 +16,12 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -42,6 +44,53 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+
+TextInputFormatter _wholeTextPatternFormatter(RegExp pattern) {
+  return TextInputFormatter.withFunction((oldValue, newValue) {
+    return pattern.hasMatch(newValue.text) ? newValue : oldValue;
+  });
+}
+
+final TextInputFormatter _plantingQuantityInputFormatter =
+    _wholeTextPatternFormatter(RegExp(r'^(\d{0,7}|\d{0,7}\.\d{0,2})$'));
+
+final TextInputFormatter _workloadUnitsInputFormatter =
+    _wholeTextPatternFormatter(RegExp(r'^\d{0,5}$'));
+
+final TextInputFormatter _staffPerUnitInputFormatter =
+    _wholeTextPatternFormatter(RegExp(r'^\d{0,3}$'));
+
+double? _parseStrictPositiveDecimalInput(String rawValue) {
+  final trimmed = rawValue.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  final normalized = trimmed.endsWith(".")
+      ? trimmed.substring(0, trimmed.length - 1)
+      : trimmed;
+  if (normalized.isEmpty) {
+    return null;
+  }
+  return double.tryParse(normalized);
+}
+
+int? _parseStrictPositiveIntInput(String rawValue) {
+  final trimmed = rawValue.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+  return int.tryParse(trimmed);
+}
+
+String _formatStrictNumericInputValue(num? value) {
+  if (value == null) {
+    return "";
+  }
+  if (value is double && value.roundToDouble() == value) {
+    return value.toInt().toString();
+  }
+  return value.toString();
+}
 
 const String _logTag = "PRODUCTION_ASSISTANT_SCREEN";
 const String _buildLog = "build()";
@@ -166,14 +215,16 @@ const String _draftPlanProjectedRemainingLabel = "Worst task left";
 const String _draftPlanProjectedTrackCountLabel = "Task tracks covered";
 const String _draftPlanTaskProjectedLabel = "Planned in this block (task)";
 const String _draftPlanTaskRemainingLabel = "Left for this task";
-const String _draftStudioImproveLabel = "Improve draft";
+const String _draftStudioImproveLabel = "Refine with AI";
 const String _draftStudioDownloadLabel = "Download plan";
-const String _draftStudioPopulateFromPdfLabel = "Populate from PDF";
+const String _draftStudioPopulateFromPdfLabel = "Populate draft";
 const String _draftRepairUnresolvedCoverageWarningCode =
     "draft_repair_unresolved_coverage";
 const String _draftRepairYieldBasisWarningCode =
     "draft_repair_yield_basis_tracking";
-const int _documentImportCharacterLimit = 12000;
+const int _documentImportCharacterLimit = 24000;
+const int _draftAiRefineContextCharacterLimit = 40000;
+const int _documentImportMaxBytes = 4 * 1024 * 1024;
 const List<String> _documentImportAllowedExtensions = [
   "pdf",
   "html",
@@ -606,6 +657,79 @@ const Map<String, List<String>> _assistantRoleTaskKeywordHints = {
   ],
 };
 
+class _StudioDraftRefinePhaseGap {
+  final String phaseName;
+  final int allocatedDays;
+  final int currentTaskCount;
+  final int suggestedTaskCount;
+
+  const _StudioDraftRefinePhaseGap({
+    required this.phaseName,
+    required this.allocatedDays,
+    required this.currentTaskCount,
+    required this.suggestedTaskCount,
+  });
+
+  int get missingTaskCount =>
+      math.max(0, suggestedTaskCount - currentTaskCount);
+}
+
+class _StudioDraftRefineGapReport {
+  final int totalProjectDays;
+  final int totalTaskCount;
+  final int suggestedTaskCount;
+  final int genericTaskCount;
+  final int missingInstructionCount;
+  final int unassignedTaskCount;
+  final List<_StudioDraftRefinePhaseGap> phaseGaps;
+
+  const _StudioDraftRefineGapReport({
+    required this.totalProjectDays,
+    required this.totalTaskCount,
+    required this.suggestedTaskCount,
+    required this.genericTaskCount,
+    required this.missingInstructionCount,
+    required this.unassignedTaskCount,
+    required this.phaseGaps,
+  });
+
+  int get suggestedAdditionalTaskCount =>
+      math.max(0, suggestedTaskCount - totalTaskCount);
+
+  List<String> get issueSummaries {
+    final lines = <String>[
+      "Project window: $totalProjectDays days with $totalTaskCount tasks. A denser working draft should carry about $suggestedTaskCount tasks.",
+    ];
+    if (genericTaskCount > 0) {
+      lines.add(
+        "$genericTaskCount tasks still read like placeholders and need real task names.",
+      );
+    }
+    if (missingInstructionCount > 0) {
+      lines.add(
+        "$missingInstructionCount tasks are missing instructions or execution notes.",
+      );
+    }
+    if (unassignedTaskCount > 0) {
+      lines.add(
+        "$unassignedTaskCount tasks still have no assigned staff profile.",
+      );
+    }
+    if (phaseGaps.isNotEmpty) {
+      lines.add(
+        "${phaseGaps.length} phases are too thin for their allocated days and need more milestones.",
+      );
+    }
+    return lines;
+  }
+}
+
+class _StudioDraftRefineDialogResult {
+  final int maxAdditionalTasks;
+
+  const _StudioDraftRefineDialogResult({required this.maxAdditionalTasks});
+}
+
 class ProductionPlanAssistantScreen extends ConsumerStatefulWidget {
   const ProductionPlanAssistantScreen({super.key});
 
@@ -725,10 +849,39 @@ class _ProductionPlanAssistantScreenState
     _syncingDraftControllers = false;
   }
 
+  void _applyPlantingTargetsToLocalState(
+    ProductionPlantingTargetsDraft targets,
+  ) {
+    _plantingMaterialType = targets.materialType;
+    _plannedPlantingQuantity = targets.plannedPlantingQuantity;
+    _plannedPlantingUnit = targets.plannedPlantingUnit;
+    _estimatedHarvestQuantity = targets.estimatedHarvestQuantity;
+    _estimatedHarvestUnit = targets.estimatedHarvestUnit;
+  }
+
+  void _seedDefaultPlantingTargetsIfNeeded({bool force = false}) {
+    final currentTargets = ProductionPlantingTargetsDraft(
+      materialType: _plantingMaterialType,
+      plannedPlantingQuantity: _plannedPlantingQuantity,
+      plannedPlantingUnit: _plannedPlantingUnit,
+      estimatedHarvestQuantity: _estimatedHarvestQuantity,
+      estimatedHarvestUnit: _estimatedHarvestUnit,
+    );
+    final nextTargets = force
+        ? buildDefaultProductionPlantingTargetsForDomain(_domainContext)
+        : withDefaultProductionPlantingTargetsForDomain(
+            currentTargets,
+            _domainContext,
+          );
+    _applyPlantingTargetsToLocalState(nextTargets);
+  }
+
   void _resetPlannerSession({required bool showSnack, bool announce = true}) {
     ref.read(productionPlanDraftProvider.notifier).reset();
     final defaultDomain = productionDomainDefault;
     final defaultWorkUnit = _defaultWorkUnitLabelForDomain(defaultDomain);
+    final defaultPlantingTargets =
+        buildDefaultProductionPlantingTargetsForDomain(defaultDomain);
     if (mounted) {
       setState(() {
         _focusedRoleKeys.clear();
@@ -746,11 +899,7 @@ class _ProductionPlanAssistantScreenState
         _minStaffPerUnit = 1;
         _maxStaffPerUnit = 3;
         _activeStaffAvailabilityPercent = 70;
-        _plantingMaterialType = "";
-        _plannedPlantingQuantity = null;
-        _plannedPlantingUnit = "";
-        _estimatedHarvestQuantity = null;
-        _estimatedHarvestUnit = "";
+        _applyPlantingTargetsToLocalState(defaultPlantingTargets);
         _startDate = null;
         _endDate = null;
         _useAiInferredDates = false;
@@ -789,11 +938,7 @@ class _ProductionPlanAssistantScreenState
       _minStaffPerUnit = 1;
       _maxStaffPerUnit = 3;
       _activeStaffAvailabilityPercent = 70;
-      _plantingMaterialType = "";
-      _plannedPlantingQuantity = null;
-      _plannedPlantingUnit = "";
-      _estimatedHarvestQuantity = null;
-      _estimatedHarvestUnit = "";
+      _applyPlantingTargetsToLocalState(defaultPlantingTargets);
       _startDate = null;
       _endDate = null;
       _useAiInferredDates = false;
@@ -4411,6 +4556,913 @@ class _ProductionPlanAssistantScreenState
       plannerMeta: _lastTurn?.planDraftPayload?.plannerMeta,
       lifecycle: _lastTurn?.planDraftPayload?.lifecycle,
     );
+  }
+
+  String _resolveStudioDraftProductName(
+    ProductionPlanDraftState draft, {
+    String fallback = "",
+  }) {
+    final normalizedFallback = fallback.trim();
+    if (normalizedFallback.isNotEmpty &&
+        normalizedFallback.toLowerCase() != "linked product") {
+      return normalizedFallback;
+    }
+    final fromTitle = draft.title
+        .trim()
+        .replaceAll(RegExp(r"\s+plan$", caseSensitive: false), "")
+        .trim();
+    if (fromTitle.isNotEmpty) {
+      return fromTitle;
+    }
+    return (draft.productId ?? "").trim().isEmpty ? "" : "Linked product";
+  }
+
+  int _inferStudioDraftTotalWorkUnits(ProductionPlanDraftState draft) {
+    var inferredUnits = 0;
+    for (final phase in draft.phases) {
+      if (phase.requiredUnits > inferredUnits) {
+        inferredUnits = phase.requiredUnits;
+      }
+    }
+    if (inferredUnits > 0) {
+      return inferredUnits;
+    }
+    if (draft.totalTasks > 0) {
+      return draft.totalTasks;
+    }
+    return draft.phases.isEmpty ? 1 : draft.phases.length;
+  }
+
+  int _inferStudioDraftMaxStaffPerUnit(ProductionPlanDraftState draft) {
+    var maxHeadcount = 1;
+    for (final phase in draft.phases) {
+      for (final task in phase.tasks) {
+        if (task.requiredHeadcount > maxHeadcount) {
+          maxHeadcount = task.requiredHeadcount;
+        }
+      }
+    }
+    return maxHeadcount;
+  }
+
+  DateTime? _normalizeStudioDraftDate(DateTime? value) {
+    if (value == null) {
+      return null;
+    }
+    final localValue = value.isUtc ? value.toLocal() : value;
+    return DateTime(localValue.year, localValue.month, localValue.day);
+  }
+
+  int _resolveStudioDraftProjectTotalDays(ProductionPlanDraftState draft) {
+    final startDate = _normalizeStudioDraftDate(draft.startDate);
+    final endDate = _normalizeStudioDraftDate(draft.endDate);
+    final summedPhaseDays = draft.phases.fold<int>(
+      0,
+      (sum, phase) => sum + (phase.estimatedDays < 1 ? 1 : phase.estimatedDays),
+    );
+    if (startDate != null && endDate != null) {
+      final safeEndDate = endDate.isBefore(startDate) ? startDate : endDate;
+      final inclusiveDateDays = safeEndDate.difference(startDate).inDays + 1;
+      return math.max(
+        inclusiveDateDays,
+        math.max(
+          summedPhaseDays,
+          draft.totalEstimatedDays > 0 ? draft.totalEstimatedDays : 1,
+        ),
+      );
+    }
+    if (summedPhaseDays > 0) {
+      return summedPhaseDays;
+    }
+    return draft.totalEstimatedDays > 0 ? draft.totalEstimatedDays : 1;
+  }
+
+  List<int> _buildStudioNormalizedPhaseDayAllocations(
+    ProductionPlanDraftState draft,
+  ) {
+    if (draft.phases.isEmpty) {
+      return const <int>[];
+    }
+    final safeTotalProjectDays = _resolveStudioDraftProjectTotalDays(draft);
+    final minimumPhaseCoverage = draft.phases.length;
+    final totalProjectDays = safeTotalProjectDays < minimumPhaseCoverage
+        ? minimumPhaseCoverage
+        : safeTotalProjectDays;
+    final safeEstimatedDays = draft.phases
+        .map((phase) => phase.estimatedDays < 1 ? 1 : phase.estimatedDays)
+        .toList();
+    var remainingActualDays = totalProjectDays;
+    var remainingEstimatedDays = safeEstimatedDays.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    final allocations = <int>[];
+
+    for (var index = 0; index < draft.phases.length; index += 1) {
+      final isLastPhase = index == draft.phases.length - 1;
+      final safeEstimated = safeEstimatedDays[index];
+      int allocatedDays;
+      if (isLastPhase) {
+        allocatedDays = remainingActualDays < 1 ? 1 : remainingActualDays;
+      } else {
+        allocatedDays =
+            ((remainingActualDays * safeEstimated) / remainingEstimatedDays)
+                .round();
+        final remainingPhases = draft.phases.length - index - 1;
+        final maxForPhase = remainingActualDays - remainingPhases;
+        final safeMaxForPhase = maxForPhase < 1 ? 1 : maxForPhase;
+        if (allocatedDays < 1) {
+          allocatedDays = 1;
+        }
+        if (allocatedDays > safeMaxForPhase) {
+          allocatedDays = safeMaxForPhase;
+        }
+      }
+      allocations.add(allocatedDays);
+      remainingActualDays -= allocatedDays;
+      remainingEstimatedDays -= safeEstimated;
+    }
+
+    return allocations;
+  }
+
+  ProductionPlanDraftState _alignStudioDraftPhaseDaysToProjectWindow(
+    ProductionPlanDraftState draft,
+  ) {
+    final allocations = _buildStudioNormalizedPhaseDayAllocations(draft);
+    if (allocations.isEmpty) {
+      return draft.copyWith(
+        totalTasks: draft.phases.fold<int>(
+          0,
+          (sum, phase) => sum + phase.tasks.length,
+        ),
+        totalEstimatedDays: _resolveStudioDraftProjectTotalDays(draft),
+      );
+    }
+    final normalizedPhases = draft.phases.asMap().entries.map((entry) {
+      final index = entry.key;
+      final phase = entry.value;
+      return phase.copyWith(estimatedDays: allocations[index]);
+    }).toList();
+    final totalTasks = normalizedPhases.fold<int>(
+      0,
+      (sum, phase) => sum + phase.tasks.length,
+    );
+    final totalEstimatedDays = allocations.fold<int>(
+      0,
+      (sum, value) => sum + value,
+    );
+    return draft.copyWith(
+      phases: normalizedPhases,
+      totalTasks: totalTasks,
+      totalEstimatedDays: totalEstimatedDays,
+    );
+  }
+
+  List<String> _collectDistinctStudioDraftRoles(
+    ProductionPlanDraftState draft,
+  ) {
+    final roles = <String>{};
+    for (final phase in draft.phases) {
+      for (final task in phase.tasks) {
+        final role = _normalizeRoleKey(task.roleRequired);
+        if (role.isNotEmpty) {
+          roles.add(role);
+        }
+      }
+    }
+    return roles.toList()..sort();
+  }
+
+  List<BusinessStaffProfileSummary> _collectAssignedStudioStaffProfiles(
+    ProductionPlanDraftState draft,
+    Map<String, BusinessStaffProfileSummary> staffById,
+  ) {
+    final assignedIds = <String>{};
+    for (final phase in draft.phases) {
+      for (final task in phase.tasks) {
+        for (final assignedId in task.assignedStaffProfileIds) {
+          final normalizedId = assignedId.trim();
+          if (normalizedId.isNotEmpty) {
+            assignedIds.add(normalizedId);
+          }
+        }
+      }
+    }
+    return assignedIds
+        .map((id) => staffById[id])
+        .whereType<BusinessStaffProfileSummary>()
+        .toList()
+      ..sort((left, right) => left.id.compareTo(right.id));
+  }
+
+  String _resolveStudioStaffDisplayName(
+    BusinessStaffProfileSummary? profile,
+    String fallback,
+  ) {
+    if (profile == null) {
+      return fallback;
+    }
+    return _resolveAssistantStaffDisplayName(profile);
+  }
+
+  _StudioDraftRefineGapReport _buildStudioDraftRefineGapReport(
+    ProductionPlanDraftState draft,
+  ) {
+    final alignedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+    final totalProjectDays = _resolveStudioDraftProjectTotalDays(alignedDraft);
+    final allTasks = <ProductionTaskDraft>[
+      for (final phase in alignedDraft.phases) ...phase.tasks,
+    ];
+    final totalTaskCount = allTasks.length;
+    final genericTaskCount = allTasks
+        .where((task) => _isGenericDraftTaskTitle(task.title))
+        .length;
+    final missingInstructionCount = allTasks
+        .where((task) => task.instructions.trim().isEmpty)
+        .length;
+    final unassignedTaskCount = allTasks
+        .where((task) => task.assignedStaffProfileIds.isEmpty)
+        .length;
+    final phaseGaps =
+        alignedDraft.phases
+            .map((phase) {
+              final allocatedDays = math.max(1, phase.estimatedDays);
+              final taskCount = phase.tasks.length;
+              final suggestedTaskCount = math.max(
+                2,
+                math.min(allocatedDays, (allocatedDays * 0.85).ceil()),
+              );
+              return _StudioDraftRefinePhaseGap(
+                phaseName: phase.name.trim().isEmpty
+                    ? "Phase ${phase.order}"
+                    : phase.name.trim(),
+                allocatedDays: allocatedDays,
+                currentTaskCount: taskCount,
+                suggestedTaskCount: suggestedTaskCount,
+              );
+            })
+            .where((gap) => gap.missingTaskCount > 0)
+            .toList()
+          ..sort(
+            (left, right) =>
+                right.missingTaskCount.compareTo(left.missingTaskCount),
+          );
+    final suggestedTaskCount =
+        totalTaskCount +
+        phaseGaps.fold<int>(0, (sum, gap) => sum + gap.missingTaskCount);
+
+    return _StudioDraftRefineGapReport(
+      totalProjectDays: totalProjectDays,
+      totalTaskCount: totalTaskCount,
+      suggestedTaskCount: suggestedTaskCount,
+      genericTaskCount: genericTaskCount,
+      missingInstructionCount: missingInstructionCount,
+      unassignedTaskCount: unassignedTaskCount,
+      phaseGaps: phaseGaps,
+    );
+  }
+
+  List<int> _buildStudioRefineTaskAllowanceOptions(
+    _StudioDraftRefineGapReport report,
+  ) {
+    final suggested = report.suggestedAdditionalTaskCount;
+    final values = <int>{
+      0,
+      math.max(4, suggested ~/ 3),
+      math.max(8, suggested ~/ 2),
+      suggested,
+      suggested + 10,
+      suggested + 25,
+    }..removeWhere((value) => value < 0 || value > 180);
+    if (values.length == 1) {
+      values.addAll(const <int>{6, 12, 24});
+    }
+    final ordered = values.toList()..sort();
+    return ordered;
+  }
+
+  Future<_StudioDraftRefineDialogResult?> _showStudioDraftRefineDialog({
+    required _StudioDraftRefineGapReport report,
+    required String estateName,
+    required String productName,
+  }) async {
+    final options = _buildStudioRefineTaskAllowanceOptions(report);
+    var selectedAllowance = report.suggestedAdditionalTaskCount;
+    if (!options.contains(selectedAllowance)) {
+      selectedAllowance = options.first;
+    }
+
+    return showDialog<_StudioDraftRefineDialogResult>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text("Review AI refine scope"),
+              content: SizedBox(
+                width: 560,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "AI will inspect the current draft for ${productName.trim().isEmpty ? 'this crop' : productName.trim()} at ${estateName.trim().isEmpty ? 'this estate' : estateName.trim()} and repair the current gaps before rewriting the task list.",
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        "Gaps found",
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ...report.issueSummaries.map(
+                        (line) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text("• $line"),
+                        ),
+                      ),
+                      if (report.phaseGaps.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          "Thinnest phases",
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 10),
+                        ...report.phaseGaps
+                            .take(4)
+                            .map(
+                              (gap) => Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  "• ${gap.phaseName}: ${gap.currentTaskCount} tasks across ${gap.allocatedDays} days. Add about ${gap.missingTaskCount} more task${gap.missingTaskCount == 1 ? '' : 's'}.",
+                                ),
+                              ),
+                            ),
+                      ],
+                      const SizedBox(height: 18),
+                      DropdownButtonFormField<int>(
+                        initialValue: selectedAllowance,
+                        decoration: const InputDecoration(
+                          labelText: "How many new tasks may AI add?",
+                          helperText:
+                              "Choose 0 to keep the current task count and only rewrite what is already there.",
+                          helperMaxLines: 2,
+                        ),
+                        items: options
+                            .map(
+                              (value) => DropdownMenuItem<int>(
+                                value: value,
+                                child: Text(
+                                  value == 0
+                                      ? "0 • rewrite only"
+                                      : "$value additional tasks",
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setDialogState(() {
+                            selectedAllowance = value;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text("Cancel"),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop(
+                      _StudioDraftRefineDialogResult(
+                        maxAdditionalTasks: selectedAllowance,
+                      ),
+                    );
+                  },
+                  child: const Text("Refine draft"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _buildStudioDraftAiContext(
+    ProductionPlanDraftState draft,
+    Map<String, BusinessStaffProfileSummary> staffById,
+  ) {
+    final alignedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+    final totalProjectDays = _resolveStudioDraftProjectTotalDays(alignedDraft);
+    final buffer = StringBuffer()
+      ..writeln(
+        "Draft title: ${alignedDraft.title.trim().isEmpty ? 'Untitled draft' : alignedDraft.title.trim()}",
+      )
+      ..writeln("Domain: ${alignedDraft.domainContext}")
+      ..writeln(
+        "Dates: ${alignedDraft.startDate == null ? 'pending' : formatDateInput(alignedDraft.startDate!)} -> ${alignedDraft.endDate == null ? 'pending' : formatDateInput(alignedDraft.endDate!)}",
+      )
+      ..writeln("Total project duration: $totalProjectDays day(s) inclusive.");
+
+    if (alignedDraft.notes.trim().isNotEmpty) {
+      buffer.writeln("Manager notes: ${alignedDraft.notes.trim()}");
+    }
+    if (productionDomainRequiresPlantingTargets(alignedDraft.domainContext) &&
+        alignedDraft.plantingTargets.isComplete) {
+      buffer.writeln(
+        "Planting baseline: ${_formatPlantingQuantity(alignedDraft.plantingTargets.plannedPlantingQuantity)} ${alignedDraft.plantingTargets.plannedPlantingUnit} ${formatProductionPlantingMaterialType(alignedDraft.plantingTargets.materialType).toLowerCase()} planned, ${_formatPlantingQuantity(alignedDraft.plantingTargets.estimatedHarvestQuantity)} ${alignedDraft.plantingTargets.estimatedHarvestUnit} estimated harvest.",
+      );
+    }
+    if (alignedDraft.riskNotes.isNotEmpty) {
+      buffer.writeln("Current warnings:");
+      for (final warning in alignedDraft.riskNotes) {
+        if (warning.trim().isNotEmpty) {
+          buffer.writeln("- ${warning.trim()}");
+        }
+      }
+    }
+
+    final normalizedStartDate = _normalizeStudioDraftDate(
+      alignedDraft.startDate,
+    );
+    var dateCursor = normalizedStartDate;
+    var projectDayCursor = 1;
+    for (final phase in alignedDraft.phases) {
+      final allocatedDays = math.max(1, phase.estimatedDays);
+      final phaseStart = dateCursor;
+      final phaseEnd = phaseStart?.add(Duration(days: allocatedDays - 1));
+      final phaseStartDay = projectDayCursor;
+      final phaseEndDay = projectDayCursor + allocatedDays - 1;
+      final dateRangeLabel = phaseStart != null && phaseEnd != null
+          ? "${formatDateInput(phaseStart)} -> ${formatDateInput(phaseEnd)}"
+          : "dates pending";
+      buffer.writeln(
+        "Phase ${phase.order}: ${phase.name.trim().isEmpty ? 'Unnamed phase' : phase.name.trim()} | allocated $allocatedDays of $totalProjectDays day(s) | project day $phaseStartDay-$phaseEndDay | $dateRangeLabel | type ${phase.phaseType} | required units ${phase.requiredUnits}.",
+      );
+      for (final task in phase.tasks) {
+        final assignedStaff = task.assignedStaffProfileIds
+            .map(
+              (id) => _resolveStudioStaffDisplayName(
+                staffById[id.trim()],
+                id.trim(),
+              ),
+            )
+            .where((label) => label.trim().isNotEmpty)
+            .join(", ");
+        buffer.writeln(
+          "Task: ${task.title.trim().isEmpty ? 'Untitled task' : task.title.trim()} | role ${task.roleRequired.trim().isEmpty ? 'farmer' : task.roleRequired.trim()} | headcount ${task.requiredHeadcount} | weight ${task.weight} | assigned ${assignedStaff.isEmpty ? 'none' : assignedStaff} | status ${task.status.name} | instructions ${task.instructions.trim().isEmpty ? 'none' : task.instructions.trim()}",
+        );
+      }
+      projectDayCursor += allocatedDays;
+      if (phaseEnd != null) {
+        dateCursor = phaseEnd.add(const Duration(days: 1));
+      }
+    }
+
+    final text = buffer.toString().trim();
+    if (text.length <= _draftAiRefineContextCharacterLimit) {
+      return text;
+    }
+    return "${text.substring(0, _draftAiRefineContextCharacterLimit)}\n...[draft context truncated]";
+  }
+
+  String _buildStudioAiRefinePrompt({
+    required ProductionPlanDraftState draft,
+    required String estateName,
+    required String productName,
+    required List<String> focusedRoles,
+    required Map<String, BusinessStaffProfileSummary> staffById,
+    required _StudioDraftRefineGapReport gapReport,
+    required int maxAdditionalTasks,
+  }) {
+    final safeEstate = estateName.trim().isEmpty
+        ? "selected estate"
+        : estateName.trim();
+    final safeProduct = productName.trim().isEmpty
+        ? "selected crop"
+        : productName.trim();
+    final alignedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+    final totalProjectDays = _resolveStudioDraftProjectTotalDays(alignedDraft);
+    final roleLabels = focusedRoles.map(formatStaffRoleLabel).join(", ");
+    final roleInstruction = focusedRoles.isEmpty
+        ? ""
+        : " Keep roleRequired within these role tracks where possible: $roleLabels.";
+    final dateInstruction =
+        alignedDraft.startDate != null && alignedDraft.endDate != null
+        ? " Preserve the current working window ${formatDateInput(alignedDraft.startDate!)} to ${formatDateInput(alignedDraft.endDate!)} unless the draft clearly needs a safer lifecycle adjustment."
+        : " Infer lifecycle-safe dates if they are missing.";
+    final plantingInstruction =
+        productionDomainRequiresPlantingTargets(alignedDraft.domainContext) &&
+            alignedDraft.plantingTargets.isComplete
+        ? " Preserve the current planting baseline and align sowing, transplant, flowering, and harvest tasks to it."
+        : "";
+    final gapInstruction = gapReport.issueSummaries
+        .map((line) => "- $line")
+        .join("\n");
+    final draftContext = _buildStudioDraftAiContext(alignedDraft, staffById);
+    final taskLimitInstruction = maxAdditionalTasks <= 0
+        ? " Do not add new tasks unless the current draft is structurally broken; rewrite and rebalance what already exists."
+        : " You may add up to $maxAdditionalTasks new tasks to close the real gaps, but only where a phase is too thin for its allocated days. The refined draft should aim for about ${gapReport.suggestedTaskCount} total tasks instead of the current ${gapReport.totalTaskCount} tasks unless there are obvious duplicates to merge.";
+    return "Refine the current production draft for $safeProduct at $safeEstate. Keep the business domain ${alignedDraft.domainContext} and improve the draft without turning it into a different plan.$roleInstruction$dateInstruction$plantingInstruction The total project duration is $totalProjectDays day(s) inclusive, and the sum of phase estimatedDays must stay aligned to that duration. Allocate days per phase realistically for the lifecycle. Do not leave a long phase with only one or two vague tasks; if a phase spans many days, break it into concrete milestones, recurring operational tasks, daily or near-daily checks, and inspection tasks across that phase. Remove repetitive generic tasks, make task titles specific, tighten instructions, keep headcount realistic, keep phase placement coherent, and preserve assigned staff where appropriate. Prefer a detailed working draft over a sparse summary.$taskLimitInstruction\n\nCURRENT GAPS TO FIX\n$gapInstruction\n\nCURRENT DRAFT START\n$draftContext\nCURRENT DRAFT END";
+  }
+
+  Map<String, dynamic> _buildStudioAiRefineDraftPayload({
+    required ProductionPlanDraftState draft,
+    required String prompt,
+    required String productName,
+    required Map<String, BusinessStaffProfileSummary> staffById,
+    required _StudioDraftRefineGapReport gapReport,
+    required int maxAdditionalTasks,
+  }) {
+    final alignedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+    final focusedRoles = _collectDistinctStudioDraftRoles(alignedDraft);
+    final focusedStaffProfiles = _collectAssignedStudioStaffProfiles(
+      alignedDraft,
+      staffById,
+    );
+    final focusedStaffRows = _buildFocusedStaffProfilesPayload(
+      focusedStaffProfiles: focusedStaffProfiles,
+    );
+    final focusedStaffByRole = _buildFocusedStaffProfileIdsByRolePayload(
+      focusedStaffProfilesPayload: focusedStaffRows,
+    );
+    return {
+      "aiBrief": prompt,
+      "prompt": prompt,
+      "estateAssetId": alignedDraft.estateAssetId ?? "",
+      "productId": alignedDraft.productId ?? "",
+      "productSearchName": productName,
+      "startDate": alignedDraft.startDate == null
+          ? ""
+          : formatDateInput(alignedDraft.startDate!),
+      "endDate": alignedDraft.endDate == null
+          ? ""
+          : formatDateInput(alignedDraft.endDate!),
+      "domainContext": alignedDraft.domainContext,
+      "businessType": alignedDraft.domainContext,
+      "focusedRoles": focusedRoles,
+      "focusedStaffProfileIds":
+          focusedStaffProfiles
+              .map((profile) => profile.id.trim())
+              .where((id) => id.isNotEmpty)
+              .toList()
+            ..sort(),
+      "focusedStaffProfiles": focusedStaffRows,
+      "focusedStaffByRole": focusedStaffByRole,
+      "focusedRoleTaskHints": {
+        for (final role in focusedRoles) role: const <String>[],
+      },
+      "workloadContext": {
+        "workUnitLabel": _defaultWorkUnitLabelForDomain(
+          alignedDraft.domainContext,
+        ),
+        "totalWorkUnits": _inferStudioDraftTotalWorkUnits(alignedDraft),
+        "minStaffPerUnit": 1,
+        "maxStaffPerUnit": _inferStudioDraftMaxStaffPerUnit(alignedDraft),
+        "activeStaffAvailabilityPercent": 70,
+        "hasConfirmedWorkloadContext": true,
+      },
+      "plantingTargets": alignedDraft.plantingTargets.toPayload(),
+      "cropSubtype": "",
+      "refineTarget": {
+        "mode": "draft_refine",
+        "currentTaskCount": gapReport.totalTaskCount,
+        "requestedTaskCount": gapReport.suggestedTaskCount,
+        "maxAdditionalTasks": maxAdditionalTasks,
+        "phaseTargets": [
+          for (final phaseGap in gapReport.phaseGaps)
+            {
+              "phaseName": phaseGap.phaseName,
+              "allocatedDays": phaseGap.allocatedDays,
+              "currentTaskCount": phaseGap.currentTaskCount,
+              "targetTaskCount": phaseGap.suggestedTaskCount,
+            },
+        ],
+      },
+    };
+  }
+
+  ProductionPlanDraftState _mergeAiDraftIntoStudioDraft({
+    required ProductionPlanDraftState currentDraft,
+    required ProductionPlanDraftState aiDraft,
+    required List<String> warnings,
+  }) {
+    final normalizedCurrentDraft = _alignStudioDraftPhaseDaysToProjectWindow(
+      currentDraft,
+    );
+    final normalizedAiDraft = _alignStudioDraftPhaseDaysToProjectWindow(
+      aiDraft,
+    );
+    final normalizedWarnings = warnings
+        .map((warning) => warning.trim())
+        .where((warning) => warning.isNotEmpty)
+        .toList();
+    return currentDraft.copyWith(
+      title: normalizedAiDraft.title.trim().isEmpty
+          ? normalizedCurrentDraft.title
+          : normalizedAiDraft.title,
+      estateAssetId: (normalizedCurrentDraft.estateAssetId ?? "").trim().isEmpty
+          ? normalizedAiDraft.estateAssetId
+          : normalizedCurrentDraft.estateAssetId,
+      productId: (normalizedCurrentDraft.productId ?? "").trim().isEmpty
+          ? normalizedAiDraft.productId
+          : normalizedCurrentDraft.productId,
+      startDate:
+          normalizedAiDraft.startDate ?? normalizedCurrentDraft.startDate,
+      endDate: normalizedAiDraft.endDate ?? normalizedCurrentDraft.endDate,
+      plantingTargets: normalizedCurrentDraft.plantingTargets.hasAnyValue
+          ? normalizedCurrentDraft.plantingTargets
+          : normalizedAiDraft.plantingTargets,
+      aiGenerated: true,
+      totalTasks: normalizedAiDraft.totalTasks,
+      totalEstimatedDays: normalizedAiDraft.totalEstimatedDays,
+      riskNotes: normalizedWarnings.isEmpty
+          ? normalizedAiDraft.riskNotes
+          : normalizedWarnings,
+      phases: normalizedAiDraft.phases,
+    );
+  }
+
+  void _applyStudioDraftState(ProductionPlanDraftState draft) {
+    final normalizedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+    ref.read(productionPlanDraftProvider.notifier).applyDraft(normalizedDraft);
+    _syncDraftEditors(normalizedDraft);
+    final payload = _buildPlanDraftPayloadFromStudioDraft(
+      draft: normalizedDraft,
+    );
+    final currentTurn = _lastTurn;
+    final nextTurn = currentTurn == null
+        ? ProductionAssistantTurn(
+            action: productionAssistantActionPlanDraft,
+            message: "Draft updated in studio.",
+            suggestionsPayload: null,
+            clarifyPayload: null,
+            draftProductPayload: null,
+            planDraftPayload: payload,
+          )
+        : ProductionAssistantTurn(
+            action: currentTurn.action,
+            message: currentTurn.message,
+            suggestionsPayload: currentTurn.suggestionsPayload,
+            clarifyPayload: currentTurn.clarifyPayload,
+            draftProductPayload: currentTurn.draftProductPayload,
+            planDraftPayload: payload,
+          );
+    if (!mounted) {
+      _lastTurn = nextTurn;
+      _showDraftStudio = true;
+      _draftStudioPanel = _DraftStudioPanel.overview;
+      _lastDraftImprovementReport = null;
+      return;
+    }
+    setState(() {
+      _lastTurn = nextTurn;
+      _showDraftStudio = true;
+      _draftStudioPanel = _DraftStudioPanel.overview;
+      _lastDraftImprovementReport = null;
+    });
+  }
+
+  Future<void> _refineStudioDraftWithAi({
+    required ProductionPlanDraftState draft,
+    required String selectedEstateName,
+    required String selectedProductName,
+    required Map<String, BusinessStaffProfileSummary> staffById,
+  }) async {
+    if (_isSending || _isImportingDraftDocument || _isImprovingDraft) {
+      return;
+    }
+    final hasDraftTasks = draft.phases.any((phase) => phase.tasks.isNotEmpty);
+    if (!hasDraftTasks) {
+      _showSnack("Add or generate draft tasks before refining with AI.");
+      return;
+    }
+    final gapReport = _buildStudioDraftRefineGapReport(draft);
+    final refineConfig = await _showStudioDraftRefineDialog(
+      report: gapReport,
+      estateName: selectedEstateName,
+      productName: selectedProductName,
+    );
+    if (refineConfig == null) {
+      return;
+    }
+
+    setState(() {
+      _isImprovingDraft = true;
+    });
+
+    try {
+      final alignedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+      final resolvedProductName = _resolveStudioDraftProductName(
+        alignedDraft,
+        fallback: selectedProductName,
+      );
+      final prompt = _buildStudioAiRefinePrompt(
+        draft: alignedDraft,
+        estateName: selectedEstateName,
+        productName: resolvedProductName,
+        focusedRoles: _collectDistinctStudioDraftRoles(alignedDraft),
+        staffById: staffById,
+        gapReport: gapReport,
+        maxAdditionalTasks: refineConfig.maxAdditionalTasks,
+      );
+      final aiResult = await ref
+          .read(productionPlanActionsProvider)
+          .generateAiDraft(
+            payload: _buildStudioAiRefineDraftPayload(
+              draft: alignedDraft,
+              prompt: prompt,
+              productName: resolvedProductName,
+              staffById: staffById,
+              gapReport: gapReport,
+              maxAdditionalTasks: refineConfig.maxAdditionalTasks,
+            ),
+          );
+      final nextDraft = _mergeAiDraftIntoStudioDraft(
+        currentDraft: alignedDraft,
+        aiDraft: aiResult.draft,
+        warnings: aiResult.warnings,
+      );
+      _applyStudioDraftState(nextDraft);
+      _showSnack(
+        refineConfig.maxAdditionalTasks <= 0
+            ? "AI refined the draft without expanding the task count. Review it, then save draft to record the revision."
+            : "AI refined the draft with room for up to ${refineConfig.maxAdditionalTasks} new tasks. Review it, then save draft to record the revision.",
+      );
+    } on ProductionAiDraftError catch (error) {
+      final message = error.resolutionHint.trim().isNotEmpty
+          ? error.resolutionHint.trim()
+          : error.message.trim();
+      _showSnack(
+        message.isEmpty ? "Couldn't refine the draft with AI yet." : message,
+      );
+    } catch (_) {
+      _showSnack("Couldn't refine the draft with AI yet.");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isImprovingDraft = false;
+        });
+      } else {
+        _isImprovingDraft = false;
+      }
+    }
+  }
+
+  Map<String, dynamic>? _buildStudioSourceDocumentPayload({
+    required String fileName,
+    required List<int> bytes,
+    required String importedText,
+  }) {
+    if (bytes.isEmpty || bytes.length > _documentImportMaxBytes) {
+      return null;
+    }
+    final extension = _extractImportFileExtension(fileName);
+    return {
+      "fileName": fileName.trim(),
+      "extension": extension,
+      "contentBase64": base64Encode(bytes),
+      if (importedText.trim().isNotEmpty)
+        "frontendExtractedText": importedText.trim(),
+      "taskLineEstimate": _estimateImportedTaskLikeLineCount(importedText),
+    };
+  }
+
+  String _importedTextForStudioTarget(Map<String, dynamic>? sourceDocument) {
+    return (sourceDocument?["frontendExtractedText"] ?? "").toString().trim();
+  }
+
+  Map<String, dynamic> _buildStudioImportedDocumentDraftPayload({
+    required ProductionPlanDraftState draft,
+    required String prompt,
+    required String productName,
+    required Map<String, dynamic>? sourceDocument,
+  }) {
+    final alignedDraft = _alignStudioDraftPhaseDaysToProjectWindow(draft);
+    final gapReport = _buildStudioDraftRefineGapReport(alignedDraft);
+    final importedTaskLikeCount = _estimateImportedTaskLikeLineCount(
+      _importedTextForStudioTarget(sourceDocument),
+    );
+    final requestedTaskCount = math
+        .max(gapReport.suggestedTaskCount, importedTaskLikeCount)
+        .clamp(draft.totalTasks, 180)
+        .toInt();
+    return {
+      "aiBrief": prompt,
+      "prompt": prompt,
+      "estateAssetId": alignedDraft.estateAssetId ?? "",
+      "productId": alignedDraft.productId ?? "",
+      "productSearchName": productName,
+      "startDate": alignedDraft.startDate == null
+          ? ""
+          : formatDateInput(alignedDraft.startDate!),
+      "endDate": alignedDraft.endDate == null
+          ? ""
+          : formatDateInput(alignedDraft.endDate!),
+      "domainContext": alignedDraft.domainContext,
+      "businessType": alignedDraft.domainContext,
+      "focusedRoles": const <String>[],
+      "focusedStaffProfileIds": const <String>[],
+      "focusedStaffProfiles": const <Map<String, String>>[],
+      "focusedStaffByRole": const <String, List<String>>{},
+      "focusedRoleTaskHints": const <String, List<String>>{},
+      "workloadContext": {
+        "workUnitLabel": _defaultWorkUnitLabelForDomain(
+          alignedDraft.domainContext,
+        ),
+        "totalWorkUnits": _inferStudioDraftTotalWorkUnits(alignedDraft),
+        "minStaffPerUnit": 1,
+        "maxStaffPerUnit": _inferStudioDraftMaxStaffPerUnit(alignedDraft),
+        "activeStaffAvailabilityPercent": 70,
+        "hasConfirmedWorkloadContext": true,
+      },
+      "plantingTargets": alignedDraft.plantingTargets.toPayload(),
+      "cropSubtype": "",
+      "refineTarget": {
+        "mode": "document_import",
+        "currentTaskCount": draft.totalTasks,
+        "requestedTaskCount": requestedTaskCount,
+        "maxAdditionalTasks": math.max(
+          0,
+          requestedTaskCount - draft.totalTasks,
+        ),
+        "phaseTargets": [
+          for (final phaseGap in gapReport.phaseGaps)
+            {
+              "phaseName": phaseGap.phaseName,
+              "allocatedDays": phaseGap.allocatedDays,
+              "currentTaskCount": phaseGap.currentTaskCount,
+              "targetTaskCount": phaseGap.suggestedTaskCount,
+            },
+        ],
+      },
+      if (sourceDocument != null) "sourceDocument": sourceDocument,
+    };
+  }
+
+  String _buildStudioImportedDocumentPrompt({
+    required ProductionPlanDraftState draft,
+    required String estateName,
+    required String productName,
+    required String fileName,
+    required String importedText,
+  }) {
+    final safeEstate = estateName.trim().isEmpty
+        ? "selected estate"
+        : estateName.trim();
+    final safeProduct = productName.trim().isEmpty
+        ? "selected crop"
+        : productName.trim();
+    final safeFileName = fileName.trim().isEmpty
+        ? "uploaded-document"
+        : fileName.trim();
+    final importedTaskLikeCount = _estimateImportedTaskLikeLineCount(
+      importedText,
+    );
+    final truncatedText = importedText.length > _documentImportCharacterLimit
+        ? importedText.substring(0, _documentImportCharacterLimit)
+        : importedText;
+    final hasPreview = truncatedText.trim().isNotEmpty;
+    final dateInstruction = draft.startDate != null && draft.endDate != null
+        ? "Keep the planning window within ${formatDateInput(draft.startDate!)} to ${formatDateInput(draft.endDate!)} unless the document clearly requires an adjustment."
+        : "Infer lifecycle-safe start and end dates from the document.";
+    final plantingInstruction =
+        productionDomainRequiresPlantingTargets(draft.domainContext) &&
+            draft.plantingTargets.isComplete
+        ? " Preserve this planting baseline: ${_formatPlantingQuantity(draft.plantingTargets.plannedPlantingQuantity)} ${draft.plantingTargets.plannedPlantingUnit} ${formatProductionPlantingMaterialType(draft.plantingTargets.materialType).toLowerCase()} planned, ${_formatPlantingQuantity(draft.plantingTargets.estimatedHarvestQuantity)} ${draft.plantingTargets.estimatedHarvestUnit} estimated harvest."
+        : "";
+    final currentPhaseLabels = draft.phases
+        .map((phase) => phase.name.trim())
+        .where((name) => name.isNotEmpty)
+        .toList();
+    final currentPhaseInstruction = currentPhaseLabels.isEmpty
+        ? ""
+        : " Current draft phase labels: ${currentPhaseLabels.join(", ")}.";
+    final currentNotesInstruction = draft.notes.trim().isEmpty
+        ? ""
+        : " Current manager notes: ${draft.notes.trim()}";
+    final densityInstruction = importedTaskLikeCount > 0
+        ? " The uploaded source appears to contain about $importedTaskLikeCount task-like lines. Keep roughly that level of detail unless the document clearly repeats or conflicts with itself."
+        : " Treat the uploaded file as a detailed working plan, not a short outline.";
+    final previewInstruction = hasPreview
+        ? " A preview of the uploaded document is included below, and the backend will also parse the raw file so you can preserve the full task list."
+        : " The backend must parse the raw uploaded file to recover the full task list before drafting.";
+    final previewBlock = hasPreview
+        ? "\n\nDOCUMENT PREVIEW START\n$truncatedText\nDOCUMENT PREVIEW END"
+        : "";
+    return "Generate a lifecycle-safe production draft for $safeProduct at $safeEstate. Use the uploaded planning document as the primary source material. Preserve explicit phase names, task titles, sequencing, durations, staffing counts, day-by-day lines, and operational notes where they are coherent. Keep the draft scoped to the current business domain ${draft.domainContext}.$dateInstruction$plantingInstruction$currentPhaseInstruction$currentNotesInstruction Do not collapse a task-rich working document into a sparse phase summary. Normalize it into clean editable phases and tasks while keeping the original scope and density.$densityInstruction$previewInstruction Source document: $safeFileName.$previewBlock";
   }
 
   Future<void> _inspectAndImproveCurrentDraft({
@@ -9532,20 +10584,26 @@ class _ProductionPlanAssistantScreenState
   }
 
   Future<void> _populateDraftUsingImportedDocument({
+    required ProductionPlanDraftState draft,
     required String selectedEstateName,
     required String selectedProductName,
   }) async {
-    if (_isSending || _isImportingDraftDocument) {
+    if (_isSending || _isImportingDraftDocument || _isImprovingDraft) {
       return;
     }
-    final hasEstate = (_selectedEstateAssetId ?? "").trim().isNotEmpty;
-    final hasProduct = _hasSelectedProduct();
-    if (!hasEstate || !hasProduct) {
-      _showSnack(_contextPromptMissingContextMessage);
+    final hasEstate = (draft.estateAssetId ?? _selectedEstateAssetId ?? "")
+        .trim()
+        .isNotEmpty;
+    final resolvedProductName = _resolveStudioDraftProductName(
+      draft,
+      fallback: selectedProductName,
+    );
+    if (!hasEstate) {
+      _showSnack("Select an estate before populating this draft.");
       return;
     }
-    if (!_isWorkloadContextReadyForDraft()) {
-      _showSnack(_contextPromptConfirmWorkloadContextMissing);
+    if (resolvedProductName.trim().isEmpty) {
+      _showSnack("Add a crop or draft title before populating this draft.");
       return;
     }
 
@@ -9568,27 +10626,30 @@ class _ProductionPlanAssistantScreenState
         _showSnack("That file could not be read for draft import.");
         return;
       }
+      if (bytes.length > _documentImportMaxBytes) {
+        _showSnack("That file is too large to import into a draft.");
+        return;
+      }
       final importedText = _extractImportableDocumentText(
         bytes: bytes,
         filename: file.name,
       );
-      if (importedText.trim().isEmpty) {
+      final sourceDocumentPayload = _buildStudioSourceDocumentPayload(
+        fileName: file.name,
+        bytes: bytes,
+        importedText: importedText,
+      );
+      if (importedText.trim().isEmpty && sourceDocumentPayload == null) {
         _showSnack(
-          "No readable planning text was found in that PDF. Try a text-based PDF or a downloaded HTML plan export.",
+          "No readable planning text was found in that file. Try a text-based PDF, HTML, or text export.",
         );
         return;
       }
 
-      final focusedRoles = _focusedRoleKeys.toList()..sort();
-      final focusedStaff = _selectedFocusedStaffProfiles(
-        staffProfiles:
-            ref.read(productionStaffProvider).valueOrNull ?? const [],
-      );
-      final prompt = _buildImportedDocumentDraftPrompt(
+      final prompt = _buildStudioImportedDocumentPrompt(
+        draft: draft,
         estateName: selectedEstateName,
-        productName: selectedProductName,
-        focusedRoles: focusedRoles,
-        focusedStaff: focusedStaff,
+        productName: resolvedProductName,
         fileName: file.name,
         importedText: importedText,
       );
@@ -9601,19 +10662,68 @@ class _ProductionPlanAssistantScreenState
           "textLength": importedText.length,
         },
       );
-      await _runDirectDraftGeneration(
-        prompt: prompt,
-        productName: selectedProductName,
-        focusedRoles: focusedRoles,
-        focusedStaff: focusedStaff,
-        displayPrompt:
-            "Populate draft from imported document: ${file.name.trim()}",
+      final aiResult = await ref
+          .read(productionPlanActionsProvider)
+          .generateAiDraft(
+            payload: _buildStudioImportedDocumentDraftPayload(
+              draft: draft,
+              prompt: prompt,
+              productName: resolvedProductName,
+              sourceDocument: sourceDocumentPayload,
+            ),
+          );
+      final nextDraft = aiResult.draft.copyWith(
+        title: aiResult.draft.title.trim().isEmpty ? draft.title : null,
+        notes: aiResult.draft.notes.trim().isEmpty ? draft.notes : null,
+        domainContext: draft.domainContext,
+        estateAssetId: (draft.estateAssetId ?? "").trim().isEmpty
+            ? aiResult.draft.estateAssetId
+            : draft.estateAssetId,
+        productId: (draft.productId ?? "").trim().isEmpty
+            ? aiResult.draft.productId
+            : draft.productId,
+        startDate: aiResult.draft.startDate ?? draft.startDate,
+        endDate: aiResult.draft.endDate ?? draft.endDate,
+        plantingTargets: aiResult.draft.plantingTargets.hasAnyValue
+            ? aiResult.draft.plantingTargets
+            : draft.plantingTargets,
+        riskNotes:
+            aiResult.warnings
+                .map((warning) => warning.trim())
+                .where((warning) => warning.isNotEmpty)
+                .toList()
+                .isEmpty
+            ? aiResult.draft.riskNotes
+            : aiResult.warnings
+                  .map((warning) => warning.trim())
+                  .where((warning) => warning.isNotEmpty)
+                  .toList(),
       );
+      _applyStudioDraftState(nextDraft);
       AppDebug.log(
         _logTag,
         _populateDraftFromPdfSuccessLog,
         extra: {"fileName": file.name, "textLength": importedText.length},
       );
+      _showSnack(
+        "Draft populated from ${file.name}. Save draft to record the revision.",
+      );
+    } on ProductionAiDraftError catch (error) {
+      final message = error.resolutionHint.trim().isNotEmpty
+          ? error.resolutionHint.trim()
+          : error.message.trim();
+      AppDebug.log(
+        _logTag,
+        _populateDraftFromPdfFailureLog,
+        extra: {"error": error.toString()},
+      );
+      if (mounted) {
+        _showSnack(
+          message.isEmpty
+              ? "Couldn't populate the draft from that document yet."
+              : message,
+        );
+      }
     } catch (error) {
       AppDebug.log(
         _logTag,
@@ -9730,6 +10840,35 @@ class _ProductionPlanAssistantScreenState
         .where((line) => line.isNotEmpty)
         .toList();
     return lines.join("\n");
+  }
+
+  int _estimateImportedTaskLikeLineCount(String rawText) {
+    final lines = _normalizeImportedDocumentText(rawText)
+        .split("\n")
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final bulletPattern = RegExp(r"^(\d+[\).:-]|[-*•])\s+");
+    final dayPattern = RegExp(r"^(day|week)\s*\d+", caseSensitive: false);
+    final taskPattern = RegExp(
+      r"\b(task|activity|operation|monitor|inspect|apply|transplant|plant|seed|seedling|harvest|spray|prune|scout|irrigat|fertigat|weed|pest|disease|pack|grade|record|clean|trellis|stake)\b",
+      caseSensitive: false,
+    );
+    return lines.where((line) {
+      final normalized = line.toLowerCase();
+      if (normalized.length < 6 || normalized.length > 180) {
+        return false;
+      }
+      if (RegExp(
+        r"^(page|title|estate|crop|start date|end date|notes|manager notes|last saved|project days|tasks|phase allocation)",
+        caseSensitive: false,
+      ).hasMatch(normalized)) {
+        return false;
+      }
+      return bulletPattern.hasMatch(line) ||
+          dayPattern.hasMatch(normalized) ||
+          taskPattern.hasMatch(normalized);
+    }).length;
   }
 
   String _extractTextFromPdfBytes(List<int> bytes) {
@@ -12524,12 +13663,10 @@ class _ProductionPlanAssistantScreenState
           _workUnitLabel.trim() == previousDefaultWorkUnit) {
         _workUnitLabel = _defaultWorkUnitLabelForDomain(nextDomain);
       }
-      if (!productionDomainRequiresPlantingTargets(nextDomain)) {
-        _plantingMaterialType = "";
-        _plannedPlantingQuantity = null;
-        _plannedPlantingUnit = "";
-        _estimatedHarvestQuantity = null;
-        _estimatedHarvestUnit = "";
+      if (productionDomainRequiresPlantingTargets(nextDomain)) {
+        _seedDefaultPlantingTargetsIfNeeded();
+      } else {
+        _seedDefaultPlantingTargetsIfNeeded(force: true);
       }
       _hasConfirmedWorkloadContext = false;
       _lastAutoGenerateKey = "";
@@ -13659,6 +14796,10 @@ class _ProductionPlanAssistantScreenState
     final staffAsync = ref.watch(productionStaffProvider);
     final staffList =
         staffAsync.valueOrNull ?? const <BusinessStaffProfileSummary>[];
+    final staffById = <String, BusinessStaffProfileSummary>{
+      for (final profile in staffList)
+        if (profile.id.trim().isNotEmpty) profile.id.trim(): profile,
+    };
     final selectedEstateName = assetsAsync.maybeWhen(
       data: (result) {
         for (final asset in result.assets) {
@@ -14133,16 +15274,19 @@ class _ProductionPlanAssistantScreenState
               builder: (context, constraints) {
                 final useColumn = constraints.maxWidth < 860;
                 final plantingField = TextFormField(
-                  initialValue: _plannedPlantingQuantity?.toString() ?? "",
+                  initialValue: _formatStrictNumericInputValue(
+                    _plannedPlantingQuantity,
+                  ),
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  inputFormatters: [_plantingQuantityInputFormatter],
                   decoration: const InputDecoration(
                     labelText: _contextPromptPlannedPlantingQuantityLabel,
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (value) => _onPlannedPlantingQuantityChanged(
-                    double.tryParse(value.trim()),
+                    _parseStrictPositiveDecimalInput(value),
                   ),
                 );
                 final plantingUnitField = DropdownButtonFormField<String>(
@@ -14166,16 +15310,19 @@ class _ProductionPlanAssistantScreenState
                   onChanged: _onPlannedPlantingUnitChanged,
                 );
                 final harvestQuantityField = TextFormField(
-                  initialValue: _estimatedHarvestQuantity?.toString() ?? "",
+                  initialValue: _formatStrictNumericInputValue(
+                    _estimatedHarvestQuantity,
+                  ),
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  inputFormatters: [_plantingQuantityInputFormatter],
                   decoration: const InputDecoration(
                     labelText: _contextPromptEstimatedHarvestQuantityLabel,
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (value) => _onEstimatedHarvestQuantityChanged(
-                    double.tryParse(value.trim()),
+                    _parseStrictPositiveDecimalInput(value),
                   ),
                 );
                 final harvestUnitField = DropdownButtonFormField<String>(
@@ -14258,34 +15405,40 @@ class _ProductionPlanAssistantScreenState
             builder: (context, constraints) {
               final useColumn = constraints.maxWidth < 860;
               final totalField = TextFormField(
-                initialValue: _totalWorkUnits?.toString() ?? "",
+                initialValue: _formatStrictNumericInputValue(_totalWorkUnits),
                 keyboardType: TextInputType.number,
+                inputFormatters: [_workloadUnitsInputFormatter],
                 decoration: const InputDecoration(
                   labelText: "Total work units",
                   border: OutlineInputBorder(),
                 ),
-                onChanged: (value) =>
-                    _onTotalWorkUnitsChanged(int.tryParse(value.trim())),
+                onChanged: (value) => _onTotalWorkUnitsChanged(
+                  _parseStrictPositiveIntInput(value),
+                ),
               );
               final minField = TextFormField(
-                initialValue: _minStaffPerUnit?.toString() ?? "",
+                initialValue: _formatStrictNumericInputValue(_minStaffPerUnit),
                 keyboardType: TextInputType.number,
+                inputFormatters: [_staffPerUnitInputFormatter],
                 decoration: const InputDecoration(
                   labelText: "Min staff / unit",
                   border: OutlineInputBorder(),
                 ),
-                onChanged: (value) =>
-                    _onMinStaffPerUnitChanged(int.tryParse(value.trim())),
+                onChanged: (value) => _onMinStaffPerUnitChanged(
+                  _parseStrictPositiveIntInput(value),
+                ),
               );
               final maxField = TextFormField(
-                initialValue: _maxStaffPerUnit?.toString() ?? "",
+                initialValue: _formatStrictNumericInputValue(_maxStaffPerUnit),
                 keyboardType: TextInputType.number,
+                inputFormatters: [_staffPerUnitInputFormatter],
                 decoration: const InputDecoration(
                   labelText: "Max staff / unit",
                   border: OutlineInputBorder(),
                 ),
-                onChanged: (value) =>
-                    _onMaxStaffPerUnitChanged(int.tryParse(value.trim())),
+                onChanged: (value) => _onMaxStaffPerUnitChanged(
+                  _parseStrictPositiveIntInput(value),
+                ),
               );
               final children = <Widget>[
                 Expanded(child: totalField),
@@ -15372,7 +16525,12 @@ class _ProductionPlanAssistantScreenState
                           _isImportingDraftDocument ||
                           _isImprovingDraft)
                       ? null
-                      : () => _inspectAndImproveCurrentDraft(draft: draft),
+                      : () => _refineStudioDraftWithAi(
+                          draft: draft,
+                          selectedEstateName: selectedEstateName,
+                          selectedProductName: selectedProductName,
+                          staffById: staffById,
+                        ),
                   icon: _isImprovingDraft
                       ? const SizedBox(
                           width: 18,
@@ -15382,7 +16540,7 @@ class _ProductionPlanAssistantScreenState
                       : const Icon(Icons.auto_fix_high_outlined),
                   label: Text(
                     _isImprovingDraft
-                        ? "Improving..."
+                        ? "Refining..."
                         : _draftStudioImproveLabel,
                   ),
                 ),
@@ -15393,6 +16551,7 @@ class _ProductionPlanAssistantScreenState
                           _isImprovingDraft)
                       ? null
                       : () => _populateDraftUsingImportedDocument(
+                          draft: draft,
                           selectedEstateName: selectedEstateName,
                           selectedProductName: selectedProductName,
                         ),
@@ -15405,7 +16564,7 @@ class _ProductionPlanAssistantScreenState
                       : const Icon(Icons.picture_as_pdf_outlined),
                   label: Text(
                     _isImportingDraftDocument
-                        ? "Importing..."
+                        ? "Populating..."
                         : _draftStudioPopulateFromPdfLabel,
                   ),
                 ),

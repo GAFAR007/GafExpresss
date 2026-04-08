@@ -516,6 +516,8 @@ const PRODUCTION_COPY = {
     "Actual plots must be a valid non-negative number",
   TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED:
     "Actual plots exceeds humane daily workload limit",
+  TASK_PROGRESS_TARGET_EXCEEDED:
+    "Actual progress exceeds the remaining planned task target",
   TASK_PROGRESS_DELAY_REASON_INVALID:
     "Delay reason is invalid",
   TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
@@ -870,6 +872,8 @@ const TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_INVALID =
   "ACTUAL_PLOTS_INVALID";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_HUMANE_LIMIT_EXCEEDED =
   "HUMANE_LIMIT_EXCEEDED";
+const TASK_PROGRESS_BATCH_ENTRY_CODE_TARGET_EXCEEDED =
+  "TARGET_EXCEEDED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_DELAY_REASON_INVALID =
   "DELAY_REASON_INVALID";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_ZERO_DELAY_REQUIRED =
@@ -3186,6 +3190,8 @@ function buildProductionDraftSnapshot({
         plan?.endDate || null,
       plantingTargets:
         plan?.plantingTargets || null,
+      workloadContext:
+        plan?.workloadContext || null,
       aiGenerated:
         Boolean(plan?.aiGenerated),
     },
@@ -3510,6 +3516,7 @@ function parseWorkloadContextTotalUnits(
     : {};
   const candidateValues = [
     source.totalWorkUnits,
+    source.totalUnits,
     source.requiredUnits,
     source.units,
   ];
@@ -3523,6 +3530,243 @@ function parseWorkloadContextTotalUnits(
     }
   }
   return 0;
+}
+
+function normalizeProductionWorkUnitLabelInput(
+  value,
+  { fallback = "" } = {},
+) {
+  const rawValue =
+    value == null ||
+      value
+        .toString()
+        .trim()
+        .length === 0 ?
+      fallback
+    : value;
+  return (
+    rawValue || ""
+  )
+    .toString()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function resolveDefaultWorkUnitLabelForDomain(
+  domainContext,
+) {
+  return normalizeDomainContext(
+    domainContext,
+  ) === "farm" ?
+      "plot"
+    : "work unit";
+}
+
+function normalizeWorkloadContextIntegerInput(
+  value,
+  {
+    fallback = 0,
+    min = 0,
+  } = {},
+) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    const safeFallback = Number(fallback);
+    if (!Number.isFinite(safeFallback)) {
+      return min;
+    }
+    return Math.max(
+      min,
+      Math.floor(safeFallback),
+    );
+  }
+  return Math.max(min, Math.floor(parsed));
+}
+
+function normalizeWorkloadContextPercentInput(
+  value,
+  { fallback = 0 } = {},
+) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    const safeFallback = Number(fallback);
+    if (!Number.isFinite(safeFallback)) {
+      return 0;
+    }
+    return Math.max(
+      0,
+      Math.min(100, Math.round(safeFallback)),
+    );
+  }
+  return Math.max(
+    0,
+    Math.min(100, Math.round(parsed)),
+  );
+}
+
+function resolveScheduledPhaseTotalWorkUnits(
+  phases,
+) {
+  return (
+    Array.isArray(phases) ? phases : []
+  ).reduce((maxUnits, phase) => {
+    if (
+      normalizeProductionPhaseTypeInput(
+        phase?.phaseType,
+      ) !== PRODUCTION_PHASE_TYPE_FINITE
+    ) {
+      return maxUnits;
+    }
+    return Math.max(
+      maxUnits,
+      normalizePhaseRequiredUnitsInput(
+        phase?.requiredUnits,
+      ),
+    );
+  }, 0);
+}
+
+function buildNormalizedProductionWorkloadContext(
+  {
+    workloadContext,
+    fallbackWorkloadContext = null,
+    domainContext = DEFAULT_PRODUCTION_DOMAIN_CONTEXT,
+    defaultTotalWorkUnits = 0,
+  } = {},
+) {
+  const source =
+    (
+      workloadContext &&
+      typeof workloadContext === "object"
+    ) ?
+      workloadContext
+    : {};
+  const fallbackSource =
+    (
+      fallbackWorkloadContext &&
+      typeof fallbackWorkloadContext ===
+        "object"
+    ) ?
+      fallbackWorkloadContext
+    : {};
+
+  const sourceTotalUnits =
+    parseWorkloadContextTotalUnits(source);
+  const fallbackTotalUnits =
+    parseWorkloadContextTotalUnits(
+      fallbackSource,
+    );
+  const resolvedTotalWorkUnits =
+    sourceTotalUnits > 0 ?
+      sourceTotalUnits
+    : fallbackTotalUnits > 0 ?
+      fallbackTotalUnits
+    : normalizeWorkloadContextIntegerInput(
+        defaultTotalWorkUnits,
+      );
+  const defaultWorkUnitLabel =
+    resolveDefaultWorkUnitLabelForDomain(
+      domainContext,
+    );
+  const resolvedWorkUnitLabel =
+    normalizeProductionWorkUnitLabelInput(
+      source.workUnitLabel ||
+        source.workUnitType,
+      {
+        fallback:
+          normalizeProductionWorkUnitLabelInput(
+            fallbackSource.workUnitLabel ||
+              fallbackSource.workUnitType,
+            {
+              fallback:
+                resolvedTotalWorkUnits > 0 ?
+                  defaultWorkUnitLabel
+                : "",
+            },
+          ),
+      },
+    );
+  const minStaffPerUnit =
+    normalizeWorkloadContextIntegerInput(
+      source.minStaffPerUnit,
+      {
+        fallback:
+          normalizeWorkloadContextIntegerInput(
+            fallbackSource.minStaffPerUnit,
+          ),
+      },
+    );
+  const maxStaffPerUnit = Math.max(
+    minStaffPerUnit,
+    normalizeWorkloadContextIntegerInput(
+      source.maxStaffPerUnit,
+      {
+        fallback:
+          normalizeWorkloadContextIntegerInput(
+            fallbackSource.maxStaffPerUnit,
+            {
+              fallback: minStaffPerUnit,
+            },
+          ),
+      },
+    ),
+  );
+  const activeStaffAvailabilityPercent =
+    normalizeWorkloadContextPercentInput(
+      source.activeStaffAvailabilityPercent ??
+        source.expectedActivePercent,
+      {
+        fallback:
+          normalizeWorkloadContextPercentInput(
+            fallbackSource.activeStaffAvailabilityPercent ??
+              fallbackSource.expectedActivePercent,
+          ),
+      },
+    );
+  const hasConfirmedWorkloadContext =
+    source.hasConfirmedWorkloadContext ===
+      true ||
+    (
+      source.hasConfirmedWorkloadContext ==
+          null &&
+      fallbackSource.hasConfirmedWorkloadContext ===
+        true
+    ) ||
+    (
+      resolvedTotalWorkUnits > 0 &&
+      resolvedWorkUnitLabel
+        .trim()
+        .length >
+        0
+    );
+
+  if (
+    resolvedTotalWorkUnits <= 0 &&
+    resolvedWorkUnitLabel
+      .trim()
+      .length ===
+      0 &&
+    minStaffPerUnit <= 0 &&
+    maxStaffPerUnit <= 0 &&
+    activeStaffAvailabilityPercent <=
+      0 &&
+    !hasConfirmedWorkloadContext
+  ) {
+    return null;
+  }
+
+  return {
+    workUnitLabel:
+      resolvedWorkUnitLabel,
+    workUnitType:
+      resolvedWorkUnitLabel,
+    totalWorkUnits:
+      resolvedTotalWorkUnits,
+    minStaffPerUnit,
+    maxStaffPerUnit,
+    activeStaffAvailabilityPercent,
+    hasConfirmedWorkloadContext,
+  };
 }
 
 // PHASE-GATE-LAYER
@@ -4095,6 +4339,53 @@ function resolveTaskAssignedStaffIds(
   );
 }
 
+function getProductionTaskAssignmentValidationError({
+  taskRoleRequired,
+  assignedProfile,
+  estateAssetId = null,
+  invalidRoleError = PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+  scopeError = PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+}) {
+  const normalizedTaskRole =
+    normalizeStaffIdInput(
+      taskRoleRequired,
+    ).toLowerCase();
+  const normalizedStaffRole =
+    normalizeStaffIdInput(
+      assignedProfile?.staffRole,
+    ).toLowerCase();
+
+  if (
+    !normalizedTaskRole ||
+    !STAFF_ROLE_VALUES.includes(
+      normalizedTaskRole,
+    )
+  ) {
+    return PRODUCTION_COPY.STAFF_ROLE_REQUIRED;
+  }
+  if (
+    !normalizedStaffRole ||
+    !STAFF_ROLE_VALUES.includes(
+      normalizedStaffRole,
+    )
+  ) {
+    return invalidRoleError;
+  }
+
+  // WHY: Production tasks can be staffed by cross-role helpers when operations
+  // need it. roleRequired remains the preferred planning role, not a hard gate.
+  if (
+    estateAssetId &&
+    assignedProfile?.estateAssetId &&
+    assignedProfile.estateAssetId.toString() !==
+      estateAssetId.toString()
+  ) {
+    return scopeError;
+  }
+
+  return "";
+}
+
 // UNIT-LIFECYCLE
 // WHY: Unit completion writes must use canonical unit ids persisted on each task.
 function resolveTaskAssignedUnitIds(
@@ -4121,6 +4412,616 @@ function resolveTaskAssignedUnitIds(
   return Array.from(
     new Set(resolvedUnitIds),
   );
+}
+
+function resolveTaskProgressTargetPlots(
+  task,
+) {
+  const assignedStaffIds =
+    resolveTaskAssignedStaffIds(task);
+  const assignedUnitIds =
+    resolveTaskAssignedUnitIds(task);
+  const requiredHeadcount = Math.max(
+    0,
+    Number(task?.requiredHeadcount || 0),
+  );
+  const staffingTarget = Math.max(
+    1,
+    Math.max(
+      requiredHeadcount,
+      assignedStaffIds.length,
+    ),
+  );
+  const unitTarget =
+    assignedUnitIds.length;
+  const weightTarget = Math.max(
+    1,
+    Number(task?.weight || 0),
+  );
+  return Math.max(
+    weightTarget,
+    Math.max(staffingTarget, unitTarget),
+  );
+}
+
+function resolveTaskProgressTargetPlotUnits(
+  task,
+) {
+  return (
+    convertPlotsToPlotUnits(
+      resolveTaskProgressTargetPlots(
+        task,
+      ),
+    ) || 0
+  );
+}
+
+function buildTaskProgressRowKey({
+  staffId,
+  unitId,
+  workDate,
+}) {
+  const normalizedStaffId =
+    normalizeStaffIdInput(staffId);
+  const normalizedUnitId =
+    normalizeStaffIdInput(unitId);
+  const normalizedWorkDate =
+    normalizeWorkDateToDayStart(
+      workDate,
+    );
+  return [
+    normalizedStaffId,
+    normalizedUnitId,
+    normalizedWorkDate ?
+      normalizedWorkDate.toISOString()
+    : "",
+  ].join(":");
+}
+
+function singularizePlanUnitWord(
+  value,
+) {
+  const normalized =
+    (value || "").toString().trim();
+  if (!normalized) {
+    return "";
+  }
+  const lower =
+    normalized.toLowerCase();
+  if (
+    lower.endsWith("ies") &&
+    normalized.length > 3
+  ) {
+    return `${normalized.slice(0, -3)}y`;
+  }
+  if (
+    lower.endsWith("ches") ||
+    lower.endsWith("shes") ||
+    lower.endsWith("xes") ||
+    lower.endsWith("zes")
+  ) {
+    return normalized.slice(0, -2);
+  }
+  if (
+    lower.endsWith("s") &&
+    !lower.endsWith("ss")
+  ) {
+    return normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function formatPlanUnitLabelStem(
+  value,
+) {
+  const normalized =
+    normalizeProductionWorkUnitLabelInput(
+      value,
+      {
+        fallback: "work unit",
+      },
+    );
+  const tokens = normalized
+    .split(" ")
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return "Work Unit";
+  }
+  const lastToken =
+    singularizePlanUnitWord(
+      tokens[tokens.length - 1],
+    );
+  tokens[tokens.length - 1] =
+    lastToken || tokens[tokens.length - 1];
+  return tokens
+    .map((token) =>
+      token ?
+        `${token.charAt(0).toUpperCase()}${token.slice(1)}`
+      : "",
+    )
+    .join(" ");
+}
+
+function buildCanonicalPlanUnitLabel({
+  workUnitLabel,
+  unitIndex,
+}) {
+  const safeIndex = Math.max(
+    1,
+    Math.floor(Number(unitIndex || 1)),
+  );
+  return `${formatPlanUnitLabelStem(workUnitLabel)} ${safeIndex}`;
+}
+
+function normalizePlanUnitMatchText(
+  value,
+) {
+  const normalized =
+    (value || "")
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  return normalized ?
+      ` ${normalized} `
+    : "";
+}
+
+function resolveExplicitPlanUnitMatchesForTask({
+  task,
+  orderedPlanUnits,
+}) {
+  const haystack =
+    normalizePlanUnitMatchText(
+      `${task?.title || ""} ${task?.instructions || ""}`,
+    );
+  if (!haystack) {
+    return [];
+  }
+  return orderedPlanUnits
+    .filter((unit) => {
+      const normalizedLabel =
+        normalizePlanUnitMatchText(
+          unit?.label,
+        );
+      return (
+        normalizedLabel &&
+        haystack.includes(
+          normalizedLabel,
+        )
+      );
+    })
+    .map((unit) =>
+      normalizeStaffIdInput(unit?._id),
+    )
+    .filter(Boolean);
+}
+
+function buildSequentialPlanUnitSelection({
+  orderedPlanUnits,
+  startIndex,
+  count,
+  excludedUnitIds = [],
+}) {
+  if (
+    !Array.isArray(orderedPlanUnits) ||
+    orderedPlanUnits.length === 0
+  ) {
+    return [];
+  }
+  const targetCount = Math.max(
+    0,
+    Math.min(
+      orderedPlanUnits.length,
+      Math.floor(Number(count || 0)),
+    ),
+  );
+  if (targetCount === 0) {
+    return [];
+  }
+  const excludedIdSet = new Set(
+    excludedUnitIds
+      .map((value) =>
+        normalizeStaffIdInput(value),
+      )
+      .filter(Boolean),
+  );
+  const selected = [];
+  const safeStartIndex =
+    Math.max(
+      0,
+      Math.floor(Number(startIndex || 0)),
+    ) % orderedPlanUnits.length;
+  for (
+    let offset = 0;
+    offset < orderedPlanUnits.length &&
+    selected.length < targetCount;
+    offset += 1
+  ) {
+    const planUnit =
+      orderedPlanUnits[
+        (safeStartIndex + offset) %
+          orderedPlanUnits.length
+      ];
+    const unitId =
+      normalizeStaffIdInput(
+        planUnit?._id,
+      );
+    if (
+      !unitId ||
+      excludedIdSet.has(unitId)
+    ) {
+      continue;
+    }
+    excludedIdSet.add(unitId);
+    selected.push(unitId);
+  }
+  return selected;
+}
+
+function assignCanonicalPlanUnitsToTasks({
+  scheduledTasks,
+  planUnits,
+}) {
+  const orderedPlanUnits =
+    (
+      Array.isArray(planUnits) ?
+        [...planUnits]
+      : []
+    ).sort(
+      (left, right) =>
+        Number(left?.unitIndex || 0) -
+        Number(right?.unitIndex || 0),
+    );
+  if (orderedPlanUnits.length === 0) {
+    return (
+      Array.isArray(scheduledTasks) ?
+        scheduledTasks
+      : []
+    ).map((task) => ({
+      ...task,
+      assignedUnitIds: [],
+    }));
+  }
+  const validUnitIdSet = new Set(
+    orderedPlanUnits
+      .map((unit) =>
+        normalizeStaffIdInput(
+          unit?._id,
+        ),
+      )
+      .filter(Boolean),
+  );
+  const unitIndexById = new Map(
+    orderedPlanUnits.map((unit, index) => [
+      normalizeStaffIdInput(unit?._id),
+      index,
+    ]),
+  );
+  let unitCursor = 0;
+
+  return (
+    Array.isArray(scheduledTasks) ?
+      scheduledTasks
+    : []
+  ).map((task) => {
+    const persistedUnitIds =
+      resolveTaskAssignedUnitIds(task)
+        .filter((unitId) =>
+          validUnitIdSet.has(unitId),
+        );
+    const coverageUnits = Math.max(
+      1,
+      Math.min(
+        orderedPlanUnits.length,
+        resolveDraftTaskCoverageUnits(task),
+      ),
+    );
+    let resolvedUnitIds =
+      persistedUnitIds;
+
+    if (resolvedUnitIds.length === 0) {
+      const explicitMatchedUnitIds =
+        resolveExplicitPlanUnitMatchesForTask(
+          {
+            task,
+            orderedPlanUnits,
+          },
+        );
+      resolvedUnitIds =
+        explicitMatchedUnitIds.slice(
+          0,
+          coverageUnits,
+        );
+      if (
+        resolvedUnitIds.length <
+        coverageUnits
+      ) {
+        resolvedUnitIds = [
+          ...resolvedUnitIds,
+          ...buildSequentialPlanUnitSelection(
+            {
+              orderedPlanUnits,
+              startIndex:
+                unitCursor,
+              count:
+                coverageUnits -
+                resolvedUnitIds.length,
+              excludedUnitIds:
+                resolvedUnitIds,
+            },
+          ),
+        ];
+      }
+    }
+
+    const lastAssignedUnitId =
+      resolvedUnitIds[
+        resolvedUnitIds.length - 1
+      ];
+    const nextCursorIndex =
+      unitIndexById.get(
+        lastAssignedUnitId,
+      );
+    if (
+      Number.isInteger(
+        nextCursorIndex,
+      )
+    ) {
+      unitCursor =
+        (nextCursorIndex + 1) %
+        orderedPlanUnits.length;
+    }
+
+    return {
+      ...task,
+      assignedUnitIds:
+        resolvedUnitIds,
+    };
+  });
+}
+
+async function seedCanonicalPlanUnits({
+  planId,
+  workloadContext,
+}) {
+  if (
+    !PRODUCTION_FEATURE_FLAGS.enablePlanUnits
+  ) {
+    return [];
+  }
+  const safePlanId =
+    normalizeStaffIdInput(planId);
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      safePlanId,
+    )
+  ) {
+    return [];
+  }
+  const totalWorkUnits =
+    parseWorkloadContextTotalUnits(
+      workloadContext,
+    );
+  if (totalWorkUnits <= 0) {
+    return [];
+  }
+  const workUnitLabel =
+    normalizeProductionWorkUnitLabelInput(
+      workloadContext?.workUnitLabel ||
+        workloadContext?.workUnitType,
+      {
+        fallback: "work unit",
+      },
+    );
+  const planUnits = Array.from(
+    { length: totalWorkUnits },
+    (_, index) => ({
+      planId: safePlanId,
+      unitIndex: index + 1,
+      label:
+        buildCanonicalPlanUnitLabel(
+          {
+            workUnitLabel,
+            unitIndex: index + 1,
+          },
+        ),
+    }),
+  );
+  try {
+    return await PlanUnit.insertMany(
+      planUnits,
+    );
+  } catch (err) {
+    const hasDuplicateUnitIndexError =
+      err?.code === 11000 ||
+      (
+        Array.isArray(
+          err?.writeErrors,
+        ) &&
+        err.writeErrors.some(
+          (writeErr) =>
+            writeErr?.code === 11000,
+        )
+      );
+    if (!hasDuplicateUnitIndexError) {
+      throw err;
+    }
+    return PlanUnit.find({
+      planId: safePlanId,
+    })
+      .sort({ unitIndex: 1 })
+      .lean();
+  }
+}
+
+function haveMatchingAssignedUnitIds(
+  left,
+  right,
+) {
+  const leftIds =
+    resolveTaskAssignedUnitIds({
+      assignedUnitIds: left,
+    });
+  const rightIds =
+    resolveTaskAssignedUnitIds({
+      assignedUnitIds: right,
+    });
+  if (leftIds.length !== rightIds.length) {
+    return false;
+  }
+  return leftIds.every(
+    (unitId, index) =>
+      unitId === rightIds[index],
+  );
+}
+
+async function ensureCanonicalPlanUnitsForPlan({
+  plan,
+  tasks,
+}) {
+  if (
+    !PRODUCTION_FEATURE_FLAGS.enablePlanUnits
+  ) {
+    return {
+      planUnits: [],
+      tasks:
+        Array.isArray(tasks) ?
+          tasks
+        : [],
+      repairedTaskCount: 0,
+    };
+  }
+  const safePlanId =
+    normalizeStaffIdInput(plan?._id);
+  if (
+    !mongoose.Types.ObjectId.isValid(
+      safePlanId,
+    )
+  ) {
+    return {
+      planUnits: [],
+      tasks:
+        Array.isArray(tasks) ?
+          tasks
+        : [],
+      repairedTaskCount: 0,
+    };
+  }
+
+  let planUnits = await PlanUnit.find({
+    planId: safePlanId,
+  })
+    .sort({ unitIndex: 1 })
+    .lean();
+
+  if (planUnits.length === 0) {
+    const seededPlanUnits =
+      await seedCanonicalPlanUnits({
+        planId: safePlanId,
+        workloadContext:
+          plan?.workloadContext,
+      });
+    planUnits =
+      Array.isArray(seededPlanUnits) ?
+        seededPlanUnits.map((unit) =>
+          unit?.toObject ?
+            unit.toObject()
+          : unit,
+        )
+      : [];
+  }
+
+  const orderedTasks =
+    Array.isArray(tasks) ?
+      tasks
+    : await ProductionTask.find({
+        planId: safePlanId,
+      })
+        .sort({
+          startDate: 1,
+          dueDate: 1,
+          manualSortOrder: 1,
+          _id: 1,
+        })
+        .lean();
+
+  if (
+    planUnits.length === 0 ||
+    orderedTasks.length === 0
+  ) {
+    return {
+      planUnits,
+      tasks: orderedTasks,
+      repairedTaskCount: 0,
+    };
+  }
+
+  const normalizedTasks =
+    assignCanonicalPlanUnitsToTasks({
+      scheduledTasks:
+        orderedTasks,
+      planUnits,
+    });
+  const taskUpdates = [];
+
+  normalizedTasks.forEach(
+    (task, index) => {
+      const currentTask =
+        orderedTasks[index];
+      const taskId =
+        normalizeStaffIdInput(
+          currentTask?._id,
+        );
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          taskId,
+        )
+      ) {
+        return;
+      }
+      const nextAssignedUnitIds =
+        resolveTaskAssignedUnitIds(task);
+      if (
+        haveMatchingAssignedUnitIds(
+          currentTask
+            ?.assignedUnitIds,
+          nextAssignedUnitIds,
+        )
+      ) {
+        return;
+      }
+      taskUpdates.push({
+        updateOne: {
+          filter: {
+            _id: taskId,
+            planId: safePlanId,
+          },
+          update: {
+            $set: {
+              assignedUnitIds:
+                nextAssignedUnitIds,
+            },
+          },
+        },
+      });
+    },
+  );
+
+  if (taskUpdates.length > 0) {
+    await ProductionTask.bulkWrite(
+      taskUpdates,
+    );
+  }
+
+  return {
+    planUnits,
+    tasks: normalizedTasks,
+    repairedTaskCount:
+      taskUpdates.length,
+  };
 }
 
 // UNIT-LIFECYCLE
@@ -13689,6 +14590,33 @@ async function acceptInvite(req, res) {
  * GET /business/staff
  * Owner + estate manager: list staff profiles.
  */
+function serializeStaffProfileSummary(
+  profile,
+) {
+  return {
+    id:
+      profile?._id ||
+      profile?.id ||
+      "",
+    staffRole:
+      profile?.staffRole || "",
+    status:
+      profile?.status || "",
+    estateAssetId:
+      profile?.estateAssetId ||
+      null,
+    startDate:
+      profile?.startDate || null,
+    endDate:
+      profile?.endDate || null,
+    notes: profile?.notes || "",
+    user:
+      profile?.userId ||
+      profile?.user ||
+      null,
+  };
+}
+
 async function listStaffProfiles(
   req,
   res,
@@ -13748,17 +14676,7 @@ async function listStaffProfiles(
         .lean();
 
     const staff = profiles.map(
-      (profile) => ({
-        id: profile._id,
-        staffRole: profile.staffRole,
-        status: profile.status,
-        estateAssetId:
-          profile.estateAssetId,
-        startDate: profile.startDate,
-        endDate: profile.endDate,
-        notes: profile.notes,
-        user: profile.userId,
-      }),
+      serializeStaffProfileSummary,
     );
 
     debug(
@@ -13879,17 +14797,10 @@ async function getStaffProfile(
     return res.status(200).json({
       message:
         STAFF_COPY.STAFF_DETAIL_OK,
-      staff: {
-        id: profile._id,
-        staffRole: profile.staffRole,
-        status: profile.status,
-        estateAssetId:
-          profile.estateAssetId,
-        startDate: profile.startDate,
-        endDate: profile.endDate,
-        notes: profile.notes,
-        user: profile.userId,
-      },
+      staff:
+        serializeStaffProfileSummary(
+          profile,
+        ),
     });
   } catch (err) {
     debug(
@@ -19174,6 +20085,7 @@ async function persistProductionPlanScheduleRows(
     planId,
     businessId,
     actor,
+    workloadContext,
     scheduledPhases,
     tasksInputByPhase,
     effectiveSchedulePolicy,
@@ -19283,6 +20195,11 @@ async function persistProductionPlanScheduleRows(
         }),
       ),
     );
+  const createdPlanUnits =
+    await seedCanonicalPlanUnits({
+      planId,
+      workloadContext,
+    });
 
   const tasksToCreate = [];
   createdPhases.forEach(
@@ -19306,8 +20223,17 @@ async function persistProductionPlanScheduleRows(
             effectiveSchedulePolicy,
           allowParallelByRole: true,
         });
+      const scheduledTasksWithUnits =
+        assignCanonicalPlanUnitsToTasks(
+          {
+            scheduledTasks,
+            planUnits:
+              createdPlanUnits,
+          },
+        );
 
-      scheduledTasks.forEach((task) => {
+      scheduledTasksWithUnits.forEach(
+        (task) => {
         const assignedStaffProfileIds =
           resolveTaskAssignedStaffIds(task);
         const assignedUnitIds =
@@ -19393,7 +20319,8 @@ async function persistProductionPlanScheduleRows(
           reviewedAt,
           rejectionReason: "",
         });
-      });
+        },
+      );
     },
   );
 
@@ -19487,6 +20414,8 @@ async function persistProductionPlanScheduleRows(
       planId: planId.toString(),
       phaseCount:
         createdPhases.length,
+      planUnitCount:
+        createdPlanUnits.length,
       taskCount:
         createdTasks.length,
       seededUnitScheduleRows:
@@ -19497,6 +20426,7 @@ async function persistProductionPlanScheduleRows(
 
   return {
     createdPhases,
+    createdPlanUnits,
     createdTasks:
       sortedCreatedTasks,
     unitScheduleSeedResult,
@@ -19625,9 +20555,17 @@ async function createProductionPlan(
           req.body?.workloadContext
             ?.plantingTargets,
       );
+    const workloadContextInput =
+      (
+        req.body?.workloadContext &&
+        typeof req.body
+          .workloadContext === "object"
+      ) ?
+        req.body.workloadContext
+      : null;
     const requestedWorkloadUnits =
       parseWorkloadContextTotalUnits(
-        req.body?.workloadContext,
+        workloadContextInput,
       );
 
     const startDate = parseDateInput(
@@ -19879,6 +20817,18 @@ async function createProductionPlan(
             : [],
         }),
       );
+    const workloadContext =
+      buildNormalizedProductionWorkloadContext(
+        {
+          workloadContext:
+            workloadContextInput,
+          domainContext,
+          defaultTotalWorkUnits:
+            resolveScheduledPhaseTotalWorkUnits(
+              normalizedPhases,
+            ),
+        },
+      );
 
     const scheduledPhases =
       buildPhaseSchedule({
@@ -19994,21 +20944,22 @@ async function createProductionPlan(
                 STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
               );
             }
-            if (
-              assignedProfile.staffRole !==
-              task.roleRequired
-            ) {
-              throw new Error(
-                PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+            const assignmentError =
+              getProductionTaskAssignmentValidationError(
+                {
+                  taskRoleRequired:
+                    task.roleRequired,
+                  assignedProfile,
+                  estateAssetId,
+                  invalidRoleError:
+                    PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+                  scopeError:
+                    PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+                },
               );
-            }
-            if (
-              assignedProfile.estateAssetId &&
-              assignedProfile.estateAssetId.toString() !==
-                estateAssetId
-            ) {
+            if (assignmentError) {
               throw new Error(
-                PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+                assignmentError,
               );
             }
           },
@@ -20053,6 +21004,7 @@ async function createProductionPlan(
           ) ?
             plantingTargets
           : null,
+        workloadContext,
         aiGenerated,
         domainContext,
       });
@@ -20101,6 +21053,7 @@ async function createProductionPlan(
           planId: plan._id,
           businessId,
           actor,
+          workloadContext,
           scheduledPhases,
           tasksInputByPhase,
           effectiveSchedulePolicy,
@@ -20429,7 +21382,13 @@ async function updateProductionPlanDraft(
       );
     const requestedWorkloadUnits =
       parseWorkloadContextTotalUnits(
-        req.body?.workloadContext,
+        (
+          req.body?.workloadContext &&
+          typeof req.body
+            .workloadContext === "object"
+        ) ?
+          req.body.workloadContext
+        : plan.workloadContext,
       );
     const startDate = parseDateInput(
       req.body?.startDate ||
@@ -20648,6 +21607,27 @@ async function updateProductionPlanDraft(
             : [],
         }),
       );
+    const workloadContext =
+      buildNormalizedProductionWorkloadContext(
+        {
+          workloadContext:
+            (
+              req.body?.workloadContext &&
+              typeof req.body
+                .workloadContext ===
+                "object"
+            ) ?
+              req.body.workloadContext
+            : null,
+          fallbackWorkloadContext:
+            plan.workloadContext,
+          domainContext,
+          defaultTotalWorkUnits:
+            resolveScheduledPhaseTotalWorkUnits(
+              normalizedPhases,
+            ),
+        },
+      );
 
     const scheduledPhases =
       buildPhaseSchedule({
@@ -20739,21 +21719,22 @@ async function updateProductionPlanDraft(
                 STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
               );
             }
-            if (
-              assignedProfile.staffRole !==
-              task.roleRequired
-            ) {
-              throw new Error(
-                PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+            const assignmentError =
+              getProductionTaskAssignmentValidationError(
+                {
+                  taskRoleRequired:
+                    task.roleRequired,
+                  assignedProfile,
+                  estateAssetId,
+                  invalidRoleError:
+                    PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+                  scopeError:
+                    PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+                },
               );
-            }
-            if (
-              assignedProfile.estateAssetId &&
-              assignedProfile.estateAssetId.toString() !==
-                estateAssetId
-            ) {
+            if (assignmentError) {
               throw new Error(
-                PRODUCTION_COPY.STAFF_ROLE_MISMATCH,
+                assignmentError,
               );
             }
           },
@@ -20785,6 +21766,7 @@ async function updateProductionPlanDraft(
           notes,
           plantingTargets:
             normalizedPlantingTargets,
+          workloadContext,
           aiGenerated,
           domainContext,
         });
@@ -20798,6 +21780,7 @@ async function updateProductionPlanDraft(
             planId: draftCopy._id,
             businessId,
             actor,
+            workloadContext,
             scheduledPhases,
             tasksInputByPhase,
             effectiveSchedulePolicy,
@@ -20850,6 +21833,8 @@ async function updateProductionPlanDraft(
     plan.domainContext = domainContext;
     plan.plantingTargets =
       normalizedPlantingTargets;
+    plan.workloadContext =
+      workloadContext;
 
     const {
       createdPhases,
@@ -20860,6 +21845,7 @@ async function updateProductionPlanDraft(
           planId: plan._id,
           businessId,
           actor,
+          workloadContext,
           scheduledPhases,
           tasksInputByPhase,
           effectiveSchedulePolicy,
@@ -21681,11 +22667,8 @@ async function listProductionPlanUnits(
         allowMissing: true,
       });
     if (
-      !canAssignProductionTasks({
-        actorRole: actor.role,
-        staffRole:
-          staffProfile?.staffRole,
-      })
+      actor.role === "staff" &&
+      !staffProfile
     ) {
       return res.status(403).json({
         error:
@@ -21701,6 +22684,7 @@ async function listProductionPlanUnits(
         .select({
           _id: 1,
           estateAssetId: 1,
+          workloadContext: 1,
         })
         .lean();
     if (!plan) {
@@ -21721,11 +22705,26 @@ async function listProductionPlanUnits(
       });
     }
 
-    const units = await PlanUnit.find({
-      planId: plan._id,
-    })
-      .sort({ unitIndex: 1 })
-      .lean();
+    const {
+      planUnits: units,
+      repairedTaskCount:
+        repairedAssignedUnitTaskCount,
+    } =
+      await ensureCanonicalPlanUnitsForPlan(
+        {
+          plan,
+        },
+      );
+
+    debug(
+      "BUSINESS CONTROLLER: listProductionPlanUnits - success",
+      {
+        actorId: actor._id,
+        planId: plan._id,
+        totalUnits: units.length,
+        repairedAssignedUnitTaskCount,
+      },
+    );
 
     return res.status(200).json({
       message:
@@ -23089,7 +24088,7 @@ async function getProductionPlanDetail(
         .sort({ order: 1 })
         .lean();
 
-    const tasks =
+    const persistedTasks =
       await ProductionTask.find({
         planId: plan._id,
       })
@@ -23100,6 +24099,18 @@ async function getProductionPlanDetail(
           _id: 1,
         })
         .lean();
+    const {
+      tasks,
+      repairedTaskCount:
+        repairedAssignedUnitTaskCount,
+    } =
+      await ensureCanonicalPlanUnitsForPlan(
+        {
+          plan,
+          tasks:
+            persistedTasks,
+        },
+      );
     const progressRecords =
       await TaskProgress.find({
         planId: plan._id,
@@ -23243,6 +24254,8 @@ async function getProductionPlanDetail(
       attendanceRecords;
     let visibleStaffProgressScores =
       staffProgressScores;
+    let visiblePlanStaffProfiles =
+      planStaffProfiles;
     if (
       actor.role === "staff" &&
       !canViewTeamKpis
@@ -23271,6 +24284,13 @@ async function getProductionPlanDetail(
           (score) =>
             normalizeStaffIdInput(
               score?.staffId,
+            ) === selfStaffProfileId,
+        );
+      visiblePlanStaffProfiles =
+        planStaffProfiles.filter(
+          (profile) =>
+            normalizeStaffIdInput(
+              profile?._id,
             ) === selfStaffProfileId,
         );
     }
@@ -23440,6 +24460,7 @@ async function getProductionPlanDetail(
         planId: plan._id,
         phases: phases.length,
         tasks: tasks.length,
+        repairedAssignedUnitTaskCount,
         progressRows:
           visibleTimelineRows.length,
         attendanceRows:
@@ -23491,6 +24512,10 @@ async function getProductionPlanDetail(
       timelineRows: visibleTimelineRows,
       attendanceRecords:
         visibleAttendanceRecords,
+      staffProfiles:
+        visiblePlanStaffProfiles.map(
+          serializeStaffProfileSummary,
+        ),
       staffProgressScores:
         visibleStaffProgressScores,
       draftAuditLog:
@@ -25225,24 +26250,23 @@ async function assignProductionTaskStaffProfiles(
       }
 
       for (const profile of matchingProfiles) {
-        if (
-          profile.staffRole !==
-          task.roleRequired
-        ) {
+        const assignmentError =
+          getProductionTaskAssignmentValidationError(
+            {
+              taskRoleRequired:
+                task.roleRequired,
+              assignedProfile: profile,
+              estateAssetId:
+                plan.estateAssetId,
+              invalidRoleError:
+                PRODUCTION_COPY.TASK_ASSIGNMENT_ROLE_MISMATCH,
+              scopeError:
+                PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+            },
+          );
+        if (assignmentError) {
           return res.status(400).json({
-            error:
-              PRODUCTION_COPY.TASK_ASSIGNMENT_ROLE_MISMATCH,
-          });
-        }
-        if (
-          plan.estateAssetId &&
-          profile.estateAssetId &&
-          profile.estateAssetId.toString() !==
-            plan.estateAssetId.toString()
-        ) {
-          return res.status(400).json({
-            error:
-              PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+            error: assignmentError,
           });
         }
       }
@@ -25392,7 +26416,7 @@ async function logProductionTaskProgress(
       parseNonNegativeNumberInput(
         req.body?.quantityAmount,
       );
-    const rawQuantityUnit =
+    const quantityUnit =
       normalizePlantingTargetUnitInput(
         req.body?.quantityUnit,
       );
@@ -25740,16 +26764,84 @@ async function logProductionTaskProgress(
     }
 
     const expectedPlotUnits =
-      convertPlotsToPlotUnits(
-        Math.max(
-          0,
-          Number(task.weight || 0),
-        ),
-      ) || 0;
+      resolveTaskProgressTargetPlotUnits(
+        task,
+      );
     const expectedPlots =
       convertPlotUnitsToPlots(
         expectedPlotUnits,
       ) || 0;
+    const existingTaskProgressRows =
+      await TaskProgress.find({
+        taskId: task._id,
+      })
+        .select({
+          staffId: 1,
+          unitId: 1,
+          workDate: 1,
+          actualPlotUnits: 1,
+        })
+        .lean();
+    const currentRowKey =
+      buildTaskProgressRowKey({
+        staffId: effectiveStaffId,
+        unitId:
+          effectiveUnitId || null,
+        workDate: normalizedWorkDate,
+      });
+    let loggedUnitsAcrossTask = 0;
+    let existingSelectionUnits = 0;
+    existingTaskProgressRows.forEach(
+      (row) => {
+        const rowUnits = Math.max(
+          0,
+          Number(
+            row?.actualPlotUnits || 0,
+          ),
+        );
+        loggedUnitsAcrossTask += rowUnits;
+        if (
+          buildTaskProgressRowKey({
+            staffId: row?.staffId,
+            unitId: row?.unitId,
+            workDate: row?.workDate,
+          }) === currentRowKey
+        ) {
+          existingSelectionUnits +=
+            rowUnits;
+        }
+      },
+    );
+    const loggedUnitsExcludingSelection =
+      Math.max(
+        0,
+        loggedUnitsAcrossTask -
+          existingSelectionUnits,
+      );
+    const maxAllowedPlotUnits =
+      Math.max(
+        0,
+        expectedPlotUnits -
+          loggedUnitsExcludingSelection,
+      );
+    if (
+      actualPlotUnits >
+      maxAllowedPlotUnits
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_TARGET_EXCEEDED,
+        maxAllowedPlots:
+          convertPlotUnitsToPlots(
+            maxAllowedPlotUnits,
+          ) || 0,
+        maxAllowedPlotUnits,
+        taskTargetPlots:
+          expectedPlots,
+        taskTargetPlotUnits:
+          expectedPlotUnits,
+      });
+    }
     const progress =
       await TaskProgress.findOneAndUpdate(
         {
@@ -26045,6 +27137,66 @@ async function logProductionTaskProgressBatch(
           unitRow?.planId,
         ),
       ]),
+    );
+    const existingTaskProgressRows =
+      taskIdsForLookup.length > 0 ?
+        await TaskProgress.find({
+          taskId: {
+            $in: taskIdsForLookup,
+          },
+        })
+          .select({
+            taskId: 1,
+            staffId: 1,
+            unitId: 1,
+            workDate: 1,
+            actualPlotUnits: 1,
+          })
+          .lean()
+      : [];
+    const taskProgressTotalsByTaskId =
+      new Map();
+    const taskProgressUnitsByRowKey =
+      new Map();
+    existingTaskProgressRows.forEach(
+      (row) => {
+        const scopedTaskId =
+          normalizeStaffIdInput(
+            row?.taskId,
+          );
+        if (!scopedTaskId) {
+          return;
+        }
+        const rowUnits = Math.max(
+          0,
+          Number(
+            row?.actualPlotUnits || 0,
+          ),
+        );
+        const currentTotal =
+          taskProgressTotalsByTaskId.get(
+            scopedTaskId,
+          ) || 0;
+        taskProgressTotalsByTaskId.set(
+          scopedTaskId,
+          currentTotal + rowUnits,
+        );
+        const rowKey = `${scopedTaskId}::${buildTaskProgressRowKey(
+          {
+            staffId: row?.staffId,
+            unitId: row?.unitId,
+            workDate: row?.workDate,
+          },
+        )}`;
+        const existingRowUnits =
+          taskProgressUnitsByRowKey.get(
+            rowKey,
+          ) || 0;
+        taskProgressUnitsByRowKey.set(
+          rowKey,
+          existingRowUnits + rowUnits,
+        );
+      },
     );
 
     const successes = [];
@@ -26387,16 +27539,54 @@ async function logProductionTaskProgressBatch(
           ?.toString()
           .trim() || "";
       const expectedPlotUnits =
-        convertPlotsToPlotUnits(
-          Math.max(
-            0,
-            Number(task.weight || 0),
-          ),
-        ) || 0;
+        resolveTaskProgressTargetPlotUnits(
+          task,
+        );
       const expectedPlots =
         convertPlotUnitsToPlots(
           expectedPlotUnits,
         ) || 0;
+      const rowKey = `${taskId}::${buildTaskProgressRowKey(
+        {
+          staffId,
+          unitId:
+            effectiveUnitId || null,
+          workDate:
+            normalizedWorkDate,
+        },
+      )}`;
+      const loggedUnitsAcrossTask =
+        taskProgressTotalsByTaskId.get(
+          taskId,
+        ) || 0;
+      const existingSelectionUnits =
+        taskProgressUnitsByRowKey.get(
+          rowKey,
+        ) || 0;
+      const loggedUnitsExcludingSelection =
+        Math.max(
+          0,
+          loggedUnitsAcrossTask -
+            existingSelectionUnits,
+        );
+      const maxAllowedPlotUnits =
+        Math.max(
+          0,
+          expectedPlotUnits -
+            loggedUnitsExcludingSelection,
+        );
+      if (
+        actualPlotUnits >
+        maxAllowedPlotUnits
+      ) {
+        pushEntryError({
+          errorCode:
+            TASK_PROGRESS_BATCH_ENTRY_CODE_TARGET_EXCEEDED,
+          error:
+            PRODUCTION_COPY.TASK_PROGRESS_TARGET_EXCEEDED,
+        });
+        continue;
+      }
 
       try {
         const progress =
@@ -26440,6 +27630,15 @@ async function logProductionTaskProgressBatch(
           unitId: effectiveUnitId || "",
           progress,
         });
+        taskProgressTotalsByTaskId.set(
+          taskId,
+          loggedUnitsExcludingSelection +
+            actualPlotUnits,
+        );
+        taskProgressUnitsByRowKey.set(
+          rowKey,
+          actualPlotUnits,
+        );
       } catch (entryError) {
         pushEntryError({
           errorCode:

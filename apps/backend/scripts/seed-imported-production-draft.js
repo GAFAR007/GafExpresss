@@ -1,30 +1,30 @@
 #!/usr/bin/env node
 /**
-* scripts/seed-imported-production-draft.js
-* -----------------------------------------
-* WHAT:
-* - Imports a reviewed production-plan PDF and persists it as a draft plan.
-*
-* WHY:
-* - Gives operators a repeatable backend seed path for document-based drafts.
-* - Reuses the same business-scoped product + plan controllers as the app.
-*
-* HOW:
-* - Resolves the target owner, estate, and product.
-* - Extracts phases/tasks from the source PDF.
-* - Fills any missing planting-target fields with explicit seed overrides.
-* - Creates or updates the draft through the production plan controllers.
-*
-* SAFETY:
-* - Dry-run by default. Pass --execute to write to MongoDB.
-*/
+ * scripts/seed-imported-production-draft.js
+ * -----------------------------------------
+ * WHAT:
+ * - Imports a reviewed production-plan PDF and persists it as a draft plan.
+ *
+ * WHY:
+ * - Gives operators a repeatable backend seed path for document-based drafts.
+ * - Reuses the same business-scoped product + plan controllers as the app.
+ *
+ * HOW:
+ * - Resolves the target owner, estate, and product.
+ * - Extracts phases/tasks from the source PDF.
+ * - Fills any missing planting-target fields with explicit seed overrides.
+ * - Creates or updates the draft through the production plan controllers.
+ *
+ * SAFETY:
+ * - Dry-run by default. Pass --execute to write to MongoDB.
+ */
 
 const fs = require("fs");
 const path = require("path");
 
 require("dotenv").config({
- path: path.resolve(__dirname, "..", ".env"),
- quiet: true,
+  path: path.resolve(__dirname, "..", ".env"),
+  quiet: true,
 });
 
 const mongoose = require("mongoose");
@@ -36,37 +36,45 @@ const BusinessAsset = require("../models/BusinessAsset");
 const ProductionPlan = require("../models/ProductionPlan");
 const businessProductService = require("../services/business.product.service");
 const {
- extractAiDraftSourceDocumentContext,
- buildProductionDraftImportResponse,
+  extractAiDraftSourceDocumentContext,
+  buildProductionDraftImportResponse,
 } = require("../services/production_plan_import.service");
 const {
- createProductionPlan,
- updateProductionPlanDraft,
+  createProductionPlan,
+  updateProductionPlanDraft,
 } = require("../controllers/business.controller");
 
 const args = process.argv.slice(2);
 const shouldExecute = args.includes("--execute");
 const shouldShowHelp =
- args.includes("--help") || args.includes("-h");
+  args.includes("--help") || args.includes("-h");
 
 const ownerEmailArg = readArg("--owner-email=");
 const businessIdArg = readArg("--business-id=");
 const estateNameArg = readArg("--estate-name=");
-const estateAssetIdArg = readArg("--estate-asset-id=");
+const estateAssetIdArg = readArg(
+  "--estate-asset-id=",
+);
 const productNameArg = readArg("--product-name=");
-const productCategoryArg = readArg("--product-category=");
-const productSubcategoryArg = readArg("--product-subcategory=");
+const productCategoryArg = readArg(
+  "--product-category=",
+);
+const productSubcategoryArg = readArg(
+  "--product-subcategory=",
+);
 const brandArg = readArg("--brand=");
 const planTitleArg = readArg("--plan-title=");
 const pdfPathArg =
- readArg("--pdf-path=") ||
- readArg("--source-pdf=") ||
- args.find((value) => !value.startsWith("--")) ||
- "";
-const estimatedHarvestQuantityArg =
- readArg("--estimated-harvest-quantity=");
-const estimatedHarvestUnitArg =
- readArg("--estimated-harvest-unit=");
+  readArg("--pdf-path=") ||
+  readArg("--source-pdf=") ||
+  args.find((value) => !value.startsWith("--")) ||
+  "";
+const estimatedHarvestQuantityArg = readArg(
+  "--estimated-harvest-quantity=",
+);
+const estimatedHarvestUnitArg = readArg(
+  "--estimated-harvest-unit=",
+);
 const priceArg = readArg("--price=");
 const stockArg = readArg("--stock=");
 
@@ -77,19 +85,19 @@ const DEFAULT_PRODUCT_PACKAGE_TYPE = "crate";
 const DEFAULT_PRODUCT_MEASUREMENT_UNIT = "crate";
 
 const PRODUCT_PLANTING_TARGET_DEFAULTS = {
- bell_pepper: {
-   materialType: "seedling",
-   estimatedHarvestQuantity: 5500,
-   estimatedHarvestUnit: "kg",
- },
+  bell_pepper: {
+    materialType: "seedling",
+    estimatedHarvestQuantity: 5500,
+    estimatedHarvestUnit: "kg",
+  },
 };
 
 function readArg(prefix) {
   const match = args.find((arg) =>
     arg.startsWith(prefix),
   );
-  return match ?
-      match.slice(prefix.length).trim()
+  return match
+    ? match.slice(prefix.length).trim()
     : "";
 }
 
@@ -161,25 +169,25 @@ function buildSeedMarker({
 }
 
 function buildSeedNotes({
- baseNotes,
- fileName,
- estateName,
- ownerName,
- productName,
+  baseNotes,
+  fileName,
+  estateName,
+  ownerName,
+  productName,
 }) {
- return [
-   normalizeText(baseNotes),
-   `Imported from ${fileName}.`,
-   `Seed target estate: ${estateName}.`,
-   `Seed target owner: ${ownerName}.`,
-   buildSeedMarker({
-     fileName,
-     estateName,
-     productName,
-   }),
- ]
-   .filter(Boolean)
-   .join(" ");
+  return [
+    normalizeText(baseNotes),
+    `Imported from ${fileName}.`,
+    `Seed target estate: ${estateName}.`,
+    `Seed target owner: ${ownerName}.`,
+    buildSeedMarker({
+      fileName,
+      estateName,
+      productName,
+    }),
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function mergePlantingTargets({
@@ -205,12 +213,11 @@ function mergePlantingTargets({
     normalizePositiveNumber(
       fallbackTargets.estimatedHarvestQuantity,
     );
-  const resolvedHarvestUnit =
-    normalizeText(
-      estimatedHarvestUnit ||
-        plantingTargets?.estimatedHarvestUnit ||
-        fallbackTargets.estimatedHarvestUnit,
-    ).toLowerCase();
+  const resolvedHarvestUnit = normalizeText(
+    estimatedHarvestUnit ||
+      plantingTargets?.estimatedHarvestUnit ||
+      fallbackTargets.estimatedHarvestUnit,
+  ).toLowerCase();
 
   return {
     materialType:
@@ -240,18 +247,18 @@ function hasCompletePlantingTargets(
     normalizeText(
       plantingTargets?.materialType,
     ) &&
-      normalizeText(
-        plantingTargets?.plannedPlantingUnit,
-      ) &&
-      normalizeText(
-        plantingTargets?.estimatedHarvestUnit,
-      ) &&
-      Number(
-        plantingTargets?.plannedPlantingQuantity,
-      ) > 0 &&
-      Number(
-        plantingTargets?.estimatedHarvestQuantity,
-      ) > 0,
+    normalizeText(
+      plantingTargets?.plannedPlantingUnit,
+    ) &&
+    normalizeText(
+      plantingTargets?.estimatedHarvestUnit,
+    ) &&
+    Number(
+      plantingTargets?.plannedPlantingQuantity,
+    ) > 0 &&
+    Number(
+      plantingTargets?.estimatedHarvestQuantity,
+    ) > 0,
   );
 }
 
@@ -354,9 +361,7 @@ async function resolveOwner() {
   );
 }
 
-async function resolveEstate({
-  businessId,
-}) {
+async function resolveEstate({ businessId }) {
   if (estateAssetIdArg) {
     return BusinessAsset.findOne({
       _id: estateAssetIdArg,
@@ -386,16 +391,13 @@ async function resolveOrCreateProduct({
   businessId,
   productName,
 }) {
-  const existingProduct =
-    await Product.findOne({
-      businessId,
-      name: {
-        $regex: `^${escapeRegExp(
-          productName,
-        )}$`,
-        $options: "i",
-      },
-    });
+  const existingProduct = await Product.findOne({
+    businessId,
+    name: {
+      $regex: `^${escapeRegExp(productName)}$`,
+      $options: "i",
+    },
+  });
   if (existingProduct) {
     return {
       product: existingProduct,
@@ -417,8 +419,7 @@ async function resolveOrCreateProduct({
     await businessProductService.createProduct({
       data: {
         name: productName,
-        description:
-          `Imported production output placeholder for ${productName} at ${owner.companyName || owner.name}.`,
+        description: `Imported production output placeholder for ${productName} at ${owner.companyName || owner.name}.`,
         category:
           productCategoryArg ||
           DEFAULT_PRODUCT_CATEGORY,
@@ -439,16 +440,14 @@ async function resolveOrCreateProduct({
             isDefault: true,
           },
         ],
-        price:
-          normalizeNonNegativeNumber(
-            priceArg,
-            0,
-          ),
-        stock:
-          normalizeNonNegativeNumber(
-            stockArg,
-            0,
-          ),
+        price: normalizeNonNegativeNumber(
+          priceArg,
+          0,
+        ),
+        stock: normalizeNonNegativeNumber(
+          stockArg,
+          0,
+        ),
         isActive: false,
         productionState: "planned",
       },
@@ -523,17 +522,14 @@ async function main() {
   const productName =
     normalizeText(productNameArg) ||
     DEFAULT_PRODUCT_NAME;
-  const {
-    product,
-    created: productCreated,
-  } = await resolveOrCreateProduct({
-    owner,
-    businessId: owner._id,
-    productName,
-  });
+  const { product, created: productCreated } =
+    await resolveOrCreateProduct({
+      owner,
+      businessId: owner._id,
+      productName,
+    });
 
-  const fileName =
-    path.basename(absolutePdfPath);
+  const fileName = path.basename(absolutePdfPath);
   const sourceDocumentContext =
     extractAiDraftSourceDocumentContext({
       fileName,
@@ -557,10 +553,8 @@ async function main() {
   const importResponse =
     buildProductionDraftImportResponse({
       sourceDocumentContext,
-      estateAssetId:
-        estate._id.toString(),
-      productId:
-        product._id.toString(),
+      estateAssetId: estate._id.toString(),
+      productId: product._id.toString(),
       productName,
       domainContext: "farm",
       plantingTargets: {},
@@ -572,18 +566,17 @@ async function main() {
     );
   }
 
-  const plantingTargets =
-    mergePlantingTargets({
-      plantingTargets:
-        importResponse.draft
-          .plantingTargets,
-      productName,
-      estimatedHarvestQuantity:
-        estimatedHarvestQuantityArg,
-      estimatedHarvestUnit:
-        estimatedHarvestUnitArg,
-    });
-  if (!hasCompletePlantingTargets(plantingTargets)) {
+  const plantingTargets = mergePlantingTargets({
+    plantingTargets:
+      importResponse.draft.plantingTargets,
+    productName,
+    estimatedHarvestQuantity:
+      estimatedHarvestQuantityArg,
+    estimatedHarvestUnit: estimatedHarvestUnitArg,
+  });
+  if (
+    !hasCompletePlantingTargets(plantingTargets)
+  ) {
     throw new Error(
       "Imported draft is missing required planting targets. Provide --estimated-harvest-quantity and --estimated-harvest-unit.",
     );
@@ -595,8 +588,7 @@ async function main() {
     productName,
   });
   const notes = buildSeedNotes({
-    baseNotes:
-      importResponse.draft.notes,
+    baseNotes: importResponse.draft.notes,
     fileName,
     estateName: estate.name,
     ownerName: owner.name,
@@ -604,31 +596,25 @@ async function main() {
   });
   const existingDraft =
     product?._id &&
-    !String(product._id).startsWith(
-      "DRY_RUN_",
-    ) ?
-      await findExistingSeededDraft({
-        businessId: owner._id,
-        estateAssetId: estate._id,
-        productId: product._id,
-        seedMarker,
-      })
-    : null;
+    !String(product._id).startsWith("DRY_RUN_")
+      ? await findExistingSeededDraft({
+          businessId: owner._id,
+          estateAssetId: estate._id,
+          productId: product._id,
+          seedMarker,
+        })
+      : null;
 
   const payload = {
     saveMode: "draft",
-    estateAssetId:
-      estate._id.toString(),
-    productId:
-      product._id.toString(),
+    estateAssetId: estate._id.toString(),
+    productId: product._id.toString(),
     title: importedTitle,
     notes,
     aiGenerated: false,
     domainContext: "farm",
-    startDate:
-      importResponse.draft.startDate,
-    endDate:
-      importResponse.draft.endDate,
+    startDate: importResponse.draft.startDate,
+    endDate: importResponse.draft.endDate,
     plantingTargets,
     phases: importResponse.draft.phases,
   };
@@ -662,19 +648,15 @@ async function main() {
       title: payload.title,
       startDate: payload.startDate,
       endDate: payload.endDate,
-      phaseCount:
-        payload.phases.length,
-      taskCount:
-        payload.phases.reduce(
-          (sum, phase) =>
-            sum +
-            (Array.isArray(
-              phase.tasks,
-            ) ?
-              phase.tasks.length
+      phaseCount: payload.phases.length,
+      taskCount: payload.phases.reduce(
+        (sum, phase) =>
+          sum +
+          (Array.isArray(phase.tasks)
+            ? phase.tasks.length
             : 0),
-          0,
-        ),
+        0,
+      ),
       plantingTargets,
     },
   };
@@ -684,9 +666,8 @@ async function main() {
       JSON.stringify(
         {
           ...summary,
-          action:
-            existingDraft ?
-              "would_update_existing_draft"
+          action: existingDraft
+            ? "would_update_existing_draft"
             : "would_create_new_draft",
         },
         null,
@@ -696,23 +677,18 @@ async function main() {
     return;
   }
 
-  const controllerResult =
-    existingDraft ?
-      await invokeController({
-        handler:
-          updateProductionPlanDraft,
-        userId:
-          owner._id.toString(),
+  const controllerResult = existingDraft
+    ? await invokeController({
+        handler: updateProductionPlanDraft,
+        userId: owner._id.toString(),
         params: {
-          id:
-            existingDraft._id.toString(),
+          id: existingDraft._id.toString(),
         },
         body: payload,
       })
     : await invokeController({
         handler: createProductionPlan,
-        userId:
-          owner._id.toString(),
+        userId: owner._id.toString(),
         body: payload,
       });
 
@@ -727,34 +703,28 @@ async function main() {
     JSON.stringify(
       {
         ...summary,
-        action:
-          existingDraft ?
-            "updated_existing_draft"
+        action: existingDraft
+          ? "updated_existing_draft"
           : "created_new_draft",
         result: {
-          statusCode:
-            controllerResult.statusCode,
+          statusCode: controllerResult.statusCode,
           message:
-            controllerResult.payload
-              ?.message || "",
+            controllerResult.payload?.message ||
+            "",
           planId:
             controllerResult.payload?.plan?._id?.toString() ||
             null,
-          phaseCount:
-            Array.isArray(
-              controllerResult.payload
-                ?.phases,
-            ) ?
-              controllerResult.payload
-                .phases.length
+          phaseCount: Array.isArray(
+            controllerResult.payload?.phases,
+          )
+            ? controllerResult.payload.phases
+                .length
             : 0,
-          taskCount:
-            Array.isArray(
-              controllerResult.payload
-                ?.tasks,
-            ) ?
-              controllerResult.payload
-                .tasks.length
+          taskCount: Array.isArray(
+            controllerResult.payload?.tasks,
+          )
+            ? controllerResult.payload.tasks
+                .length
             : 0,
         },
       },

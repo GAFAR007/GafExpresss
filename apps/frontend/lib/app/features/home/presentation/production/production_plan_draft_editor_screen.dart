@@ -33,6 +33,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_plan_task_table.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 
 const double _pagePadding = 20;
 const double _sectionSpacing = 18;
@@ -75,6 +76,11 @@ const String _startProductionConfirmTitle = "Start this production plan?";
 const String _startProductionConfirmMessage =
     "We will save the latest draft changes, activate the plan, and open the live production workspace.";
 const String _startProductionConfirmLabel = "Start production";
+const Set<String> _draftAssignmentManagementRoles = <String>{
+  staffRoleFarmManager,
+  staffRoleEstateManager,
+  staffRoleAssetManager,
+};
 
 class _DraftEditorLayoutMetrics {
   final int totalTasks;
@@ -110,6 +116,122 @@ class _DraftEditorLayoutMetrics {
       totalProjectDays: math.max(0, totalProjectDays),
     );
   }
+}
+
+class _DraftWorkScopeSummary {
+  final int totalUnits;
+  final String singularLabel;
+  final bool isEstimated;
+
+  const _DraftWorkScopeSummary({
+    required this.totalUnits,
+    required this.singularLabel,
+    required this.isEstimated,
+  });
+
+  String get _normalizedSingularLabel {
+    final normalized = singularLabel.trim();
+    return normalized.isEmpty ? "work unit" : normalized;
+  }
+
+  String get valueLabel {
+    final safeTotal = totalUnits < 1 ? 1 : totalUnits;
+    final unitLabel = safeTotal == 1
+        ? _normalizedSingularLabel
+        : _pluralizeDraftWorkUnitLabel(_normalizedSingularLabel);
+    return "$safeTotal $unitLabel";
+  }
+
+  String get helperText => isEstimated
+      ? "Estimated from the current phase workload until the saved unit footprint is available."
+      : "Representative work-unit footprint for scheduling and staffing.";
+}
+
+bool _looksLikeDraftUnitIdentifierToken(String token) {
+  final normalized = token.trim().replaceAll("#", "");
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return RegExp(r"^[A-Za-z]?\d+[A-Za-z]?$").hasMatch(normalized) ||
+      RegExp(r"^[A-Za-z]$").hasMatch(normalized);
+}
+
+String _extractDraftWorkUnitStem(String label) {
+  final normalized = label
+      .trim()
+      .replaceAll(RegExp(r"[_-]+"), " ")
+      .replaceAll(RegExp(r"\s+"), " ");
+  if (normalized.isEmpty) {
+    return "";
+  }
+  if (RegExp(r"^[a-f0-9]{24}$", caseSensitive: false).hasMatch(normalized)) {
+    return "";
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  while (tokens.length > 1 && _looksLikeDraftUnitIdentifierToken(tokens.last)) {
+    tokens.removeLast();
+  }
+  final stem = tokens.join(" ").trim().toLowerCase();
+  return stem.isEmpty ? normalized.toLowerCase() : stem;
+}
+
+String _pluralizeDraftWorkUnitWord(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final lower = normalized.toLowerCase();
+  if (lower.endsWith("s")) {
+    return normalized;
+  }
+  if (RegExp(r"[^aeiou]y$").hasMatch(lower)) {
+    return "${normalized.substring(0, normalized.length - 1)}ies";
+  }
+  if (lower.endsWith("ch") ||
+      lower.endsWith("sh") ||
+      lower.endsWith("x") ||
+      lower.endsWith("z")) {
+    return "${normalized}es";
+  }
+  return "${normalized}s";
+}
+
+String _pluralizeDraftWorkUnitLabel(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (tokens.isEmpty) {
+    return normalized;
+  }
+  final lastToken = tokens.removeLast();
+  tokens.add(_pluralizeDraftWorkUnitWord(lastToken));
+  return tokens.join(" ");
+}
+
+String _inferDraftWorkUnitStemFromContext({
+  required String fallbackWorkUnitLabel,
+  String contextText = "",
+}) {
+  final normalizedFallback = _extractDraftWorkUnitStem(fallbackWorkUnitLabel);
+  final normalizedContext = contextText.trim().toLowerCase();
+  final fallbackIsGeneric =
+      normalizedFallback.isEmpty ||
+      normalizedFallback == "plot" ||
+      normalizedFallback == "work unit";
+  if (fallbackIsGeneric &&
+      (normalizedContext.contains("greenhouse") ||
+          normalizedContext.contains("green house"))) {
+    return "greenhouse";
+  }
+  return "";
 }
 
 class _DraftExportPhaseWindow {
@@ -219,6 +341,38 @@ class _DraftRefineDialogResult {
   const _DraftRefineDialogResult({required this.maxAdditionalTasks});
 }
 
+enum _DraftBulkAssignScope { needsStaff, reassignAll }
+
+enum _DraftBulkAssignMode { allIncludedStaff, preferTaskRole }
+
+class _DraftBulkAssignDialogResult {
+  final _DraftBulkAssignScope scope;
+  final _DraftBulkAssignMode mode;
+  final List<String> excludedRoleKeys;
+
+  const _DraftBulkAssignDialogResult({
+    required this.scope,
+    required this.mode,
+    required this.excludedRoleKeys,
+  });
+}
+
+class _DraftBulkAssignOutcome {
+  final ProductionPlanDraftState draft;
+  final int changedTaskCount;
+  final int tasksWithAssignments;
+  final int tasksStillShort;
+  final int eligibleStaffCount;
+
+  const _DraftBulkAssignOutcome({
+    required this.draft,
+    required this.changedTaskCount,
+    required this.tasksWithAssignments,
+    required this.tasksStillShort,
+    required this.eligibleStaffCount,
+  });
+}
+
 class ProductionPlanDraftEditorScreen extends ConsumerStatefulWidget {
   final String? planId;
 
@@ -245,6 +399,7 @@ class _ProductionPlanDraftEditorScreenState
   bool _isRefiningDraft = false;
   bool _isDownloadingDraft = false;
   bool _isImportingDraftDocument = false;
+  bool _isAssigningDraftStaff = false;
   String? _hydratedPlanId;
   _DraftEditorMobileSection _mobileSection = _DraftEditorMobileSection.tasks;
   String? _lastLoggedLayoutMode;
@@ -911,11 +1066,587 @@ class _ProductionPlanDraftEditorScreenState
     }
   }
 
+  _DraftWorkScopeSummary _resolveDraftWorkScopeSummary({
+    required ProductionPlanDraftState draft,
+    ProductionPlanDetail? detail,
+    ProductionPlanUnitsResponse? planUnitsResponse,
+  }) {
+    final planUnits = planUnitsResponse?.units ?? const <ProductionPlanUnit>[];
+    final canonicalUnitCount = (planUnitsResponse?.totalUnits ?? 0) > 0
+        ? planUnitsResponse!.totalUnits
+        : planUnits.length;
+    final workloadContext = detail?.plan.workloadContext;
+    final workloadUnitCount = workloadContext?.totalWorkUnits ?? 0;
+    final fallbackWorkUnitLabel =
+        workloadContext?.resolvedWorkUnitLabel.isNotEmpty == true
+        ? workloadContext!.resolvedWorkUnitLabel
+        : _defaultWorkUnitLabelForDomain(draft.domainContext);
+    final inferredUnitStem = _inferDraftWorkUnitStemFromContext(
+      fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+      contextText: [
+        detail?.plan.title ?? "",
+        detail?.plan.notes ?? "",
+        draft.title,
+        draft.notes,
+      ].join(" "),
+    );
+    final unitStems =
+        planUnits
+            .map((unit) => _extractDraftWorkUnitStem(unit.label))
+            .where((stem) => stem.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    final resolvedUnitLabel = unitStems.length == 1
+        ? unitStems.first
+        : inferredUnitStem.isNotEmpty
+        ? inferredUnitStem
+        : _extractDraftWorkUnitStem(fallbackWorkUnitLabel).isNotEmpty
+        ? _extractDraftWorkUnitStem(fallbackWorkUnitLabel)
+        : _defaultWorkUnitLabelForDomain(draft.domainContext);
+    final resolvedTotalUnits = canonicalUnitCount > 0
+        ? canonicalUnitCount
+        : workloadUnitCount > 0
+        ? workloadUnitCount
+        : _inferTotalWorkUnits(draft);
+
+    return _DraftWorkScopeSummary(
+      totalUnits: resolvedTotalUnits < 1 ? 1 : resolvedTotalUnits,
+      singularLabel: resolvedUnitLabel,
+      isEstimated: canonicalUnitCount <= 0 && workloadUnitCount <= 0,
+    );
+  }
+
+  String _normalizeDraftAssignmentRole(String rawRole) {
+    return rawRole
+        .trim()
+        .toLowerCase()
+        .replaceAll("-", "_")
+        .replaceAll(" ", "_");
+  }
+
+  List<String> _normalizeDraftAssignedIds(List<String> ids) {
+    return ids
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+  }
+
+  bool _hasSameDraftAssignedIds(List<String> first, List<String> second) {
+    final normalizedFirst = _normalizeDraftAssignedIds(first);
+    final normalizedSecond = _normalizeDraftAssignedIds(second);
+    if (normalizedFirst.length != normalizedSecond.length) {
+      return false;
+    }
+    for (var index = 0; index < normalizedFirst.length; index += 1) {
+      if (normalizedFirst[index] != normalizedSecond[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  String _draftBulkAssignableStaffLabel(BusinessStaffProfileSummary profile) {
+    return _resolveStaffDisplayName(profile, profile.id.trim());
+  }
+
+  List<BusinessStaffProfileSummary> _buildDraftAssignableStaffPool({
+    required ProductionPlanDraftState draft,
+    required List<BusinessStaffProfileSummary> staffList,
+    required Set<String> excludedRoleKeys,
+  }) {
+    final normalizedExcludedRoles = excludedRoleKeys
+        .map(_normalizeDraftAssignmentRole)
+        .where((role) => role.isNotEmpty)
+        .toSet();
+    final draftEstateId = (draft.estateAssetId ?? "").trim();
+    final filtered = staffList.where((profile) {
+      final profileId = profile.id.trim();
+      if (profileId.isEmpty) {
+        return false;
+      }
+      final normalizedStatus = profile.status.trim().toLowerCase();
+      if (normalizedStatus != "active") {
+        return false;
+      }
+      final normalizedRole = _normalizeDraftAssignmentRole(profile.staffRole);
+      if (normalizedRole.isEmpty ||
+          normalizedExcludedRoles.contains(normalizedRole)) {
+        return false;
+      }
+      final staffEstateId = (profile.estateAssetId ?? "").trim();
+      if (draftEstateId.isNotEmpty &&
+          staffEstateId.isNotEmpty &&
+          staffEstateId != draftEstateId) {
+        return false;
+      }
+      return true;
+    }).toList();
+    filtered.sort((left, right) {
+      final roleCompare = _normalizeDraftAssignmentRole(
+        left.staffRole,
+      ).compareTo(_normalizeDraftAssignmentRole(right.staffRole));
+      if (roleCompare != 0) {
+        return roleCompare;
+      }
+      return _draftBulkAssignableStaffLabel(
+        left,
+      ).compareTo(_draftBulkAssignableStaffLabel(right));
+    });
+    return filtered;
+  }
+
+  Map<String, List<String>> _buildDraftAssignableStaffIdsByRole(
+    List<BusinessStaffProfileSummary> staffList,
+  ) {
+    final grouped = <String, List<String>>{};
+    for (final profile in staffList) {
+      final roleKey = _normalizeDraftAssignmentRole(profile.staffRole);
+      final profileId = profile.id.trim();
+      if (roleKey.isEmpty || profileId.isEmpty) {
+        continue;
+      }
+      grouped.putIfAbsent(roleKey, () => <String>[]).add(profileId);
+    }
+    return grouped;
+  }
+
+  List<String> _takeDraftAssignmentFromPool({
+    required List<String> currentAssignedIds,
+    required List<String> pool,
+    required int targetCount,
+    required Map<String, int> cursorByPoolKey,
+    required String poolKey,
+  }) {
+    if (pool.isEmpty || currentAssignedIds.length >= targetCount) {
+      return currentAssignedIds;
+    }
+    final nextAssigned = List<String>.from(currentAssignedIds);
+    final safePool = _normalizeDraftAssignedIds(pool);
+    if (safePool.isEmpty) {
+      return nextAssigned;
+    }
+    final startIndex = cursorByPoolKey[poolKey] ?? 0;
+    var offset = 0;
+    var visited = 0;
+    while (visited < safePool.length && nextAssigned.length < targetCount) {
+      final candidate = safePool[(startIndex + offset) % safePool.length];
+      offset += 1;
+      visited += 1;
+      if (nextAssigned.contains(candidate)) {
+        continue;
+      }
+      nextAssigned.add(candidate);
+    }
+    cursorByPoolKey[poolKey] = (startIndex + offset) % safePool.length;
+    return nextAssigned;
+  }
+
+  _DraftBulkAssignOutcome _buildBulkAssignedDraft({
+    required ProductionPlanDraftState draft,
+    required List<BusinessStaffProfileSummary> eligibleStaff,
+    required _DraftBulkAssignScope scope,
+    required _DraftBulkAssignMode mode,
+  }) {
+    final eligibleStaffIds = eligibleStaff
+        .map((profile) => profile.id.trim())
+        .where((id) => id.isNotEmpty)
+        .toList();
+    final eligibleStaffIdSet = eligibleStaffIds.toSet();
+    final eligibleStaffIdsByRole = _buildDraftAssignableStaffIdsByRole(
+      eligibleStaff,
+    );
+    final cursorByPoolKey = <String, int>{};
+    var changedTaskCount = 0;
+    var tasksWithAssignments = 0;
+    var tasksStillShort = 0;
+
+    final nextPhases = draft.phases.map((phase) {
+      final nextTasks = phase.tasks.map((task) {
+        final targetHeadcount = task.requiredHeadcount < 1
+            ? 1
+            : task.requiredHeadcount;
+        final keptAssignedIds = scope == _DraftBulkAssignScope.reassignAll
+            ? <String>[]
+            : _normalizeDraftAssignedIds(
+                task.assignedStaffProfileIds
+                    .where((id) => eligibleStaffIdSet.contains(id.trim()))
+                    .toList(),
+              );
+        final roleKey = _normalizeDraftAssignmentRole(task.roleRequired);
+        var nextAssignedIds = keptAssignedIds;
+        if (mode == _DraftBulkAssignMode.preferTaskRole && roleKey.isNotEmpty) {
+          nextAssignedIds = _takeDraftAssignmentFromPool(
+            currentAssignedIds: nextAssignedIds,
+            pool: eligibleStaffIdsByRole[roleKey] ?? const <String>[],
+            targetCount: targetHeadcount,
+            cursorByPoolKey: cursorByPoolKey,
+            poolKey: "role:$roleKey",
+          );
+        }
+        nextAssignedIds = _takeDraftAssignmentFromPool(
+          currentAssignedIds: nextAssignedIds,
+          pool: eligibleStaffIds,
+          targetCount: targetHeadcount,
+          cursorByPoolKey: cursorByPoolKey,
+          poolKey: "all",
+        );
+
+        if (nextAssignedIds.isNotEmpty) {
+          tasksWithAssignments += 1;
+        }
+        if (nextAssignedIds.length < targetHeadcount) {
+          tasksStillShort += 1;
+        }
+
+        final nextHeadcount = targetHeadcount < nextAssignedIds.length
+            ? nextAssignedIds.length
+            : targetHeadcount;
+        if (_hasSameDraftAssignedIds(
+              task.assignedStaffProfileIds,
+              nextAssignedIds,
+            ) &&
+            task.requiredHeadcount == nextHeadcount) {
+          return task;
+        }
+        changedTaskCount += 1;
+        return task.copyWith(
+          assignedStaffId: nextAssignedIds.isEmpty
+              ? null
+              : nextAssignedIds.first,
+          assignedStaffProfileIds: nextAssignedIds,
+          requiredHeadcount: nextHeadcount,
+        );
+      }).toList();
+      return phase.copyWith(tasks: nextTasks);
+    }).toList();
+
+    return _DraftBulkAssignOutcome(
+      draft: draft.copyWith(phases: nextPhases),
+      changedTaskCount: changedTaskCount,
+      tasksWithAssignments: tasksWithAssignments,
+      tasksStillShort: tasksStillShort,
+      eligibleStaffCount: eligibleStaff.length,
+    );
+  }
+
+  Future<_DraftBulkAssignDialogResult?> _showBulkAssignStaffDialog({
+    required ProductionPlanDraftState draft,
+    required List<BusinessStaffProfileSummary> staffList,
+  }) async {
+    final availableStaff = _buildDraftAssignableStaffPool(
+      draft: draft,
+      staffList: staffList,
+      excludedRoleKeys: const <String>{},
+    );
+    final roleCounts = <String, int>{};
+    for (final profile in availableStaff) {
+      final roleKey = _normalizeDraftAssignmentRole(profile.staffRole);
+      roleCounts[roleKey] = (roleCounts[roleKey] ?? 0) + 1;
+    }
+    final orderedRoleKeys = roleCounts.keys.toList()
+      ..sort((left, right) {
+        final countCompare = (roleCounts[right] ?? 0).compareTo(
+          roleCounts[left] ?? 0,
+        );
+        if (countCompare != 0) {
+          return countCompare;
+        }
+        return formatStaffRoleLabel(
+          left,
+        ).compareTo(formatStaffRoleLabel(right));
+      });
+    if (orderedRoleKeys.isEmpty) {
+      _showSnack("No active staff are available for this draft yet.");
+      return null;
+    }
+
+    var selectedScope = _DraftBulkAssignScope.needsStaff;
+    var selectedMode = _DraftBulkAssignMode.allIncludedStaff;
+    final excludedRoles = <String>{};
+
+    return showDialog<_DraftBulkAssignDialogResult>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final includedRoleCount =
+                orderedRoleKeys.length - excludedRoles.length;
+            final includedStaffCount = orderedRoleKeys.fold<int>(0, (
+              sum,
+              roleKey,
+            ) {
+              if (excludedRoles.contains(roleKey)) {
+                return sum;
+              }
+              return sum + (roleCounts[roleKey] ?? 0);
+            });
+            return AlertDialog(
+              title: const Text("Assign staff to draft"),
+              content: SizedBox(
+                width: 620,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "Build one shared assignment pool for this draft. Farm work can pull from any included active role, so exclude only the roles you do not want used here.",
+                      ),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          Chip(
+                            avatar: const Icon(
+                              Icons.groups_2_outlined,
+                              size: 18,
+                            ),
+                            label: Text("$includedStaffCount staff included"),
+                          ),
+                          Chip(
+                            avatar: const Icon(Icons.badge_outlined, size: 18),
+                            label: Text("$includedRoleCount roles included"),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        "Assignment scope",
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SegmentedButton<_DraftBulkAssignScope>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment<_DraftBulkAssignScope>(
+                            value: _DraftBulkAssignScope.needsStaff,
+                            label: Text("Needs staff"),
+                            icon: Icon(Icons.person_add_alt_1_outlined),
+                          ),
+                          ButtonSegment<_DraftBulkAssignScope>(
+                            value: _DraftBulkAssignScope.reassignAll,
+                            label: Text("Reassign all"),
+                            icon: Icon(Icons.restart_alt_outlined),
+                          ),
+                        ],
+                        selected: <_DraftBulkAssignScope>{selectedScope},
+                        onSelectionChanged: (selection) {
+                          if (selection.isEmpty) {
+                            return;
+                          }
+                          setDialogState(() {
+                            selectedScope = selection.first;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        "Assignment mode",
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SegmentedButton<_DraftBulkAssignMode>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment<_DraftBulkAssignMode>(
+                            value: _DraftBulkAssignMode.allIncludedStaff,
+                            label: Text("All included roles"),
+                            icon: Icon(Icons.shuffle_outlined),
+                          ),
+                          ButtonSegment<_DraftBulkAssignMode>(
+                            value: _DraftBulkAssignMode.preferTaskRole,
+                            label: Text("Prefer task role"),
+                            icon: Icon(Icons.rule_folder_outlined),
+                          ),
+                        ],
+                        selected: <_DraftBulkAssignMode>{selectedMode},
+                        onSelectionChanged: (selection) {
+                          if (selection.isEmpty) {
+                            return;
+                          }
+                          setDialogState(() {
+                            selectedMode = selection.first;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Text(
+                            "Included roles",
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () {
+                              setDialogState(() {
+                                excludedRoles.clear();
+                              });
+                            },
+                            child: const Text("Include all"),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setDialogState(() {
+                                excludedRoles
+                                  ..clear()
+                                  ..addAll(_draftAssignmentManagementRoles);
+                              });
+                            },
+                            child: const Text("Exclude management"),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: orderedRoleKeys.map((roleKey) {
+                          final isIncluded = !excludedRoles.contains(roleKey);
+                          return FilterChip(
+                            selected: isIncluded,
+                            label: Text(
+                              "${formatStaffRoleLabel(roleKey)} · ${roleCounts[roleKey] ?? 0}",
+                            ),
+                            onSelected: (selected) {
+                              setDialogState(() {
+                                if (selected) {
+                                  excludedRoles.remove(roleKey);
+                                } else {
+                                  excludedRoles.add(roleKey);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      if (includedStaffCount <= 0) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          "Include at least one role before applying assignments.",
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text("Cancel"),
+                ),
+                FilledButton.icon(
+                  onPressed: includedStaffCount <= 0
+                      ? null
+                      : () {
+                          Navigator.of(dialogContext).pop(
+                            _DraftBulkAssignDialogResult(
+                              scope: selectedScope,
+                              mode: selectedMode,
+                              excludedRoleKeys: excludedRoles.toList()..sort(),
+                            ),
+                          );
+                        },
+                  icon: const Icon(Icons.group_add_outlined),
+                  label: const Text("Assign staff"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _assignDraftStaff({
+    required ProductionPlanDraftState draft,
+    required List<BusinessStaffProfileSummary> staffList,
+  }) async {
+    if (_isSaving ||
+        _isRefiningDraft ||
+        _isImportingDraftDocument ||
+        _isDownloadingDraft ||
+        _isAssigningDraftStaff) {
+      return;
+    }
+    final hasDraftTasks = draft.phases.any((phase) => phase.tasks.isNotEmpty);
+    if (!hasDraftTasks) {
+      _showSnack("Add or generate draft tasks before assigning staff.");
+      return;
+    }
+    final config = await _showBulkAssignStaffDialog(
+      draft: draft,
+      staffList: staffList,
+    );
+    if (config == null) {
+      return;
+    }
+
+    setState(() {
+      _isAssigningDraftStaff = true;
+    });
+
+    try {
+      final eligibleStaff = _buildDraftAssignableStaffPool(
+        draft: draft,
+        staffList: staffList,
+        excludedRoleKeys: config.excludedRoleKeys.toSet(),
+      );
+      if (eligibleStaff.isEmpty) {
+        _showSnack("No active staff remain after those role exclusions.");
+        return;
+      }
+      final outcome = _buildBulkAssignedDraft(
+        draft: draft,
+        eligibleStaff: eligibleStaff,
+        scope: config.scope,
+        mode: config.mode,
+      );
+      if (outcome.changedTaskCount <= 0) {
+        _showSnack("No task assignments changed.");
+        return;
+      }
+      ref.read(productionPlanDraftProvider.notifier).applyDraft(outcome.draft);
+      _syncControllers(outcome.draft);
+      if (outcome.tasksStillShort > 0) {
+        _showSnack(
+          "Assigned staff across ${outcome.changedTaskCount} tasks using ${outcome.eligibleStaffCount} active staff. ${outcome.tasksStillShort} tasks still need more people.",
+        );
+      } else {
+        _showSnack(
+          "Assigned staff across ${outcome.changedTaskCount} tasks using ${outcome.eligibleStaffCount} active staff.",
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAssigningDraftStaff = false;
+        });
+      } else {
+        _isAssigningDraftStaff = false;
+      }
+    }
+  }
+
   DateTime? _normalizeDraftDate(DateTime? value) {
     if (value == null) {
       return null;
     }
-    return DateTime(value.year, value.month, value.day);
+    final localValue = value.isUtc ? value.toLocal() : value;
+    return DateTime(localValue.year, localValue.month, localValue.day);
   }
 
   int _resolveDraftProjectTotalDays(ProductionPlanDraftState draft) {
@@ -2603,6 +3334,11 @@ class _ProductionPlanDraftEditorScreenState
             _hydrateDraftFromDetail(value);
             return value;
           });
+    final planUnitsAsync = planId.isEmpty
+        ? const AsyncValue<ProductionPlanUnitsResponse?>.data(null)
+        : ref.watch(productionPlanUnitsProvider(planId)).whenData((value) {
+            return value;
+          });
     final staffAsync = ref.watch(productionStaffProvider);
     final staffList =
         staffAsync.valueOrNull ?? const <BusinessStaffProfileSummary>[];
@@ -2673,7 +3409,8 @@ class _ProductionPlanDraftEditorScreenState
                     !_isSaving &&
                     !_isRefiningDraft &&
                     !_isImportingDraftDocument &&
-                    !_isDownloadingDraft
+                    !_isDownloadingDraft &&
+                    !_isAssigningDraftStaff
                 ? () => _saveDraft(existingPlanStatus: existingPlanStatus)
                 : null,
             icon: _isSaving
@@ -2697,6 +3434,11 @@ class _ProductionPlanDraftEditorScreenState
           ),
         ),
         data: (detail) {
+          final workScope = _resolveDraftWorkScopeSummary(
+            draft: draft,
+            detail: detail,
+            planUnitsResponse: planUnitsAsync.valueOrNull,
+          );
           final selectedEstateName = assetsAsync.maybeWhen(
             data: (result) {
               for (final asset in result.assets) {
@@ -2749,7 +3491,8 @@ class _ProductionPlanDraftEditorScreenState
                                               _isSaving ||
                                                   _isRefiningDraft ||
                                                   _isImportingDraftDocument ||
-                                                  _isDownloadingDraft
+                                                  _isDownloadingDraft ||
+                                                  _isAssigningDraftStaff
                                               ? null
                                               : () => _startProduction(
                                                   existingPlanStatus:
@@ -2775,7 +3518,8 @@ class _ProductionPlanDraftEditorScreenState
                                               _isSaving ||
                                                   _isRefiningDraft ||
                                                   _isImportingDraftDocument ||
-                                                  _isDownloadingDraft
+                                                  _isDownloadingDraft ||
+                                                  _isAssigningDraftStaff
                                               ? null
                                               : _returnPlanToDraft,
                                           icon: const Icon(
@@ -2788,7 +3532,8 @@ class _ProductionPlanDraftEditorScreenState
                                             _isSaving ||
                                                 _isRefiningDraft ||
                                                 _isImportingDraftDocument ||
-                                                _isDownloadingDraft
+                                                _isDownloadingDraft ||
+                                                _isAssigningDraftStaff
                                             ? null
                                             : () => _refineDraftWithAi(
                                                 draft: draft,
@@ -2821,7 +3566,8 @@ class _ProductionPlanDraftEditorScreenState
                                             _isSaving ||
                                                 _isRefiningDraft ||
                                                 _isImportingDraftDocument ||
-                                                _isDownloadingDraft
+                                                _isDownloadingDraft ||
+                                                _isAssigningDraftStaff
                                             ? null
                                             : () => _populateDraftFromDocument(
                                                 draft: draft,
@@ -2848,12 +3594,43 @@ class _ProductionPlanDraftEditorScreenState
                                               : "Populate draft",
                                         ),
                                       ),
+                                      FilledButton.tonalIcon(
+                                        onPressed:
+                                            _isSaving ||
+                                                _isRefiningDraft ||
+                                                _isImportingDraftDocument ||
+                                                _isDownloadingDraft ||
+                                                _isAssigningDraftStaff
+                                            ? null
+                                            : () => _assignDraftStaff(
+                                                draft: draft,
+                                                staffList: staffList,
+                                              ),
+                                        icon: _isAssigningDraftStaff
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : const Icon(
+                                                Icons.group_add_outlined,
+                                              ),
+                                        label: Text(
+                                          _isAssigningDraftStaff
+                                              ? "Assigning..."
+                                              : "Assign staff",
+                                        ),
+                                      ),
                                       OutlinedButton.icon(
                                         onPressed:
                                             _isSaving ||
                                                 _isRefiningDraft ||
                                                 _isImportingDraftDocument ||
-                                                _isDownloadingDraft
+                                                _isDownloadingDraft ||
+                                                _isAssigningDraftStaff
                                             ? null
                                             : () => _downloadDraftFile(
                                                 draft: draft,
@@ -2923,6 +3700,7 @@ class _ProductionPlanDraftEditorScreenState
                                 estimatedHarvestCtrl: _estimatedHarvestCtrl,
                                 estimatedHarvestUnitCtrl:
                                     _estimatedHarvestUnitCtrl,
+                                workScope: workScope,
                                 onPickStartDate: canEditDraft
                                     ? () => _pickDate(isStart: true)
                                     : null,
@@ -3429,6 +4207,7 @@ class _DraftEditorSidePanel extends StatefulWidget {
   final TextEditingController plannedPlantingUnitCtrl;
   final TextEditingController estimatedHarvestCtrl;
   final TextEditingController estimatedHarvestUnitCtrl;
+  final _DraftWorkScopeSummary workScope;
   final VoidCallback? onPickStartDate;
   final VoidCallback? onPickEndDate;
   final ValueChanged<String?>? onPlantingMaterialChanged;
@@ -3444,6 +4223,7 @@ class _DraftEditorSidePanel extends StatefulWidget {
     required this.plannedPlantingUnitCtrl,
     required this.estimatedHarvestCtrl,
     required this.estimatedHarvestUnitCtrl,
+    required this.workScope,
     required this.onPickStartDate,
     required this.onPickEndDate,
     required this.onPlantingMaterialChanged,
@@ -3531,6 +4311,13 @@ class _DraftEditorSidePanelState extends State<_DraftEditorSidePanel> {
                 ? "Everything assigned is visible in the workspace."
                 : "${metrics.unassignedTasks} tasks still need staffing.",
             icon: Icons.dashboard_customize_outlined,
+          ),
+          const SizedBox(height: 12),
+          _DraftHeroMetricTile(
+            label: "Work scope",
+            value: widget.workScope.valueLabel,
+            helper: widget.workScope.helperText,
+            icon: Icons.grid_view_outlined,
           ),
           const SizedBox(height: 18),
           AnimatedSwitcher(

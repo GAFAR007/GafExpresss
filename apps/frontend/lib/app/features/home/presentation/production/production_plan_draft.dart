@@ -229,6 +229,27 @@ const List<String> productionPlantingTargetUnitValues = [
   "plant",
 ];
 
+const String _defaultFarmPlantingMaterialType = "seed";
+const double _defaultFarmPlannedPlantingQuantity = 100;
+const String _defaultFarmPlannedPlantingUnit = "kg";
+const double _defaultFarmEstimatedHarvestQuantity = 1000;
+const String _defaultFarmEstimatedHarvestUnit = "kg";
+
+DateTime? _normalizeDraftLocalDateTime(DateTime? value) {
+  if (value == null) {
+    return null;
+  }
+  return value.isUtc ? value.toLocal() : value;
+}
+
+DateTime? _normalizeDraftCalendarDate(DateTime? value) {
+  final localValue = _normalizeDraftLocalDateTime(value);
+  if (localValue == null) {
+    return null;
+  }
+  return DateTime(localValue.year, localValue.month, localValue.day);
+}
+
 bool productionDomainRequiresPlantingTargets(String? domainContext) {
   return normalizeProductionDomainContext(domainContext) ==
       productionDomainFarm;
@@ -453,6 +474,56 @@ class ProductionPlantingTargetsDraft {
   }
 }
 
+ProductionPlantingTargetsDraft buildDefaultProductionPlantingTargetsForDomain(
+  String domainContext,
+) {
+  if (!productionDomainRequiresPlantingTargets(domainContext)) {
+    return const ProductionPlantingTargetsDraft(
+      materialType: "",
+      plannedPlantingQuantity: null,
+      plannedPlantingUnit: "",
+      estimatedHarvestQuantity: null,
+      estimatedHarvestUnit: "",
+    );
+  }
+  return const ProductionPlantingTargetsDraft(
+    materialType: _defaultFarmPlantingMaterialType,
+    plannedPlantingQuantity: _defaultFarmPlannedPlantingQuantity,
+    plannedPlantingUnit: _defaultFarmPlannedPlantingUnit,
+    estimatedHarvestQuantity: _defaultFarmEstimatedHarvestQuantity,
+    estimatedHarvestUnit: _defaultFarmEstimatedHarvestUnit,
+  );
+}
+
+ProductionPlantingTargetsDraft withDefaultProductionPlantingTargetsForDomain(
+  ProductionPlantingTargetsDraft current,
+  String domainContext,
+) {
+  if (!productionDomainRequiresPlantingTargets(domainContext)) {
+    return current;
+  }
+  final defaults = buildDefaultProductionPlantingTargetsForDomain(
+    domainContext,
+  );
+  return current.copyWith(
+    materialType: current.materialType.trim().isEmpty
+        ? defaults.materialType
+        : current.materialType,
+    plannedPlantingQuantity: (current.plannedPlantingQuantity ?? 0) <= 0
+        ? defaults.plannedPlantingQuantity
+        : current.plannedPlantingQuantity,
+    plannedPlantingUnit: current.plannedPlantingUnit.trim().isEmpty
+        ? defaults.plannedPlantingUnit
+        : current.plannedPlantingUnit,
+    estimatedHarvestQuantity: (current.estimatedHarvestQuantity ?? 0) <= 0
+        ? defaults.estimatedHarvestQuantity
+        : current.estimatedHarvestQuantity,
+    estimatedHarvestUnit: current.estimatedHarvestUnit.trim().isEmpty
+        ? defaults.estimatedHarvestUnit
+        : current.estimatedHarvestUnit,
+  );
+}
+
 class ProductionAiDraftError implements Exception {
   final String message;
   final String classification;
@@ -658,8 +729,12 @@ class ProductionAiDraftSummary {
 
   factory ProductionAiDraftSummary.fromJson(Map<String, dynamic> json) {
     return ProductionAiDraftSummary(
-      startDate: DateTime.tryParse((json[_payloadStartDate] ?? "").toString()),
-      endDate: DateTime.tryParse((json[_payloadEndDate] ?? "").toString()),
+      startDate: _normalizeDraftCalendarDate(
+        DateTime.tryParse((json[_payloadStartDate] ?? "").toString()),
+      ),
+      endDate: _normalizeDraftCalendarDate(
+        DateTime.tryParse((json[_payloadEndDate] ?? "").toString()),
+      ),
       days: int.tryParse(json[_payloadDays]?.toString() ?? "") ?? 0,
       weeks: int.tryParse(json[_payloadWeeks]?.toString() ?? "") ?? 0,
       monthApprox:
@@ -1061,8 +1136,13 @@ class ProductionPlanDraftController
 
   void updateDomainContext(String? value) {
     // WHY: Domain context is an optional hint that biases AI planning.
+    final nextDomain = normalizeProductionDomainContext(value);
     state = state.copyWith(
-      domainContext: normalizeProductionDomainContext(value),
+      domainContext: nextDomain,
+      plantingTargets: withDefaultProductionPlantingTargetsForDomain(
+        state.plantingTargets,
+        nextDomain,
+      ),
     );
     AppDebug.log(
       _logTag,
@@ -1089,13 +1169,19 @@ class ProductionPlanDraftController
 
   void updateStartDate(DateTime? date) {
     // WHY: Start date drives phase and task scheduling.
-    state = state.copyWith(startDate: date, startDateAiSuggested: false);
+    state = state.copyWith(
+      startDate: _normalizeDraftCalendarDate(date),
+      startDateAiSuggested: false,
+    );
     AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldStartDate});
   }
 
   void updateEndDate(DateTime? date) {
     // WHY: End date drives phase and task scheduling.
-    state = state.copyWith(endDate: date, endDateAiSuggested: false);
+    state = state.copyWith(
+      endDate: _normalizeDraftCalendarDate(date),
+      endDateAiSuggested: false,
+    );
     AppDebug.log(_logTag, _logUpdate, extra: {_extraFieldKey: _fieldEndDate});
   }
 
@@ -1393,10 +1479,7 @@ class ProductionPlanDraftController
     _updateTask(
       phaseIndex,
       taskId,
-      (task) => task.copyWith(
-        scheduledStart: startDate,
-        scheduledDue: dueDate,
-      ),
+      (task) => task.copyWith(scheduledStart: startDate, scheduledDue: dueDate),
     );
   }
 
@@ -1445,15 +1528,31 @@ class ProductionPlanDraftController
   }
 
   void updateTaskStaff(int phaseIndex, String taskId, String? staffId) {
+    updateTaskAssignedStaffProfiles(
+      phaseIndex,
+      taskId,
+      staffId == null || staffId.trim().isEmpty ? const [] : [staffId],
+    );
+  }
+
+  void updateTaskAssignedStaffProfiles(
+    int phaseIndex,
+    String taskId,
+    List<String> staffProfileIds,
+  ) {
+    final normalizedAssignedIds = _parseDraftStringList(staffProfileIds);
     // WHY: Assignment changes should clear completion metadata to avoid drift.
     _updateTask(
       phaseIndex,
       taskId,
       (task) => task.copyWith(
-        assignedStaffId: staffId,
-        assignedStaffProfileIds: staffId == null || staffId.trim().isEmpty
-            ? const []
-            : [staffId],
+        assignedStaffId: normalizedAssignedIds.isEmpty
+            ? null
+            : normalizedAssignedIds.first,
+        assignedStaffProfileIds: normalizedAssignedIds,
+        requiredHeadcount: task.requiredHeadcount < normalizedAssignedIds.length
+            ? normalizedAssignedIds.length
+            : (task.requiredHeadcount < 1 ? 1 : task.requiredHeadcount),
         status: _defaultTaskStatus,
         completedAt: null,
         completedByStaffId: null,
@@ -1540,6 +1639,8 @@ class ProductionPlanDraftController
 
   List<String> validate() {
     final errors = <String>[];
+    final normalizedStartDate = _normalizeDraftCalendarDate(state.startDate);
+    final normalizedEndDate = _normalizeDraftCalendarDate(state.endDate);
 
     if (state.title.trim().isEmpty) {
       errors.add(_errorTitleRequired);
@@ -1550,15 +1651,15 @@ class ProductionPlanDraftController
     if (state.productId == null || state.productId!.trim().isEmpty) {
       errors.add(_errorProductRequired);
     }
-    if (state.startDate == null) {
+    if (normalizedStartDate == null) {
       errors.add(_errorStartDateRequired);
     }
-    if (state.endDate == null) {
+    if (normalizedEndDate == null) {
       errors.add(_errorEndDateRequired);
     }
-    if (state.startDate != null &&
-        state.endDate != null &&
-        !state.endDate!.isAfter(state.startDate!)) {
+    if (normalizedStartDate != null &&
+        normalizedEndDate != null &&
+        !normalizedEndDate.isAfter(normalizedStartDate)) {
       errors.add(_errorDateRange);
     }
     errors.addAll(state.plantingTargets.validateForDomain(state.domainContext));
@@ -1588,23 +1689,25 @@ class ProductionPlanDraftController
         break;
       }
       if (hasScheduledStart && hasScheduledDue) {
-        if (!task.scheduledDue!.isAfter(task.scheduledStart!)) {
+        final normalizedTaskStart = _normalizeDraftLocalDateTime(
+          task.scheduledStart,
+        );
+        final normalizedTaskDue = _normalizeDraftLocalDateTime(
+          task.scheduledDue,
+        );
+        if (normalizedTaskStart == null ||
+            normalizedTaskDue == null ||
+            !normalizedTaskDue.isAfter(normalizedTaskStart)) {
           errors.add(_errorTaskScheduleInvalid);
           break;
         }
-        if (state.startDate != null && state.endDate != null) {
-          final planStart = DateTime(
-            state.startDate!.year,
-            state.startDate!.month,
-            state.startDate!.day,
+        if (normalizedStartDate != null && normalizedEndDate != null) {
+          final planStart = normalizedStartDate;
+          final planEndExclusive = normalizedEndDate.add(
+            const Duration(days: 1),
           );
-          final planEndExclusive = DateTime(
-            state.endDate!.year,
-            state.endDate!.month,
-            state.endDate!.day + 1,
-          );
-          if (task.scheduledStart!.isBefore(planStart) ||
-              task.scheduledDue!.isAfter(planEndExclusive)) {
+          if (normalizedTaskStart.isBefore(planStart) ||
+              normalizedTaskDue.isAfter(planEndExclusive)) {
             errors.add(_errorTaskScheduleOutsideWindow);
             break;
           }
@@ -1617,38 +1720,36 @@ class ProductionPlanDraftController
 
   Map<String, dynamic> toPayload() {
     var taskSortCursor = 0;
+    final normalizedStartDate = _normalizeDraftCalendarDate(state.startDate);
+    final normalizedEndDate = _normalizeDraftCalendarDate(state.endDate);
     final phasesPayload = state.phases.map((phase) {
-      final taskPayloads = phase.tasks
-          .map(
-            (task) {
-              final normalizedSortOrder = taskSortCursor;
-              taskSortCursor += 1;
-              return {
-                _payloadTaskTitle: task.title.trim(),
-                _payloadTaskRole: task.roleRequired,
-                _payloadTaskStaff: task.assignedStaffId,
-                _payloadTaskStaffProfileIds: task.assignedStaffProfileIds,
-                _payloadTaskRequiredHeadcount:
-                    // WHY: Payload keeps required slots aligned with selected assignees.
-                    task.requiredHeadcount < task.assignedStaffProfileIds.length
-                    ? task.assignedStaffProfileIds.length
-                    : (task.requiredHeadcount < 1 ? 1 : task.requiredHeadcount),
-                _payloadTaskWeight: task.weight,
-                _payloadTaskInstructions: task.instructions.trim(),
-                _payloadTaskType: task.taskType.trim(),
-                _payloadTaskSourceTemplateKey: task.sourceTemplateKey.trim(),
-                _payloadTaskRecurrenceGroupKey: task.recurrenceGroupKey.trim(),
-                _payloadTaskOccurrenceIndex: task.occurrenceIndex,
-                _payloadTaskManualSortOrder: normalizedSortOrder,
-                if (task.scheduledStart != null && task.scheduledDue != null) ...{
-                  _payloadTaskStartDate: task.scheduledStart!.toIso8601String(),
-                  _payloadTaskDueDate: task.scheduledDue!.toIso8601String(),
-                },
-                _payloadTaskDependencies: const [],
-              };
-            },
-          )
-          .toList();
+      final taskPayloads = phase.tasks.map((task) {
+        final normalizedSortOrder = taskSortCursor;
+        taskSortCursor += 1;
+        return {
+          _payloadTaskTitle: task.title.trim(),
+          _payloadTaskRole: task.roleRequired,
+          _payloadTaskStaff: task.assignedStaffId,
+          _payloadTaskStaffProfileIds: task.assignedStaffProfileIds,
+          _payloadTaskRequiredHeadcount:
+              // WHY: Payload keeps required slots aligned with selected assignees.
+              task.requiredHeadcount < task.assignedStaffProfileIds.length
+              ? task.assignedStaffProfileIds.length
+              : (task.requiredHeadcount < 1 ? 1 : task.requiredHeadcount),
+          _payloadTaskWeight: task.weight,
+          _payloadTaskInstructions: task.instructions.trim(),
+          _payloadTaskType: task.taskType.trim(),
+          _payloadTaskSourceTemplateKey: task.sourceTemplateKey.trim(),
+          _payloadTaskRecurrenceGroupKey: task.recurrenceGroupKey.trim(),
+          _payloadTaskOccurrenceIndex: task.occurrenceIndex,
+          _payloadTaskManualSortOrder: normalizedSortOrder,
+          if (task.scheduledStart != null && task.scheduledDue != null) ...{
+            _payloadTaskStartDate: task.scheduledStart!.toIso8601String(),
+            _payloadTaskDueDate: task.scheduledDue!.toIso8601String(),
+          },
+          _payloadTaskDependencies: const [],
+        };
+      }).toList();
 
       return {
         _payloadPhaseName: phase.name,
@@ -1672,8 +1773,8 @@ class ProductionPlanDraftController
       _payloadDomainContext: normalizeProductionDomainContext(
         state.domainContext,
       ),
-      _payloadStartDate: state.startDate?.toIso8601String(),
-      _payloadEndDate: state.endDate?.toIso8601String(),
+      _payloadStartDate: normalizedStartDate?.toIso8601String(),
+      _payloadEndDate: normalizedEndDate?.toIso8601String(),
       _payloadAiGenerated: state.aiGenerated,
       _payloadPlantingTargets: state.plantingTargets.toPayload(),
       _payloadPhases: phasesPayload,
@@ -1703,16 +1804,22 @@ class ProductionPlanDraftController
 
 ProductionPlanDraftState _withComputedSummary(ProductionPlanDraftState draft) {
   // WHY: Keep summary counters synchronized with local task edits.
-  final normalizedPhases = _withNormalizedTaskSortOrders(draft.phases);
-  final totalTasks = draft.phases.fold<int>(
+  final normalizedDraft = draft.copyWith(
+    startDate: _normalizeDraftCalendarDate(draft.startDate),
+    endDate: _normalizeDraftCalendarDate(draft.endDate),
+  );
+  final normalizedPhases = _withNormalizedTaskSortOrders(
+    normalizedDraft.phases,
+  );
+  final totalTasks = normalizedDraft.phases.fold<int>(
     0,
     (sum, phase) => sum + phase.tasks.length,
   );
-  final totalEstimatedDays = draft.phases.fold<int>(
+  final totalEstimatedDays = normalizedDraft.phases.fold<int>(
     0,
     (sum, phase) => sum + phase.estimatedDays,
   );
-  return draft.copyWith(
+  return normalizedDraft.copyWith(
     totalTasks: totalTasks,
     totalEstimatedDays: totalEstimatedDays,
     phases: normalizedPhases,
@@ -2578,8 +2685,12 @@ ProductionPlanDraftState _buildStrictDraftState(Map<String, dynamic> draft) {
     productId: hasDirectProduct
         ? draft[_payloadProductId].toString().trim()
         : null,
-    startDate: startDateString == null ? null : DateTime.parse(startDateString),
-    endDate: endDateString == null ? null : DateTime.parse(endDateString),
+    startDate: startDateString == null
+        ? null
+        : _normalizeDraftCalendarDate(DateTime.parse(startDateString)),
+    endDate: endDateString == null
+        ? null
+        : _normalizeDraftCalendarDate(DateTime.parse(endDateString)),
     plantingTargets: plantingTargetsRaw is Map<String, dynamic>
         ? ProductionPlantingTargetsDraft.fromJson(plantingTargetsRaw)
         : const ProductionPlantingTargetsDraft(
