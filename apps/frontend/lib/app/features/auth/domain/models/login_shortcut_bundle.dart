@@ -9,6 +9,7 @@ class LoginShortcutAccount {
   final bool isPhoneVerified;
   final bool isNinVerified;
   final String? staffRole;
+  final List<String> displayRoles;
   final String? subtitle;
   final String? addressLabel;
 
@@ -21,6 +22,7 @@ class LoginShortcutAccount {
     required this.isPhoneVerified,
     required this.isNinVerified,
     this.staffRole,
+    this.displayRoles = const [],
     this.subtitle,
     this.addressLabel,
   });
@@ -38,6 +40,7 @@ class LoginShortcutAccount {
       isPhoneVerified: json['isPhoneVerified'] == true,
       isNinVerified: json['isNinVerified'] == true,
       staffRole: _readOptionalString(json['staffRole']),
+      displayRoles: _readStringList(json['displayRoles']),
       subtitle: _readOptionalString(json['subtitle']),
       addressLabel: _readOptionalString(json['addressLabel']),
     );
@@ -73,4 +76,15 @@ String? _readOptionalString(dynamic value) {
     return null;
   }
   return trimmed;
+}
+
+List<String> _readStringList(dynamic value) {
+  if (value is! List) {
+    return const [];
+  }
+
+  return value
+      .map((entry) => entry?.toString().trim() ?? '')
+      .where((entry) => entry.isNotEmpty)
+      .toList(growable: false);
 }

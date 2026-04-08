@@ -24,6 +24,7 @@
     "ops:crop-profiles:seed": "./scripts/run-with-project-node.sh node scripts/seed-production-crop-profile-manifest.js",
     "ops:crop-profiles:bootstrap": "./scripts/run-with-project-node.sh node scripts/seed-verified-production-crop-bootstrap.js",
     "ops:crop-profiles:import": "./scripts/run-with-project-node.sh node scripts/import-production-crop-profile-source-file.js",
+    "ops:gafar-express:seed-management-staff": "./scripts/run-with-project-node.sh node scripts/seed-gafar-express-management-staff.js",
     "seed:staff-bots": "./scripts/run-with-project-node.sh node scripts/seed-staff-bots.js",
     "cleanup:staff-bots": "./scripts/run-with-project-node.sh node scripts/cleanup-staff-bots.js"
   },

@@ -22,6 +22,27 @@ const LOGIN_ACCOUNT_ROLE_ALIASES = {
   tenant: 'tenant',
   staff: 'staff',
 };
+const LOGIN_ACCOUNT_FIELDS = [
+  '_id',
+  'createdAt',
+  'name',
+  'firstName',
+  'middleName',
+  'lastName',
+  'email',
+  'role',
+  'companyName',
+  'accountType',
+  'homeAddress',
+  'companyAddress',
+  'businessRegisteredAddress',
+  'isEmailVerified',
+  'isPhoneVerified',
+  'isNinVerified',
+].join(' ');
+const STAFF_STATUS_ACTIVE = 'active';
+const STAFF_ROLE_SHAREHOLDER = 'shareholder';
+const STAFF_ROLE_SHAREHOLDER_KEYWORD = 'shareholder';
 
 
 
@@ -176,6 +197,32 @@ function buildUserDisplayName(user) {
   return typeof user.email === 'string' ? user.email.trim() : 'Unknown user';
 }
 
+function resolveAccountDisplayRoles({ user, staffProfile }) {
+  if (user?.role === 'staff') {
+    const roles = [];
+    const primaryRole =
+      typeof staffProfile?.staffRole === 'string'
+        ? staffProfile.staffRole.trim().toLowerCase()
+        : '';
+
+    if (primaryRole) {
+      roles.push(primaryRole);
+    }
+
+    if (
+      hasShareholderShortcutAccess(staffProfile) &&
+      primaryRole !== STAFF_ROLE_SHAREHOLDER
+    ) {
+      roles.push(STAFF_ROLE_SHAREHOLDER);
+    }
+
+    return roles;
+  }
+
+  const role = typeof user?.role === 'string' ? user.role.trim().toLowerCase() : '';
+  return role ? [role] : [];
+}
+
 function buildAccountSubtitle({ role, user, staffProfile }) {
   if (role === 'admin') {
     const companyName =
@@ -184,8 +231,19 @@ function buildAccountSubtitle({ role, user, staffProfile }) {
   }
 
   if (role === 'business_owner') {
+    const displayRoles = resolveAccountDisplayRoles({ user, staffProfile })
+      .map(humanizeLabel)
+      .filter(Boolean);
     const companyName =
       typeof user.companyName === 'string' ? user.companyName.trim() : '';
+    if (user.role === 'staff') {
+      const parts = [];
+      parts.push(...displayRoles);
+      if (companyName) {
+        parts.push(companyName);
+      }
+      return parts.join(' • ') || 'Business stakeholder';
+    }
     return companyName || 'Business owner';
   }
 
@@ -197,13 +255,13 @@ function buildAccountSubtitle({ role, user, staffProfile }) {
 
   if (role === 'staff') {
     const parts = [];
-    const staffRole = humanizeLabel(staffProfile?.staffRole);
+    const displayRoles = resolveAccountDisplayRoles({ user, staffProfile })
+      .map(humanizeLabel)
+      .filter(Boolean);
     const companyName =
       typeof user.companyName === 'string' ? user.companyName.trim() : '';
 
-    if (staffRole) {
-      parts.push(staffRole);
-    }
+    parts.push(...displayRoles);
     if (companyName) {
       parts.push(companyName);
     }
@@ -259,56 +317,156 @@ function buildAccountAddress({ role, user }) {
   return '';
 }
 
+function isPrimaryShareholderShortcutProfile(staffProfile) {
+  return (
+    typeof staffProfile?.staffRole === 'string' &&
+    staffProfile.staffRole.trim().toLowerCase() === STAFF_ROLE_SHAREHOLDER
+  );
+}
+
+function hasShareholderShortcutAccess(staffProfile) {
+  if (isPrimaryShareholderShortcutProfile(staffProfile)) {
+    return true;
+  }
+
+  const notes =
+    typeof staffProfile?.notes === 'string' ? staffProfile.notes.trim() : '';
+  if (!notes) {
+    return false;
+  }
+
+  return notes.toLowerCase().includes(STAFF_ROLE_SHAREHOLDER_KEYWORD);
+}
+
+function sortLoginAccounts(left, right) {
+  const leftCreatedAt = Date.parse(left?.createdAt ?? '') || 0;
+  const rightCreatedAt = Date.parse(right?.createdAt ?? '') || 0;
+  if (leftCreatedAt !== rightCreatedAt) {
+    return leftCreatedAt - rightCreatedAt;
+  }
+
+  const leftFirstName = (left?.firstName ?? '').toString().toLowerCase();
+  const rightFirstName = (right?.firstName ?? '').toString().toLowerCase();
+  if (leftFirstName !== rightFirstName) {
+    return leftFirstName.localeCompare(rightFirstName);
+  }
+
+  const leftLastName = (left?.lastName ?? '').toString().toLowerCase();
+  const rightLastName = (right?.lastName ?? '').toString().toLowerCase();
+  if (leftLastName !== rightLastName) {
+    return leftLastName.localeCompare(rightLastName);
+  }
+
+  return (left?.email ?? '').toString().toLowerCase().localeCompare(
+    (right?.email ?? '').toString().toLowerCase(),
+  );
+}
+
+async function fetchLoginUsers({ role, userIds = null }) {
+  const query = {
+    isActive: true,
+  };
+
+  if (role) {
+    query.role = role;
+  }
+
+  if (Array.isArray(userIds)) {
+    query._id = { $in: userIds };
+  }
+
+  const users = await User.find(query)
+    .select(LOGIN_ACCOUNT_FIELDS)
+    .lean();
+
+  users.sort(sortLoginAccounts);
+  return users;
+}
+
+async function fetchActiveStaffProfiles({
+  userIds = null,
+  staffRole = null,
+  requireShareholderAccess = false,
+}) {
+  const query = {
+    status: STAFF_STATUS_ACTIVE,
+  };
+
+  if (Array.isArray(userIds)) {
+    query.userId = { $in: userIds };
+  }
+
+  if (requireShareholderAccess) {
+    query.$or = [
+      { staffRole: STAFF_ROLE_SHAREHOLDER },
+      { notes: /shareholder/i },
+    ];
+  } else if (staffRole) {
+    query.staffRole = staffRole;
+  }
+
+  return BusinessStaffProfile.find(query)
+    .sort({ createdAt: 1 })
+    .select('userId staffRole notes')
+    .lean();
+}
+
 async function listLoginAccounts(role) {
   const normalizedRole = normalizeLoginAccountRole(role);
   if (!normalizedRole) {
     throw new Error('Unsupported login account role');
   }
 
-  const users = await User.find({
-    role: normalizedRole,
-    isActive: true,
-  })
-    .sort({
-      createdAt: 1,
-      firstName: 1,
-      lastName: 1,
-      email: 1,
-    })
-    .select(
-      [
-        '_id',
-        'name',
-        'firstName',
-        'middleName',
-        'lastName',
-        'email',
-        'role',
-        'companyName',
-        'accountType',
-        'homeAddress',
-        'companyAddress',
-        'businessRegisteredAddress',
-        'isEmailVerified',
-        'isPhoneVerified',
-        'isNinVerified',
-      ].join(' '),
-    )
-    .lean();
-
   let staffProfilesByUserId = new Map();
-  if (normalizedRole === 'staff' && users.length > 0) {
-    const staffProfiles = await BusinessStaffProfile.find({
-      userId: { $in: users.map((user) => user._id) },
-      status: 'active',
-    })
-      .sort({ createdAt: 1 })
-      .select('userId staffRole')
-      .lean();
+  let users = [];
+
+  if (normalizedRole === 'staff') {
+    const staffUsers = await fetchLoginUsers({ role: normalizedRole });
+    if (staffUsers.length > 0) {
+      const staffProfiles = await fetchActiveStaffProfiles({
+        userIds: staffUsers.map((user) => user._id),
+      });
+      staffProfilesByUserId = new Map(
+        staffProfiles.map((profile) => [String(profile.userId), profile]),
+      );
+      users = staffUsers.filter(
+        (user) =>
+          !isPrimaryShareholderShortcutProfile(
+            staffProfilesByUserId.get(String(user._id)),
+          ),
+      );
+    }
+  } else if (normalizedRole === 'business_owner') {
+    const ownerUsers = await fetchLoginUsers({ role: normalizedRole });
+    const shareholderProfiles = await fetchActiveStaffProfiles({
+      requireShareholderAccess: true,
+    });
+    const shareholderUserIds = shareholderProfiles.map((profile) => profile.userId);
+    const shareholderUsers =
+      shareholderUserIds.length > 0
+      ? await fetchLoginUsers({
+          role: 'staff',
+          userIds: shareholderUserIds,
+        })
+      : [];
 
     staffProfilesByUserId = new Map(
-      staffProfiles.map((profile) => [String(profile.userId), profile]),
+      shareholderProfiles
+        .filter((profile) => hasShareholderShortcutAccess(profile))
+        .map((profile) => [String(profile.userId), profile]),
     );
+
+    const usersById = new Map();
+    for (const user of ownerUsers) {
+      usersById.set(String(user._id), user);
+    }
+    for (const user of shareholderUsers) {
+      usersById.set(String(user._id), user);
+    }
+    users = Array.from(usersById.values());
+    users.sort(sortLoginAccounts);
+  } else {
+    users = await fetchLoginUsers({ role: normalizedRole });
   }
 
   const accounts = users.map((user) => ({
@@ -320,6 +478,10 @@ async function listLoginAccounts(role) {
     isPhoneVerified: user.isPhoneVerified === true,
     isNinVerified: user.isNinVerified === true,
     staffRole: staffProfilesByUserId.get(String(user._id))?.staffRole || null,
+    displayRoles: resolveAccountDisplayRoles({
+      user,
+      staffProfile: staffProfilesByUserId.get(String(user._id)),
+    }),
     subtitle: buildAccountSubtitle({
       role: normalizedRole,
       user,

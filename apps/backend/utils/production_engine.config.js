@@ -72,8 +72,11 @@ const STAFF_ROLES = [
   "asset_manager",
   "farm_manager",
   "estate_manager",
+  "quality_control_manager",
   "customer_care",
   "accountant",
+  "lawyer",
+  "shareholder",
   "field_agent",
   "cleaner",
   "farmer",
@@ -114,6 +117,10 @@ const ROLE_RULES = {
     responsibilities: ["COMPLIANCE", "APPROVAL", "PLANNING"],
     priority: 3,
   },
+  quality_control_manager: {
+    responsibilities: ["AUDIT", "SUPERVISION", "APPROVAL"],
+    priority: 3,
+  },
   customer_care: {
     responsibilities: ["CUSTOMER_SUPPORT", "APPROVAL"],
     priority: 2,
@@ -121,6 +128,14 @@ const ROLE_RULES = {
   accountant: {
     responsibilities: ["FINANCE", "AUDIT"],
     priority: 3,
+  },
+  lawyer: {
+    responsibilities: ["COMPLIANCE", "APPROVAL"],
+    priority: 4,
+  },
+  shareholder: {
+    responsibilities: ["REPORTING"],
+    priority: 5,
   },
   auditor: {
     responsibilities: ["AUDIT"],
@@ -149,7 +164,16 @@ const ROLE_KEYWORDS = {
   maintenance_technician: ["repair", "fix", "maintain", "machine"],
   logistics_driver: ["transport", "deliver", "haul"],
   estate_manager: ["approve", "report", "compliance", "policy"],
+  quality_control_manager: [
+    "quality",
+    "quality control",
+    "inspection",
+    "audit",
+    "compliance",
+  ],
   customer_care: ["customer", "support", "chat", "queue", "reply"],
+  lawyer: ["legal", "contract", "compliance", "policy"],
+  shareholder: ["shareholder", "board", "investor", "stakeholder"],
 };
 
 // WHY: Domain configs bias suggestions without replacing core engine behavior.

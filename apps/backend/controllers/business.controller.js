@@ -12404,6 +12404,7 @@ function resolveCapacityBucketsForStaffRole(
     case "farmer":
       return ["farmer"];
     case "auditor":
+    case "quality_control_manager":
       return ["qc_officer"];
     case "maintenance_technician":
       return ["machine_operator"];

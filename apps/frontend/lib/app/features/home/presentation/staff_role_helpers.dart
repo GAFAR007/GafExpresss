@@ -16,8 +16,11 @@ library;
 const String staffRoleAssetManager = "asset_manager";
 const String staffRoleFarmManager = "farm_manager";
 const String staffRoleEstateManager = "estate_manager";
+const String staffRoleQualityControlManager = "quality_control_manager";
 const String staffRoleCustomerCare = "customer_care";
 const String staffRoleAccountant = "accountant";
+const String staffRoleLawyer = "lawyer";
+const String staffRoleShareholder = "shareholder";
 const String staffRoleFieldAgent = "field_agent";
 const String staffRoleCleaner = "cleaner";
 const String staffRoleFarmer = "farmer";
@@ -31,8 +34,11 @@ const List<String> staffRoleValues = [
   staffRoleAssetManager,
   staffRoleFarmManager,
   staffRoleEstateManager,
+  staffRoleQualityControlManager,
   staffRoleCustomerCare,
   staffRoleAccountant,
+  staffRoleLawyer,
+  staffRoleShareholder,
   staffRoleFieldAgent,
   staffRoleCleaner,
   staffRoleFarmer,

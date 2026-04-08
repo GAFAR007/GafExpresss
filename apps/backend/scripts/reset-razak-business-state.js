@@ -120,7 +120,52 @@ const STAFF_SEEDS = [
     staffRole: "estate_manager",
     note: "Estate manager added by request.",
   },
+  {
+    firstName: "Kudirat",
+    lastName: "Gafar",
+    email: "kudirat.gafar@gafarhydroponyfarmfarm.com",
+    phone: "08000000303",
+    staffRole: "lawyer",
+    note: "Lawyer and shareholder added by request.",
+  },
+  {
+    firstName: "Sherifat",
+    lastName: "Gafar",
+    email: "sherifat.gafar@gafarhydroponyfarmfarm.com",
+    phone: "08000000304",
+    staffRole: "shareholder",
+    note: "Shareholder added by request.",
+  },
+  {
+    firstName: "Kemi",
+    lastName: "Gafar",
+    email: "kemi.gafar@gafarhydroponyfarmfarm.com",
+    phone: "08000000305",
+    staffRole: "quality_control_manager",
+    note: "Shareholder and quality control manager added by request.",
+  },
+  {
+    firstName: "Abdulateef",
+    middleName: "Femi",
+    lastName: "Gafar",
+    email: "abdulateef.femi.gafar@gafarhydroponyfarmfarm.com",
+    phone: "08000000306",
+    staffRole: "shareholder",
+    note: "Shareholder added by request.",
+  },
 ];
+
+const ESTATE_LINKED_STAFF_ROLES = new Set([
+  "estate_manager",
+  "security",
+  "maintenance_technician",
+  "field_agent",
+  "farm_manager",
+  "farmer",
+  "cleaner",
+  "logistics_driver",
+  "quality_control_manager",
+]);
 
 const CUSTOMER_SEEDS = [
   {
@@ -656,6 +701,15 @@ async function main() {
     });
     const resolvedEmail = staffSeed.email || email;
     const ninLast4 = lastFourDigits(staffSeed.phone);
+    const isEstateLinkedStaff = ESTATE_LINKED_STAFF_ROLES.has(
+      staffSeed.staffRole,
+    );
+    const assignedEstateId = isEstateLinkedStaff
+      ? preservedEstate._id
+      : null;
+    const staffCompanyName = isEstateLinkedStaff
+      ? PRESERVED_ESTATE_NAME
+      : PRESERVED_BUSINESS_NAME;
 
     await User.create({
       _id: userId,
@@ -668,9 +722,9 @@ async function main() {
       passwordHash,
       role: "staff",
       businessId: preservedUser._id,
-      estateAssetId: preservedEstate._id,
+      estateAssetId: assignedEstateId,
       accountType: "personal",
-      companyName: PRESERVED_ESTATE_NAME,
+      companyName: staffCompanyName,
       isActive: true,
       isEmailVerified: true,
       isPhoneVerified: true,
@@ -682,7 +736,7 @@ async function main() {
       userId,
       businessId: preservedUser._id,
       staffRole: staffSeed.staffRole,
-      estateAssetId: preservedEstate._id,
+      estateAssetId: assignedEstateId,
       status: "active",
       startDate: now,
       notes: staffSeed.note,

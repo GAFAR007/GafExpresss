@@ -270,6 +270,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         .join(' ');
   }
 
+  List<String> _resolveAccountRoleLabels(LoginShortcutAccount account) {
+    final formattedRoles = account.displayRoles
+        .map(_formatAccountLabel)
+        .where((value) => value.trim().isNotEmpty)
+        .toList(growable: false);
+    if (formattedRoles.isNotEmpty) {
+      return formattedRoles;
+    }
+
+    final fallback = _formatAccountLabel(
+      (account.staffRole ?? '').isNotEmpty ? account.staffRole! : account.role,
+    );
+    return fallback.trim().isEmpty ? const [] : [fallback];
+  }
+
   void _togglePasswordVisibility({
     required void Function(void Function()) setModalState,
   }) {
@@ -981,9 +996,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _emailCtrl.text.trim().toLowerCase() == account.email.toLowerCase();
     final password = _resolveShortcutPassword(account);
     final hasPassword = (password ?? "").isNotEmpty;
-    final accountRoleLabel = _formatAccountLabel(
-      (account.staffRole ?? '').isNotEmpty ? account.staffRole! : account.role,
-    );
+    final accountRoleLabels = _resolveAccountRoleLabels(account);
 
     return Material(
       color: Colors.transparent,
@@ -1078,12 +1091,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.sm,
                 children: [
-                  AppStatusChip(
-                    label: accountRoleLabel,
-                    tone: AppStatusTone.info,
-                    icon: (account.staffRole ?? '').isNotEmpty
-                        ? Icons.badge_rounded
-                        : _selectedShortcutRole.icon,
+                  ...accountRoleLabels.map(
+                    (roleLabel) => AppStatusChip(
+                      label: roleLabel,
+                      tone: AppStatusTone.info,
+                      icon: (account.staffRole ?? '').isNotEmpty
+                          ? Icons.badge_rounded
+                          : _selectedShortcutRole.icon,
+                    ),
                   ),
                   AppStatusChip(
                     label: account.isFullyVerified
@@ -2176,9 +2191,9 @@ extension on _LoginShortcutRole {
 
   String get description => switch (this) {
     _LoginShortcutRole.user => 'Customers and shoppers',
-    _LoginShortcutRole.businessOwner => 'Owners and operators',
+    _LoginShortcutRole.businessOwner => 'Owners, operators, and shareholders',
     _LoginShortcutRole.tenant => 'Residents and lease customers',
-    _LoginShortcutRole.staff => 'Team members and field staff',
+    _LoginShortcutRole.staff => 'Team members and professional staff',
     _LoginShortcutRole.admin => 'Platform control account',
   };
 
