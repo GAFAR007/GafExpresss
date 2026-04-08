@@ -25,15 +25,18 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/core/platform/text_file_download.dart';
+import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_task_table.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+import 'package:frontend/app/theme/app_colors.dart';
 
 const double _pagePadding = 20;
 const double _sectionSpacing = 18;
@@ -3381,6 +3384,15 @@ class _ProductionPlanDraftEditorScreenState
         planId.isNotEmpty &&
         canManageLifecycle &&
         (existingPlanStatus == "active" || existingPlanStatus == "paused");
+    final presenceState = planId.isEmpty
+        ? null
+        : ref.watch(productionDraftPresenceProvider(planId));
+    final currentViewer = _buildCurrentPresenceViewer(
+      session: session,
+      profileName: profileAsync.valueOrNull?.name ?? "",
+      profileEmail: profileAsync.valueOrNull?.email ?? "",
+      profileStaffRole: profileAsync.valueOrNull?.staffRole,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -3478,6 +3490,16 @@ class _ProductionPlanDraftEditorScreenState
                       constraints: const BoxConstraints(maxWidth: 1520),
                       child: Column(
                         children: [
+                          _DraftPresenceBanner(
+                            currentViewer: currentViewer,
+                            remoteViewers:
+                                presenceState?.viewers ??
+                                const <ProductionDraftPresenceViewer>[],
+                            isConnected: presenceState?.isConnected ?? false,
+                            isSharedRoom: planId.isNotEmpty,
+                            errorMessage: presenceState?.error,
+                          ),
+                          const SizedBox(height: _sectionSpacing),
                           _DraftEditorSummaryCard(
                             draft: draft,
                             selectedEstateName: selectedEstateName,
@@ -4027,6 +4049,281 @@ class _DraftEditorSummaryCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _DraftPresenceBanner extends StatelessWidget {
+  final ProductionDraftPresenceViewer currentViewer;
+  final List<ProductionDraftPresenceViewer> remoteViewers;
+  final bool isConnected;
+  final bool isSharedRoom;
+  final String? errorMessage;
+
+  const _DraftPresenceBanner({
+    required this.currentViewer,
+    required this.remoteViewers,
+    required this.isConnected,
+    required this.isSharedRoom,
+    required this.errorMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final viewers = _mergeDraftPresenceViewers(
+      currentViewer: currentViewer,
+      remoteViewers: remoteViewers,
+    );
+    final viewerCount = viewers.length;
+    final statusColor = isSharedRoom
+        ? (isConnected ? AppColors.productionAccent : AppColors.tenantAccent)
+        : theme.colorScheme.tertiary;
+    final statusLabel = !isSharedRoom
+        ? "Local draft"
+        : isConnected
+        ? "Live"
+        : "Connecting";
+    final statusBackground = statusColor.withValues(
+      alpha: theme.brightness == Brightness.dark ? 0.24 : 0.12,
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(_cardRadius),
+        border: Border.all(color: statusColor.withValues(alpha: 0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stackHeader = constraints.maxWidth < 760;
+              final titleBlock = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Currently viewing",
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "$viewerCount viewer${viewerCount == 1 ? '' : 's'} on this draft",
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isSharedRoom
+                        ? "Live room presence updates while the draft is open."
+                        : "Showing the signed-in account tied to this draft.",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              );
+
+              final statusChip = Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: statusBackground,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: statusColor.withValues(alpha: 0.42),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isConnected
+                          ? Icons.wifi_tethering_outlined
+                          : Icons.wifi_off_outlined,
+                      size: 16,
+                      color: statusColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      statusLabel,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: statusColor,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+
+              if (stackHeader) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    titleBlock,
+                    const SizedBox(height: 12),
+                    statusChip,
+                  ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: titleBlock),
+                  const SizedBox(width: 12),
+                  statusChip,
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: viewers
+                .map(
+                  (viewer) => _DraftPresenceViewerChip(
+                    viewer: viewer,
+                    isSelf:
+                        _draftPresenceViewerKey(viewer) ==
+                        _draftPresenceViewerKey(currentViewer),
+                  ),
+                )
+                .toList(),
+          ),
+          if ((errorMessage ?? "").trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              "Live presence is not connected yet. Showing the current viewer and draft state only.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _DraftPresenceViewerChip extends StatelessWidget {
+  final ProductionDraftPresenceViewer viewer;
+  final bool isSelf;
+
+  const _DraftPresenceViewerChip({required this.viewer, required this.isSelf});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _resolveDraftPresenceAccentColor(theme, viewer.roleKey);
+    final background = accent.withValues(
+      alpha: theme.brightness == Brightness.dark ? 0.22 : 0.12,
+    );
+    final initials = _presenceViewerInitials(viewer.resolvedDisplayName);
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: accent.withValues(alpha: isSelf ? 0.72 : 0.42),
+            width: isSelf ? 1.8 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.2),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                initials,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          viewer.resolvedDisplayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      if (isSelf) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: theme.brightness == Brightness.dark
+                                  ? 0.24
+                                  : 0.12,
+                            ),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            "You",
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    viewer.roleLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -4845,6 +5142,140 @@ class _SummaryChip extends StatelessWidget {
       ),
     );
   }
+}
+
+ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
+  required AuthSession? session,
+  required String profileName,
+  required String profileEmail,
+  required String? profileStaffRole,
+}) {
+  final userId = session?.user.id.trim() ?? "";
+  final sessionName = session?.user.name.trim() ?? "";
+  final sessionEmail = session?.user.email.trim() ?? "";
+  final sessionRole = session?.user.role.trim() ?? "";
+  final trimmedProfileName = profileName.trim();
+  final trimmedProfileEmail = profileEmail.trim();
+  final resolvedName = trimmedProfileName.isNotEmpty
+      ? trimmedProfileName
+      : sessionName.isNotEmpty
+      ? sessionName
+      : trimmedProfileEmail.isNotEmpty
+      ? trimmedProfileEmail
+      : sessionEmail;
+  final normalizedRole = normalizeDraftPresenceRoleKey(sessionRole);
+  final resolvedStaffRole = normalizedRole == "staff"
+      ? _normalizeNullableDraftPresenceRole(profileStaffRole)
+      : null;
+
+  return ProductionDraftPresenceViewer(
+    userId: userId,
+    displayName: resolvedName,
+    email: trimmedProfileEmail.isNotEmpty ? trimmedProfileEmail : sessionEmail,
+    accountRole: normalizedRole,
+    staffRole: resolvedStaffRole,
+  );
+}
+
+List<ProductionDraftPresenceViewer> _mergeDraftPresenceViewers({
+  required ProductionDraftPresenceViewer currentViewer,
+  required List<ProductionDraftPresenceViewer> remoteViewers,
+}) {
+  final merged = <String, ProductionDraftPresenceViewer>{};
+
+  final currentKey = _draftPresenceViewerKey(currentViewer);
+  if (currentKey.isNotEmpty) {
+    merged[currentKey] = currentViewer;
+  }
+
+  for (final viewer in remoteViewers) {
+    final key = _draftPresenceViewerKey(viewer);
+    if (key.isEmpty) {
+      continue;
+    }
+    merged[key] = viewer;
+  }
+
+  final viewers = merged.values.toList();
+  viewers.sort((left, right) {
+    final selfKey = currentKey;
+    if (_draftPresenceViewerKey(left) == selfKey &&
+        _draftPresenceViewerKey(right) != selfKey) {
+      return -1;
+    }
+    if (_draftPresenceViewerKey(right) == selfKey &&
+        _draftPresenceViewerKey(left) != selfKey) {
+      return 1;
+    }
+    final nameCompare = left.resolvedDisplayName.compareTo(
+      right.resolvedDisplayName,
+    );
+    if (nameCompare != 0) {
+      return nameCompare;
+    }
+    return left.userId.compareTo(right.userId);
+  });
+
+  return viewers;
+}
+
+String _draftPresenceViewerKey(ProductionDraftPresenceViewer viewer) {
+  final userId = viewer.userId.trim();
+  if (userId.isNotEmpty) {
+    return userId;
+  }
+
+  final displayName = viewer.resolvedDisplayName.trim();
+  final roleKey = viewer.roleKey.trim();
+  if (displayName.isEmpty && roleKey.isEmpty) {
+    return "";
+  }
+
+  return "$displayName|$roleKey";
+}
+
+Color _resolveDraftPresenceAccentColor(ThemeData theme, String roleKey) {
+  switch (normalizeDraftPresenceRoleKey(roleKey)) {
+    case "business_owner":
+      return AppColors.tertiary;
+    case "estate_manager":
+      return AppColors.analyticsAccent;
+    case "farm_manager":
+      return AppColors.productionAccent;
+    case "asset_manager":
+      return AppColors.commerceAccent;
+    case "admin":
+      return AppColors.recordsAccent;
+    default:
+      return theme.colorScheme.primary;
+  }
+}
+
+String _presenceViewerInitials(String name) {
+  final words = name
+      .trim()
+      .split(RegExp(r"\s+"))
+      .where((word) => word.trim().isNotEmpty)
+      .toList();
+  if (words.isEmpty) {
+    return "?";
+  }
+
+  final first = words.first.trim();
+  final second = words.length > 1 ? words[1].trim() : "";
+  final buffer = StringBuffer();
+  buffer.write(first.substring(0, 1));
+  if (second.isNotEmpty) {
+    buffer.write(second.substring(0, 1));
+  } else if (first.length > 1) {
+    buffer.write(first.substring(first.length - 1));
+  }
+  return buffer.toString().toUpperCase();
+}
+
+String? _normalizeNullableDraftPresenceRole(String? role) {
+  final normalized = normalizeDraftPresenceRoleKey(role ?? "");
+  return normalized.isEmpty ? null : normalized;
 }
 
 ProductionTaskStatus _taskStatusFromBackend(String rawStatus) {
