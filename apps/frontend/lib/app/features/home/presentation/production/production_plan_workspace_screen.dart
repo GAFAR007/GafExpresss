@@ -290,7 +290,9 @@ class _ProductionPlanWorkspaceScreenState
     final detailAsync = ref.watch(productionPlanDetailProvider(widget.planId));
     final staffAsync = ref.watch(productionStaffProvider);
     final session = ref.watch(authSessionProvider);
-    final actorRole = session?.user.role;
+    final profileAsync = ref.watch(userProfileProvider);
+    final profileRole = profileAsync.valueOrNull?.role ?? "";
+    final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
 
     return Scaffold(
       appBar: AppBar(
@@ -353,11 +355,11 @@ class _ProductionPlanWorkspaceScreenState
             final staffMap = _buildStaffMap(staffList);
             final selfStaffRole = _resolveSelfStaffRole(
               staffList: staffList,
-              userEmail: session?.user.email,
+              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
             );
             final selfStaffId = _resolveSelfStaffId(
               staffList: staffList,
-              userEmail: session?.user.email,
+              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
             );
             final canManageCalendar = _canManageCalendar(
               actorRole: actorRole,

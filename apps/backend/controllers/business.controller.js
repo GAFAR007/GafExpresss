@@ -986,8 +986,11 @@ function canManageStaffDirectory({
 
   return (
     actorRole === "staff" &&
-    staffRole ===
-      STAFF_ROLE_ESTATE_MANAGER
+    (
+      staffRole === STAFF_ROLE_ESTATE_MANAGER ||
+      staffRole === STAFF_ROLE_FARM_MANAGER ||
+      staffRole === STAFF_ROLE_ASSET_MANAGER
+    )
   );
 }
 
@@ -14566,10 +14569,13 @@ async function acceptInvite(req, res) {
       },
     );
 
+    const acceptedUser = user.toObject();
+    acceptedUser.staffRole = invite.staffRole || null;
+
     return res.status(200).json({
       message:
         "Invite accepted successfully",
-      user,
+      user: acceptedUser,
       token: authToken,
       role: user.role,
       estateAssetId: user.estateAssetId,

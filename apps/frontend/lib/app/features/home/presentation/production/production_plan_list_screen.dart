@@ -351,8 +351,13 @@ class _ProductionPlanListScreenState
     final portfolioAsync = ref.watch(
       productionPortfolioConfidenceProvider(null),
     );
-    final role = ref.watch(authSessionProvider)?.user.role ?? "";
-    final userEmail = ref.watch(authSessionProvider)?.user.email;
+    final session = ref.watch(authSessionProvider);
+    final profileAsync = ref.watch(userProfileProvider);
+    final profileRole = profileAsync.valueOrNull?.role ?? "";
+    final role = profileRole.isNotEmpty
+        ? profileRole
+        : session?.user.role ?? "";
+    final userEmail = profileAsync.valueOrNull?.email ?? session?.user.email;
     final canOpenMonitoring = role == _ownerRole;
     final staffAsync = ref.watch(productionStaffProvider);
     final selfStaffRole = _resolveSelfStaffRole(
@@ -692,7 +697,8 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (plan.lastDraftSavedBy?.displayLabel.trim().isNotEmpty == true) ...[
+            if (plan.lastDraftSavedBy?.displayLabel.trim().isNotEmpty ==
+                true) ...[
               const SizedBox(height: _cardRowSpacing),
               Text(
                 "Saved by: ${plan.lastDraftSavedBy!.displayLabel}",
@@ -860,8 +866,9 @@ String _resolveProductionActionErrorMessage(
   final responseMap = responseData is Map<String, dynamic>
       ? responseData
       : const <String, dynamic>{};
-  final backendError =
-      (responseMap["error"] ?? responseMap["message"] ?? "").toString().trim();
+  final backendError = (responseMap["error"] ?? responseMap["message"] ?? "")
+      .toString()
+      .trim();
   if (backendError.isNotEmpty) {
     return backendError;
   }

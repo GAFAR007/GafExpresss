@@ -411,6 +411,31 @@ async function fetchActiveStaffProfiles({
     .lean();
 }
 
+async function resolveLoginStaffRole(user) {
+  if (!user || user.role !== 'staff' || !user._id) {
+    return null;
+  }
+
+  const query = {
+    userId: user._id,
+    status: { $ne: 'terminated' },
+  };
+
+  if (user.businessId) {
+    query.businessId = user.businessId;
+  }
+
+  const staffProfile = await BusinessStaffProfile.findOne(query)
+    .sort({
+      updatedAt: -1,
+      createdAt: -1,
+    })
+    .select('staffRole')
+    .lean();
+
+  return staffProfile?.staffRole || null;
+}
+
 async function listLoginAccounts(role) {
   const normalizedRole = normalizeLoginAccountRole(role);
   if (!normalizedRole) {
@@ -541,6 +566,8 @@ async function loginUser(payload) {
     throw new Error('Invalid email or password');
   }
 
+  const staffRole = await resolveLoginStaffRole(user);
+
   debug('================ LOGIN SERVICE END (SUCCESS) ================');
 
 const token = signToken({
@@ -555,6 +582,7 @@ return {
     name: user.name,
     email: user.email,
     role: user.role,
+    staffRole,
   },
 };
 }

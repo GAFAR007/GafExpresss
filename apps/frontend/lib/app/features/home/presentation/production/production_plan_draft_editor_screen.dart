@@ -3350,20 +3350,26 @@ class _ProductionPlanDraftEditorScreenState
         if (profile.id.trim().isNotEmpty) profile.id.trim(): profile,
     };
     final session = ref.watch(authSessionProvider);
+    final sessionStaffRole = session?.user.staffRole;
     // WHY: Staff directory access is narrower than draft editing, so use the
     // authenticated profile role first and only fall back to email matching.
     final profileAsync = ref.watch(userProfileProvider);
+    final profileRole = profileAsync.valueOrNull?.role ?? "";
+    final actorRole = _resolveDraftAccessRole(
+      profileRole.isNotEmpty ? profileRole : session?.user.role ?? "",
+    );
     final selfStaffRole = _resolveSelfStaffRole(
+      sessionStaffRole: sessionStaffRole,
       profileStaffRole: profileAsync.valueOrNull?.staffRole,
       staffList: staffList,
       userEmail: session?.user.email,
     );
     final canEditDraft = _canEditDraft(
-      actorRole: session?.user.role ?? "",
+      actorRole: actorRole,
       staffRole: selfStaffRole,
     );
     final canManageLifecycle = _canManageDraftLifecycle(
-      actorRole: session?.user.role ?? "",
+      actorRole: actorRole,
       staffRole: selfStaffRole,
     );
     final existingPlanStatus =
@@ -3389,6 +3395,8 @@ class _ProductionPlanDraftEditorScreenState
         : ref.watch(productionDraftPresenceProvider(planId));
     final currentViewer = _buildCurrentPresenceViewer(
       session: session,
+      sessionStaffRole: sessionStaffRole,
+      profileRole: profileRole,
       profileName: profileAsync.valueOrNull?.name ?? "",
       profileEmail: profileAsync.valueOrNull?.email ?? "",
       profileStaffRole: profileAsync.valueOrNull?.staffRole,
@@ -5146,6 +5154,8 @@ class _SummaryChip extends StatelessWidget {
 
 ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
   required AuthSession? session,
+  required String? sessionStaffRole,
+  required String profileRole,
   required String profileName,
   required String profileEmail,
   required String? profileStaffRole,
@@ -5153,7 +5163,9 @@ ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
   final userId = session?.user.id.trim() ?? "";
   final sessionName = session?.user.name.trim() ?? "";
   final sessionEmail = session?.user.email.trim() ?? "";
-  final sessionRole = session?.user.role.trim() ?? "";
+  final sessionRole = profileRole.trim().isNotEmpty
+      ? profileRole.trim()
+      : session?.user.role.trim() ?? "";
   final trimmedProfileName = profileName.trim();
   final trimmedProfileEmail = profileEmail.trim();
   final resolvedName = trimmedProfileName.isNotEmpty
@@ -5165,7 +5177,9 @@ ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
       : sessionEmail;
   final normalizedRole = normalizeDraftPresenceRoleKey(sessionRole);
   final resolvedStaffRole = normalizedRole == "staff"
-      ? _normalizeNullableDraftPresenceRole(profileStaffRole)
+      ? _normalizeNullableDraftPresenceRole(
+          sessionStaffRole ?? profileStaffRole,
+        )
       : null;
 
   return ProductionDraftPresenceViewer(
@@ -5346,11 +5360,14 @@ bool _canManageDraftLifecycle({
 }
 
 String? _resolveSelfStaffRole({
+  required String? sessionStaffRole,
   required String? profileStaffRole,
   required List<BusinessStaffProfileSummary> staffList,
   required String? userEmail,
 }) {
-  final directRole = _normalizeDraftAccessRole(profileStaffRole ?? "");
+  final directRole = _normalizeDraftAccessRole(
+    sessionStaffRole ?? profileStaffRole ?? "",
+  );
   if (directRole.isNotEmpty) {
     return directRole;
   }
@@ -5368,8 +5385,12 @@ String? _resolveSelfStaffRole({
   return null;
 }
 
-String _normalizeDraftAccessRole(String rawRole) {
+String _resolveDraftAccessRole(String rawRole) {
   return rawRole.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_");
+}
+
+String _normalizeDraftAccessRole(String rawRole) {
+  return _resolveDraftAccessRole(rawRole);
 }
 
 String _sentenceCase(String value) {

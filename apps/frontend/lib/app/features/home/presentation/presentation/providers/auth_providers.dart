@@ -190,6 +190,7 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
   Future<void> updateUserRole({
     required String role,
     required String source,
+    String? staffRole,
   }) async {
     final session = state;
     if (session == null) {
@@ -213,12 +214,26 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
       return;
     }
 
-    if (session.user.role == trimmedRole) {
+    final normalizedStaffRole = staffRole?.trim().isNotEmpty == true
+        ? staffRole!
+              .trim()
+              .toLowerCase()
+              .replaceAll("-", "_")
+              .replaceAll(" ", "_")
+        : null;
+
+    if (session.user.role == trimmedRole &&
+        (normalizedStaffRole == null ||
+            normalizedStaffRole == session.user.staffRole)) {
       // WHY: Avoid unnecessary writes to secure storage.
       AppDebug.log(
         "AUTH_SESSION",
         "updateUserRole() skipped - role unchanged",
-        extra: {"source": source, "role": trimmedRole},
+        extra: {
+          "source": source,
+          "role": trimmedRole,
+          if (normalizedStaffRole != null) "staffRole": normalizedStaffRole,
+        },
       );
       return;
     }
@@ -227,18 +242,20 @@ class AuthSessionController extends StateNotifier<AuthSession?> {
     AppDebug.log(
       "AUTH_SESSION",
       "updateUserRole()",
-      extra: {"source": source, "from": session.user.role, "to": trimmedRole},
+      extra: {
+        "source": source,
+        "from": session.user.role,
+        "to": trimmedRole,
+        if (normalizedStaffRole != null) "staffRole": normalizedStaffRole,
+      },
     );
 
     // WHY: Preserve identity fields while only updating role.
-    final updatedUser = AuthUser(
-      id: session.user.id,
-      name: session.user.name,
-      email: session.user.email,
-      role: trimmedRole,
-      // WHY: Keep business scope stable across role updates.
-      businessId: session.user.businessId,
-    );
+    final updatedUser = AuthUser.fromJson({
+      ...session.user.toJson(),
+      "role": trimmedRole,
+      if (normalizedStaffRole != null) "staffRole": normalizedStaffRole,
+    });
     // WHY: Keep token intact so the session remains authenticated.
     final updatedSession = AuthSession(user: updatedUser, token: session.token);
     // WHY: Reuse setSession so storage + auto-logout stay consistent.

@@ -73,12 +73,21 @@ class AppRefresh {
         // WHY: Fetch the latest profile to compare role with session role.
         final profile = await ref.refresh(userProfileProvider.future);
         final profileRole = profile?.role.trim() ?? "";
-        if (profileRole.isNotEmpty && profileRole != session.user.role) {
+        final profileStaffRole = profile?.staffRole?.trim() ?? "";
+        final shouldSyncRole =
+            profileRole.isNotEmpty && profileRole != session.user.role;
+        final shouldSyncStaffRole =
+            profileStaffRole.isNotEmpty &&
+            profileStaffRole != session.user.staffRole;
+        if (shouldSyncRole || shouldSyncStaffRole) {
           // WHY: Update session role so UI (tenant tab) reflects changes.
           await ref
               .read(authSessionProvider.notifier)
               .updateUserRole(
-                role: profileRole,
+                role: profileRole.isNotEmpty ? profileRole : session.user.role,
+                staffRole: profileStaffRole.isNotEmpty
+                    ? profileStaffRole
+                    : null,
                 source: "app_refresh_profile_sync",
               );
         }
