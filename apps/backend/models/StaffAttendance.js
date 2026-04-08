@@ -68,6 +68,41 @@ const staffAttendanceSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    // WHY: Proof keeps clock-out actions auditable and verifiable.
+    proofUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    proofPublicId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    proofFilename: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    proofMimeType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    proofSizeBytes: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    proofUploadedAt: {
+      type: Date,
+      default: null,
+    },
+    proofUploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -154,6 +154,13 @@ const String _keyWorkDate = "workDate";
 const String _keyClockInAt = "clockInAt";
 const String _keyClockOutAt = "clockOutAt";
 const String _keyDurationMinutes = "durationMinutes";
+const String _keyProofUrl = "proofUrl";
+const String _keyProofPublicId = "proofPublicId";
+const String _keyProofFilename = "proofFilename";
+const String _keyProofMimeType = "proofMimeType";
+const String _keyProofSizeBytes = "proofSizeBytes";
+const String _keyProofUploadedAt = "proofUploadedAt";
+const String _keyProofUploadedBy = "proofUploadedBy";
 const String _keyPreorderEnabled = "preorderEnabled";
 const String _keyPreorderCapQuantity = "preorderCapQuantity";
 const String _keyPreorderReservedQuantity = "preorderReservedQuantity";
@@ -1276,6 +1283,13 @@ class ProductionAttendanceRecord {
   final int durationMinutes;
   final String notes;
   final DateTime? createdAt;
+  final String? proofUrl;
+  final String? proofPublicId;
+  final String? proofFilename;
+  final String? proofMimeType;
+  final int? proofSizeBytes;
+  final DateTime? proofUploadedAt;
+  final String? proofUploadedBy;
 
   const ProductionAttendanceRecord({
     required this.id,
@@ -1285,6 +1299,13 @@ class ProductionAttendanceRecord {
     required this.durationMinutes,
     required this.notes,
     required this.createdAt,
+    required this.proofUrl,
+    required this.proofPublicId,
+    required this.proofFilename,
+    required this.proofMimeType,
+    required this.proofSizeBytes,
+    required this.proofUploadedAt,
+    required this.proofUploadedBy,
   });
 
   factory ProductionAttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -1296,6 +1317,13 @@ class ProductionAttendanceRecord {
       durationMinutes: _parseInt(json[_keyDurationMinutes]),
       notes: _parseString(json[_keyNotes]),
       createdAt: _parseDate(json[_keyCreatedAt]),
+      proofUrl: _parseNullableString(json[_keyProofUrl]),
+      proofPublicId: _parseNullableString(json[_keyProofPublicId]),
+      proofFilename: _parseNullableString(json[_keyProofFilename]),
+      proofMimeType: _parseNullableString(json[_keyProofMimeType]),
+      proofSizeBytes: _parseNullableNum(json[_keyProofSizeBytes])?.toInt(),
+      proofUploadedAt: _parseDate(json[_keyProofUploadedAt]),
+      proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
     );
   }
 }

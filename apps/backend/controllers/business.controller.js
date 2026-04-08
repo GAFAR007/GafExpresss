@@ -25,6 +25,7 @@ const productImageService = require("../services/product_image.service");
 const businessInviteService = require("../services/business_invite.service");
 const businessTenantService = require("../services/business.tenant.service");
 const tenantContactDocumentService = require("../services/tenant_contact_document.service");
+const staffAttendanceProofService = require("../services/staff_attendance_proof.service");
 const paymentService = require("../services/payment.service");
 const {
   generateProductionPlanDraft,
@@ -15999,6 +16000,173 @@ async function clockOutStaff(req, res) {
 }
 
 /**
+ * POST /business/staff/attendance/:attendanceId/proof
+ * Staff + managers: upload proof immediately after clock-out.
+ */
+async function uploadStaffAttendanceProof(req, res) {
+  debug(
+    "BUSINESS CONTROLLER: uploadStaffAttendanceProof - entry",
+    {
+      actorId: req.user?.sub,
+      attendanceId: req.params?.attendanceId,
+      hasFile: Boolean(req.file),
+    },
+  );
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    const canManage =
+      canManageAttendance({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      });
+
+    const attendanceId =
+      req.params?.attendanceId
+        ?.toString()
+        .trim();
+    if (!attendanceId) {
+      return res.status(400).json({
+        error: "Attendance id is required",
+      });
+    }
+    if (!req.file) {
+      return res.status(400).json({
+        error: "Proof file is required",
+      });
+    }
+
+    const attendance =
+      await StaffAttendance.findById(
+        attendanceId,
+      );
+    if (!attendance) {
+      return res.status(404).json({
+        error: "Attendance record not found",
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: attendance.staffProfileId,
+          businessId,
+        },
+      );
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      targetProfile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    if (
+      !canManage &&
+      staffProfile?._id?.toString() !==
+        targetProfile._id.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          "Cannot upload proof for another staff member",
+      });
+    }
+
+    if (!attendance.clockOutAt) {
+      return res.status(409).json({
+        error:
+          "Clock-out must be recorded before uploading proof",
+      });
+    }
+
+    const proof =
+      await staffAttendanceProofService.uploadStaffAttendanceProof(
+        {
+          businessId,
+          attendanceId:
+            attendance._id.toString(),
+          file: req.file,
+        },
+      );
+
+    attendance.proofUrl = proof.url;
+    attendance.proofPublicId = proof.publicId;
+    attendance.proofFilename = proof.filename;
+    attendance.proofMimeType = proof.mimeType;
+    attendance.proofSizeBytes = proof.sizeBytes;
+    attendance.proofUploadedAt = new Date();
+    attendance.proofUploadedBy = actor._id;
+    await attendance.save();
+
+    await writeAuditLog({
+      businessId,
+      actorId: actor._id,
+      actorRole: actor.role,
+      action: "staff_attendance_proof_upload",
+      entityType: "staff_attendance",
+      entityId: attendance._id,
+      message: "Uploaded staff attendance proof",
+      changes: {
+        staffProfileId:
+          targetProfile._id,
+        proofUrl: proof.url,
+        proofFilename: proof.filename,
+        proofMimeType: proof.mimeType,
+        proofSizeBytes: proof.sizeBytes,
+      },
+    });
+
+    debug(
+      "BUSINESS CONTROLLER: uploadStaffAttendanceProof - success",
+      {
+        actorId: actor._id,
+        attendanceId:
+          attendance._id,
+        staffProfileId:
+          targetProfile._id,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        "Staff attendance proof uploaded successfully",
+      attendance,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: uploadStaffAttendanceProof - error",
+      err.message,
+    );
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/**
  * GET /business/staff/attendance
  * Staff + managers: list attendance records.
  */
@@ -31578,6 +31746,7 @@ module.exports = {
   upsertStaffCompensation,
   clockInStaff,
   clockOutStaff,
+  uploadStaffAttendanceProof,
   listStaffAttendance,
   getStaffCapacity,
   getProductionSchedulePolicy,

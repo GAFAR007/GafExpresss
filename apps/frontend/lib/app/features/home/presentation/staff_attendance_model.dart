@@ -27,6 +27,13 @@ const String _keyDurationMinutes = "durationMinutes";
 const String _keyLocation = "location";
 const String _keyNotes = "notes";
 const String _keyCreatedAt = "createdAt";
+const String _keyProofUrl = "proofUrl";
+const String _keyProofPublicId = "proofPublicId";
+const String _keyProofFilename = "proofFilename";
+const String _keyProofMimeType = "proofMimeType";
+const String _keyProofSizeBytes = "proofSizeBytes";
+const String _keyProofUploadedAt = "proofUploadedAt";
+const String _keyProofUploadedBy = "proofUploadedBy";
 
 class StaffAttendanceRecord {
   final String id;
@@ -37,6 +44,13 @@ class StaffAttendanceRecord {
   final String? location;
   final String? notes;
   final DateTime? createdAt;
+  final String? proofUrl;
+  final String? proofPublicId;
+  final String? proofFilename;
+  final String? proofMimeType;
+  final int? proofSizeBytes;
+  final DateTime? proofUploadedAt;
+  final String? proofUploadedBy;
 
   const StaffAttendanceRecord({
     required this.id,
@@ -47,6 +61,13 @@ class StaffAttendanceRecord {
     required this.location,
     required this.notes,
     required this.createdAt,
+    required this.proofUrl,
+    required this.proofPublicId,
+    required this.proofFilename,
+    required this.proofMimeType,
+    required this.proofSizeBytes,
+    required this.proofUploadedAt,
+    required this.proofUploadedBy,
   });
 
   factory StaffAttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -66,6 +87,13 @@ class StaffAttendanceRecord {
       location: _parseNullableString(json[_keyLocation]),
       notes: _parseNullableString(json[_keyNotes]),
       createdAt: _parseDate(json[_keyCreatedAt]),
+      proofUrl: _parseNullableString(json[_keyProofUrl]),
+      proofPublicId: _parseNullableString(json[_keyProofPublicId]),
+      proofFilename: _parseNullableString(json[_keyProofFilename]),
+      proofMimeType: _parseNullableString(json[_keyProofMimeType]),
+      proofSizeBytes: _parseNullableInt(json[_keyProofSizeBytes]),
+      proofUploadedAt: _parseDate(json[_keyProofUploadedAt]),
+      proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
     );
   }
 

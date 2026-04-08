@@ -167,4 +167,39 @@ class StaffAttendanceActions {
 
     return record;
   }
+
+  Future<StaffAttendanceRecord> uploadProof({
+    String? staffProfileId,
+    required String attendanceId,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    // WHY: Ensure auth is valid before attempting a proof upload.
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonClockMissing,
+          _extraStaffKey: staffProfileId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(staffAttendanceApiProvider);
+    final record = await api.uploadAttendanceProof(
+      token: session.token,
+      attendanceId: attendanceId,
+      bytes: bytes,
+      filename: filename,
+    );
+
+    _ref.invalidate(staffAttendanceProvider(record.staffProfileId));
+    _ref.invalidate(staffAttendanceProvider(null));
+
+    return record;
+  }
 }

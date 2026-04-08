@@ -417,6 +417,17 @@ router.post(
   businessController.clockOutStaff,
 );
 
+router.post(
+  "/staff/attendance/:attendanceId/proof",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  upload.single("proof"),
+  businessController.uploadStaffAttendanceProof,
+);
+
 router.get(
   "/staff/attendance",
   requireAuth,

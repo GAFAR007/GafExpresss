@@ -31,6 +31,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_model.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
@@ -103,7 +104,7 @@ const String _attendanceClockOutPendingLabel = "Awaiting clock-out";
 const String _setAttendanceLabel = "Set time";
 const String _editAttendanceLabel = "Edit time";
 const String _attendanceQuickClockInSuccess = "Clock-in recorded.";
-const String _attendanceQuickClockOutSuccess = "Clock-out recorded.";
+const String _attendanceQuickClockOutSuccess = "Clock-out and proof saved.";
 const String _attendanceNotStartedHint =
     "Use Clock in to start this shift, or Set time if you need to backfill the exact hours.";
 const String _attendanceShiftOpenHint =
@@ -722,6 +723,13 @@ class _ProductionPlanWorkspaceScreenState
                                 taskId: task.id,
                                 notes: note,
                               );
+                          await requireAttendanceProofUpload(
+                            context: context,
+                            ref: ref,
+                            attendance: updatedClockOut,
+                            subjectLabel: staffLabel,
+                            taskLabel: task.title,
+                          );
                           attendanceRecord = await attendanceActions.clockIn(
                             staffProfileId: staffProfileId,
                             attendanceId: updatedClockOut.id,
@@ -751,6 +759,14 @@ class _ProductionPlanWorkspaceScreenState
                               taskId: task.id,
                               notes: note,
                             );
+                            attendanceRecord =
+                                await requireAttendanceProofUpload(
+                                  context: context,
+                                  ref: ref,
+                                  attendance: attendanceRecord,
+                                  subjectLabel: staffLabel,
+                                  taskLabel: task.title,
+                                );
                           }
                         }
                         ref.invalidate(
@@ -830,11 +846,25 @@ class _ProductionPlanWorkspaceScreenState
                               taskId: task.id,
                               notes: "Clocked out from production workspace",
                             );
+                        final attendanceWithProof =
+                            await requireAttendanceProofUpload(
+                              context: context,
+                              ref: ref,
+                              attendance: attendanceRecord,
+                              subjectLabel: _resolveStaffDisplayLabel(
+                                staffProfileId,
+                                staffMap,
+                                fallbackRole: task.roleRequired,
+                              ),
+                              taskLabel: task.title,
+                            );
                         ref.invalidate(
                           productionPlanDetailProvider(widget.planId),
                         );
                         _showSnackSafe(_attendanceQuickClockOutSuccess);
-                        return _toProductionAttendanceRecord(attendanceRecord);
+                        return _toProductionAttendanceRecord(
+                          attendanceWithProof,
+                        );
                       } catch (error) {
                         _showSnackSafe(
                           _resolveProductionWorkspaceErrorMessage(
@@ -4286,6 +4316,13 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
     durationMinutes: record.durationMinutes ?? computedDurationMinutes,
     notes: record.notes ?? "",
     createdAt: record.createdAt,
+    proofUrl: record.proofUrl,
+    proofPublicId: record.proofPublicId,
+    proofFilename: record.proofFilename,
+    proofMimeType: record.proofMimeType,
+    proofSizeBytes: record.proofSizeBytes,
+    proofUploadedAt: record.proofUploadedAt,
+    proofUploadedBy: record.proofUploadedBy,
   );
 }
 

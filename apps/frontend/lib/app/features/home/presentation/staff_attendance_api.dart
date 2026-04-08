@@ -10,6 +10,7 @@
 /// HOW:
 /// - POST /business/staff/attendance/clock-in
 /// - POST /business/staff/attendance/clock-out
+/// - POST /business/staff/attendance/:attendanceId/proof
 /// - GET /business/staff/attendance?staffProfileId=...
 /// - Logs start/success/failure with safe context.
 library;
@@ -48,6 +49,9 @@ const String _keyNotes = "notes";
 const String _attendancePath = "/business/staff/attendance";
 const String _clockInPath = "/business/staff/attendance/clock-in";
 const String _clockOutPath = "/business/staff/attendance/clock-out";
+const String _attendanceProofPathPrefix =
+    "/business/staff/attendance";
+const String _keyProof = "proof";
 
 const String _extraServiceKey = "service";
 const String _extraOperationKey = "operation";
@@ -351,6 +355,87 @@ class StaffAttendanceApi {
           _extraOperationKey: _operationClockOut,
           _extraIntentKey: _intentClockOut,
           _extraStaffIdKey: staffProfileId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<StaffAttendanceRecord> uploadAttendanceProof({
+    required String? token,
+    required String attendanceId,
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    // WHY: Log intent so proof uploads are traceable alongside clock-outs.
+    AppDebug.log(
+      _logTag,
+      "uploadAttendanceProof() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: "uploadAttendanceProof",
+        _extraIntentKey: "upload proof after clock-out",
+        "attendanceId": attendanceId,
+        "bytes": bytes.length,
+        "filename": filename,
+      },
+    );
+
+    if (bytes.isEmpty) {
+      throw Exception("Missing proof data");
+    }
+
+    try {
+      final authOptions = _authOptions(token);
+      final formData = FormData.fromMap({
+        _keyProof: MultipartFile.fromBytes(
+          bytes,
+          filename: filename,
+        ),
+      });
+
+      final resp = await _dio.post(
+        "$_attendanceProofPathPrefix/$attendanceId/proof",
+        data: formData,
+        options: Options(
+          headers: authOptions.headers,
+          contentType: "multipart/form-data",
+        ),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final attendanceMap =
+          data[_keyAttendance] as Map<String, dynamic>;
+      final record = StaffAttendanceRecord.fromJson(attendanceMap);
+
+      AppDebug.log(
+        _logTag,
+        "uploadAttendanceProof() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: "uploadAttendanceProof",
+          "attendanceId": attendanceId,
+          _extraStaffIdKey: record.staffProfileId,
+        },
+      );
+
+      return record;
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "uploadAttendanceProof() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: "uploadAttendanceProof",
+          "attendanceId": attendanceId,
           _extraStatusKey: statusCode,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,

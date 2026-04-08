@@ -19,6 +19,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/business_staff_attendance_actions_section.dart';
 import 'package:frontend/app/features/home/presentation/business_staff_attendance_constants.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
+import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
 
 class StaffAttendanceActionsContainer extends ConsumerWidget {
@@ -57,9 +58,7 @@ class StaffAttendanceActionsContainer extends ConsumerWidget {
         if (canManage && targetId == null) {
           // WHY: Prevent manager actions without a chosen staff member.
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(staffAttendanceSelectStaffPrompt),
-            ),
+            const SnackBar(content: Text(staffAttendanceSelectStaffPrompt)),
           );
           return;
         }
@@ -68,9 +67,7 @@ class StaffAttendanceActionsContainer extends ConsumerWidget {
         if (context.mounted) {
           // WHY: Confirm success so users know the action completed.
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(staffAttendanceClockInSuccess),
-            ),
+            const SnackBar(content: Text(staffAttendanceClockInSuccess)),
           );
         }
       },
@@ -87,23 +84,59 @@ class StaffAttendanceActionsContainer extends ConsumerWidget {
         if (canManage && targetId == null) {
           // WHY: Prevent manager actions without a chosen staff member.
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(staffAttendanceSelectStaffPrompt),
-            ),
+            const SnackBar(content: Text(staffAttendanceSelectStaffPrompt)),
           );
           return;
         }
-        // WHY: Trigger backend clock-out for the selected profile (or self).
-        await actions.clockOut(staffProfileId: targetId);
-        if (context.mounted) {
-          // WHY: Confirm success so users know the action completed.
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(staffAttendanceClockOutSuccess),
-            ),
+        try {
+          // WHY: Trigger backend clock-out for the selected profile (or self).
+          final attendance = await actions.clockOut(staffProfileId: targetId);
+          await requireAttendanceProofUpload(
+            context: context,
+            ref: ref,
+            attendance: attendance,
+            subjectLabel: _resolveSelectedStaffLabel(),
           );
+          if (context.mounted) {
+            // WHY: Confirm the complete clock-out + proof flow succeeded.
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text(staffAttendanceClockOutSuccess)),
+            );
+          }
+        } catch (_) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text(staffAttendanceErrorHelper)),
+            );
+          }
         }
       },
     );
+  }
+
+  String _resolveSelectedStaffLabel() {
+    final trimmedSelectedId = selectedStaffId?.trim() ?? "";
+    if (!canManage || trimmedSelectedId.isEmpty) {
+      return staffProfileId?.trim().isNotEmpty == true
+          ? staffProfileId!.trim()
+          : "Staff member";
+    }
+
+    for (final staff in staffOptions) {
+      final matchesSelectedId =
+          staff.id.trim() == trimmedSelectedId ||
+          staff.userId.trim() == trimmedSelectedId;
+      if (!matchesSelectedId) {
+        continue;
+      }
+
+      final name = (staff.userName?.trim().isNotEmpty == true)
+          ? staff.userName!.trim()
+          : trimmedSelectedId;
+      final role = staff.staffRole.trim();
+      return role.isEmpty ? name : "$name • $role";
+    }
+
+    return trimmedSelectedId;
   }
 }

@@ -44,7 +44,7 @@ const String staffAttendanceErrorHelper =
 const String staffAttendanceRetryLabel = "Try again";
 const String staffAttendanceSelectStaffPrompt = "Select a staff member first.";
 const String staffAttendanceClockInSuccess = "Clock-in recorded.";
-const String staffAttendanceClockOutSuccess = "Clock-out recorded.";
+const String staffAttendanceClockOutSuccess = "Clock-out and proof saved.";
 
 const String staffAttendanceKpiOnTime = "On-time rate";
 const String staffAttendanceKpiLate = "Late count";
