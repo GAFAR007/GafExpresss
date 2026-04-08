@@ -4888,23 +4888,30 @@ String _formatQuantity(num? value) {
 }
 
 bool _canEditDraft({required String actorRole, required String? staffRole}) {
-  if (actorRole == "business_owner") {
+  final normalizedActorRole = _normalizeDraftAccessRole(actorRole);
+  final normalizedStaffRole = _normalizeDraftAccessRole(staffRole ?? "");
+
+  if (normalizedActorRole == "business_owner") {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == "estate_manager" ||
-          staffRole == "farm_manager" ||
-          staffRole == "asset_manager");
+  return normalizedActorRole == "staff" &&
+      (normalizedStaffRole == "estate_manager" ||
+          normalizedStaffRole == "farm_manager" ||
+          normalizedStaffRole == "asset_manager");
 }
 
 bool _canManageDraftLifecycle({
   required String actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  final normalizedActorRole = _normalizeDraftAccessRole(actorRole);
+  final normalizedStaffRole = _normalizeDraftAccessRole(staffRole ?? "");
+
+  if (normalizedActorRole == "business_owner") {
     return true;
   }
-  return actorRole == "staff" && staffRole == "estate_manager";
+  return normalizedActorRole == "staff" &&
+      normalizedStaffRole == "estate_manager";
 }
 
 String? _resolveSelfStaffRole({
@@ -4912,7 +4919,7 @@ String? _resolveSelfStaffRole({
   required List<BusinessStaffProfileSummary> staffList,
   required String? userEmail,
 }) {
-  final directRole = (profileStaffRole ?? "").trim();
+  final directRole = _normalizeDraftAccessRole(profileStaffRole ?? "");
   if (directRole.isNotEmpty) {
     return directRole;
   }
@@ -4928,6 +4935,10 @@ String? _resolveSelfStaffRole({
     }
   }
   return null;
+}
+
+String _normalizeDraftAccessRole(String rawRole) {
+  return rawRole.trim().toLowerCase().replaceAll("-", "_").replaceAll(" ", "_");
 }
 
 String _sentenceCase(String value) {
