@@ -40,6 +40,9 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 const { registerChatSocket } = require('./services/chat_socket.service');
 const {
+  registerDraftPresenceSocket,
+} = require('./services/production_draft_presence_socket.service');
+const {
   startPreorderReconcileWorker,
 } = require('./services/preorder_reservation_reconciler.worker');
 
@@ -146,6 +149,9 @@ const io = new Server(server, {
 
 // WHY: Register chat socket events after server initialization.
 registerChatSocket(io);
+
+// WHY: Draft editor presence uses the same Socket.IO server.
+registerDraftPresenceSocket(io);
 
 function scheduleMongoReconnect(reason) {
   if (isDatabaseReady() || mongoReconnectTimer) {
