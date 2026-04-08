@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: gafar-express-backend
+    runtime: node
+    branch: chore/batched-push-2026-04-05
+    rootDir: apps/backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: CLIENT_ORIGIN
+        value: https://gafarsexpress.gafarstechnologies.com
+      - key: FRONTEND_BASE_URL
+        value: https://gafarsexpress.gafarstechnologies.com
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_FROM_NAME
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: GOOGLE_PLACES_API_KEY
+        sync: false
+      - key: GOOGLE_ADDRESS_API_KEY
+        sync: false
+      - key: DOJAH_APP_ID
+        sync: false
+      - key: DOJAH_SECRET_KEY
+        sync: false
+      - key: AI_BASE_URL
+        sync: false
+      - key: XAI_API_KEY
+        sync: false

@@ -1,0 +1,58 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "./scripts/run-with-project-node.sh nodemon server.js",
+    "dev:status": "./scripts/manage-dev-server.sh status",
+    "dev:stop": "./scripts/manage-dev-server.sh stop",
+    "dev:restart": "./scripts/manage-dev-server.sh restart",
+    "start": "./scripts/run-with-project-node.sh node server.js",
+    "reset:password": "./scripts/run-with-project-node.sh node scripts/reset-user-password.js",
+    "test:planner:v2": "./scripts/run-with-project-node.sh node --test scripts/planner-v2.unit.test.js",
+    "test:production:ai-envelope": "./scripts/run-with-project-node.sh node --test scripts/production-ai-envelope.test.js",
+    "test:production:endpoints-harness": "./scripts/run-with-project-node.sh node --test scripts/production-endpoints.integration.test.js",
+    "test:preorder:regression": "./scripts/run-with-project-node.sh node scripts/preorder-regression-suite.js",
+    "ops:preorder:reconcile:once": "./scripts/run-with-project-node.sh node scripts/preorder-reservation-reconciler.js",
+    "ops:business:clear": "./scripts/run-with-project-node.sh node scripts/clear-business-data.js",
+    "ops:reset:razak": "./scripts/run-with-project-node.sh node scripts/reset-razak-business-state.js",
+    "ops:production:simulate": "./scripts/run-with-project-node.sh node scripts/simulate-production-plans.js",
+    "ops:production:seed-imported-draft": "./scripts/run-with-project-node.sh node scripts/seed-imported-production-draft.js",
+    "ops:farm-audit:simulate": "./scripts/run-with-project-node.sh node scripts/simulate-farm-asset-audits.js",
+    "ops:lifecycle:refresh": "./scripts/run-with-project-node.sh node scripts/refresh-production-lifecycle-store.js",
+    "ops:crop-profiles:seed": "./scripts/run-with-project-node.sh node scripts/seed-production-crop-profile-manifest.js",
+    "ops:crop-profiles:bootstrap": "./scripts/run-with-project-node.sh node scripts/seed-verified-production-crop-bootstrap.js",
+    "ops:crop-profiles:import": "./scripts/run-with-project-node.sh node scripts/import-production-crop-profile-source-file.js",
+    "ops:gafar-express:seed-management-staff": "./scripts/run-with-project-node.sh node scripts/seed-gafar-express-management-staff.js",
+    "seed:staff-bots": "./scripts/run-with-project-node.sh node scripts/seed-staff-bots.js",
+    "cleanup:staff-bots": "./scripts/run-with-project-node.sh node scripts/cleanup-staff-bots.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20.19 <25"
+  },
+  "dependencies": {
+    "ajv": "^8.18.0",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "glob": "^13.0.0",
+    "groq-sdk": "^0.37.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.1.0",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.8.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}

@@ -1,377 +1,253 @@
-# WHAT
-- Top-level overview and operating rules for the apps workspace.
+# GafExpress — Full-Stack Application
 
-# WHY
-- Keep frontend + backend changes consistent, safe, and production-ready.
+GafExpress is a full-stack application built with a **clean, scalable architecture**, separating backend services and frontend clients while maintaining a clear data and authentication flow.
 
-# HOW
-- Document architecture, flows, and required debugging standards here.
+This repository follows a **production-style monorepo structure** to support long-term growth, team collaboration, and multiple client platforms.
 
-GafExpress — Full-Stack Application
-Clean Architecture · Multi-Platform · Production-Oriented · JWT-Validated
-Agent Instructions (Codex / AI Helpers)
+---
 
-These rules are mandatory. Do not violate them.
+## 🧱 High-Level Architecture
 
-Non-Negotiable Workflow
+```
+office-ecom-store/
+├─ apps/
+│  ├─ backend/        # Express + MongoDB API
+│  └─ frontend/       # Client application (Flutter / Web)
+├─ README.md          # System overview (this file)
+└─ .gitignore
+```
 
-Work ONE step at a time (no large refactors or code dumps).
+---
 
-Never change the existing folder structure.
+## 🔁 System Flow Overview
 
-Do not rename or move files unless explicitly instructed.
+```
+Frontend (Web / Mobile)
+        |
+        |  HTTP Requests (JSON)
+        v
+Backend (Express API)
+        |
+        |  Business Logic
+        v
+MongoDB (Atlas)
+```
 
-Keep imports consistent with the current structure.
+### Authentication Flow (Current & Planned)
 
-Prefer small, safe changes, then run & verify.
+1. User interacts with the **frontend**
+2. Frontend sends requests to **Express API**
+3. Backend:
 
-Code Style Requirements
+   * Validates request
+   * Handles authentication / authorization
+   * Interacts with MongoDB
+4. Backend returns structured JSON responses
+5. Frontend renders UI based on response
 
-Every new or edited file must include:
+---
 
-File header documentation:
+## 🖥 Backend (`apps/backend`)
 
-WHAT this file is
-
-WHY it exists
-
-HOW it works
-
-Extensive inline comments explaining WHY, not just WHAT.
-
-Debug logs at all critical points.
-
-Debug Logging Standard
-
-Use AppDebug.log(TAG, message, extra: {...})
-
-Logs must include:
-
-Screen build()
-
-Button taps
-
-API request start/end
-
-Navigation events
-
-Never log:
-
-Passwords
-
-Tokens
-
-Secrets
-
-Multi-Platform Requirements
-
-Must work on Web, Android, and iOS
-
-No dart:io usage in UI or presentation layers
-
-Platform differences handled via:
-
-platform_info_web.dart
-
-platform_info_io.dart
-
-platform_info_stub.dart
-
-API Contract Rules
-
-Current backend responses:
-
-POST /auth/register → { user }
-
-POST /auth/login → { message, token, user }
-
-Token is REQUIRED for login
-
-Frontend validates token presence + expiry (JWT exp)
-
-🧱 Monorepo Structure
-apps/
-├─ backend/ # Express + MongoDB API
-└─ frontend/ # Flutter (Web / Android / iOS)
-
-This is a production-style monorepo, designed for long-term growth and multiple clients.
-
-🔁 System Flow Overview
-Flutter Client (Web / Mobile)
-|
-| HTTP (JSON)
-v
-Express API
-|
-| Business Logic
-v
-MongoDB
-
-🔐 Authentication Flow (CURRENT STATE)
-What Works Now ✅
-
-User registers via frontend
-
-Backend creates user and returns { user }
-
-User logs in
-
-Backend returns { message, token, user }
-
-Frontend:
-
-Parses response safely
-
-Validates JWT exp and rejects expired tokens
-
-Creates AuthSession(user, token)
-
-Navigates to /home only if token is valid
-
-Important Design Decision
-
-Token handling is enforced and JWT-validated
-
-No frontend rewrite required when JWT is added
-
-🔒 Verification Flow (Email + Phone)
-What Happens
-
-Frontend (dumb UI)
-- Shows "Verified" only when the backend profile returns `isEmailVerified` / `isPhoneVerified`.
-- Never sets verification flags itself.
-
-Backend (source of truth)
-1) Request: `/auth/email-verification/request` or `/auth/phone-verification/request`.
-2) OTP: backend generates a 6-digit code, hashes it, stores hash + expiry.
-3) Confirm: `/auth/*/confirm` validates code + expiry, then flips verified flags.
-4) UI refresh: frontend re-fetches `/auth/profile` and updates the badge.
-
-Why It's Safe
-- Verification flags can only be set server-side; profile updates ignore them.
-- OTPs are hashed, time-limited, and never stored in plaintext.
-- Requests are tied to the authenticated `userId` from auth middleware.
-
-🔁 Settings Flow (End-to-End)
-1) Open Settings:
-   - UI fetches `GET /auth/profile`.
-   - `_applyProfile()` prefills controllers + renders the screen.
-2) Email verification:
-   - `POST /auth/email-verification/request`
-   - Enter OTP → `POST /auth/email-verification/confirm`
-   - UI refreshes profile.
-3) Phone verification:
-   - `POST /auth/phone-verification/request`
-   - Enter OTP → `POST /auth/phone-verification/confirm`
-   - UI refreshes profile.
-4) NIN verification (dev simulation):
-   - Requires email + phone verified first.
-   - `POST /auth/nin/verify`
-   - Backend updates identity fields + sets `isNinVerified`.
-   - UI refreshes profile → shows NIN ID card.
-5) Save changes:
-   - `PATCH /auth/profile`
-   - UI refreshes profile.
-6) Auto refresh:
-   - Settings auto-refreshes every 45s to keep verification badges current.
-
-📝 TODO (IMPORTANT)
-- When your Termii Sender ID is approved, log in to https://app.termii.com and switch from dev OTP to real SMS delivery.
-- Check the Sender ID status regularly until it flips to Approved.
-- Dojah business verification: keep using simulation mode until Dojah credentials are ready.
-  - Set `DOJAH_SIMULATION_ENABLED=true`.
-  - Configure `BUSINESS_VERIFY_SIM_REG_NUMBER` and optional `BUSINESS_VERIFY_SIM_*` fields for company name, email, phone, address, and director.
-
-🖥 Backend (apps/backend)
-Purpose
+### Purpose
 
 The backend provides:
 
-REST API
+* API endpoints
+* Authentication logic
+* Authorization & role handling
+* Database access
+* Business rules
 
-Authentication logic
+### Tech Stack
 
-Business rules
+* **Node.js**
+* **Express**
+* **MongoDB (Mongoose)**
+* **JWT Authentication**
+* **dotenv**
+* **nodemon (dev)**
 
-MongoDB access
+---
 
-Tech Stack
+### Backend Folder Structure
 
-Node.js
-
-Express
-
-MongoDB (Mongoose)
-
-dotenv
-
-nodemon (dev)
-
-JWT is in use for login and protected endpoints.
-
-Backend Folder Structure
+```
 apps/backend/
 ├─ config/
-│ ├─ db.js
-│ └─ jwt.js # Present, token usage coming later
+│  ├─ db.js           # MongoDB connection logic
+│  └─ jwt.js          # JWT helpers (sign / verify tokens)
 │
 ├─ controllers/
-│ └─ auth.controller.js
+│  └─ auth.controller.js
+│     # Handles HTTP requests (req/res layer)
 │
 ├─ services/
-│ └─ auth.service.js
+│  └─ auth.service.js
+│     # Business logic (no Express coupling)
 │
 ├─ routes/
-│ └─ index.js
+│  └─ index.js
+│     # Central route registration
 │
 ├─ utils/
-│ └─ debug.js
+│  └─ debug.js
+│     # Structured debug logging
 │
 ├─ server.js
+│   # Main backend entry point
+│
+├─ .env
+│   # Environment variables (never committed)
+│
 └─ package.json
+```
 
-Backend Startup Flow
+---
+
+### Backend Design Principles
+
+✅ **Separation of concerns**
+
+* Routes → Controllers → Services → Database
+* No business logic inside routes
+
+✅ **Single entry point**
+
+* `server.js` handles startup flow:
+
+  * Load env
+  * Register middleware
+  * Connect database
+  * Register routes
+  * Start server
+
+✅ **Fail-fast startup**
+
+* App exits if MongoDB connection fails
+
+---
+
+### Backend Startup Flow
+
+```text
 server.js
-↓
-Load env
-↓
+  ↓
+Load env variables
+  ↓
 Create Express app
-↓
+  ↓
 Register middleware
-↓
+  ↓
 Connect MongoDB
-↓
+  ↓
 Register routes
-↓
-Start server
+  ↓
+Start HTTP server
+```
 
-Backend runs at:
+---
 
-http://localhost:4000
+## 🎨 Frontend (`apps/frontend`)
 
-🎨 Frontend (apps/frontend)
-Purpose
+### Purpose
 
-The frontend handles:
+The frontend is responsible for:
 
-UI
+* User interface
+* User input
+* Authentication UI
+* Communicating with the backend API
 
-User input
+### Notes
 
-Navigation
+* Frontend is **fully decoupled** from backend
+* Communicates only via HTTP (REST)
+* Can be replaced or expanded (Web / Mobile / Admin dashboard)
 
-API communication
+> The frontend never talks directly to the database.
 
-Auth flow
+---
 
-It is fully decoupled from the backend.
+## 🔐 Authentication Strategy (Planned)
 
-Frontend Tech Stack
+The system is designed to support **multiple authentication methods**:
 
-Flutter
+### Current / Planned Auth Types
 
-Riverpod (state & DI)
+* ✅ Email + Password
+* 🔜 Google OAuth
+* 🔜 Microsoft (Outlook) OAuth
 
-Dio (networking)
+### User Roles (Planned)
 
-GoRouter (navigation)
+* `admin`
+* `staff`
+* `customer`
 
-Frontend Folder Structure (CURRENT)
-lib/
-├─ app/
-│ ├─ core/
-│ │ ├─ constants/ # AppConstants (baseUrl, keys)
-│ │ ├─ debug/ # AppDebug logging
-│ │ ├─ network/ # Dio client + providers
-│ │ └─ platform/ # Web / iOS / Android detection
-│ │
-│ ├─ features/
-│ │ ├─ auth/
-│ │ │ ├─ data/ # Auth API calls
-│ │ │ ├─ domain/
-│ │ │ │ └─ models/ # AuthUser, AuthSession
-│ │ │ └─ presentation/
-│ │ │ ├─ providers/
-│ │ │ ├─ login_screen.dart
-│ │ │ └─ register_screen.dart
-│ │ │
-│ │ └─ home/
-│ │ └─ presentation/
-│ │ └─ home_screen.dart
-│ │
-│ ├─ theme/
-│ ├─ router.dart
-│ ├─ app.dart
-│ └─ main.dart
+Roles will be enforced **server-side** using JWT claims and middleware.
 
-Frontend Boot Flow
-main.dart
-↓
-Log BOOT status
-↓
-Resolve platform baseUrl
-↓
-Wrap AppRoot in ProviderScope
-↓
-GoRouter builds routes
-↓
-Login screen renders
+---
 
-🌍 Environment Configuration
-Backend (apps/backend/.env)
+## 🌍 Environment Variables
+
+Backend uses environment variables for security.
+
+Example (`apps/backend/.env`):
+
+```env
 PORT=4000
-MONGO_URI=your_mongodb_uri
-JWT_SECRET=your_secret
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=your_secret_key
+```
 
-Frontend Base URL Handling
+⚠️ `.env` files are **never committed**.
 
-Handled via AppConstants + PlatformInfo:
+---
 
-Web / iOS simulator → http://localhost:4000
+## 🚀 Development
 
-Android emulator → http://10.0.2.2:4000
+### Backend
 
-Real device → LAN IP
-
-🚀 Development
-Backend
+```bash
 cd apps/backend
 npm install
 npm run dev
+```
 
-Frontend
-cd apps/frontend
-flutter pub get
-flutter run -d chrome
+Server runs at:
 
-📦 Current Status
-Feature Status
-Backend API ✅ Stable
-MongoDB ✅ Connected
-Auth routes ✅ Working
-Flutter boot ✅ Stable
-Login flow ✅ Complete
-Register flow ✅ Complete
-Token handling ✅ Required + validated
-Route guards 🔜 Next
-Session persistence 🔜 Next
-🧠 Philosophy
+```
+http://localhost:4000
+```
 
-GafExpress prioritizes:
+---
 
-Clean architecture
+## 📦 Repository Status
 
-Debuggability
+* Backend foundation: ✅ complete
+* Database connection: ✅ stable
+* Auth layering: ✅ structured
+* Frontend integration: 🔜 in progress
+* OAuth providers: 🔜 planned
 
-Scalability
+---
 
-Discipline over shortcuts
+## 🧠 Philosophy
 
-This is not a demo app.
-It is structured to evolve into a production system.
+This project prioritizes:
 
-✍️ Author
+* Clean architecture
+* Long-term scalability
+* Readability over shortcuts
+* Real-world backend patterns
 
-Gafar Temitayo Razak
+This is **not a tutorial project** — it is structured to grow into a production system.
+
+---
+
+## ✍️ Author
+
+**Gafar Temitayo Razak**
 Backend & Full-Stack Developer
 Building scalable systems with clarity and discipline.
