@@ -173,6 +173,12 @@ function humanizeLabel(value) {
     .join(' ');
 }
 
+function normalizeRoleKey(value) {
+  return typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/-/g, '_').replace(/\s+/g, '_')
+    : '';
+}
+
 function buildUserDisplayName(user) {
   const structuredName = [
     user.firstName,
@@ -433,7 +439,8 @@ async function resolveLoginStaffRole(user) {
     .select('staffRole')
     .lean();
 
-  return staffProfile?.staffRole || null;
+  const normalizedStaffRole = normalizeRoleKey(staffProfile?.staffRole);
+  return normalizedStaffRole || null;
 }
 
 async function listLoginAccounts(role) {

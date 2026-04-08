@@ -29,6 +29,15 @@ const LOG_STEPS = {
 };
 const UNKNOWN_VALUE = 'unknown';
 
+function normalizeRoleKey(value) {
+  return (value || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_')
+    .replace(/\s+/g, '_');
+}
+
 function logStep(step, context = {}) {
   // WHY: Avoid noisy logs unless a caller supplies trace context.
   if (
@@ -155,6 +164,11 @@ async function resolveStaffProfile(
       },
     });
     throw new Error('Staff profile not found');
+  }
+
+  if (profile) {
+    // WHY: Normalize once so every downstream permission check sees the same staff-role key.
+    profile.staffRole = normalizeRoleKey(profile.staffRole);
   }
 
   logStep(LOG_STEPS.DB_QUERY_OK, {
