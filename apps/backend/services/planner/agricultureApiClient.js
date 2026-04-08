@@ -2234,14 +2234,10 @@ async function searchExternalAgricultureCatalog({
   limit = 8,
   context = {},
 }) {
-  const normalizedQuery =
-    normalizeText(query);
+  const normalizedQuery = normalizeText(query);
   const safeLimit = Math.min(
     12,
-    Math.max(
-      1,
-      Math.floor(Number(limit) || 8),
-    ),
+    Math.max(1, Math.floor(Number(limit) || 8)),
   );
   if (!normalizedQuery) {
     return [];
@@ -2257,24 +2253,18 @@ async function searchExternalAgricultureCatalog({
     return [];
   }
 
-  const requestContext =
-    resolveProviderRequestContext(
-      context,
-    );
-  const searchUrl = new URL(
-    `${TREFLE_BASE_URL}/species/search`,
-  );
-  searchUrl.searchParams.set(
-    "q",
-    normalizedQuery,
-  );
-  searchUrl.searchParams.set(
-    "token",
-    TREFLE_API_TOKEN,
+  const requestContext = resolveProviderRequestContext(
+    context,
   );
 
-  const searchPayload =
-    await requestJsonFromProvider({
+  try {
+    const searchUrl = new URL(
+      `${TREFLE_BASE_URL}/species/search`,
+    );
+    searchUrl.searchParams.set("q", normalizedQuery);
+    searchUrl.searchParams.set("token", TREFLE_API_TOKEN);
+
+    const searchPayload = await requestJsonFromProvider({
       providerName: "Trefle",
       operationName: "SearchSpecies",
       intent:
@@ -2282,84 +2272,80 @@ async function searchExternalAgricultureCatalog({
       url: searchUrl.toString(),
       requestContext,
     });
-  if (!searchPayload) {
-    return [];
-  }
+    if (!searchPayload) {
+      return [];
+    }
 
-  const rankedSpecies = (
-    Array.isArray(searchPayload?.data) ?
-      searchPayload.data
-    : []
-  )
-    .map((species) => ({
-      species,
-      score:
-        scoreTrefleCatalogSearchResult({
+    const rankedSpecies = (
+      Array.isArray(searchPayload?.data) ? searchPayload.data : []
+    )
+      .map((species) => ({
+        species,
+        score: scoreTrefleCatalogSearchResult({
           species,
           query: normalizedQuery,
         }),
-    }))
-    .filter((entry) => entry.score > 0)
-    .sort((left, right) => {
-      if (right.score !== left.score) {
-        return (
-          right.score - left.score
-        );
-      }
-      return (
-        Number(
-          left.species?.id || 0,
-        ) -
-        Number(right.species?.id || 0)
-      );
-    })
-    .slice(0, safeLimit);
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+        return Number(left.species?.id || 0) - Number(right.species?.id || 0);
+      })
+      .slice(0, safeLimit);
 
-  const items = await Promise.all(
-    rankedSpecies.map(
-      async ({ species }) => {
-        const detailPayload =
-          await fetchTrefleSpeciesDetail({
-            species,
-            requestContext,
-          });
+    const settledItems = await Promise.allSettled(
+      rankedSpecies.map(async ({ species }) => {
+        const detailPayload = await fetchTrefleSpeciesDetail({
+          species,
+          requestContext,
+        });
         return buildTrefleCatalogItem({
           query: normalizedQuery,
           species,
-          detailSpecies:
-            detailPayload?.data ||
-            detailPayload ||
-            species,
+          detailSpecies: detailPayload?.data || detailPayload || species,
         });
-      },
-    ),
-  );
+      }),
+    );
 
-  const seenKeys = new Set();
-  return items.filter((item) => {
-    const hasLifecycleDays =
-      Number(item?.minDays || 0) > 0 ||
-      Number(item?.maxDays || 0) > 0;
-    if (!hasLifecycleDays) {
-      return false;
-    }
-    const displayKey = [
-      normalizeLifecycleCatalogKey(
-        item?.name,
-      ),
-      normalizeLifecycleCatalogKey(
-        item?.cropKey,
-      ),
-    ].join("::");
-    if (!displayKey) {
-      return false;
-    }
-    if (seenKeys.has(displayKey)) {
-      return false;
-    }
-    seenKeys.add(displayKey);
-    return true;
-  });
+    const items = settledItems
+      .filter((entry) => entry.status === "fulfilled")
+      .map((entry) => entry.value);
+
+    const seenKeys = new Set();
+    return items.filter((item) => {
+      const hasLifecycleDays =
+        Number(item?.minDays || 0) > 0 ||
+        Number(item?.maxDays || 0) > 0;
+      if (!hasLifecycleDays) {
+        return false;
+      }
+      const displayKey = [
+        normalizeLifecycleCatalogKey(item?.name),
+        normalizeLifecycleCatalogKey(item?.cropKey),
+      ].join("::");
+      if (!displayKey) {
+        return false;
+      }
+      if (seenKeys.has(displayKey)) {
+        return false;
+      }
+      seenKeys.add(displayKey);
+      return true;
+    });
+  } catch (error) {
+    debug(
+      "PLANNER_V2_AGRICULTURE_API: provider search failed",
+      {
+        provider: "trefle",
+        reason: error?.message || "unknown_provider_error",
+        requestId: requestContext.requestId,
+        route: requestContext.route,
+      },
+    );
+    return [];
+  }
 }
 
 async function fetchAgricultureLifecycleProfile({

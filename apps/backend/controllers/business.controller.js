@@ -5623,82 +5623,84 @@ async function buildAssistantPlannerCropSearchResults(
         limit: safeLimit,
         context,
       });
-    externalItems = await Promise.all(
-      fetchedItems.map(async (item) => {
-        const normalizedSource =
-          (item?.source || "agriculture_api")
-            .toString()
-            .trim();
-        await persistVerifiedAgricultureLifecycleProfile(
-          {
-            businessId,
-            productName: item?.name || "",
-            cropSubtype: "",
-            domainContext: "farm",
-            lifecycle: {
-              product: item?.name || "",
-              minDays: item?.minDays || 0,
-              maxDays: item?.maxDays || 0,
-              phases: Array.isArray(item?.phases) ?
-                item.phases
-              : [],
-            },
-            metadata: {
-              sourceType: "agriculture_api",
-              lifecycleSource:
-                normalizedSource,
-              providerKey:
-                normalizedSource.includes(
-                  "trefle",
-                ) ?
-                  "trefle"
-                : normalizedSource.includes(
-                    "geoglam",
-                  ) ?
-                  "geoglam"
-                : null,
-            },
-            aliases: Array.isArray(item?.aliases) ?
-              item.aliases
-            : [],
-            profileKind:
-              item?.profileKind || "crop",
-            category:
-              item?.category || "",
-            variety:
-              item?.variety || "",
-            plantType:
-              item?.plantType || "",
-            summary:
-              item?.summary || "",
-            scientificName:
-              item?.scientificName || "",
-            family:
-              item?.family || "",
-            climate:
-              item?.climate || {},
-            soil:
-              item?.soil || {},
-            water:
-              item?.water || {},
-            propagation:
-              item?.propagation || {},
-            harvestWindow:
-              item?.harvestWindow || {},
-            sourceProvenance:
-              Array.isArray(
-                item?.sourceProvenance,
-              ) ?
-                item.sourceProvenance
-              : [],
-          },
-        );
-        return {
-          ...item,
-          source: "verified_store",
-        };
-      }),
-    );
+    const settledExternalItems =
+      await Promise.allSettled(
+        fetchedItems.map(async (item) => {
+          const normalizedSource =
+            (item?.source || "agriculture_api")
+              .toString()
+              .trim();
+          try {
+            await persistVerifiedAgricultureLifecycleProfile(
+              {
+                businessId,
+                productName: item?.name || "",
+                cropSubtype: "",
+                domainContext: "farm",
+                lifecycle: {
+                  product: item?.name || "",
+                  minDays: item?.minDays || 0,
+                  maxDays: item?.maxDays || 0,
+                  phases: Array.isArray(item?.phases)
+                    ? item.phases
+                    : [],
+                },
+                metadata: {
+                  sourceType: "agriculture_api",
+                  lifecycleSource: normalizedSource,
+                  providerKey:
+                    normalizedSource.includes(
+                      "trefle",
+                    )
+                      ? "trefle"
+                      : normalizedSource.includes(
+                            "geoglam",
+                        )
+                      ? "geoglam"
+                      : null,
+                },
+                aliases: Array.isArray(item?.aliases)
+                  ? item.aliases
+                  : [],
+                profileKind: item?.profileKind || "crop",
+                category: item?.category || "",
+                variety: item?.variety || "",
+                plantType: item?.plantType || "",
+                summary: item?.summary || "",
+                scientificName: item?.scientificName || "",
+                family: item?.family || "",
+                climate: item?.climate || {},
+                soil: item?.soil || {},
+                water: item?.water || {},
+                propagation: item?.propagation || {},
+                harvestWindow: item?.harvestWindow || {},
+                sourceProvenance: Array.isArray(
+                  item?.sourceProvenance,
+                )
+                  ? item.sourceProvenance
+                  : [],
+              },
+            );
+            return {
+              ...item,
+              source: "verified_store",
+            };
+          } catch (error) {
+            debug(
+              "BUSINESS CONTROLLER: searchProductionAssistantCatalog - external item persistence skipped",
+              {
+                query,
+                productName: item?.name || "",
+                reason: error.message,
+              },
+            );
+            return item;
+          }
+        }),
+      );
+    externalItems = settledExternalItems
+      .filter((entry) => entry.status === "fulfilled")
+      .map((entry) => entry.value);
   }
   const items = [
     ...uniquePreExternalItems,
