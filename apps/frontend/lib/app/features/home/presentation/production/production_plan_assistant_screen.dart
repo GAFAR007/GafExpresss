@@ -37,7 +37,6 @@ import 'package:frontend/app/features/home/presentation/product_ai_model.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/product_selling_option.dart';
 import 'package:frontend/app/features/home/presentation/production/production_assistant_models.dart';
-import 'package:frontend/app/features/home/presentation/production/production_crop_fallback_catalog.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
@@ -185,7 +184,7 @@ const String _contextPromptTitle = "Context-first planning";
 const String _contextPromptGenerateLabel = "Generate draft from context";
 const String _contextPromptMissingContextMessage =
     "Select estate and crop first, then generate draft.";
-const String _contextPromptSearchProductLabel = "Search planner crop database";
+const String _contextPromptSearchProductLabel = "Search seeded crop database";
 const String _contextPromptSearchProductHint =
     "Search one crop from the planner source instead of browsing farm product chips.";
 const String _contextPromptSelectedProductLabel = "Selected crop";
@@ -271,9 +270,9 @@ const String _contextPromptConfirmWorkloadContextLabel =
 const String _contextPromptConfirmWorkloadContextMissing =
     "Set work unit, total units, and min/max staff per unit before continuing.";
 const String _contextPromptWorkUnitOptionLabel = "Work unit options";
-const String _plannerCropSheetTitle = "Search planner crop database";
+const String _plannerCropSheetTitle = "Search seeded crop database";
 const String _plannerCropSheetHint =
-    "Search verified planner crops, fruits, and plants with offline lifecycle coverage first, then refresh from vetted agriculture sources when available.";
+    "Search the seeded planner crop database to choose the crop this plan should use.";
 const String _plannerCropSearchFieldLabel = "Search crops";
 const String _plannerCropSearchFieldHint = "Try beans, corn, rice, tomato";
 const String _plannerCropSearchEmptyState =
@@ -282,11 +281,7 @@ const String _plannerCropSearchMinimumState =
     "Start typing or pick one of the planner crop suggestions.";
 const String _plannerCropSearchErrorState =
     "Crop search failed. Retry in a moment.";
-const String _plannerCropSearchOfflineNotice =
-    "Live crop search is unavailable right now. Showing offline planner crops.";
 const String _plannerCropLifecyclePendingLabel = "Lifecycle pending";
-const String _plannerCropLifecycleFallbackSnack =
-    "Crop selected. Lifecycle details could not be refreshed right now, so the planner kept the best available local data.";
 const String _plannerCropAutoCreateProductSuccessSnack =
     "Farm product setup complete. The planner crop is now linked.";
 const String _plannerCropAutoCreateProductFailureSnack =
@@ -1045,7 +1040,7 @@ class _ProductionPlanAssistantScreenState
       case "agriculture_api_trefle":
         return "Agriculture API (Trefle)";
       case "verified_store":
-        return "Verified lifecycle store";
+        return "Seeded crop database";
       case "cache":
         return "Planner lifecycle cache";
       case "catalog":
@@ -1695,69 +1690,6 @@ class _ProductionPlanAssistantScreenState
         setState(() {
           _isLinkingPlannerCropProduct = false;
         });
-      }
-    }
-  }
-
-  Future<void> _resolveSelectedPlannerCropLifecycle({
-    required ProductionAssistantCatalogItem selected,
-    String? linkedProductIdOverride,
-  }) async {
-    final normalizedOverride = (linkedProductIdOverride ?? "").trim();
-    final selectedProductId = normalizedOverride.isNotEmpty
-        ? normalizedOverride
-        : selected.linkedProductId.isEmpty
-        ? null
-        : selected.linkedProductId;
-    final fallbackCatalogItem = findPlannerCropFallbackByName(selected.name);
-    final fallbackLifecycleLabel = selected.hasLifecycle
-        ? selected.lifecycleLabel
-        : fallbackCatalogItem?.lifecycleLabel ??
-              _plannerCropLifecyclePendingLabel;
-    final fallbackSource = selected.source.trim().isNotEmpty
-        ? selected.source
-        : fallbackCatalogItem?.source ?? "";
-    try {
-      final preview = await ref
-          .read(productionPlanActionsProvider)
-          .previewAssistantCropLifecycle(
-            productName: selected.name,
-            domainContext: _domainContext,
-            estateAssetId: _selectedEstateAssetId,
-          );
-      if (!mounted) {
-        return;
-      }
-      if (_resolveSelectedProductName() != selected.name.trim()) {
-        return;
-      }
-      setState(() {
-        _applySelectedProductState(
-          productId: selectedProductId,
-          productName: selected.name,
-          productLifecycleLabel: preview.lifecycle.lifecycleLabel,
-          productSourceLabel: _resolveProductSourceLabel(
-            preview.lifecycleSource,
-          ),
-        );
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      if (_resolveSelectedProductName() != selected.name.trim()) {
-        return;
-      }
-      setState(() {
-        _applySelectedProductState(
-          productId: selectedProductId,
-          productName: selected.name,
-          productLifecycleLabel: fallbackLifecycleLabel,
-          productSourceLabel: _resolveProductSourceLabel(fallbackSource),
-        );
-      });
-      if (!selected.hasLifecycle && fallbackCatalogItem == null) {
-        _showSnack(_plannerCropLifecycleFallbackSnack);
       }
     }
   }
@@ -13785,10 +13717,6 @@ class _ProductionPlanAssistantScreenState
       productLifecycleLabel: selected.lifecycleLabel,
       productSourceLabel: _resolveProductSourceLabel(selected.source),
     );
-    await _resolveSelectedPlannerCropLifecycle(
-      selected: selected,
-      linkedProductIdOverride: selectedProductId,
-    );
   }
 
   Future<ProductionAssistantCatalogItem?> _showPlannerCropSearchSheet() async {
@@ -13800,7 +13728,6 @@ class _ProductionPlanAssistantScreenState
     bool isLoading = false;
     bool hasInitialized = false;
     String? errorText;
-    String? noticeText;
 
     Future<void> runSearch(
       String rawQuery,
@@ -13814,14 +13741,12 @@ class _ProductionPlanAssistantScreenState
           results = const <ProductionAssistantCatalogItem>[];
           isLoading = false;
           errorText = null;
-          noticeText = null;
         });
         return;
       }
       setModalState(() {
         isLoading = true;
         errorText = null;
-        noticeText = null;
       });
       try {
         final response = await ref
@@ -13839,7 +13764,6 @@ class _ProductionPlanAssistantScreenState
           results = response.items;
           isLoading = false;
           errorText = null;
-          noticeText = null;
         });
       } catch (error) {
         if (!mounted) {
@@ -13847,7 +13771,7 @@ class _ProductionPlanAssistantScreenState
         }
         AppDebug.log(
           _logTag,
-          "planner_crop_search_fallback",
+          "planner_crop_search_failed",
           extra: {
             "query": query,
             "domainContext": _domainContext,
@@ -13855,20 +13779,10 @@ class _ProductionPlanAssistantScreenState
             "error": error.toString(),
           },
         );
-        final fallbackResults = searchPlannerCropFallbackCatalog(
-          query: query,
-          limit: 8,
-        );
         setModalState(() {
-          results = fallbackResults;
+          results = const <ProductionAssistantCatalogItem>[];
           isLoading = false;
-          if (fallbackResults.isNotEmpty) {
-            errorText = null;
-            noticeText = _plannerCropSearchOfflineNotice;
-          } else {
-            errorText = _plannerCropSearchErrorState;
-            noticeText = null;
-          }
+          errorText = _plannerCropSearchErrorState;
         });
       }
     }
@@ -13946,41 +13860,6 @@ class _ProductionPlanAssistantScreenState
                           ),
                         ),
                         const SizedBox(height: 14),
-                        if (noticeText != null && results.isNotEmpty) ...[
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.tertiaryContainer
-                                  .withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: theme.colorScheme.tertiary.withValues(
-                                  alpha: 0.25,
-                                ),
-                              ),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Icons.cloud_off_outlined,
-                                  color: theme.colorScheme.onTertiaryContainer,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    noticeText!,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color:
-                                          theme.colorScheme.onTertiaryContainer,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                        ],
                         Expanded(
                           child: Builder(
                             builder: (context) {
@@ -14075,9 +13954,10 @@ class _ProductionPlanAssistantScreenState
                                         .isNotEmpty)
                                       "Water ${item.water.requirement.trim()}",
                                   ];
-                                  final provenanceLabel = item
-                                      .primarySourceLabel
-                                      .trim();
+                                  final provenanceLabel =
+                                      _resolveProductSourceLabel(
+                                        item.primarySourceLabel.trim(),
+                                      );
                                   final verificationLabel =
                                       _resolveCropVerificationLabel(
                                         item.verificationStatus,
@@ -14151,7 +14031,7 @@ class _ProductionPlanAssistantScreenState
                                                 ? "Already linked to your business"
                                                 : provenanceLabel.isNotEmpty
                                                 ? provenanceLabel
-                                                : "Planner crop source",
+                                                : "Seeded crop database",
                                             style: theme.textTheme.bodySmall
                                                 ?.copyWith(
                                                   color: theme
@@ -14455,7 +14335,7 @@ class _ProductionPlanAssistantScreenState
       case _CreateWizardStep.estate:
         return "Pick the estate or working location for this production cycle.";
       case _CreateWizardStep.crop:
-        return "Search the planner crop database and lock the crop you want to plan.";
+        return "Search the seeded crop database and lock the crop you want to plan.";
       case _CreateWizardStep.timing:
         return "Set lifecycle dates or exact dates, then define workload assumptions and farm planting targets.";
       case _CreateWizardStep.people:
@@ -15926,7 +15806,7 @@ class _ProductionPlanAssistantScreenState
                 buildSelectionCard(
                   title: "No crop selected yet",
                   subtitle:
-                      "Search the planner crop database to choose the crop this plan should use.",
+                      "Search the seeded crop database to choose the crop this plan should use.",
                   selected: false,
                   onTap: _openPlannerCropSearch,
                   icon: Icons.search_outlined,
@@ -15991,7 +15871,7 @@ class _ProductionPlanAssistantScreenState
                 icon: const Icon(Icons.search),
                 label: Text(
                   selectedProductName.trim().isEmpty
-                      ? "Search planner crop database"
+                      ? "Search seeded crop database"
                       : "Change crop",
                 ),
               ),
@@ -17001,7 +16881,7 @@ class _AiCopilotSheet extends StatelessWidget {
           FilledButton.tonalIcon(
             onPressed: () => closeThen(onSearchCrop),
             icon: const Icon(Icons.search_outlined),
-            label: const Text("Search planner crop database"),
+            label: const Text("Search seeded crop database"),
           ),
           const SizedBox(height: 10),
           FilledButton.tonalIcon(

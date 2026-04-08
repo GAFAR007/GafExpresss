@@ -38,16 +38,11 @@ const {
   generateProductionPlanDraftV2,
 } = require("../services/planner");
 const {
-  searchExternalAgricultureCatalog,
   resolveAgricultureCropKey,
   humanizeCropKey,
 } = require("../services/planner/agricultureApiClient");
 const {
-  searchLocalPlannerCropCatalog,
-} = require("../services/planner/plannerCropCatalog");
-const {
   searchStoredLifecycleProfiles,
-  persistVerifiedAgricultureLifecycleProfile,
   resolveVerifiedAgricultureLifecycle,
 } = require("../services/planner/lifecycleResolver");
 const {
@@ -5573,139 +5568,7 @@ async function buildAssistantPlannerCropSearchResults(
       limit: safeLimit,
       domainContext: "farm",
     });
-  const localItems =
-    searchLocalPlannerCropCatalog({
-      query,
-      limit: safeLimit,
-    });
-  const preExternalItems = [
-    ...storedItems,
-    ...localItems,
-  ];
-  const seenPreExternalKeys = new Set();
-  const uniquePreExternalItems =
-    preExternalItems.filter((item) => {
-      const displayKey = [
-        (
-          item.displayName ||
-          item.name ||
-          ""
-        )
-          .toString()
-          .trim()
-          .toLowerCase(),
-        (
-          item.cropKey || ""
-        )
-          .toString()
-          .trim()
-          .toLowerCase(),
-      ].join("::");
-      if (!displayKey) {
-        return false;
-      }
-      if (
-        seenPreExternalKeys.has(displayKey)
-      ) {
-        return false;
-      }
-      seenPreExternalKeys.add(displayKey);
-      return true;
-    });
-  let externalItems = [];
-  if (
-    uniquePreExternalItems.length <
-    safeLimit
-  ) {
-    const fetchedItems =
-      await searchExternalAgricultureCatalog({
-        query,
-        limit: safeLimit,
-        context,
-      });
-    const settledExternalItems =
-      await Promise.allSettled(
-        fetchedItems.map(async (item) => {
-          const normalizedSource =
-            (item?.source || "agriculture_api")
-              .toString()
-              .trim();
-          try {
-            await persistVerifiedAgricultureLifecycleProfile(
-              {
-                businessId,
-                productName: item?.name || "",
-                cropSubtype: "",
-                domainContext: "farm",
-                lifecycle: {
-                  product: item?.name || "",
-                  minDays: item?.minDays || 0,
-                  maxDays: item?.maxDays || 0,
-                  phases: Array.isArray(item?.phases)
-                    ? item.phases
-                    : [],
-                },
-                metadata: {
-                  sourceType: "agriculture_api",
-                  lifecycleSource: normalizedSource,
-                  providerKey:
-                    normalizedSource.includes(
-                      "trefle",
-                    )
-                      ? "trefle"
-                      : normalizedSource.includes(
-                            "geoglam",
-                        )
-                      ? "geoglam"
-                      : null,
-                },
-                aliases: Array.isArray(item?.aliases)
-                  ? item.aliases
-                  : [],
-                profileKind: item?.profileKind || "crop",
-                category: item?.category || "",
-                variety: item?.variety || "",
-                plantType: item?.plantType || "",
-                summary: item?.summary || "",
-                scientificName: item?.scientificName || "",
-                family: item?.family || "",
-                climate: item?.climate || {},
-                soil: item?.soil || {},
-                water: item?.water || {},
-                propagation: item?.propagation || {},
-                harvestWindow: item?.harvestWindow || {},
-                sourceProvenance: Array.isArray(
-                  item?.sourceProvenance,
-                )
-                  ? item.sourceProvenance
-                  : [],
-              },
-            );
-            return {
-              ...item,
-              source: "verified_store",
-            };
-          } catch (error) {
-            debug(
-              "BUSINESS CONTROLLER: searchProductionAssistantCatalog - external item persistence skipped",
-              {
-                query,
-                productName: item?.name || "",
-                reason: error.message,
-              },
-            );
-            return item;
-          }
-        }),
-      );
-    externalItems = settledExternalItems
-      .filter((entry) => entry.status === "fulfilled")
-      .map((entry) => entry.value);
-  }
-  const items = [
-    ...uniquePreExternalItems,
-    ...externalItems,
-  ];
+  const items = storedItems;
   if (items.length === 0) {
     return [];
   }
@@ -17039,7 +16902,7 @@ async function searchProductionAssistantCatalogHandler(
 
 /**
  * GET /business/production/plans/crop-lifecycle
- * Owner + draft editors: resolve lifecycle preview for one crop directly from the external agriculture API.
+ * Owner + draft editors: resolve lifecycle preview for one crop from the seeded crop database.
  */
 async function previewProductionAssistantCropLifecycleHandler(
   req,
@@ -17180,13 +17043,13 @@ async function previewProductionAssistantCropLifecycleHandler(
     if (!resolvedLifecycle) {
       return res.status(422).json({
         error:
-          "Crop lifecycle data is unavailable from the agriculture API.",
+          "Crop lifecycle data is unavailable in the seeded crop database.",
         classification:
           "MISSING_REQUIRED_FIELD",
         error_code:
-          "PRODUCTION_AI_LIFECYCLE_API_UNAVAILABLE",
+          "PRODUCTION_AI_LIFECYCLE_STORE_UNAVAILABLE",
         resolution_hint:
-          "Try another crop name, refresh the verified lifecycle store from the agriculture API, or retry when the agriculture API has lifecycle coverage for this crop.",
+          "Try another crop name or seed the crop database with verified lifecycle records for this crop.",
         retry_allowed: false,
         retry_reason:
           "missing_lifecycle_data",
@@ -17608,7 +17471,7 @@ async function productionPlanAssistantTurnHandler(
                 (item) =>
                   `Use crop: ${item.name}`,
               ),
-              "Search the planner crop database and select one crop before generating the draft.",
+              "Search the seeded crop database and select one crop before generating the draft.",
             ],
           });
         return res.status(200).json({
@@ -18516,7 +18379,7 @@ async function generateProductionPlanDraftHandler(
           "PRODUCTION_AI_PRODUCT_REQUIRED",
         resolution_hint:
           domainContext === "farm" ?
-            "Search the planner crop database and select one crop before generating an AI draft."
+            "Search the seeded crop database and select one crop before generating an AI draft."
           : "Select a product before generating an AI draft.",
         retry_skipped: true,
         retry_reason:

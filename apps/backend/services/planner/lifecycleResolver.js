@@ -6,12 +6,11 @@
  *
  * WHY:
  * - Farm-first planning must respect real biological duration bounds and phase order.
- * - Resolver precedence keeps known crops fast while still supporting unknown farm products.
+ * - Seeded lifecycle records keep known crops fast and deterministic.
  *
  * HOW:
  * - Reuses cached lifecycle profiles first when available.
- * - Checks the local catalog next for deterministic offline coverage.
- * - Tries the external agriculture provider adapter only after the cheaper trusted sources miss.
+ * - Falls back to the seeded lifecycle database when cache is missing.
  * - Fails clearly when no trusted lifecycle source is available.
  */
 
@@ -923,7 +922,7 @@ function scoreStoredLifecycleProfileSearch({
   normalizedQuery,
 }) {
   if (!normalizedQuery) {
-    return 0;
+    return 1;
   }
 
   const candidates = [
@@ -1001,9 +1000,6 @@ async function searchStoredLifecycleProfiles({
       Math.floor(Number(limit) || 8),
     ),
   );
-  if (!normalizedQuery) {
-    return [];
-  }
   if (!(await resolveLifecycleCacheCollectionAvailability())) {
     return [];
   }
@@ -1047,7 +1043,13 @@ async function searchStoredLifecycleProfiles({
         normalizedQuery,
       }),
     }))
-    .filter((entry) => entry.score > 0)
+    .filter(
+      (entry) =>
+        entry.score > 0 &&
+        isLifecycleReadyProfile(
+          entry.profile,
+        ),
+    )
     .sort((left, right) => {
       if (right.score !== left.score) {
         return right.score - left.score;
@@ -1404,80 +1406,61 @@ async function resolveVerifiedAgricultureLifecycle({
     };
   }
 
-  const localPlannerLifecycle =
-    await resolveLocalPlannerCatalogLifecycleProfile(
-      {
-        businessId,
-        productName: normalizedProductName,
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-      },
-    );
-  if (localPlannerLifecycle) {
-    return localPlannerLifecycle;
-  }
-
-  const negativeCacheEntry =
-    readNegativeLifecycleCache({
-      businessId,
-      productKey,
-      cropSubtype: normalizedCropSubtype,
-      domainContext,
-    });
-  if (negativeCacheEntry) {
+  const searchQuery = [
+    normalizedProductName,
+    normalizedCropSubtype,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (!searchQuery) {
     return null;
   }
-
-  const agricultureLifecycle =
-    await fetchAgricultureLifecycleProfile({
-      productName: normalizedProductName,
-      cropSubtype: normalizedCropSubtype,
-      domainContext,
-      context,
-    });
-  if (!agricultureLifecycle) {
-    writeNegativeLifecycleCache({
+  const storedMatches =
+    await searchStoredLifecycleProfiles({
       businessId,
-      productKey,
-      cropSubtype: normalizedCropSubtype,
+      query: searchQuery,
+      limit: 5,
       domainContext,
     });
+  const matchedStored =
+    storedMatches.find((profile) => {
+      const normalizedName =
+        normalizeLifecycleCatalogKey(
+          profile?.name,
+        );
+      const normalizedCropKey =
+        normalizeLifecycleCatalogKey(
+          profile?.cropKey,
+        );
+      return (
+        normalizedName ===
+          normalizeLifecycleCatalogKey(
+            normalizedProductName,
+          ) ||
+        normalizedCropKey === productKey
+      );
+    }) || storedMatches[0] || null;
+  if (!matchedStored) {
     return null;
   }
-
-  const providerMetadata =
-    (
-      agricultureLifecycle?.metadata &&
-      typeof agricultureLifecycle.metadata ===
-        "object"
-    ) ?
-      agricultureLifecycle.metadata
-    : {};
-  const normalizedLifecycle =
-    await persistVerifiedAgricultureLifecycleProfile(
-      {
-        businessId,
-        productName:
-          normalizedProductName ||
-          agricultureLifecycle?.product ||
-          "",
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-        lifecycle: agricultureLifecycle,
-        metadata: providerMetadata,
-        aliases,
-      },
-    );
+  clearNegativeLifecycleCache({
+    businessId,
+    productKey,
+    cropSubtype: normalizedCropSubtype,
+    domainContext,
+  });
   return {
-    lifecycle: normalizedLifecycle,
+    lifecycle: normalizeLifecycleProfileShape({
+      product: matchedStored.name,
+      minDays: matchedStored.minDays,
+      maxDays: matchedStored.maxDays,
+      phases: matchedStored.phases,
+    }),
     lifecycleSource:
-      (
-        providerMetadata.lifecycleSource ||
-        providerMetadata.providerKey ||
-        "agriculture_api"
-      )
+      (matchedStored.source || "verified_store")
         .toString()
-        .trim() || "agriculture_api",
+        .trim() || "verified_store",
   };
 }
 
@@ -1898,170 +1881,57 @@ async function resolveLifecycleProfile({
     }
   }
 
-  const catalogLifecycle =
-    await resolveLocalPlannerCatalogLifecycleProfile(
-      {
-        businessId,
-        productName: normalizedProductName,
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-      },
-    );
-  if (catalogLifecycle) {
-    return catalogLifecycle;
-  }
-
-  const localCatalogLifecycle =
-    findCatalogLifecycleProfile({
-      productName: normalizedProductName,
-      cropSubtype: normalizedCropSubtype,
+  const searchQuery = [
+    normalizedProductName,
+    normalizedCropSubtype,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const storedMatches =
+    await searchStoredLifecycleProfiles({
+      businessId,
+      query: searchQuery,
+      limit: 5,
+      domainContext,
     });
-  if (localCatalogLifecycle) {
+  const matchedStored =
+    storedMatches.find((profile) => {
+      const normalizedName =
+        normalizeLifecycleCatalogKey(
+          profile?.name,
+        );
+      const normalizedCropKey =
+        normalizeLifecycleCatalogKey(
+          profile?.cropKey,
+        );
+      return (
+        normalizedName ===
+          normalizeLifecycleCatalogKey(
+            normalizedProductName,
+          ) ||
+        normalizedCropKey === productKey
+      );
+    }) || storedMatches[0] || null;
+  if (matchedStored) {
     clearNegativeLifecycleCache({
       businessId,
       productKey,
       cropSubtype: normalizedCropSubtype,
       domainContext,
     });
-    await persistLifecycleProfile({
-      businessId,
-      productKey,
-      productName:
-        normalizedProductName ||
-        localCatalogLifecycle.product,
-      cropSubtype: normalizedCropSubtype,
-      domainContext,
-      lifecycle: localCatalogLifecycle,
-      source: "catalog",
-      sourceConfidence: 1,
-      metadata: {
-        sourceType: "local_catalog",
-      },
-      aliases: [
-        normalizedProductName,
-        normalizedCropSubtype,
-        localCatalogLifecycle.product,
-      ],
-      profileDetails:
-        buildStoredCropProfilePatch({
-          productName:
-            normalizedProductName ||
-            localCatalogLifecycle.product,
-          profileKind: "crop",
-          verificationStatus:
-            "manual_verified",
-          lifecycleStatus: "verified",
-        }),
-    });
     return {
-      lifecycle: localCatalogLifecycle,
-      lifecycleSource: "catalog",
-    };
-  }
-
-  const negativeCacheEntry =
-    readNegativeLifecycleCache({
-      businessId,
-      productKey,
-      cropSubtype: normalizedCropSubtype,
-      domainContext,
-    });
-  const negativeCacheTtlMsRemaining =
-    negativeCacheEntry ?
-      Math.max(
-        0,
-        negativeCacheEntry.expiresAt -
-          Date.now(),
-      )
-    : 0;
-  if (negativeCacheEntry) {
-    debug(
-      "PLANNER_V2_LIFECYCLE: negative cache hit",
-      {
-        intent:
-          "skip repeated external lifecycle lookups for the same missing crop scope",
-        businessId:
-          businessId?.toString?.() || null,
-        productKey,
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-        ttlMsRemaining:
-          negativeCacheTtlMsRemaining,
-      },
-    );
-  } else {
-    const agricultureLifecycle =
-      await fetchAgricultureLifecycleProfile({
-        productName: normalizedProductName,
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-        // WHY: Provider lookups need estate/request context to choose the right country-specific calendar.
-        context,
-      });
-    if (agricultureLifecycle) {
-      const normalizedLifecycle =
-        normalizeLifecycleProfileShape(
-          agricultureLifecycle,
-        );
-      const providerMetadata =
-        (
-          agricultureLifecycle?.metadata &&
-          typeof agricultureLifecycle
-            .metadata === "object"
-        ) ?
-          agricultureLifecycle.metadata
-        : {};
-      const lifecycleSource =
-        (
-          providerMetadata.lifecycleSource ||
-          providerMetadata.providerKey ||
-          "agriculture_api"
-        )
+      lifecycle: normalizeLifecycleProfileShape({
+        product: matchedStored.name,
+        minDays: matchedStored.minDays,
+        maxDays: matchedStored.maxDays,
+        phases: matchedStored.phases,
+      }),
+      lifecycleSource:
+        (matchedStored.source || "verified_store")
           .toString()
-          .trim();
-      clearNegativeLifecycleCache({
-        businessId,
-        productKey,
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-      });
-      await persistLifecycleProfile({
-        businessId,
-        productKey,
-        productName:
-          normalizedProductName || normalizedLifecycle.product,
-        cropSubtype: normalizedCropSubtype,
-        domainContext,
-        lifecycle: normalizedLifecycle,
-        source: "agriculture_api",
-        sourceConfidence: 0.85,
-        metadata: {
-          // WHY: Provider metadata keeps cache provenance explainable when multiple adapters are enabled.
-          sourceType:
-            providerMetadata.sourceType ||
-            "agriculture_api",
-          ...providerMetadata,
-        },
-        aliases: [
-          normalizedProductName,
-          normalizedCropSubtype,
-          normalizedLifecycle.product,
-          providerMetadata.scientificName,
-          providerMetadata.trefleSlug,
-        ],
-      });
-      return {
-        lifecycle: normalizedLifecycle,
-        lifecycleSource,
-      };
-    }
-
-    writeNegativeLifecycleCache({
-      businessId,
-      productKey,
-      cropSubtype: normalizedCropSubtype,
-      domainContext,
-    });
+          .trim() || "verified_store",
+    };
   }
 
   throw buildPlannerValidationError({
@@ -2070,20 +1940,14 @@ async function resolveLifecycleProfile({
     errorCode:
       "PRODUCTION_AI_PLANNER_V2_LIFECYCLE_UNAVAILABLE",
     resolutionHint:
-      "Use a crop with verified lifecycle store coverage, refresh the lifecycle store from the agriculture API, or configure the agriculture lifecycle API before generating the plan.",
+      "Use a crop with verified lifecycle store coverage or seed the crop database with verified lifecycle records before generating the plan.",
     details: {
       productName: normalizedProductName,
       cropSubtype: normalizedCropSubtype,
       domainContext,
       lifecycleSourcesChecked: [
         "verified_store",
-        "catalog",
-        negativeCacheEntry ?
-          "negative_cache"
-        : "agriculture_api",
       ],
-      negativeCacheTtlMsRemaining:
-        negativeCacheTtlMsRemaining || null,
       hasProductDescription: Boolean(
         (productDescription || "").toString().trim(),
       ),
