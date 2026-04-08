@@ -83,7 +83,9 @@ class UserProfile {
       dob: _nullIfEmpty(json['dob']),
       email: (json['email'] ?? '').toString(),
       role: (json['role'] ?? 'customer').toString(),
-      staffRole: _nullIfEmpty(json['staffRole']),
+      // WHY: Normalize staff roles once so every permission check sees the
+      // same canonical key, even if the backend returns a humanized label.
+      staffRole: _normalizeStaffRole(json['staffRole']),
       accountType: rawAccountType,
       isEmailVerified: json['isEmailVerified'] == true,
       isPhoneVerified: json['isPhoneVerified'] == true,
@@ -158,7 +160,7 @@ class UserProfile {
       dob: dob ?? this.dob,
       email: email,
       role: role,
-      staffRole: staffRole ?? this.staffRole,
+      staffRole: _normalizeStaffRole(staffRole ?? this.staffRole),
       accountType: accountType ?? this.accountType,
       isEmailVerified: isEmailVerified ?? this.isEmailVerified,
       isPhoneVerified: isPhoneVerified ?? this.isPhoneVerified,
@@ -181,6 +183,19 @@ class UserProfile {
     if (value == null) return null;
     final trimmed = value.toString().trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// WHY: Permission checks need a stable staff-role key regardless of the
+  /// backend spelling or spacing used in the payload.
+  static String? _normalizeStaffRole(dynamic value) {
+    if (value == null) return null;
+    final normalized = value
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll("-", "_")
+        .replaceAll(" ", "_");
+    return normalized.isEmpty ? null : normalized;
   }
 }
 
@@ -267,7 +282,48 @@ class UserAddress {
       "lga": lga,
       "country": country,
       "landmark": landmark,
+      "formattedAddress": formattedAddress,
+      "placeId": placeId,
+      "lat": lat,
+      "lng": lng,
     };
+  }
+
+  /// WHY: Keep immutable helpers consistent with the parent model.
+  UserAddress copyWith({
+    String? houseNumber,
+    String? street,
+    String? city,
+    String? state,
+    String? postalCode,
+    String? lga,
+    String? country,
+    String? landmark,
+    bool? isVerified,
+    String? verifiedAt,
+    String? verificationSource,
+    String? formattedAddress,
+    String? placeId,
+    double? lat,
+    double? lng,
+  }) {
+    return UserAddress(
+      houseNumber: houseNumber ?? this.houseNumber,
+      street: street ?? this.street,
+      city: city ?? this.city,
+      state: state ?? this.state,
+      postalCode: postalCode ?? this.postalCode,
+      lga: lga ?? this.lga,
+      country: country ?? this.country,
+      landmark: landmark ?? this.landmark,
+      isVerified: isVerified ?? this.isVerified,
+      verifiedAt: verifiedAt ?? this.verifiedAt,
+      verificationSource: verificationSource ?? this.verificationSource,
+      formattedAddress: formattedAddress ?? this.formattedAddress,
+      placeId: placeId ?? this.placeId,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+    );
   }
 
   /// WHY: Keep optional string handling consistent and clean.
