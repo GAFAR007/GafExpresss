@@ -83,7 +83,9 @@ class UserProfile {
       dob: _nullIfEmpty(json['dob']),
       email: (json['email'] ?? '').toString(),
       role: (json['role'] ?? 'customer').toString(),
-      staffRole: _nullIfEmpty(json['staffRole']),
+      // WHY: Normalize staff roles once so every permission check sees the
+      // same canonical key, even if the backend returns a humanized label.
+      staffRole: _normalizeStaffRole(json['staffRole']),
       accountType: rawAccountType,
       isEmailVerified: json['isEmailVerified'] == true,
       isPhoneVerified: json['isPhoneVerified'] == true,
@@ -158,7 +160,7 @@ class UserProfile {
       dob: dob ?? this.dob,
       email: email,
       role: role,
-      staffRole: staffRole ?? this.staffRole,
+      staffRole: _normalizeStaffRole(staffRole ?? this.staffRole),
       accountType: accountType ?? this.accountType,
       isEmailVerified: isEmailVerified ?? this.isEmailVerified,
       isPhoneVerified: isPhoneVerified ?? this.isPhoneVerified,
@@ -181,6 +183,19 @@ class UserProfile {
     if (value == null) return null;
     final trimmed = value.toString().trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// WHY: Permission checks need a stable staff-role key regardless of the
+  /// backend spelling or spacing used in the payload.
+  static String? _normalizeStaffRole(dynamic value) {
+    if (value == null) return null;
+    final normalized = value
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll("-", "_")
+        .replaceAll(" ", "_");
+    return normalized.isEmpty ? null : normalized;
   }
 }
 
