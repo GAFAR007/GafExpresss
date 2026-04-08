@@ -37,6 +37,7 @@ import 'package:frontend/app/features/home/presentation/product_ai_model.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/product_selling_option.dart';
 import 'package:frontend/app/features/home/presentation/production/production_assistant_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_crop_fallback_catalog.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
@@ -281,6 +282,8 @@ const String _plannerCropSearchMinimumState =
     "Start typing or pick one of the planner crop suggestions.";
 const String _plannerCropSearchErrorState =
     "Crop search failed. Retry in a moment.";
+const String _plannerCropSearchOfflineNotice =
+    "Live crop search is unavailable right now. Showing offline planner crops.";
 const String _plannerCropLifecyclePendingLabel = "Lifecycle pending";
 const String _plannerCropLifecycleFallbackSnack =
     "Crop selected. Lifecycle details could not be refreshed right now, so the planner kept the best available local data.";
@@ -1706,6 +1709,9 @@ class _ProductionPlanAssistantScreenState
         : selected.linkedProductId.isEmpty
         ? null
         : selected.linkedProductId;
+    final fallbackLifecycleLabel = selected.hasLifecycle
+        ? selected.lifecycleLabel
+        : _plannerCropLifecyclePendingLabel;
     try {
       final preview = await ref
           .read(productionPlanActionsProvider)
@@ -1741,11 +1747,13 @@ class _ProductionPlanAssistantScreenState
         _applySelectedProductState(
           productId: selectedProductId,
           productName: selected.name,
-          productLifecycleLabel: _plannerCropLifecyclePendingLabel,
+          productLifecycleLabel: fallbackLifecycleLabel,
           productSourceLabel: _resolveProductSourceLabel(selected.source),
         );
       });
-      _showSnack(_plannerCropLifecycleFallbackSnack);
+      if (!selected.hasLifecycle) {
+        _showSnack(_plannerCropLifecycleFallbackSnack);
+      }
     }
   }
 
@@ -13787,6 +13795,7 @@ class _ProductionPlanAssistantScreenState
     bool isLoading = false;
     bool hasInitialized = false;
     String? errorText;
+    String? noticeText;
 
     Future<void> runSearch(
       String rawQuery,
@@ -13800,12 +13809,14 @@ class _ProductionPlanAssistantScreenState
           results = const <ProductionAssistantCatalogItem>[];
           isLoading = false;
           errorText = null;
+          noticeText = null;
         });
         return;
       }
       setModalState(() {
         isLoading = true;
         errorText = null;
+        noticeText = null;
       });
       try {
         final response = await ref
@@ -13822,15 +13833,37 @@ class _ProductionPlanAssistantScreenState
         setModalState(() {
           results = response.items;
           isLoading = false;
+          errorText = null;
+          noticeText = null;
         });
-      } catch (_) {
+      } catch (error) {
         if (!mounted) {
           return;
         }
+        AppDebug.log(
+          _logTag,
+          "planner_crop_search_fallback",
+          extra: {
+            "query": query,
+            "domainContext": _domainContext,
+            "estateAssetId": _selectedEstateAssetId ?? "",
+            "error": error.toString(),
+          },
+        );
+        final fallbackResults = searchPlannerCropFallbackCatalog(
+          query: query,
+          limit: 8,
+        );
         setModalState(() {
-          results = const <ProductionAssistantCatalogItem>[];
+          results = fallbackResults;
           isLoading = false;
-          errorText = _plannerCropSearchErrorState;
+          if (fallbackResults.isNotEmpty) {
+            errorText = null;
+            noticeText = _plannerCropSearchOfflineNotice;
+          } else {
+            errorText = _plannerCropSearchErrorState;
+            noticeText = null;
+          }
         });
       }
     }
@@ -13908,6 +13941,41 @@ class _ProductionPlanAssistantScreenState
                           ),
                         ),
                         const SizedBox(height: 14),
+                        if (noticeText != null && results.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.tertiaryContainer
+                                  .withValues(alpha: 0.6),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: theme.colorScheme.tertiary.withValues(
+                                  alpha: 0.25,
+                                ),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.cloud_off_outlined,
+                                  color: theme.colorScheme.onTertiaryContainer,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    noticeText!,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color:
+                                          theme.colorScheme.onTertiaryContainer,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         Expanded(
                           child: Builder(
                             builder: (context) {
@@ -13916,7 +13984,7 @@ class _ProductionPlanAssistantScreenState
                                   child: CircularProgressIndicator(),
                                 );
                               }
-                              if (errorText != null) {
+                              if (errorText != null && results.isEmpty) {
                                 return Center(
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
