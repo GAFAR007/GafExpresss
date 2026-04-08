@@ -1093,6 +1093,17 @@ function canEditProductionPlanDraft({
   );
 }
 
+// WHY: Draft-planning tools should follow draft edit access, not lifecycle control.
+function canUseProductionPlanDraftTools({
+  actorRole,
+  staffRole,
+}) {
+  return canEditProductionPlanDraft({
+    actorRole,
+    staffRole,
+  });
+}
+
 // WHY: Task assignments can be initiated by designated managers.
 function canAssignProductionTasks({
   actorRole,
@@ -16322,7 +16333,7 @@ async function listStaffAttendance(
 
 /**
  * GET /business/production/schedule-policy?estateAssetId=<id>
- * Owner + estate manager: resolve effective production schedule policy.
+ * Owner + draft editors: resolve effective production schedule policy.
  */
 async function getProductionSchedulePolicy(
   req,
@@ -16350,7 +16361,7 @@ async function getProductionSchedulePolicy(
       });
 
     if (
-      !canCreateProductionPlan({
+      !canUseProductionPlanDraftTools({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
@@ -16695,7 +16706,7 @@ async function updateProductionSchedulePolicy(
 
 /**
  * GET /business/staff/capacity?estateAssetId=<id>
- * Owner + staff: summarize role capacity for AI planning and staffing warnings.
+ * Owner + draft editors: summarize role capacity for AI planning and staffing warnings.
  */
 async function getStaffCapacity(
   req,
@@ -16723,7 +16734,7 @@ async function getStaffCapacity(
       });
 
     if (
-      !canCreateProductionPlan({
+      !canUseProductionPlanDraftTools({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
@@ -16813,7 +16824,7 @@ async function getStaffCapacity(
 
 /**
  * GET /business/production/plans/crop-search
- * Owner + staff: search planner-backed crop options for the assistant flow.
+ * Owner + draft editors: search planner-backed crop options for the assistant flow.
  */
 async function searchProductionAssistantCatalogHandler(
   req,
@@ -16845,7 +16856,7 @@ async function searchProductionAssistantCatalogHandler(
       });
 
     if (
-      !canCreateProductionPlan({
+      !canUseProductionPlanDraftTools({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
@@ -17026,7 +17037,7 @@ async function searchProductionAssistantCatalogHandler(
 
 /**
  * GET /business/production/plans/crop-lifecycle
- * Owner + staff: resolve lifecycle preview for one crop directly from the external agriculture API.
+ * Owner + draft editors: resolve lifecycle preview for one crop directly from the external agriculture API.
  */
 async function previewProductionAssistantCropLifecycleHandler(
   req,
@@ -17062,7 +17073,7 @@ async function previewProductionAssistantCropLifecycleHandler(
       });
 
     if (
-      !canCreateProductionPlan({
+      !canUseProductionPlanDraftTools({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
@@ -17246,7 +17257,7 @@ async function previewProductionAssistantCropLifecycleHandler(
 
 /**
  * POST /business/production/plans/assistant-turn
- * Owner + staff: chat-first assistant turn that guides draft generation and product selection.
+ * Owner + draft editors: chat-first assistant turn that guides draft generation and product selection.
  */
 async function productionPlanAssistantTurnHandler(
   req,
@@ -17286,7 +17297,7 @@ async function productionPlanAssistantTurnHandler(
       });
 
     if (
-      !canCreateProductionPlan({
+      !canUseProductionPlanDraftTools({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
@@ -18131,7 +18142,7 @@ async function productionPlanAssistantTurnHandler(
 
 /**
  * POST /business/production/plans/ai-draft
- * Owner + estate manager: generate an AI draft for a production plan.
+ * Owner + draft editors: generate an AI draft for a production plan.
  */
 function buildAiDraftSourceDocumentPrompt(sourceDocumentContext) {
   if (!sourceDocumentContext?.text) {
@@ -18209,7 +18220,7 @@ async function generateProductionPlanDraftHandler(
       });
 
     if (
-      !canCreateProductionPlan({
+      !canUseProductionPlanDraftTools({
         actorRole: actor.role,
         staffRole:
           staffProfile?.staffRole,
