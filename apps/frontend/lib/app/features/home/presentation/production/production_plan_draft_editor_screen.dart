@@ -32,7 +32,6 @@ import 'package:frontend/app/features/home/presentation/presentation/providers/a
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
-import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_task_table.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
@@ -3510,6 +3509,11 @@ class _ProductionPlanDraftEditorScreenState
                             errorMessage: presenceState?.error,
                             planId: planId,
                             snapshotAt: presenceState?.updatedAt,
+                            onOpenStats: planId.isEmpty
+                                ? null
+                                : () => context.push(
+                                    productionPlanPresenceStatsPath(planId),
+                                  ),
                           ),
                           const SizedBox(height: _sectionSpacing),
                           _DraftEditorSummaryCard(
@@ -4074,6 +4078,7 @@ class _DraftPresenceBanner extends StatelessWidget {
   final String? errorMessage;
   final String? planId;
   final DateTime? snapshotAt;
+  final VoidCallback? onOpenStats;
 
   const _DraftPresenceBanner({
     required this.currentViewer,
@@ -4083,6 +4088,7 @@ class _DraftPresenceBanner extends StatelessWidget {
     required this.errorMessage,
     this.planId,
     this.snapshotAt,
+    this.onOpenStats,
   });
 
   @override
@@ -4095,6 +4101,7 @@ class _DraftPresenceBanner extends StatelessWidget {
     final normalizedPlanId = (planId ?? "").trim();
     final roomId = draftPresenceRoomIdForPlanId(normalizedPlanId);
     final viewerCount = viewers.length;
+    final canOpenStats = onOpenStats != null && roomId.isNotEmpty;
     final statusColor = isSharedRoom
         ? (isConnected ? AppColors.productionAccent : AppColors.tenantAccent)
         : theme.colorScheme.tertiary;
@@ -4106,6 +4113,17 @@ class _DraftPresenceBanner extends StatelessWidget {
     final statusBackground = statusColor.withValues(
       alpha: theme.brightness == Brightness.dark ? 0.24 : 0.12,
     );
+    final statsButton = canOpenStats
+        ? FilledButton.icon(
+            onPressed: onOpenStats,
+            icon: const Icon(Icons.bar_chart_rounded, size: 18),
+            label: const Text("Stats"),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          )
+        : null;
 
     return Container(
       width: double.infinity,
@@ -4190,7 +4208,14 @@ class _DraftPresenceBanner extends StatelessWidget {
                   children: [
                     titleBlock,
                     const SizedBox(height: 12),
-                    statusChip,
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        if (statsButton != null) statsButton,
+                        statusChip,
+                      ],
+                    ),
                   ],
                 );
               }
@@ -4200,7 +4225,16 @@ class _DraftPresenceBanner extends StatelessWidget {
                 children: [
                   Expanded(child: titleBlock),
                   const SizedBox(width: 12),
-                  statusChip,
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (statsButton != null) statsButton,
+                      statusChip,
+                    ],
+                  ),
                 ],
               );
             },
@@ -4279,12 +4313,6 @@ class _DraftPresenceBanner extends StatelessWidget {
                           ),
                         )
                         .toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  ProductionPresenceStatsCard(
-                    viewers: viewers,
-                    referenceTime: referenceTime,
-                    snapshotAt: snapshotAt,
                   ),
                 ],
               );

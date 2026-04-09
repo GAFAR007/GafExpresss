@@ -18,6 +18,8 @@ const String productionPlanDraftStudioRoute =
     "/business-production/draft-studio";
 const String productionPlanDetailRoute = "/business-production/:id";
 const String productionPlanInsightsRoute = "/business-production/:id/insights";
+const String productionPlanPresenceStatsRoute =
+    "/business-production/:id/presence-stats";
 const String productionCalendarRoute = "/business-production/calendar";
 const String productionPlanArchiveRoute = "/business-production/archive";
 const String productionPreorderReservationsRoute =
@@ -31,6 +33,11 @@ String productionPlanDetailPath(String id) {
 String productionPlanInsightsPath(String id) {
   // WHY: Insights live on a separate route so the plan workspace can stay calendar-first.
   return "/business-production/$id/insights";
+}
+
+String productionPlanPresenceStatsPath(String id) {
+  // WHY: Presence stats live on a separate route so the draft view stays uncluttered.
+  return "/business-production/$id/presence-stats";
 }
 
 String productionPlanDraftStudioPath({String? planId}) {

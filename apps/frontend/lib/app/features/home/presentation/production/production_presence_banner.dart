@@ -29,6 +29,7 @@ class ProductionPresenceBanner extends StatelessWidget {
   final String? errorMessage;
   final String? planId;
   final DateTime? snapshotAt;
+  final VoidCallback? onOpenStats;
 
   const ProductionPresenceBanner({
     super.key,
@@ -39,6 +40,7 @@ class ProductionPresenceBanner extends StatelessWidget {
     required this.errorMessage,
     this.planId,
     this.snapshotAt,
+    this.onOpenStats,
   });
 
   @override
@@ -51,6 +53,7 @@ class ProductionPresenceBanner extends StatelessWidget {
     final normalizedPlanId = (planId ?? "").trim();
     final roomId = draftPresenceRoomIdForPlanId(normalizedPlanId);
     final viewerCount = viewers.length;
+    final canOpenStats = onOpenStats != null && roomId.isNotEmpty;
     final statusColor = isSharedRoom
         ? (isConnected ? AppColors.productionAccent : AppColors.tenantAccent)
         : theme.colorScheme.tertiary;
@@ -62,6 +65,17 @@ class ProductionPresenceBanner extends StatelessWidget {
     final statusBackground = statusColor.withValues(
       alpha: theme.brightness == Brightness.dark ? 0.24 : 0.12,
     );
+    final statsButton = canOpenStats
+        ? FilledButton.icon(
+            onPressed: onOpenStats,
+            icon: const Icon(Icons.bar_chart_rounded, size: 18),
+            label: const Text("Stats"),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          )
+        : null;
 
     return Container(
       width: double.infinity,
@@ -146,7 +160,14 @@ class ProductionPresenceBanner extends StatelessWidget {
                   children: [
                     titleBlock,
                     const SizedBox(height: 12),
-                    statusChip,
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        if (statsButton != null) statsButton,
+                        statusChip,
+                      ],
+                    ),
                   ],
                 );
               }
@@ -156,7 +177,16 @@ class ProductionPresenceBanner extends StatelessWidget {
                 children: [
                   Expanded(child: titleBlock),
                   const SizedBox(width: 12),
-                  statusChip,
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (statsButton != null) statsButton,
+                      statusChip,
+                    ],
+                  ),
                 ],
               );
             },
@@ -235,12 +265,6 @@ class ProductionPresenceBanner extends StatelessWidget {
                           ),
                         )
                         .toList(),
-                  ),
-                  const SizedBox(height: 16),
-                  ProductionPresenceStatsCard(
-                    viewers: viewers,
-                    referenceTime: referenceTime,
-                    snapshotAt: snapshotAt,
                   ),
                 ],
               );

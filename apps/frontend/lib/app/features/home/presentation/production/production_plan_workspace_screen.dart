@@ -541,6 +541,11 @@ class _ProductionPlanWorkspaceScreenState
                   errorMessage: presenceState.error,
                   planId: widget.planId,
                   snapshotAt: presenceState.updatedAt,
+                  onOpenStats: widget.planId.trim().isEmpty
+                      ? null
+                      : () => context.push(
+                          productionPlanPresenceStatsPath(widget.planId),
+                        ),
                 ),
                 const SizedBox(height: _sectionSpacing),
                 ProductionSectionHeader(

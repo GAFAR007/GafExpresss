@@ -71,6 +71,7 @@ import 'package:frontend/app/features/home/presentation/production/production_ca
 import 'package:frontend/app/features/home/presentation/production/production_plan_assistant_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft_editor_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_insights_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_presence_stats_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
@@ -92,6 +93,8 @@ const String _routeProductionPreorderReservationsLog =
     "-> /business-production/preorder-reservations";
 const String _routeProductionInsightsLog =
     "-> /business-production/:id/insights";
+const String _routeProductionPresenceStatsLog =
+    "-> /business-production/:id/presence-stats";
 const String _routeProductionDetailLog = "-> /business-production/:id";
 const String _routeStaffDirectoryLog = "-> /business-staff-directory";
 const String _routeStaffDetailLog = "-> /business-staff/:id";
@@ -636,6 +639,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           return BusinessThemeWrapper(
             child: ProductionPlanInsightsScreen(planId: planId),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanPresenceStatsRoute,
+        builder: (context, state) {
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionPresenceStatsLog,
+            extra: {_productionPlanIdParam: planId},
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPresenceStatsScreen(planId: planId),
           );
         },
       ),
