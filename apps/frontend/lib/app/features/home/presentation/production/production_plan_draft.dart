@@ -200,6 +200,7 @@ const String _extraIssueTypeKey = "issueType";
 const List<String> productionPlantingMaterialTypeValues = [
   "seed",
   "seedling",
+  "stand",
   "root",
   "stem",
   "cutting",
@@ -262,6 +263,9 @@ String formatProductionPlantingMaterialType(String value) {
       return "Seed";
     case "seedling":
       return "Seedling";
+    case "stand":
+    case "stands":
+      return "Stand";
     case "root":
       return "Root";
     case "stem":
