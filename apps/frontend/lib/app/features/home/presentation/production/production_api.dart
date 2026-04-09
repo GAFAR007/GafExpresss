@@ -130,6 +130,7 @@ const String _keyStaffId = "staffId";
 const String _keyUnitId = "unitId";
 const String _keyAssignedStaffProfileIds = "assignedStaffProfileIds";
 const String _keyActualPlots = "actualPlots";
+const String _keyProofs = "proofs";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
@@ -1946,6 +1947,7 @@ class ProductionApi {
     String? staffId,
     String? unitId,
     required num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs = const [],
     String? quantityActivityType,
     num? quantityAmount,
     String? quantityUnit,
@@ -1989,11 +1991,39 @@ class ProductionApi {
       if (normalizedQuantityUnit.isNotEmpty) {
         payload[_keyQuantityUnit] = normalizedQuantityUnit;
       }
-      final resp = await _dio.post(
-        "$_tasksPath/$taskId/progress",
-        data: payload,
-        options: _authOptions(token),
-      );
+      final resp = proofs.isEmpty
+          ? await _dio.post(
+              "$_tasksPath/$taskId/progress",
+              data: payload,
+              options: _authOptions(token),
+            )
+          : await _dio.post(
+              "$_tasksPath/$taskId/progress",
+              data: () {
+                final formData = FormData();
+                for (final entry in payload.entries) {
+                  formData.fields.add(
+                    MapEntry(entry.key, entry.value.toString()),
+                  );
+                }
+                for (final proof in proofs) {
+                  formData.files.add(
+                    MapEntry(
+                      _keyProofs,
+                      MultipartFile.fromBytes(
+                        proof.bytes,
+                        filename: proof.filename,
+                      ),
+                    ),
+                  );
+                }
+                return formData;
+              }(),
+              options: Options(
+                headers: _authOptions(token).headers,
+                contentType: "multipart/form-data",
+              ),
+            );
 
       final data = resp.data as Map<String, dynamic>;
       final parsed = ProductionTaskProgressResponse.fromJson(data);

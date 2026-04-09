@@ -33,6 +33,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_model.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
@@ -1069,6 +1070,7 @@ class _ProductionPlanWorkspaceScreenState
                                             input.quantityActivityType,
                                         quantityAmount: input.quantityAmount,
                                         quantityUnit: input.quantityUnit,
+                                        proofs: input.proofs,
                                         delayReason: input.delayReason,
                                         notes: input.notes,
                                         planId: widget.planId,
@@ -1168,6 +1170,7 @@ class _ProductionPlanWorkspaceScreenState
                                             input.quantityActivityType,
                                         quantityAmount: input.quantityAmount,
                                         quantityUnit: input.quantityUnit,
+                                        proofs: input.proofs,
                                         delayReason: input.delayReason,
                                         notes: input.notes,
                                         planId: widget.planId,
@@ -4032,6 +4035,7 @@ class _WorkspaceLogProgressInput {
   final String? staffId;
   final String? unitId;
   final num actualPlots;
+  final List<ProductionTaskProgressProofInput> proofs;
   final String quantityActivityType;
   final num quantityAmount;
   final String quantityUnit;
@@ -4042,6 +4046,7 @@ class _WorkspaceLogProgressInput {
     required this.staffId,
     required this.unitId,
     required this.actualPlots,
+    required this.proofs,
     required this.quantityActivityType,
     required this.quantityAmount,
     required this.quantityUnit,
@@ -5585,6 +5590,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   var selectedDelayReason = _delayReasonNone;
   var validationError = "";
   final attendanceOverridesByStaffId = <String, ProductionAttendanceRecord>{};
+  List<ProductionTaskProgressProofInput> selectedProofs = [];
 
   ProductionAttendanceRecord? resolveDialogAttendance(String? staffProfileId) {
     final normalizedStaffId = staffProfileId?.trim() ?? "";
@@ -5700,6 +5706,8 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           );
           final existingSelectionAmount =
               existingSelectionRow?.actualPlots ?? 0;
+          final existingSelectionProofCount =
+              existingSelectionRow?.proofCount ?? 0;
           final loggedAmountExcludingSelection =
               loggedTotal - existingSelectionAmount;
           final remainingAgainstPlan =
@@ -5761,6 +5769,29 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               (taskTargetAmount - totalLoggedAfterSave) < 0
               ? 0
               : (taskTargetAmount - totalLoggedAfterSave);
+          final requiredProofCount = requiredTaskProgressProofCount(
+            selectedActualAmountValue,
+          );
+          final proofCountMatchesSelectedAmount = requiredProofCount == 0
+              ? selectedProofs.isEmpty
+              : selectedProofs.isNotEmpty
+              ? selectedProofs.length == requiredProofCount
+              : existingSelectionProofCount == requiredProofCount;
+          final proofInstructionText = requiredProofCount == 0
+              ? "Enter a positive actual amount to unlock proof uploads."
+              : proofCountMatchesSelectedAmount
+              ? selectedProofs.isEmpty
+                    ? existingSelectionProofCount > 0 &&
+                              existingSelectionProofCount == requiredProofCount
+                          ? "This staff/unit already has $existingSelectionProofCount proof image(s) saved."
+                          : "Upload exactly $requiredProofCount proof image(s) before saving."
+                    : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s)."
+              : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s).";
+          final proofButtonLabel = selectedProofs.isEmpty
+              ? (existingSelectionProofCount > 0
+                    ? "Update proof images"
+                    : "Add proof images")
+              : "Replace proof images";
           final selectedAttendance = resolveDialogAttendance(selectedStaffId);
           final selectedClockInAt = selectedAttendance?.clockInAt?.toLocal();
           final selectedClockOutAt = selectedAttendance?.clockOutAt?.toLocal();
@@ -5778,7 +5809,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final selectedAttendanceComplete =
               hasSelectedClockIn && hasSelectedClockOut;
           final canSubmitProgress =
-              selectedAttendanceComplete && selectedActualSelectionValid;
+              selectedAttendanceComplete &&
+              selectedActualSelectionValid &&
+              proofCountMatchesSelectedAmount;
           final selectedStaffLabel =
               (selectedStaffId != null && selectedStaffId!.trim().isNotEmpty)
               ? _resolveStaffDisplayLabel(
@@ -5787,6 +5820,17 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                   fallbackRole: task.roleRequired,
                 )
               : _unassignedLabel;
+
+          Future<void> chooseProofs() async {
+            final picked = await pickTaskProgressProofImages();
+            if (!dialogContext.mounted || picked.isEmpty) {
+              return;
+            }
+            setDialogState(() {
+              selectedProofs = picked;
+              validationError = "";
+            });
+          }
 
           Future<void> applyAttendanceAction(
             Future<ProductionAttendanceRecord?> Function(
@@ -5845,6 +5889,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               (cappedQuantityRemaining - selectedQuantityAmount) < 0
               ? 0
               : (cappedQuantityRemaining - selectedQuantityAmount);
+          final shouldShowFollowUpSuggestion =
+              hasSelectedActualAmount &&
+              (remainingAfterSave > 0 || quantityRemainingAfterSave > 0);
           return AlertDialog(
             title: const Text(_logDialogTitle),
             content: SizedBox(
@@ -6275,6 +6322,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                 onSelected: (_) {
                                   setDialogState(() {
                                     selectedActualAmount = amount;
+                                    if (_sameProgressAmount(amount, 0)) {
+                                      selectedProofs = [];
+                                    }
                                     validationError = "";
                                   });
                                 },
@@ -6339,6 +6389,132 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                   height: 1.4,
                                 ),
                           ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant
+                                    .withValues(alpha: 0.7),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Proof images",
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  proofInstructionText,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                        height: 1.3,
+                                      ),
+                                ),
+                                const SizedBox(height: 10),
+                                OutlinedButton.icon(
+                                  onPressed: requiredProofCount == 0
+                                      ? null
+                                      : chooseProofs,
+                                  icon: Icon(
+                                    selectedProofs.isEmpty
+                                        ? Icons.add_photo_alternate_outlined
+                                        : Icons.refresh_outlined,
+                                  ),
+                                  label: Text(proofButtonLabel),
+                                ),
+                                if (selectedProofs.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: selectedProofs
+                                        .map(
+                                          (proof) => Chip(
+                                            avatar: const Icon(
+                                              Icons.image_outlined,
+                                              size: 18,
+                                            ),
+                                            label: Text(proof.displayLabel),
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (shouldShowFollowUpSuggestion) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: _workspaceSoftAmber,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: _workspaceAmber.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Suggested follow-up",
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: _workspaceAmber,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  if (remainingAfterSave > 0)
+                                    Text(
+                                      "Give the staff a 2 hour break, then create a follow-up task for ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)} remaining.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            height: 1.4,
+                                          ),
+                                    ),
+                                  if (remainingAfterSave > 0 &&
+                                      quantityRemainingAfterSave > 0)
+                                    const SizedBox(height: 8),
+                                  if (quantityRemainingAfterSave > 0)
+                                    Text(
+                                      "Create another ${_formatQuantityActivityLabel(selectedQuantityActivityType)} task for ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel left after save.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            height: 1.4,
+                                          ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -6494,6 +6670,14 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           });
                           return;
                         }
+                        if (!proofCountMatchesSelectedAmount) {
+                          setDialogState(() {
+                            validationError = requiredProofCount == 0
+                                ? "Proof images are not allowed when actual plots is 0."
+                                : "Upload exactly $requiredProofCount proof image(s).";
+                          });
+                          return;
+                        }
                         if (selectedActualAmountValue == 0 &&
                             selectedQuantityAmount == 0 &&
                             selectedDelayReason == _delayReasonNone) {
@@ -6507,6 +6691,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             staffId: selectedStaffId,
                             unitId: selectedUnitId,
                             actualPlots: selectedActualAmountValue,
+                            proofs: List<ProductionTaskProgressProofInput>.from(
+                              selectedProofs,
+                            ),
                             quantityActivityType: selectedQuantityActivityType,
                             quantityAmount: selectedQuantityAmount,
                             quantityUnit:

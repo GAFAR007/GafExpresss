@@ -26,6 +26,9 @@ const businessInviteService = require("../services/business_invite.service");
 const businessTenantService = require("../services/business.tenant.service");
 const tenantContactDocumentService = require("../services/tenant_contact_document.service");
 const staffAttendanceProofService = require("../services/staff_attendance_proof.service");
+const {
+  uploadTaskProgressProofImages,
+} = require("../services/production_task_progress_proof.service");
 const paymentService = require("../services/payment.service");
 const {
   generateProductionPlanDraft,
@@ -514,6 +517,12 @@ const PRODUCTION_COPY = {
     "Actual plots exceeds humane daily workload limit",
   TASK_PROGRESS_TARGET_EXCEEDED:
     "Actual progress exceeds the remaining planned task target",
+  TASK_PROGRESS_PROOFS_REQUIRED:
+    "Upload proof images before logging progress",
+  TASK_PROGRESS_PROOFS_COUNT_INVALID:
+    "Upload exactly the required number of proof images",
+  TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS:
+    "Proof images are not allowed when actual plots is zero",
   TASK_PROGRESS_DELAY_REASON_INVALID:
     "Delay reason is invalid",
   TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
@@ -4524,7 +4533,35 @@ function resolveTaskProgressTargetPlotUnits(
       resolveTaskProgressTargetPlots(
         task,
       ),
-    ) || 0
+  ) || 0
+  );
+}
+
+function resolveTaskProgressProofCount(
+  actualPlots,
+) {
+  const normalizedActualPlots = Math.max(
+    0,
+    Number(actualPlots || 0),
+  );
+  if (!Number.isFinite(normalizedActualPlots) || normalizedActualPlots <= 0) {
+    return 0;
+  }
+  return Math.ceil(normalizedActualPlots);
+}
+
+function normalizeTaskProgressProofFiles(
+  files,
+) {
+  if (!Array.isArray(files)) {
+    return [];
+  }
+  return files.filter((file) =>
+    Boolean(
+      file &&
+        file.buffer &&
+        file.buffer.length > 0,
+    ),
   );
 }
 
@@ -10446,6 +10483,14 @@ function buildTimelineRows({
       const quantityAmount = Number(
         record.quantityAmount || 0,
       );
+      const proofCount = Array.isArray(
+        record.proofs,
+      ) ?
+        record.proofs.length
+      : Math.max(
+          0,
+          Number(record.proofCount || 0),
+        );
       // WHY: Zero-output days are explicit blocked records, not implicit misses.
       let status =
         TASK_PROGRESS_STATUS_BEHIND;
@@ -10502,6 +10547,7 @@ function buildTimelineRows({
         quantityAmount,
         quantityUnit:
           record.quantityUnit || "",
+        proofCount,
         status,
         delay,
         delayReason,
@@ -26905,6 +26951,37 @@ async function logProductionTaskProgress(
       convertPlotUnitsToPlots(
         expectedPlotUnits,
       ) || 0;
+    const requiredProofCount =
+      resolveTaskProgressProofCount(
+        actualPlots,
+      );
+    const uploadedProofFiles =
+      normalizeTaskProgressProofFiles(
+        req.files,
+      );
+    if (
+      requiredProofCount === 0 &&
+      uploadedProofFiles.length > 0
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS,
+      });
+    }
+    if (
+      requiredProofCount > 0 &&
+      uploadedProofFiles.length > 0 &&
+      uploadedProofFiles.length !==
+        requiredProofCount
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
+        requiredProofCount,
+        providedProofCount:
+          uploadedProofFiles.length,
+      });
+    }
     const existingTaskProgressRows =
       await TaskProgress.find({
         taskId: task._id,
@@ -26914,6 +26991,7 @@ async function logProductionTaskProgress(
           unitId: 1,
           workDate: 1,
           actualPlotUnits: 1,
+          proofs: 1,
         })
         .lean();
     const currentRowKey =
@@ -26925,6 +27003,8 @@ async function logProductionTaskProgress(
       });
     let loggedUnitsAcrossTask = 0;
     let existingSelectionUnits = 0;
+    let existingSelectionProofCount = 0;
+    let existingSelectionProofs = [];
     existingTaskProgressRows.forEach(
       (row) => {
         const rowUnits = Math.max(
@@ -26943,6 +27023,12 @@ async function logProductionTaskProgress(
         ) {
           existingSelectionUnits +=
             rowUnits;
+          existingSelectionProofs =
+            Array.isArray(row?.proofs) ?
+              row.proofs
+            : [];
+          existingSelectionProofCount =
+            existingSelectionProofs.length;
         }
       },
     );
@@ -26976,6 +27062,34 @@ async function logProductionTaskProgress(
           expectedPlotUnits,
       });
     }
+
+    let proofsToPersist =
+      existingSelectionProofs;
+    if (requiredProofCount === 0) {
+      proofsToPersist = [];
+    } else if (uploadedProofFiles.length > 0) {
+      proofsToPersist =
+        await uploadTaskProgressProofImages({
+          businessId,
+          taskId: task._id?.toString(),
+          staffId: effectiveStaffId,
+          workDate: normalizedWorkDate,
+          files: uploadedProofFiles,
+        });
+    } else if (
+      existingSelectionProofCount !==
+      requiredProofCount
+    ) {
+      return res.status(400).json({
+        error:
+          existingSelectionProofCount > 0 ?
+            PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID
+          : PRODUCTION_COPY.TASK_PROGRESS_PROOFS_REQUIRED,
+        requiredProofCount,
+        providedProofCount:
+          existingSelectionProofCount,
+      });
+    }
     const progress =
       await TaskProgress.findOneAndUpdate(
         {
@@ -27006,6 +27120,11 @@ async function logProductionTaskProgress(
               hasQuantityTracking ?
                 quantityUnit
               : "",
+            ...(requiredProofCount === 0 ?
+              { proofs: [] }
+            : uploadedProofFiles.length > 0 ?
+              { proofs: proofsToPersist }
+            : {}),
             delayReason,
             notes,
           },
@@ -27038,6 +27157,7 @@ async function logProductionTaskProgress(
         quantityAmount,
         quantityUnit,
         expectedPlotUnits,
+        proofCount: proofsToPersist.length,
       },
     );
 

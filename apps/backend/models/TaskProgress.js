@@ -29,6 +29,47 @@ const PRODUCTION_QUANTITY_ACTIVITY_TYPES = [
   "harvest",
 ];
 
+const taskProgressProofSchema =
+  new mongoose.Schema(
+    {
+      url: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      publicId: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      filename: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      mimeType: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      sizeBytes: {
+        type: Number,
+        min: 0,
+        default: 0,
+      },
+      uploadedAt: {
+        type: Date,
+        default: null,
+      },
+      uploadedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+    },
+    { _id: false },
+  );
+
 debug("Loading TaskProgress model...");
 
 const taskProgressSchema = new mongoose.Schema(
@@ -114,6 +155,11 @@ const taskProgressSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+    // WHY: Execution proof images keep each progress row auditable.
+    proofs: {
+      type: [taskProgressProofSchema],
+      default: [],
     },
     // WHY: Structured delay reasons avoid vague "task failed" records.
     delayReason: {

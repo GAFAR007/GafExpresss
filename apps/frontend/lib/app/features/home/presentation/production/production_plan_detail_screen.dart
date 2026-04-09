@@ -25,6 +25,7 @@ import 'package:frontend/app/features/home/presentation/production/production_mo
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
 
 const String _logTag = "PRODUCTION_DETAIL";
 const String _buildMessage = "build()";
@@ -703,6 +704,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
                     unitId,
                     workDate,
                     actualPlots,
+                    proofs,
                     delayReason,
                     notes,
                   ) async {
@@ -720,6 +722,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
                             staffId: staffId,
                             unitId: unitId,
                             actualPlots: actualPlots,
+                            proofs: proofs,
                             delayReason: delayReason,
                             notes: notes,
                             planId: planId,
@@ -787,6 +790,7 @@ class _PlanDetailBody extends StatefulWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3187,6 +3191,7 @@ class _PhaseTaskSection extends StatelessWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3257,6 +3262,7 @@ class _TaskCard extends StatelessWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3367,6 +3373,7 @@ class _TaskCard extends StatelessWidget {
                     staffMap: staffMap,
                     planUnitLabelById: planUnitLabelById,
                     attendanceRecords: attendanceRecords,
+                    taskTargetPlots: task.weight,
                   );
                   if (input == null) {
                     return;
@@ -3377,6 +3384,7 @@ class _TaskCard extends StatelessWidget {
                     input.unitId,
                     input.workDate,
                     input.actualPlots,
+                    input.proofs,
                     input.delayReason,
                     input.notes,
                   );
@@ -3477,6 +3485,7 @@ class _LogProgressInput {
   final String? unitId;
   final DateTime workDate;
   final num actualPlots;
+  final List<ProductionTaskProgressProofInput> proofs;
   final String delayReason;
   final String notes;
 
@@ -3485,6 +3494,7 @@ class _LogProgressInput {
     required this.unitId,
     required this.workDate,
     required this.actualPlots,
+    required this.proofs,
     required this.delayReason,
     required this.notes,
   });
@@ -4008,6 +4018,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
   required List<ProductionAttendanceRecord> attendanceRecords,
+  required num taskTargetPlots,
 }) async {
   // WHY: Managers need a small, focused form for daily execution logging.
   DateTime selectedDate = DateTime.now();
@@ -4036,12 +4047,44 @@ Future<_LogProgressInput?> _showLogProgressDialog(
   final actualPlotsCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
   final attendanceRecordsSnapshot = attendanceRecords;
+  List<ProductionTaskProgressProofInput> selectedProofs = [];
 
   final result = await showDialog<_LogProgressInput>(
     context: context,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (dialogContext, setDialogState) {
+          final parsedActualPlots = num.tryParse(actualPlotsCtrl.text.trim());
+          final requiredProofCount = parsedActualPlots == null
+              ? 0
+              : requiredTaskProgressProofCount(parsedActualPlots);
+          final proofCountMatches = requiredProofCount == 0
+              ? selectedProofs.isEmpty
+              : selectedProofs.length == requiredProofCount;
+          final remainingAfterSave = parsedActualPlots == null
+              ? 0
+              : (taskTargetPlots - parsedActualPlots) < 0
+              ? 0
+              : (taskTargetPlots - parsedActualPlots);
+          final remainingAfterSaveLabel = remainingAfterSave % 1 == 0
+              ? remainingAfterSave.toStringAsFixed(0)
+              : remainingAfterSave.toStringAsFixed(1);
+          final shouldShowFollowUpSuggestion =
+              parsedActualPlots != null &&
+              parsedActualPlots > 0 &&
+              remainingAfterSave > 0;
+
+          Future<void> chooseProofs() async {
+            final picked = await pickTaskProgressProofImages();
+            if (!dialogContext.mounted || picked.isEmpty) {
+              return;
+            }
+            setDialogState(() {
+              selectedProofs = picked;
+              validationMessage = "";
+            });
+          }
+
           final selectedAttendanceStaffId = hasMultipleAssignedStaff
               ? selectedStaffId
               : (normalizedAssignedStaffIds.isNotEmpty
@@ -4090,6 +4133,17 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     decoration: const InputDecoration(
                       labelText: _logProgressActualPlotsLabel,
                     ),
+                    onChanged: (_) {
+                      setDialogState(() {
+                        validationMessage = "";
+                        if (requiredTaskProgressProofCount(
+                              num.tryParse(actualPlotsCtrl.text.trim()) ?? 0,
+                            ) ==
+                            0) {
+                          selectedProofs = [];
+                        }
+                      });
+                    },
                   ),
                   const SizedBox(height: _summaryMetaSpacing),
                   Text(
@@ -4198,6 +4252,121 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     ),
                   ),
                   const SizedBox(height: _summaryMetaSpacing),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(dialogContext)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.outlineVariant.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Proof images",
+                          style: Theme.of(dialogContext).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          requiredProofCount == 0
+                              ? "Enter a positive actual amount to unlock proof uploads."
+                              : proofCountMatches
+                              ? "Upload exactly $requiredProofCount proof image(s) before saving."
+                              : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s).",
+                          style: Theme.of(dialogContext).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  dialogContext,
+                                ).colorScheme.onSurfaceVariant,
+                                height: 1.3,
+                              ),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: requiredProofCount == 0
+                              ? null
+                              : chooseProofs,
+                          icon: Icon(
+                            selectedProofs.isEmpty
+                                ? Icons.add_photo_alternate_outlined
+                                : Icons.refresh_outlined,
+                          ),
+                          label: Text(
+                            selectedProofs.isEmpty
+                                ? "Add proof images"
+                                : "Replace proof images",
+                          ),
+                        ),
+                        if (selectedProofs.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: selectedProofs
+                                .map(
+                                  (proof) => Chip(
+                                    avatar: const Icon(
+                                      Icons.image_outlined,
+                                      size: 18,
+                                    ),
+                                    label: Text(proof.displayLabel),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (shouldShowFollowUpSuggestion) ...[
+                    const SizedBox(height: _summaryMetaSpacing),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.tertiaryContainer.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.tertiary.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Suggested follow-up",
+                            style: Theme.of(dialogContext).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "Give the staff a 2 hour break, then create a follow-up task for $remainingAfterSaveLabel greenhouse(s) remaining.",
+                            style: Theme.of(dialogContext).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    dialogContext,
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.4,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: _summaryMetaSpacing),
                   DropdownButtonFormField<String>(
                     initialValue: selectedDelayReason,
                     decoration: const InputDecoration(
@@ -4256,6 +4425,24 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           });
                           return;
                         }
+                        final requiredProofCount =
+                            requiredTaskProgressProofCount(actualPlots);
+                        if (requiredProofCount == 0 &&
+                            selectedProofs.isNotEmpty) {
+                          setDialogState(() {
+                            validationMessage =
+                                "Proof images are not allowed when actual plots is 0.";
+                          });
+                          return;
+                        }
+                        if (requiredProofCount > 0 &&
+                            selectedProofs.length != requiredProofCount) {
+                          setDialogState(() {
+                            validationMessage =
+                                "Upload exactly $requiredProofCount proof image(s).";
+                          });
+                          return;
+                        }
                         if (hasMultipleAssignedStaff &&
                             selectedStaffId == null) {
                           setDialogState(() {
@@ -4286,6 +4473,9 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                             unitId: selectedUnitId,
                             workDate: selectedDate,
                             actualPlots: actualPlots,
+                            proofs: List<ProductionTaskProgressProofInput>.from(
+                              selectedProofs,
+                            ),
                             delayReason: selectedDelayReason,
                             notes: notesCtrl.text.trim(),
                           ),

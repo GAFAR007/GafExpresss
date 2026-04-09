@@ -41,6 +41,30 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
 });
 
+function parseTaskProgressProofUploads(
+  req,
+  res,
+  next,
+) {
+  const contentType = (
+    req.headers["content-type"] || ""
+  )
+    .toString()
+    .toLowerCase();
+  if (
+    !contentType.includes(
+      "multipart/form-data",
+    )
+  ) {
+    return next();
+  }
+  return upload.array("proofs", 10)(
+    req,
+    res,
+    next,
+  );
+}
+
 /**
  * PRODUCTS
  */
@@ -729,6 +753,7 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  parseTaskProgressProofUploads,
   businessController.logProductionTaskProgress,
 );
 

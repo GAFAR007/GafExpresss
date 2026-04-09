@@ -154,6 +154,8 @@ const String _keyWorkDate = "workDate";
 const String _keyClockInAt = "clockInAt";
 const String _keyClockOutAt = "clockOutAt";
 const String _keyDurationMinutes = "durationMinutes";
+const String _keyProofs = "proofs";
+const String _keyProofCount = "proofCount";
 const String _keyProofUrl = "proofUrl";
 const String _keyProofPublicId = "proofPublicId";
 const String _keyProofFilename = "proofFilename";
@@ -1328,6 +1330,34 @@ class ProductionAttendanceRecord {
   }
 }
 
+class ProductionTaskProgressProofInput {
+  final List<int> bytes;
+  final String filename;
+  final int sizeBytes;
+
+  const ProductionTaskProgressProofInput({
+    required this.bytes,
+    required this.filename,
+    required this.sizeBytes,
+  });
+
+  bool get isImage {
+    final normalized = filename.trim().toLowerCase();
+    return normalized.endsWith(".png") ||
+        normalized.endsWith(".jpg") ||
+        normalized.endsWith(".jpeg") ||
+        normalized.endsWith(".webp");
+  }
+
+  String get displayLabel {
+    final label = filename.trim();
+    if (label.isNotEmpty) {
+      return label;
+    }
+    return "Proof image";
+  }
+}
+
 class ProductionPlanDetail {
   final ProductionPlan plan;
   final ProductionPlanConfidence? confidence;
@@ -2139,6 +2169,7 @@ class ProductionTimelineRow {
   final String approvedBy;
   final DateTime? approvedAt;
   final String notes;
+  final int proofCount;
 
   const ProductionTimelineRow({
     required this.id,
@@ -2162,6 +2193,7 @@ class ProductionTimelineRow {
     required this.approvedBy,
     required this.approvedAt,
     required this.notes,
+    required this.proofCount,
   });
 
   factory ProductionTimelineRow.fromJson(Map<String, dynamic> json) {
@@ -2193,6 +2225,7 @@ class ProductionTimelineRow {
       approvedBy: _parseString(json[_keyApprovedBy]),
       approvedAt: approvedAt,
       notes: _parseString(json[_keyNotes]),
+      proofCount: _parseInt(json[_keyProofCount]),
     );
   }
 }
@@ -2240,6 +2273,7 @@ class ProductionTaskProgressRecord {
   final String quantityUnit;
   final String delayReason;
   final String notes;
+  final int proofCount;
   final String createdBy;
   final String approvedBy;
   final DateTime? approvedAt;
@@ -2258,12 +2292,14 @@ class ProductionTaskProgressRecord {
     required this.quantityUnit,
     required this.delayReason,
     required this.notes,
+    required this.proofCount,
     required this.createdBy,
     required this.approvedBy,
     required this.approvedAt,
   });
 
   factory ProductionTaskProgressRecord.fromJson(Map<String, dynamic> json) {
+    final proofList = json[_keyProofs];
     return ProductionTaskProgressRecord(
       id: _parseId(json),
       taskId: _parseString(json[_keyTaskId]),
@@ -2278,6 +2314,9 @@ class ProductionTaskProgressRecord {
       quantityUnit: _parseString(json[_keyQuantityUnit]),
       delayReason: _parseString(json[_keyDelayReason]),
       notes: _parseString(json[_keyNotes]),
+      proofCount: proofList is List
+          ? proofList.length
+          : _parseInt(json[_keyProofCount]),
       createdBy: _parseString(json[_keyCreatedBy]),
       approvedBy: _parseString(json[_keyApprovedBy]),
       approvedAt: _parseDate(json[_keyApprovedAt]),
@@ -2558,6 +2597,14 @@ num? _parseNullableNum(dynamic value) {
   if (value == null) return null;
   if (value is num) return value;
   return num.tryParse(value.toString());
+}
+
+int requiredTaskProgressProofCount(num actualPlots) {
+  final normalizedActualPlots = actualPlots.toDouble();
+  if (normalizedActualPlots <= 0) {
+    return 0;
+  }
+  return normalizedActualPlots.ceil();
 }
 
 Map<String, num> _parseOutputByUnit(dynamic value) {
