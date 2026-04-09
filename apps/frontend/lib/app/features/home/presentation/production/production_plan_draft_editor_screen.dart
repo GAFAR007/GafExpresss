@@ -3506,6 +3506,7 @@ class _ProductionPlanDraftEditorScreenState
                             isConnected: presenceState?.isConnected ?? false,
                             isSharedRoom: planId.isNotEmpty,
                             errorMessage: presenceState?.error,
+                            planId: planId,
                           ),
                           const SizedBox(height: _sectionSpacing),
                           _DraftEditorSummaryCard(
@@ -4068,6 +4069,7 @@ class _DraftPresenceBanner extends StatelessWidget {
   final bool isConnected;
   final bool isSharedRoom;
   final String? errorMessage;
+  final String? planId;
 
   const _DraftPresenceBanner({
     required this.currentViewer,
@@ -4075,6 +4077,7 @@ class _DraftPresenceBanner extends StatelessWidget {
     required this.isConnected,
     required this.isSharedRoom,
     required this.errorMessage,
+    this.planId,
   });
 
   @override
@@ -4084,6 +4087,8 @@ class _DraftPresenceBanner extends StatelessWidget {
       currentViewer: currentViewer,
       remoteViewers: remoteViewers,
     );
+    final normalizedPlanId = (planId ?? "").trim();
+    final roomId = draftPresenceRoomIdForPlanId(normalizedPlanId);
     final viewerCount = viewers.length;
     final statusColor = isSharedRoom
         ? (isConnected ? AppColors.productionAccent : AppColors.tenantAccent)
@@ -4196,6 +4201,53 @@ class _DraftPresenceBanner extends StatelessWidget {
             },
           ),
           const SizedBox(height: 14),
+          if (roomId.isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface.withValues(
+                  alpha: theme.brightness == Brightness.dark ? 0.14 : 0.48,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.7,
+                  ),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Debug room",
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Plan ID: $normalizedPlanId",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "Room: $roomId",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           Wrap(
             spacing: 10,
             runSpacing: 10,

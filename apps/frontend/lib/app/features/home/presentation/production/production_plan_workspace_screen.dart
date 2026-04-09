@@ -527,6 +527,7 @@ class _ProductionPlanWorkspaceScreenState
                   isConnected: presenceState.isConnected,
                   isSharedRoom: widget.planId.trim().isNotEmpty,
                   errorMessage: presenceState.error,
+                  planId: widget.planId,
                 ),
                 const SizedBox(height: _sectionSpacing),
                 ProductionSectionHeader(

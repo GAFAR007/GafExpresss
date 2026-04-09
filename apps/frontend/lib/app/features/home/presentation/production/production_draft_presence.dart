@@ -28,6 +28,7 @@ const String draftPresenceEventJoin = "production:draft:presence:join";
 const String draftPresenceEventLeave = "production:draft:presence:leave";
 const String draftPresenceEventUpdate = "production:draft:presence:update";
 const String draftPresenceEventError = "production:draft:presence:error";
+const String draftPresenceRoomPrefix = "production:draft:";
 
 // WHY: Keep logs easy to grep when presence rooms misbehave.
 const String _logTag = "DRAFT_PRESENCE_SOCKET";
@@ -67,6 +68,14 @@ String formatDraftPresenceRoleLabel(
         return "${lower[0].toUpperCase()}${lower.substring(1)}";
       })
       .join(" ");
+}
+
+String draftPresenceRoomIdForPlanId(String planId) {
+  final normalizedPlanId = planId.trim();
+  if (normalizedPlanId.isEmpty) {
+    return "";
+  }
+  return "$draftPresenceRoomPrefix$normalizedPlanId";
 }
 
 class ProductionDraftPresenceViewer {
