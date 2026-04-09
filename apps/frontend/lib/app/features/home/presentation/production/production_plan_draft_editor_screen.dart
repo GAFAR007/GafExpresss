@@ -32,6 +32,7 @@ import 'package:frontend/app/features/home/presentation/presentation/providers/a
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
+import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_task_table.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
@@ -4260,21 +4261,32 @@ class _DraftPresenceBanner extends StatelessWidget {
             initialData: DateTime.now(),
             builder: (context, timeSnapshot) {
               final referenceTime = timeSnapshot.data ?? DateTime.now();
-              return Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: viewers
-                    .map(
-                      (viewer) => _DraftPresenceViewerChip(
-                        viewer: viewer,
-                        isSelf:
-                            _draftPresenceViewerKey(viewer) ==
-                            _draftPresenceViewerKey(currentViewer),
-                        referenceTime: referenceTime,
-                        snapshotAt: snapshotAt,
-                      ),
-                    )
-                    .toList(),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: viewers
+                        .map(
+                          (viewer) => _DraftPresenceViewerChip(
+                            viewer: viewer,
+                            isSelf:
+                                _draftPresenceViewerKey(viewer) ==
+                                _draftPresenceViewerKey(currentViewer),
+                            referenceTime: referenceTime,
+                            snapshotAt: snapshotAt,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  ProductionPresenceStatsCard(
+                    viewers: viewers,
+                    referenceTime: referenceTime,
+                    snapshotAt: snapshotAt,
+                  ),
+                ],
               );
             },
           ),
@@ -5285,6 +5297,7 @@ ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
     currentSessionSeconds: 0,
     durationSeconds: 0,
     todaySeconds: 0,
+    weekSeconds: 0,
     monthSeconds: 0,
     yearSeconds: 0,
     totalSeconds: 0,

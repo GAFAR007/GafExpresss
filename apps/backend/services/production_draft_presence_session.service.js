@@ -89,6 +89,19 @@ function toUtcMonthKey(value) {
   return value.toISOString().slice(0, 7);
 }
 
+function startOfUtcWeek(value) {
+  const start = new Date(value);
+  start.setUTCHours(0, 0, 0, 0);
+  const utcDay = start.getUTCDay();
+  const offsetToMonday = (utcDay + 6) % 7;
+  start.setUTCDate(start.getUTCDate() - offsetToMonday);
+  return start;
+}
+
+function toUtcWeekKey(value) {
+  return startOfUtcWeek(value).toISOString().slice(0, 10);
+}
+
 function toUtcYearKey(value) {
   return value.toISOString().slice(0, 4);
 }
@@ -133,7 +146,9 @@ function accumulateInterval(buckets, start, end) {
 
     if (seconds > 0) {
       const dayKey = toUtcDayKey(cursor);
+      const weekKey = toUtcWeekKey(cursor);
       addSeconds(buckets.dailySeconds, dayKey, seconds);
+      addSeconds(buckets.weeklySeconds, weekKey, seconds);
       addSeconds(buckets.monthlySeconds, toUtcMonthKey(cursor), seconds);
       addSeconds(buckets.yearlySeconds, toUtcYearKey(cursor), seconds);
       buckets.totalSeconds += seconds;
@@ -150,6 +165,7 @@ function createDurationBuckets() {
   return {
     totalSeconds: 0,
     dailySeconds: createEmptyBucketMap(),
+    weeklySeconds: createEmptyBucketMap(),
     monthlySeconds: createEmptyBucketMap(),
     yearlySeconds: createEmptyBucketMap(),
   };
@@ -215,6 +231,7 @@ function buildViewerPresenceSummary(sessions, now = new Date()) {
   const sourceSession = activeSession || latestSession;
   const timeSummary = sourceSession ? toSessionTimeSummary(sourceSession, now) : null;
   const dayKey = toUtcDayKey(now);
+  const weekKey = toUtcWeekKey(now);
   const monthKey = toUtcMonthKey(now);
   const yearKey = toUtcYearKey(now);
 
@@ -226,6 +243,7 @@ function buildViewerPresenceSummary(sessions, now = new Date()) {
     currentSessionSeconds: timeSummary?.currentSessionSeconds || 0,
     durationSeconds: timeSummary?.durationSeconds || 0,
     todaySeconds: buckets.dailySeconds[dayKey] || 0,
+    weekSeconds: buckets.weeklySeconds[weekKey] || 0,
     monthSeconds: buckets.monthlySeconds[monthKey] || 0,
     yearSeconds: buckets.yearlySeconds[yearKey] || 0,
     totalSeconds: buckets.totalSeconds,
@@ -254,6 +272,7 @@ function buildViewerSummaryFromSession(session, presenceSummary) {
     currentSessionSeconds: presenceSummary.currentSessionSeconds,
     durationSeconds: presenceSummary.durationSeconds,
     todaySeconds: presenceSummary.todaySeconds,
+    weekSeconds: presenceSummary.weekSeconds,
     monthSeconds: presenceSummary.monthSeconds,
     yearSeconds: presenceSummary.yearSeconds,
     totalSeconds: presenceSummary.totalSeconds,

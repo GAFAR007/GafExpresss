@@ -121,6 +121,7 @@ class ProductionDraftPresenceViewer {
   final int currentSessionSeconds;
   final int durationSeconds;
   final int todaySeconds;
+  final int weekSeconds;
   final int monthSeconds;
   final int yearSeconds;
   final int totalSeconds;
@@ -139,6 +140,7 @@ class ProductionDraftPresenceViewer {
     required this.currentSessionSeconds,
     required this.durationSeconds,
     required this.todaySeconds,
+    required this.weekSeconds,
     required this.monthSeconds,
     required this.yearSeconds,
     required this.totalSeconds,
@@ -177,6 +179,7 @@ class ProductionDraftPresenceViewer {
     return enteredAt != null ||
         currentSessionSeconds > 0 ||
         todaySeconds > 0 ||
+        weekSeconds > 0 ||
         monthSeconds > 0 ||
         yearSeconds > 0 ||
         totalSeconds > 0 ||
@@ -193,6 +196,10 @@ class ProductionDraftPresenceViewer {
 
   String get todayDurationLabel {
     return formatDraftPresenceDurationLabel(todaySeconds);
+  }
+
+  String get weekDurationLabel {
+    return formatDraftPresenceDurationLabel(weekSeconds);
   }
 
   String get monthDurationLabel {
@@ -257,6 +264,18 @@ class ProductionDraftPresenceViewer {
         );
   }
 
+  int liveWeekSeconds({required DateTime referenceTime, DateTime? snapshotAt}) {
+    if (leftAt != null || enteredAt == null) {
+      return weekSeconds;
+    }
+
+    return weekSeconds +
+        _liveElapsedSinceSnapshotSeconds(
+          referenceTime: referenceTime,
+          snapshotAt: snapshotAt,
+        );
+  }
+
   int liveYearSeconds({required DateTime referenceTime, DateTime? snapshotAt}) {
     if (leftAt != null || enteredAt == null) {
       return yearSeconds;
@@ -286,6 +305,10 @@ class ProductionDraftPresenceViewer {
       referenceTime: referenceTime,
       snapshotAt: snapshotAt,
     );
+    final liveWeekSecondsValue = liveWeekSeconds(
+      referenceTime: referenceTime,
+      snapshotAt: snapshotAt,
+    );
     final liveMonthSecondsValue = liveMonthSeconds(
       referenceTime: referenceTime,
       snapshotAt: snapshotAt,
@@ -303,6 +326,7 @@ class ProductionDraftPresenceViewer {
       [
         "Current ${formatDraftPresenceDurationLabel(liveCurrentSeconds)}",
         "Today ${formatDraftPresenceDurationLabel(liveTodaySecondsValue)}",
+        "Week ${formatDraftPresenceDurationLabel(liveWeekSecondsValue)}",
         "Month ${formatDraftPresenceDurationLabel(liveMonthSecondsValue)}",
         "Year ${formatDraftPresenceDurationLabel(liveYearSecondsValue)}",
       ].join(" · "),
@@ -328,6 +352,7 @@ class ProductionDraftPresenceViewer {
       ),
       durationSeconds: _parseNonNegativeInt(json["durationSeconds"]),
       todaySeconds: _parseNonNegativeInt(json["todaySeconds"]),
+      weekSeconds: _parseNonNegativeInt(json["weekSeconds"]),
       monthSeconds: _parseNonNegativeInt(json["monthSeconds"]),
       yearSeconds: _parseNonNegativeInt(json["yearSeconds"]),
       totalSeconds: _parseNonNegativeInt(json["totalSeconds"]),

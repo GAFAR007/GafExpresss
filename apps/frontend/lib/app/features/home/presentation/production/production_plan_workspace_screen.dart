@@ -450,6 +450,7 @@ class _ProductionPlanWorkspaceScreenState
               currentSessionSeconds: 0,
               durationSeconds: 0,
               todaySeconds: 0,
+              weekSeconds: 0,
               monthSeconds: 0,
               yearSeconds: 0,
               totalSeconds: 0,
