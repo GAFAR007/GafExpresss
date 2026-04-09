@@ -82,6 +82,45 @@ final chatInboxProvider = FutureProvider<List<ChatConversation>>((ref) async {
   return api.fetchConversations(token: session.token);
 });
 
+final chatInboxRealtimeProvider = Provider.autoDispose<void>((ref) {
+  final session = ref.watch(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    return;
+  }
+
+  final socket = ref.watch(chatSocketProvider);
+  socket.connect(token: session.token);
+
+  final messageSub = socket.messageStream.listen((_) {
+    ref.invalidate(chatInboxProvider);
+  });
+  final readSub = socket.readStream.listen((_) {
+    ref.invalidate(chatInboxProvider);
+  });
+
+  ref.onDispose(() {
+    messageSub.cancel();
+    readSub.cancel();
+  });
+});
+
+final chatUnreadCountProvider = Provider.autoDispose<int>((ref) {
+  final session = ref.watch(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    return 0;
+  }
+
+  ref.watch(chatInboxRealtimeProvider);
+  final conversationsAsync = ref.watch(chatInboxProvider);
+  return conversationsAsync.maybeWhen(
+    data: (conversations) => conversations.fold<int>(
+      0,
+      (sum, conversation) => sum + conversation.unreadCount,
+    ),
+    orElse: () => 0,
+  );
+});
+
 final chatConversationDetailProvider =
     FutureProvider.family<ChatConversationDetail, String>((ref, id) async {
       AppDebug.log(_logTag, _detailLoadStart, extra: {"id": id});
@@ -272,6 +311,7 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
         conversationId: conversationId,
         messageIds: unread,
       );
+      _ref.invalidate(chatInboxProvider);
     } catch (_) {
       // WHY: Read receipts are non-blocking; ignore failures.
     }

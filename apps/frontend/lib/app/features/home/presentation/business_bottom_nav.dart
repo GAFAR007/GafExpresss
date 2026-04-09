@@ -17,11 +17,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/theme/app_radius.dart';
 
-class BusinessBottomNav extends StatelessWidget {
+class BusinessBottomNav extends ConsumerWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final bool showProfileItem;
@@ -35,22 +37,10 @@ class BusinessBottomNav extends StatelessWidget {
 
   static const _baseItems = [
     _BusinessNavItem(icon: Icons.home, label: "Home"),
-    _BusinessNavItem(
-      icon: Icons.inventory_2_outlined,
-      label: "Products",
-    ),
-    _BusinessNavItem(
-      icon: Icons.bar_chart_rounded,
-      label: "Dashboard",
-    ),
-    _BusinessNavItem(
-      icon: Icons.receipt_long_outlined,
-      label: "Orders",
-    ),
-    _BusinessNavItem(
-      icon: Icons.chat_bubble_outline,
-      label: "Chat",
-    ),
+    _BusinessNavItem(icon: Icons.inventory_2_outlined, label: "Products"),
+    _BusinessNavItem(icon: Icons.bar_chart_rounded, label: "Dashboard"),
+    _BusinessNavItem(icon: Icons.receipt_long_outlined, label: "Orders"),
+    _BusinessNavItem(icon: Icons.chat_bubble_outline, label: "Chat"),
   ];
 
   static const _profileItem = _BusinessNavItem(
@@ -64,9 +54,10 @@ class BusinessBottomNav extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     AppDebug.log("BUSINESS_NAV", "build()", extra: {"index": currentIndex});
     final colorScheme = Theme.of(context).colorScheme;
+    final chatBadgeCount = ref.watch(chatUnreadCountProvider);
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
@@ -100,6 +91,7 @@ class BusinessBottomNav extends StatelessWidget {
                 child: _BusinessNavButton(
                   item: item,
                   isActive: isActive,
+                  badgeCount: item.label == "Chat" ? chatBadgeCount : 0,
                   onTap: () {
                     AppDebug.log(
                       "BUSINESS_NAV",
@@ -121,11 +113,13 @@ class BusinessBottomNav extends StatelessWidget {
 class _BusinessNavButton extends StatelessWidget {
   final _BusinessNavItem item;
   final bool isActive;
+  final int badgeCount;
   final VoidCallback onTap;
 
   const _BusinessNavButton({
     required this.item,
     required this.isActive,
+    required this.badgeCount,
     required this.onTap,
   });
 
@@ -160,27 +154,60 @@ class _BusinessNavButton extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isActive
-                    ? activeColor
-                    : colorScheme.surface,
-                borderRadius: BorderRadius.circular(AppRadius.pill),
-                border: Border.all(
-                  color: isActive
-                      ? activeColor.withValues(alpha: 0.22)
-                      : colorScheme.outlineVariant.withValues(alpha: 0.55),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: isActive ? activeColor : colorScheme.surface,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    border: Border.all(
+                      color: isActive
+                          ? activeColor.withValues(alpha: 0.22)
+                          : colorScheme.outlineVariant.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    item.icon,
+                    size: 18,
+                    color: isActive ? colorScheme.onPrimary : inactiveColor,
+                  ),
                 ),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                item.icon,
-                size: 18,
-                color: isActive ? colorScheme.onPrimary : inactiveColor,
-              ),
+                if (badgeCount > 0)
+                  Positioned(
+                    right: -7,
+                    top: -6,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 18),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.error,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: colorScheme.surface,
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Text(
+                        badgeCount > 99 ? "99+" : "$badgeCount",
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onError,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 6),
             Text(
@@ -203,8 +230,5 @@ class _BusinessNavItem {
   final IconData icon;
   final String label;
 
-  const _BusinessNavItem({
-    required this.icon,
-    required this.label,
-  });
+  const _BusinessNavItem({required this.icon, required this.label});
 }
