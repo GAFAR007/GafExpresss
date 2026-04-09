@@ -137,6 +137,8 @@ const String _taskProgressSuccess = "Daily progress logged.";
 const String _taskProgressFailure = "Unable to log daily progress.";
 const String _taskProgressNeedsAssignedStaff =
     "Assign staff to this task before logging daily progress.";
+const String _taskProgressAttendanceRequired =
+    "Clock in and clock out before logging progress.";
 const String _approveTaskSuccess = "Task approved.";
 const String _approveTaskFailure = "Unable to approve task.";
 const String _rejectTaskSuccess = "Task rejected.";
@@ -937,6 +939,7 @@ class _ProductionPlanWorkspaceScreenState
                         phaseName:
                             phaseById[task.phaseId]?.name ?? task.phaseId,
                         staffMap: staffMap,
+                        currentActorStaffId: selfStaffId,
                         planUnitLabelById: planUnitLabelById,
                         fallbackTotalUnits: workScopeSummary.totalUnits,
                         fallbackWorkUnitLabel: workScopeSummary.singularLabel,
@@ -2892,6 +2895,7 @@ class _AgendaTaskCard extends StatelessWidget {
   final ProductionTask task;
   final String phaseName;
   final Map<String, BusinessStaffProfileSummary> staffMap;
+  final String currentActorStaffId;
   final Map<String, String> planUnitLabelById;
   final int fallbackTotalUnits;
   final String fallbackWorkUnitLabel;
@@ -2932,6 +2936,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.task,
     required this.phaseName,
     required this.staffMap,
+    required this.currentActorStaffId,
     required this.planUnitLabelById,
     required this.fallbackTotalUnits,
     required this.fallbackWorkUnitLabel,
@@ -3197,9 +3202,18 @@ class _AgendaTaskCard extends StatelessWidget {
                         hasClockIn: attendance?.clockInAt != null,
                         hasClockOut: attendance?.clockOutAt != null,
                         canManageAttendance: canManageTaskAttendance,
-                        canLogProgress: progressEnabledStaffIds.contains(
-                          staffId,
-                        ),
+                        canClockSelfAttendance:
+                            !canManageTaskAttendance &&
+                            currentActorStaffId.trim().isNotEmpty &&
+                            currentActorStaffId.trim() == staffId.trim(),
+                        canLogProgress:
+                            progressEnabledStaffIds.contains(staffId) &&
+                            (attendance?.clockInAt != null &&
+                                attendance?.clockOutAt != null),
+                        attendanceLockedForProgress:
+                            progressEnabledStaffIds.contains(staffId) &&
+                            !(attendance?.clockInAt != null &&
+                                attendance?.clockOutAt != null),
                         hasLoggedProgress: hasLoggedProgress,
                         onQuickClockIn: onQuickClockInForStaff == null
                             ? null
@@ -3215,7 +3229,9 @@ class _AgendaTaskCard extends StatelessWidget {
                                   onSetAttendanceForStaff!(staffId, attendance),
                         onLogProgress:
                             onLogProgressForStaff == null ||
-                                !progressEnabledStaffIds.contains(staffId)
+                                !progressEnabledStaffIds.contains(staffId) ||
+                                !(attendance?.clockInAt != null &&
+                                    attendance?.clockOutAt != null)
                             ? null
                             : () => onLogProgressForStaff!(staffId),
                       );
@@ -3540,7 +3556,9 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final bool hasClockIn;
   final bool hasClockOut;
   final bool canManageAttendance;
+  final bool canClockSelfAttendance;
   final bool canLogProgress;
+  final bool attendanceLockedForProgress;
   final bool hasLoggedProgress;
   final Future<void> Function()? onQuickClockIn;
   final Future<void> Function()? onQuickClockOut;
@@ -3556,7 +3574,9 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.hasClockIn,
     required this.hasClockOut,
     required this.canManageAttendance,
+    required this.canClockSelfAttendance,
     required this.canLogProgress,
+    required this.attendanceLockedForProgress,
     required this.hasLoggedProgress,
     required this.onQuickClockIn,
     required this.onQuickClockOut,
@@ -3648,7 +3668,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 runSpacing: 8,
                 alignment: WrapAlignment.end,
                 children: [
-                  if (canManageAttendance &&
+                  if ((canManageAttendance || canClockSelfAttendance) &&
                       !hasClockIn &&
                       !hasClockOut &&
                       onQuickClockIn != null)
@@ -3657,7 +3677,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                       icon: const Icon(Icons.login_outlined, size: 18),
                       label: const Text(_attendanceDialogClockInLabel),
                     ),
-                  if (canManageAttendance &&
+                  if ((canManageAttendance || canClockSelfAttendance) &&
                       hasClockIn &&
                       !hasClockOut &&
                       onQuickClockOut != null)
@@ -3755,6 +3775,36 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               );
             },
           ),
+          if (attendanceLockedForProgress) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _workspaceSoftAmber,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _workspaceAmber.withValues(alpha: 0.18),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline, size: 18, color: _workspaceAmber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _taskProgressAttendanceRequired,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: _workspaceAmber,
+                        fontWeight: FontWeight.w800,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           Container(
             width: double.infinity,
@@ -5528,7 +5578,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   final suggestedQuantityActivityType = supportsFarmQuantityTracking
       ? _suggestQuantityActivityType(task)
       : _quantityActivityNone;
-  num selectedActualAmount = 0;
+  num? selectedActualAmount;
   var selectedQuantityActivityType = suggestedQuantityActivityType;
   num selectedQuantityAmount = 0;
   final notesController = TextEditingController();
@@ -5603,7 +5653,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
       staffId: selectedStaffId,
       unitId: selectedUnitId,
     );
-    selectedActualAmount = existingRow?.actualPlots ?? 0;
+    selectedActualAmount = existingRow?.actualPlots;
     final existingDelayReason = existingRow?.delayReason.trim() ?? "";
     selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
         ? existingDelayReason
@@ -5661,12 +5711,14 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final progressOptions = _buildProgressAmountOptions(
             maxAmount: strictActualMax,
           );
-          if (progressOptions.isNotEmpty &&
-              !progressOptions.any(
-                (amount) => _sameProgressAmount(amount, selectedActualAmount),
-              )) {
-            selectedActualAmount = progressOptions.last;
-          }
+          final selectedActualAmountValue = selectedActualAmount ?? 0;
+          final hasSelectedActualAmount = selectedActualAmount != null;
+          final selectedActualSelectionValid =
+              hasSelectedActualAmount &&
+              progressOptions.any(
+                (amount) =>
+                    _sameProgressAmount(amount, selectedActualAmountValue),
+              );
           final actualHelperText = _buildProgressCountHelperText(
             targetAmount: taskTargetAmount,
             loggedAmount: loggedAmountExcludingSelection,
@@ -5704,7 +5756,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
             singularUnitLabel: progressUnitSingularLabel,
           );
           final totalLoggedAfterSave =
-              loggedAmountExcludingSelection + selectedActualAmount;
+              loggedAmountExcludingSelection + selectedActualAmountValue;
           final remainingAfterSave =
               (taskTargetAmount - totalLoggedAfterSave) < 0
               ? 0
@@ -5723,6 +5775,10 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                     : _attendanceClockOutUnsetLabel);
           final hasSelectedClockIn = selectedAttendance?.clockInAt != null;
           final hasSelectedClockOut = selectedAttendance?.clockOutAt != null;
+          final selectedAttendanceComplete =
+              hasSelectedClockIn && hasSelectedClockOut;
+          final canSubmitProgress =
+              selectedAttendanceComplete && selectedActualSelectionValid;
           final selectedStaffLabel =
               (selectedStaffId != null && selectedStaffId!.trim().isNotEmpty)
               ? _resolveStaffDisplayLabel(
@@ -5951,6 +6007,48 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                   ),
                                 ],
                               ),
+                              if (!selectedAttendanceComplete) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _workspaceSoftAmber,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: _workspaceAmber.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.lock_outline,
+                                        size: 18,
+                                        color: _workspaceAmber,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _taskProgressAttendanceRequired,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: _workspaceAmber,
+                                                fontWeight: FontWeight.w800,
+                                                height: 1.35,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               if (canManageAttendance &&
                                   (onQuickClockInForStaff != null ||
                                       onQuickClockOutForStaff != null ||
@@ -6146,10 +6244,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             spacing: 8,
                             runSpacing: 8,
                             children: progressOptions.map((amount) {
-                              final selected = _sameProgressAmount(
-                                amount,
-                                selectedActualAmount,
-                              );
+                              final selected =
+                                  hasSelectedActualAmount &&
+                                  _sameProgressAmount(
+                                    amount,
+                                    selectedActualAmountValue,
+                                  );
                               return ChoiceChip(
                                 label: Text(_formatProgressAmount(amount)),
                                 selected: selected,
@@ -6189,13 +6289,13 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                               vertical: 10,
                             ),
                             decoration: BoxDecoration(
-                              color: selectedActualAmount > 0
+                              color: hasSelectedActualAmount
                                   ? _workspaceSoftTeal
                                   : _workspaceSoftSlate,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
                                 color:
-                                    (selectedActualAmount > 0
+                                    (hasSelectedActualAmount
                                             ? _workspaceTeal
                                             : _workspaceBlue)
                                         .withValues(alpha: 0.14),
@@ -6204,19 +6304,19 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             child: Row(
                               children: [
                                 Icon(
-                                  selectedActualAmount > 0
+                                  hasSelectedActualAmount
                                       ? Icons.task_alt_outlined
                                       : Icons.pending_actions_outlined,
                                   size: 18,
-                                  color: selectedActualAmount > 0
+                                  color: hasSelectedActualAmount
                                       ? _workspaceTeal
                                       : _workspaceBlue,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    selectedActualAmount > 0
-                                        ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmount, singularUnitLabel: progressUnitSingularLabel)} for this staff."
+                                    hasSelectedActualAmount
+                                        ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmountValue, singularUnitLabel: progressUnitSingularLabel)} for this staff."
                                         : "Select the completed amount from the allowed values below.",
                                     style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
@@ -6244,7 +6344,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "Save preview: ${_formatProgressAmountWithUnit(amount: selectedActualAmount, singularUnitLabel: progressUnitSingularLabel)} completed by $selectedStaffLabel today. Task total after save: ${_formatProgressAmountWithUnit(amount: totalLoggedAfterSave, singularUnitLabel: progressUnitSingularLabel)} against a planned target of ${_formatProgressAmountWithUnit(amount: taskTargetAmount, singularUnitLabel: progressUnitSingularLabel)}. Remaining against plan after save: ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)}.",
+                      hasSelectedActualAmount
+                          ? "Save preview: ${_formatProgressAmountWithUnit(amount: selectedActualAmountValue, singularUnitLabel: progressUnitSingularLabel)} completed by $selectedStaffLabel today. Task total after save: ${_formatProgressAmountWithUnit(amount: totalLoggedAfterSave, singularUnitLabel: progressUnitSingularLabel)} against a planned target of ${_formatProgressAmountWithUnit(amount: taskTargetAmount, singularUnitLabel: progressUnitSingularLabel)}. Remaining against plan after save: ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)}."
+                          : "Select a completed amount to preview the save.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -6377,41 +6479,49 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                 child: const Text(_logDialogCancelLabel),
               ),
               FilledButton(
-                onPressed: () {
-                  final isValidActualSelection = progressOptions.any(
-                    (amount) =>
-                        _sameProgressAmount(amount, selectedActualAmount),
-                  );
-                  if (!isValidActualSelection) {
-                    setDialogState(() {
-                      validationError = _logDialogActualInvalid;
-                    });
-                    return;
-                  }
-                  if (selectedActualAmount == 0 &&
-                      selectedQuantityAmount == 0 &&
-                      selectedDelayReason == _delayReasonNone) {
-                    setDialogState(() {
-                      validationError = _logDialogDelayRequired;
-                    });
-                    return;
-                  }
-                  Navigator.of(dialogContext).pop(
-                    _WorkspaceLogProgressInput(
-                      staffId: selectedStaffId,
-                      unitId: selectedUnitId,
-                      actualPlots: selectedActualAmount,
-                      quantityActivityType: selectedQuantityActivityType,
-                      quantityAmount: selectedQuantityAmount,
-                      quantityUnit:
-                          selectedQuantityActivityType == _quantityActivityNone
-                          ? ""
-                          : resolveQuantityUnit(selectedQuantityActivityType),
-                      delayReason: selectedDelayReason,
-                      notes: notesController.text.trim(),
-                    ),
-                  );
-                },
+                onPressed: canSubmitProgress
+                    ? () {
+                        if (!selectedAttendanceComplete) {
+                          setDialogState(() {
+                            validationError = _taskProgressAttendanceRequired;
+                          });
+                          return;
+                        }
+                        if (!hasSelectedActualAmount ||
+                            !selectedActualSelectionValid) {
+                          setDialogState(() {
+                            validationError = _logDialogActualInvalid;
+                          });
+                          return;
+                        }
+                        if (selectedActualAmountValue == 0 &&
+                            selectedQuantityAmount == 0 &&
+                            selectedDelayReason == _delayReasonNone) {
+                          setDialogState(() {
+                            validationError = _logDialogDelayRequired;
+                          });
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(
+                          _WorkspaceLogProgressInput(
+                            staffId: selectedStaffId,
+                            unitId: selectedUnitId,
+                            actualPlots: selectedActualAmountValue,
+                            quantityActivityType: selectedQuantityActivityType,
+                            quantityAmount: selectedQuantityAmount,
+                            quantityUnit:
+                                selectedQuantityActivityType ==
+                                    _quantityActivityNone
+                                ? ""
+                                : resolveQuantityUnit(
+                                    selectedQuantityActivityType,
+                                  ),
+                            delayReason: selectedDelayReason,
+                            notes: notesController.text.trim(),
+                          ),
+                        );
+                      }
+                    : null,
                 child: const Text(_logDialogSaveLabel),
               ),
             ],

@@ -20,6 +20,7 @@ import 'package:frontend/app/theme/app_spacing.dart';
 
 class StaffAttendanceActionsSection extends StatelessWidget {
   final bool canManage;
+  final bool canClockSelf;
   final List<BusinessStaffProfileSummary> staffOptions;
   final String? selectedStaffId;
   final ValueChanged<String?> onStaffChanged;
@@ -29,6 +30,7 @@ class StaffAttendanceActionsSection extends StatelessWidget {
   const StaffAttendanceActionsSection({
     super.key,
     required this.canManage,
+    required this.canClockSelf,
     required this.staffOptions,
     required this.selectedStaffId,
     required this.onStaffChanged,
@@ -65,25 +67,35 @@ class StaffAttendanceActionsSection extends StatelessWidget {
             onChanged: onStaffChanged,
           ),
           const SizedBox(height: AppSpacing.md),
+        ] else if (canClockSelf) ...[
+          Text(
+            "Clock in and out for yourself only.",
+            style: textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
         ],
-        // WHY: Keep actions side-by-side for quick time tracking.
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton(
-                onPressed: onClockIn,
-                child: const Text(staffAttendanceClockInLabel),
+        if (canManage || canClockSelf) ...[
+          // WHY: Keep actions side-by-side for quick time tracking.
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  onPressed: onClockIn,
+                  child: const Text(staffAttendanceClockInLabel),
+                ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: onClockOut,
-                child: const Text(staffAttendanceClockOutLabel),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onClockOut,
+                  child: const Text(staffAttendanceClockOutLabel),
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ],
     );
   }

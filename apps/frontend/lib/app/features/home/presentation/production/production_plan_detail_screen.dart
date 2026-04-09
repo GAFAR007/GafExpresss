@@ -171,6 +171,12 @@ const String _logProgressZeroHelperText =
     "Use this to record absence or blocked workdays";
 const String _logProgressNotesLabel = "Notes";
 const String _logProgressNotesHint = "Optional context";
+const String _logProgressActualInvalidText =
+    "Enter a valid non-negative amount";
+const String _logProgressStaffRequiredText = "Select a staff member";
+const String _logProgressUnitRequiredText = "Select a unit";
+const String _logProgressAttendanceRequiredText =
+    "Clock in and clock out before logging progress";
 const String _logProgressZeroDelayValidationText =
     "Select a delay reason when actual plots is zero";
 const String _logProgressSaveLabel = "Save";
@@ -1001,6 +1007,7 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
             return _PhaseTaskSection(
               phase: phase,
               tasks: phaseTasks,
+              attendanceRecords: widget.detail.attendanceRecords,
               staffMap: widget.staffMap,
               isOwner: widget.isOwner,
               canLogProgress: widget.canLogProgress,
@@ -1231,6 +1238,34 @@ class _DetailViewModePicker extends StatelessWidget {
       }).toList(),
     );
   }
+}
+
+ProductionAttendanceRecord? _findCompletedAttendanceForStaffOnDate({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime workDate,
+}) {
+  final normalizedStaffId = staffProfileId.trim();
+  if (normalizedStaffId.isEmpty) {
+    return null;
+  }
+
+  final dayStart = DateTime(workDate.year, workDate.month, workDate.day);
+  final dayEnd = dayStart.add(const Duration(days: 1));
+  for (final record in attendanceRecords) {
+    if (record.staffProfileId.trim() != normalizedStaffId) {
+      continue;
+    }
+    final clockInAt = record.clockInAt;
+    final clockOutAt = record.clockOutAt;
+    if (clockInAt == null || clockOutAt == null) {
+      continue;
+    }
+    if (clockInAt.isBefore(dayEnd) && !clockOutAt.isBefore(dayStart)) {
+      return record;
+    }
+  }
+  return null;
 }
 
 class _DetailPanel extends StatelessWidget {
@@ -3139,6 +3174,7 @@ class _TimelineTaskTable extends StatelessWidget {
 class _PhaseTaskSection extends StatelessWidget {
   final ProductionPhase phase;
   final List<ProductionTask> tasks;
+  final List<ProductionAttendanceRecord> attendanceRecords;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
@@ -3161,6 +3197,7 @@ class _PhaseTaskSection extends StatelessWidget {
   const _PhaseTaskSection({
     required this.phase,
     required this.tasks,
+    required this.attendanceRecords,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
@@ -3188,6 +3225,7 @@ class _PhaseTaskSection extends StatelessWidget {
                 .map(
                   (task) => _TaskCard(
                     task: task,
+                    attendanceRecords: attendanceRecords,
                     staffMap: staffMap,
                     isOwner: isOwner,
                     canLogProgress: canLogProgress,
@@ -3206,6 +3244,7 @@ class _PhaseTaskSection extends StatelessWidget {
 
 class _TaskCard extends StatelessWidget {
   final ProductionTask task;
+  final List<ProductionAttendanceRecord> attendanceRecords;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
@@ -3227,6 +3266,7 @@ class _TaskCard extends StatelessWidget {
 
   const _TaskCard({
     required this.task,
+    required this.attendanceRecords,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
@@ -3326,6 +3366,7 @@ class _TaskCard extends StatelessWidget {
                     assignedUnitIds: task.assignedUnitIds,
                     staffMap: staffMap,
                     planUnitLabelById: planUnitLabelById,
+                    attendanceRecords: attendanceRecords,
                   );
                   if (input == null) {
                     return;
@@ -3966,6 +4007,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
   required List<String> assignedUnitIds,
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
+  required List<ProductionAttendanceRecord> attendanceRecords,
 }) async {
   // WHY: Managers need a small, focused form for daily execution logging.
   DateTime selectedDate = DateTime.now();
@@ -3993,12 +4035,28 @@ Future<_LogProgressInput?> _showLogProgressDialog(
       : null;
   final actualPlotsCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
+  final attendanceRecordsSnapshot = attendanceRecords;
 
   final result = await showDialog<_LogProgressInput>(
     context: context,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (dialogContext, setDialogState) {
+          final selectedAttendanceStaffId = hasMultipleAssignedStaff
+              ? selectedStaffId
+              : (normalizedAssignedStaffIds.isNotEmpty
+                    ? normalizedAssignedStaffIds.first
+                    : null);
+          final selectedAttendance = selectedAttendanceStaffId == null
+              ? null
+              : _findCompletedAttendanceForStaffOnDate(
+                  attendanceRecords: attendanceRecordsSnapshot,
+                  staffProfileId: selectedAttendanceStaffId,
+                  workDate: selectedDate,
+                );
+          final selectedAttendanceComplete =
+              selectedAttendance?.clockInAt != null &&
+              selectedAttendance?.clockOutAt != null;
           return AlertDialog(
             title: const Text(_logProgressDialogTitle),
             content: SingleChildScrollView(
@@ -4085,6 +4143,61 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     ),
                   ],
                   const SizedBox(height: _summaryMetaSpacing),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: selectedAttendanceComplete
+                          ? Theme.of(dialogContext).colorScheme.primaryContainer
+                          : Theme.of(
+                              dialogContext,
+                            ).colorScheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selectedAttendanceComplete
+                            ? Theme.of(
+                                dialogContext,
+                              ).colorScheme.primary.withValues(alpha: 0.18)
+                            : Theme.of(
+                                dialogContext,
+                              ).colorScheme.tertiary.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          selectedAttendanceComplete
+                              ? Icons.verified_outlined
+                              : Icons.lock_outline,
+                          size: 18,
+                          color: selectedAttendanceComplete
+                              ? Theme.of(dialogContext).colorScheme.primary
+                              : Theme.of(dialogContext).colorScheme.tertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            selectedAttendanceComplete
+                                ? "Attendance complete for this staff on ${formatDateLabel(selectedDate)}."
+                                : _logProgressAttendanceRequiredText,
+                            style: Theme.of(dialogContext).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: selectedAttendanceComplete
+                                      ? Theme.of(
+                                          dialogContext,
+                                        ).colorScheme.primary
+                                      : Theme.of(
+                                          dialogContext,
+                                        ).colorScheme.tertiary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: _summaryMetaSpacing),
                   DropdownButtonFormField<String>(
                     initialValue: selectedDelayReason,
                     decoration: const InputDecoration(
@@ -4132,46 +4245,53 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                 child: const Text(_logProgressCancelLabel),
               ),
               TextButton(
-                onPressed: () {
-                  final actualPlots = num.tryParse(actualPlotsCtrl.text.trim());
-                  if (actualPlots == null || actualPlots < 0) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (hasMultipleAssignedStaff && selectedStaffId == null) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (hasMultipleAssignedUnits && selectedUnitId == null) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (actualPlots == 0 &&
-                      selectedDelayReason == _delayReasonNone) {
-                    setDialogState(() {
-                      validationMessage = _logProgressZeroDelayValidationText;
-                    });
-                    return;
-                  }
-                  Navigator.of(dialogContext).pop(
-                    _LogProgressInput(
-                      staffId: hasMultipleAssignedStaff
-                          ? selectedStaffId
-                          : null,
-                      unitId: selectedUnitId,
-                      workDate: selectedDate,
-                      actualPlots: actualPlots,
-                      delayReason: selectedDelayReason,
-                      notes: notesCtrl.text.trim(),
-                    ),
-                  );
-                },
+                onPressed: selectedAttendanceComplete
+                    ? () {
+                        final actualPlots = num.tryParse(
+                          actualPlotsCtrl.text.trim(),
+                        );
+                        if (actualPlots == null || actualPlots < 0) {
+                          setDialogState(() {
+                            validationMessage = _logProgressActualInvalidText;
+                          });
+                          return;
+                        }
+                        if (hasMultipleAssignedStaff &&
+                            selectedStaffId == null) {
+                          setDialogState(() {
+                            validationMessage = _logProgressStaffRequiredText;
+                          });
+                          return;
+                        }
+                        if (hasMultipleAssignedUnits &&
+                            selectedUnitId == null) {
+                          setDialogState(() {
+                            validationMessage = _logProgressUnitRequiredText;
+                          });
+                          return;
+                        }
+                        if (actualPlots == 0 &&
+                            selectedDelayReason == _delayReasonNone) {
+                          setDialogState(() {
+                            validationMessage =
+                                _logProgressZeroDelayValidationText;
+                          });
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(
+                          _LogProgressInput(
+                            staffId: hasMultipleAssignedStaff
+                                ? selectedStaffId
+                                : null,
+                            unitId: selectedUnitId,
+                            workDate: selectedDate,
+                            actualPlots: actualPlots,
+                            delayReason: selectedDelayReason,
+                            notes: notesCtrl.text.trim(),
+                          ),
+                        );
+                      }
+                    : null,
                 child: const Text(_logProgressSaveLabel),
               ),
             ],

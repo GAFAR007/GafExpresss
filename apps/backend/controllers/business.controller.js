@@ -518,6 +518,8 @@ const PRODUCTION_COPY = {
     "Delay reason is invalid",
   TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
     "Delay reason is required when actual plots is zero",
+  TASK_PROGRESS_ATTENDANCE_REQUIRED:
+    "Clock in and clock out before logging progress",
   TASK_PROGRESS_STAFF_ID_INVALID:
     "Staff id is invalid",
   TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN:
@@ -874,6 +876,8 @@ const TASK_PROGRESS_BATCH_ENTRY_CODE_DELAY_REASON_INVALID =
   "DELAY_REASON_INVALID";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_ZERO_DELAY_REQUIRED =
   "ZERO_OUTPUT_DELAY_REQUIRED";
+const TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_REQUIRED =
+  "ATTENDANCE_REQUIRED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_FORBIDDEN =
   "FORBIDDEN";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_UNKNOWN =
@@ -4231,6 +4235,44 @@ function normalizeWorkDateToDayStart(
       parsed.getUTCDate(),
     ),
   );
+}
+
+// WHY: Progress logging should only accept staff who completed a full shift on the same work day.
+async function findCompletedAttendanceForStaffOnWorkDate({
+  staffProfileId,
+  workDate,
+}) {
+  const normalizedStaffId = normalizeStaffIdInput(
+    staffProfileId,
+  );
+  const normalizedWorkDate =
+    normalizeWorkDateToDayStart(workDate);
+  if (
+    !normalizedStaffId ||
+    !normalizedWorkDate
+  ) {
+    return null;
+  }
+
+  const workDateEndExclusive = new Date(
+    normalizedWorkDate.getTime() + MS_PER_DAY,
+  );
+
+  return StaffAttendance.findOne({
+    staffProfileId: normalizedStaffId,
+    clockInAt: {
+      $lt: workDateEndExclusive,
+    },
+    clockOutAt: {
+      $ne: null,
+      $gte: normalizedWorkDate,
+    },
+  })
+    .sort({
+      clockOutAt: -1,
+      clockInAt: -1,
+    })
+    .lean();
 }
 
 // WHY: Keep delay reasons constrained to the controlled taxonomy.
@@ -26578,6 +26620,15 @@ async function logProductionTaskProgress(
           PRODUCTION_COPY.TASK_PROGRESS_DELAY_REASON_INVALID,
       });
     }
+    if (
+      actualPlotUnits === 0 &&
+      delayReason === "none"
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED,
+      });
+    }
     const notes =
       req.body?.notes
         ?.toString()
@@ -26831,6 +26882,18 @@ async function logProductionTaskProgress(
       return res.status(400).json({
         error:
           PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+      });
+    }
+
+    const completedAttendance =
+      await findCompletedAttendanceForStaffOnWorkDate({
+        staffProfileId: effectiveStaffId,
+        workDate: normalizedWorkDate,
+      });
+    if (!completedAttendance) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_REQUIRED,
       });
     }
 
@@ -27171,6 +27234,57 @@ async function logProductionTaskProgressBatch(
           ],
         ),
       );
+    const completedAttendanceRows =
+      staffIdsForLookup.length > 0 ?
+        await StaffAttendance.find({
+          staffProfileId: {
+            $in: staffIdsForLookup,
+          },
+          clockInAt: {
+            $lt: new Date(
+              normalizedWorkDate.getTime() +
+                MS_PER_DAY,
+            ),
+          },
+          clockOutAt: {
+            $ne: null,
+            $gte: normalizedWorkDate,
+          },
+        })
+          .select({
+            _id: 1,
+            staffProfileId: 1,
+            clockInAt: 1,
+            clockOutAt: 1,
+            durationMinutes: 1,
+          })
+          .sort({
+            clockOutAt: -1,
+            clockInAt: -1,
+          })
+          .lean()
+      : [];
+    const completedAttendanceByStaffId =
+      new Map();
+    completedAttendanceRows.forEach(
+      (row) => {
+        const scopedStaffId =
+          normalizeStaffIdInput(
+            row?.staffProfileId,
+          );
+        if (
+          scopedStaffId &&
+          !completedAttendanceByStaffId.has(
+            scopedStaffId,
+          )
+        ) {
+          completedAttendanceByStaffId.set(
+            scopedStaffId,
+            row,
+          );
+        }
+      },
+    );
     const unitIdsForLookup = Array.from(
       new Set(
         entries
@@ -27511,6 +27625,20 @@ async function logProductionTaskProgressBatch(
             TASK_PROGRESS_BATCH_ENTRY_CODE_STAFF_SCOPE_INVALID,
           error:
             PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+          });
+        continue;
+      }
+
+      if (
+        !completedAttendanceByStaffId.get(
+          staffId,
+        )
+      ) {
+        pushEntryError({
+          errorCode:
+            TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_REQUIRED,
+          error:
+            PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_REQUIRED,
         });
         continue;
       }

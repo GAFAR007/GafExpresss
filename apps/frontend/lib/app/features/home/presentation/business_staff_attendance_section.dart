@@ -58,12 +58,13 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
     // WHY: Build staff map for quick metadata lookups.
     final staffList = staffAsync.asData?.value ?? const [];
     final staffMap = buildStaffMap(staffList);
+    final actorSelfStaffId = resolveSelfStaffProfileId(
+      staff: staffList,
+      userEmail: session?.user.email,
+    );
     // WHY: Resolve "self" staff profile when detail screen id is missing.
     final selfStaffId = staffProfileId ??
-        resolveSelfStaffProfileId(
-          staff: staffList,
-          userEmail: session?.user.email,
-        );
+        actorSelfStaffId;
     // WHY: Determine permissions based on staff role + user role.
     final selfStaffRole =
         selfStaffId == null ? null : staffMap[selfStaffId]?.staffRole;
@@ -75,6 +76,10 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
       actorRole: session?.user.role,
       staffRole: selfStaffRole,
     );
+    final canClockSelf = session?.user.role == "staff" &&
+        actorSelfStaffId != null &&
+        selfStaffId != null &&
+        selfStaffId == actorSelfStaffId;
     // WHY: Clamp scope to self when the actor lacks full access.
     final effectiveScope = canViewAll ? filters.scope : attendanceScopeSelf;
     final staffIdForQuery =
@@ -117,6 +122,7 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
         // WHY: Actions allow clock-in/out with optional staff selection.
         StaffAttendanceActionsContainer(
           canManage: canManage,
+          canClockSelf: canClockSelf,
           staffOptions: staffList,
           selectedStaffId: selectedStaffId,
           onStaffChanged: (value) {
