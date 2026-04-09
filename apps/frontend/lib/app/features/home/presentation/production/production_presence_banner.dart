@@ -13,6 +13,8 @@
 /// - Colors each chip by role for quick scanning.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
@@ -25,6 +27,7 @@ class ProductionPresenceBanner extends StatelessWidget {
   final bool isSharedRoom;
   final String? errorMessage;
   final String? planId;
+  final DateTime? snapshotAt;
 
   const ProductionPresenceBanner({
     super.key,
@@ -34,6 +37,7 @@ class ProductionPresenceBanner extends StatelessWidget {
     required this.isSharedRoom,
     required this.errorMessage,
     this.planId,
+    this.snapshotAt,
   });
 
   @override
@@ -204,19 +208,31 @@ class ProductionPresenceBanner extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: viewers
-                .map(
-                  (viewer) => _ProductionPresenceViewerChip(
-                    viewer: viewer,
-                    isSelf:
-                        _productionPresenceViewerKey(viewer) ==
-                        _productionPresenceViewerKey(currentViewer),
-                  ),
-                )
-                .toList(),
+          StreamBuilder<DateTime>(
+            stream: Stream<DateTime>.periodic(
+              const Duration(seconds: 30),
+              (_) => DateTime.now(),
+            ),
+            initialData: DateTime.now(),
+            builder: (context, timeSnapshot) {
+              final referenceTime = timeSnapshot.data ?? DateTime.now();
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: viewers
+                    .map(
+                      (viewer) => _ProductionPresenceViewerChip(
+                        viewer: viewer,
+                        isSelf:
+                            _productionPresenceViewerKey(viewer) ==
+                            _productionPresenceViewerKey(currentViewer),
+                        referenceTime: referenceTime,
+                        snapshotAt: snapshotAt,
+                      ),
+                    )
+                    .toList(),
+              );
+            },
           ),
           if ((errorMessage ?? "").trim().isNotEmpty) ...[
             const SizedBox(height: 12),
@@ -331,10 +347,14 @@ String _presenceViewerInitials(String name) {
 class _ProductionPresenceViewerChip extends StatelessWidget {
   final ProductionDraftPresenceViewer viewer;
   final bool isSelf;
+  final DateTime referenceTime;
+  final DateTime? snapshotAt;
 
   const _ProductionPresenceViewerChip({
     required this.viewer,
     required this.isSelf,
+    required this.referenceTime,
+    required this.snapshotAt,
   });
 
   @override
@@ -433,6 +453,21 @@ class _ProductionPresenceViewerChip extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (viewer.hasPresenceMetrics) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      viewer.presenceSummaryLabel(
+                        referenceTime: referenceTime,
+                        snapshotAt: snapshotAt,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

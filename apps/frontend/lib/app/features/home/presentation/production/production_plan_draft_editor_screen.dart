@@ -14,6 +14,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -3507,6 +3508,7 @@ class _ProductionPlanDraftEditorScreenState
                             isSharedRoom: planId.isNotEmpty,
                             errorMessage: presenceState?.error,
                             planId: planId,
+                            snapshotAt: presenceState?.updatedAt,
                           ),
                           const SizedBox(height: _sectionSpacing),
                           _DraftEditorSummaryCard(
@@ -4070,6 +4072,7 @@ class _DraftPresenceBanner extends StatelessWidget {
   final bool isSharedRoom;
   final String? errorMessage;
   final String? planId;
+  final DateTime? snapshotAt;
 
   const _DraftPresenceBanner({
     required this.currentViewer,
@@ -4078,6 +4081,7 @@ class _DraftPresenceBanner extends StatelessWidget {
     required this.isSharedRoom,
     required this.errorMessage,
     this.planId,
+    this.snapshotAt,
   });
 
   @override
@@ -4248,19 +4252,31 @@ class _DraftPresenceBanner extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: viewers
-                .map(
-                  (viewer) => _DraftPresenceViewerChip(
-                    viewer: viewer,
-                    isSelf:
-                        _draftPresenceViewerKey(viewer) ==
-                        _draftPresenceViewerKey(currentViewer),
-                  ),
-                )
-                .toList(),
+          StreamBuilder<DateTime>(
+            stream: Stream<DateTime>.periodic(
+              const Duration(seconds: 30),
+              (_) => DateTime.now(),
+            ),
+            initialData: DateTime.now(),
+            builder: (context, timeSnapshot) {
+              final referenceTime = timeSnapshot.data ?? DateTime.now();
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: viewers
+                    .map(
+                      (viewer) => _DraftPresenceViewerChip(
+                        viewer: viewer,
+                        isSelf:
+                            _draftPresenceViewerKey(viewer) ==
+                            _draftPresenceViewerKey(currentViewer),
+                        referenceTime: referenceTime,
+                        snapshotAt: snapshotAt,
+                      ),
+                    )
+                    .toList(),
+              );
+            },
           ),
           if ((errorMessage ?? "").trim().isNotEmpty) ...[
             const SizedBox(height: 12),
@@ -4280,8 +4296,15 @@ class _DraftPresenceBanner extends StatelessWidget {
 class _DraftPresenceViewerChip extends StatelessWidget {
   final ProductionDraftPresenceViewer viewer;
   final bool isSelf;
+  final DateTime referenceTime;
+  final DateTime? snapshotAt;
 
-  const _DraftPresenceViewerChip({required this.viewer, required this.isSelf});
+  const _DraftPresenceViewerChip({
+    required this.viewer,
+    required this.isSelf,
+    required this.referenceTime,
+    required this.snapshotAt,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4379,6 +4402,21 @@ class _DraftPresenceViewerChip extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (viewer.hasPresenceMetrics) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      viewer.presenceSummaryLabel(
+                        referenceTime: referenceTime,
+                        snapshotAt: snapshotAt,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -5240,6 +5278,17 @@ ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
     email: trimmedProfileEmail.isNotEmpty ? trimmedProfileEmail : sessionEmail,
     accountRole: normalizedRole,
     staffRole: resolvedStaffRole,
+    enteredAt: null,
+    lastSeenAt: null,
+    leftAt: null,
+    activeSocketCount: 0,
+    currentSessionSeconds: 0,
+    durationSeconds: 0,
+    todaySeconds: 0,
+    monthSeconds: 0,
+    yearSeconds: 0,
+    totalSeconds: 0,
+    sessionCount: 0,
   );
 }
 

@@ -443,6 +443,17 @@ class _ProductionPlanWorkspaceScreenState
                   ? currentAccountRole
                   : (session?.user.role ?? "").trim(),
               staffRole: selfStaffRole,
+              enteredAt: null,
+              lastSeenAt: null,
+              leftAt: null,
+              activeSocketCount: 0,
+              currentSessionSeconds: 0,
+              durationSeconds: 0,
+              todaySeconds: 0,
+              monthSeconds: 0,
+              yearSeconds: 0,
+              totalSeconds: 0,
+              sessionCount: 0,
             );
             void selectDay(DateTime next) {
               AppDebug.log(
@@ -528,6 +539,7 @@ class _ProductionPlanWorkspaceScreenState
                   isSharedRoom: widget.planId.trim().isNotEmpty,
                   errorMessage: presenceState.error,
                   planId: widget.planId,
+                  snapshotAt: presenceState.updatedAt,
                 ),
                 const SizedBox(height: _sectionSpacing),
                 ProductionSectionHeader(
