@@ -49,17 +49,34 @@ module.exports = (app) => {
   });
 
   /**
-   * HEALTH CHECK
+   * LIVENESS CHECK
    */
   app.get("/health", (req, res) => {
-    // WHY: Health must reflect process liveness and MongoDB readiness separately.
     const databaseStatus = getDatabaseStatus();
-    const isHealthy = isDatabaseReady();
 
-    res.status(isHealthy ? 200 : 503).json({
-      status: isHealthy ? "ok" : "degraded",
-      message: isHealthy
+    res.status(200).json({
+      status: databaseStatus.isReady ? "ok" : "degraded",
+      message: databaseStatus.isReady
         ? "Backend is alive"
+        : "Backend is alive but database is unavailable",
+      database: {
+        isReady: databaseStatus.isReady,
+        readyState: databaseStatus.readyState,
+        state: databaseStatus.state,
+      },
+    });
+  });
+
+  /**
+   * READINESS CHECK
+   */
+  app.get("/ready", (req, res) => {
+    const databaseStatus = getDatabaseStatus();
+
+    res.status(databaseStatus.isReady ? 200 : 503).json({
+      status: databaseStatus.isReady ? "ok" : "degraded",
+      message: databaseStatus.isReady
+        ? "Backend is ready"
         : "Backend is alive but database is unavailable",
       database: {
         isReady: databaseStatus.isReady,
