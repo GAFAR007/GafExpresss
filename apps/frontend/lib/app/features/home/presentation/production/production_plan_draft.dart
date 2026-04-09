@@ -225,6 +225,7 @@ const List<String> productionPlantingTargetUnitValues = [
   "tray",
   "seed",
   "seedling",
+  "stand",
   "piece",
   "plant",
 ];
@@ -317,6 +318,8 @@ String normalizeProductionPlantingTargetUnit(String? value) {
       return "seed";
     case "seedlings":
       return "seedling";
+    case "stands":
+      return "stand";
     case "pieces":
       return "piece";
     case "plants":
@@ -358,6 +361,8 @@ String formatProductionPlantingTargetUnit(String value) {
       return "Seed";
     case "seedling":
       return "Seedling";
+    case "stand":
+      return "Stand";
     case "piece":
       return "Piece";
     case "plant":

@@ -2385,6 +2385,8 @@ function normalizePlantingTargetUnitInput(
       return "seed";
     case "seedlings":
       return "seedling";
+    case "stands":
+      return "stand";
     case "pieces":
       return "piece";
     case "plants":
