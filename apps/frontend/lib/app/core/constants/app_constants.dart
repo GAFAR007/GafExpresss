@@ -31,6 +31,8 @@ class AppConstants {
   /// Base URLs you may need depending on where the app runs
   static const String _webOrIosBaseUrl = "http://localhost:4000";
   static const String _androidEmulatorBaseUrl = "http://10.0.2.2:4000";
+  static const String _productionWebApiBaseUrl =
+      "https://api.gafarsexpress.gafarstechnologies.com";
 
   /// ✅ This is the single source of truth for the API base URL.
   ///
@@ -49,8 +51,18 @@ class AppConstants {
       return configuredBaseUrl;
     }
 
-    // PlatformInfo.isAndroid is true only on Android.
     // PlatformInfo.isWeb is true only on web.
+    // When a production web build forgets the dart-define, prefer the hosted API
+    // instead of falling back to localhost on the user's machine.
+    if (PlatformInfo.isWeb) {
+      final host = Uri.base.host.toLowerCase();
+      if (host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0") {
+        return _webOrIosBaseUrl;
+      }
+      return _productionWebApiBaseUrl;
+    }
+
+    // PlatformInfo.isAndroid is true only on Android.
     // Android emulator "localhost" points to the emulator itself, NOT your laptop.
     if (PlatformInfo.isAndroid && !PlatformInfo.isWeb) {
       return _androidEmulatorBaseUrl;
