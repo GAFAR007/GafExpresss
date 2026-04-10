@@ -32,6 +32,7 @@ const FARM_APPROVER_STAFF_ROLES = new Set([
   "farm_manager",
   "asset_manager",
   "estate_manager",
+  "shareholder",
 ]);
 const TIME_24H_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 

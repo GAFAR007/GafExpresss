@@ -25,6 +25,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 
 const String _logTag = "PRODUCTION_LIST";
 const String _buildMessage = "build()";
@@ -103,7 +104,6 @@ const double _cardTitleSpacing = 8;
 const double _cardRowSpacing = 4;
 const double _cardPadding = 16;
 
-const String _ownerRole = "business_owner";
 const String _staffRole = "staff";
 const String _staffRoleEstateManager = "estate_manager";
 
@@ -358,12 +358,15 @@ class _ProductionPlanListScreenState
         ? profileRole
         : session?.user.role ?? "";
     final userEmail = profileAsync.valueOrNull?.email ?? session?.user.email;
-    final canOpenMonitoring = role == _ownerRole;
     final staffAsync = ref.watch(productionStaffProvider);
     final selfStaffRole = _resolveSelfStaffRole(
       staffList:
           staffAsync.valueOrNull ?? const <BusinessStaffProfileSummary>[],
       userEmail: userEmail,
+    );
+    final canOpenMonitoring = canUseBusinessOwnerEquivalentAccess(
+      role: role,
+      staffRole: selfStaffRole,
     );
     final canManageLifecycle = _canManagePlanLifecycle(
       actorRole: role,
@@ -904,7 +907,10 @@ bool _canManagePlanLifecycle({
   required String actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 

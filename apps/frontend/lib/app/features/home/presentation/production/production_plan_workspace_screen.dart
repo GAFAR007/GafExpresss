@@ -40,6 +40,7 @@ import 'package:frontend/app/features/home/presentation/staff_attendance_proof_f
 import 'package:frontend/app/features/home/presentation/staff_attendance_model.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 
 const String _logTag = "PRODUCTION_PLAN_WORKSPACE";
 const String _logBuild = "build()";
@@ -1021,7 +1022,10 @@ class _ProductionPlanWorkspaceScreenState
                         canManageCalendar: canManageCalendar,
                         canManageTaskAttendance: canManageTaskAttendance,
                         canReviewProgress: canReviewProgress,
-                        isOwner: actorRole == "business_owner",
+                        isOwner: canUseBusinessOwnerEquivalentAccess(
+                          role: actorRole,
+                          staffRole: selfStaffRole,
+                        ),
                         progressEnabledStaffIds: progressEnabledStaffIds,
                         onManageStaff: canManageCalendar
                             ? () async {
@@ -1264,7 +1268,10 @@ class _ProductionPlanWorkspaceScreenState
                               }
                             : null,
                         onApproveTask:
-                            actorRole == "business_owner" &&
+                            canUseBusinessOwnerEquivalentAccess(
+                                  role: actorRole,
+                                  staffRole: selfStaffRole,
+                                ) &&
                                 task.approvalStatus == "pending_approval"
                             ? () async {
                                 AppDebug.log(
@@ -1289,7 +1296,10 @@ class _ProductionPlanWorkspaceScreenState
                               }
                             : null,
                         onRejectTask:
-                            actorRole == "business_owner" &&
+                            canUseBusinessOwnerEquivalentAccess(
+                                  role: actorRole,
+                                  staffRole: selfStaffRole,
+                                ) &&
                                 task.approvalStatus == "pending_approval"
                             ? () async {
                                 final reason = await _showReasonDialog(
@@ -4614,7 +4624,10 @@ bool _canReviewProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
   return actorRole == "staff" &&
@@ -4627,7 +4640,10 @@ bool _canManageTaskAttendance({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
   return actorRole == "staff" &&
@@ -4639,7 +4655,10 @@ bool _canManageCalendar({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
   return actorRole == "staff" &&
@@ -4652,7 +4671,10 @@ bool _canManagePlanLifecycle({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
   return actorRole == "staff" && staffRole == staffRoleEstateManager;

@@ -1017,12 +1017,29 @@ async function getStaffProfileForActor({
   });
 }
 
+// WHY: Shareholders should behave like business owners for business access.
+function isBusinessOwnerEquivalentActor(actor) {
+  if (actor?.role === "business_owner") {
+    return true;
+  }
+
+  return (
+    actor?.role === "staff" &&
+    normalizeDraftAccessStaffRole(
+      actor?.staffRole,
+    ) === STAFF_ROLE_SHAREHOLDER
+  );
+}
+
 // WHY: Only estate managers can manage staff visibility (besides owners).
 function canManageStaffDirectory({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1041,7 +1058,10 @@ function canManageStaffCompensation({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1057,7 +1077,10 @@ function canManageAttendance({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1095,7 +1118,10 @@ function canCreateProductionPlan({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1131,7 +1157,11 @@ function canEditProductionPlanDraft({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    normalizeDraftAccessStaffRole(staffRole) ===
+      STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1169,7 +1199,10 @@ function canAssignProductionTasks({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1188,7 +1221,10 @@ function canLogProductionTaskProgress({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -1207,7 +1243,10 @@ function canApproveFarmAssetWorkflow({
   actorRole,
   staffRole,
 }) {
-  if (actorRole === "business_owner") {
+  if (
+    actorRole === "business_owner" ||
+    staffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
     return true;
   }
 
@@ -14120,7 +14159,7 @@ async function updateUserRole(
     }
 
     if (
-      actor.role !== "business_owner"
+      !isBusinessOwnerEquivalentActor(actor)
     ) {
       return res.status(403).json({
         error:
@@ -14273,7 +14312,7 @@ async function createInvite(req, res) {
         .toLowerCase() || "";
 
     if (
-      actor.role !== "business_owner"
+      !isBusinessOwnerEquivalentActor(actor)
     ) {
       if (requestedRole !== "tenant") {
         return res.status(403).json({
@@ -20492,7 +20531,7 @@ async function persistProductionPlanScheduleRows(
             ),
           );
         const isOwner =
-          actor.role === "business_owner";
+          isBusinessOwnerEquivalentActor(actor);
         const approvalStatus =
           isOwner ?
             PRODUCTION_TASK_APPROVAL_APPROVED
@@ -28624,7 +28663,7 @@ async function approveProductionTask(
       );
 
     if (
-      actor.role !== "business_owner"
+      !isBusinessOwnerEquivalentActor(actor)
     ) {
       return res.status(403).json({
         error:
@@ -28724,7 +28763,7 @@ async function rejectProductionTask(
       );
 
     if (
-      actor.role !== "business_owner"
+      !isBusinessOwnerEquivalentActor(actor)
     ) {
       return res.status(403).json({
         error:
@@ -32024,7 +32063,7 @@ async function devMarkPaymentSucceeded(
       );
 
     if (
-      actor.role !== "business_owner"
+      !isBusinessOwnerEquivalentActor(actor)
     ) {
       return res.status(403).json({
         error:

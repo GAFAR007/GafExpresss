@@ -161,6 +161,11 @@ const ROLE_PERMISSIONS = {
     ],
   },
   [STAFF_ROLES.SHAREHOLDER]: {
+    [PERMISSION_MODULES.ASSETS]: [
+      PERMISSION_CAPABILITIES.MANAGE,
+      PERMISSION_CAPABILITIES.VIEW,
+      PERMISSION_CAPABILITIES.APPROVE,
+    ],
     [PERMISSION_MODULES.TENANTS]: [
       PERMISSION_CAPABILITIES.VIEW,
       PERMISSION_CAPABILITIES.MANAGE,
@@ -243,9 +248,18 @@ const ROLE_PERMISSIONS = {
   },
 };
 
+// WHY: Some staff roles are treated as owner-equivalent for business access.
+const OWNER_EQUIVALENT_STAFF_ROLES = new Set([
+  STAFF_ROLES.SHAREHOLDER,
+]);
+
 // WHY: Business owners should never be blocked by staff role rules.
 function isOwnerRole(role) {
   return role === USER_ROLES.OWNER;
+}
+
+function isOwnerEquivalentStaffRole(staffRole) {
+  return OWNER_EQUIVALENT_STAFF_ROLES.has(staffRole);
 }
 
 // WHY: Resolve allowed capabilities for a given staff role.
@@ -255,7 +269,7 @@ function getRolePermissions(staffRole) {
 
 // WHY: Central access check so middleware stays simple.
 function hasPermission({ actorRole, staffRole, module, capability }) {
-  if (isOwnerRole(actorRole)) {
+  if (isOwnerRole(actorRole) || isOwnerEquivalentStaffRole(staffRole)) {
     return true;
   }
 
@@ -277,4 +291,5 @@ module.exports = {
   hasPermission,
   getRolePermissions,
   isOwnerRole,
+  isOwnerEquivalentStaffRole,
 };

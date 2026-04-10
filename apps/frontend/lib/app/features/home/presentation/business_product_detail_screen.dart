@@ -36,6 +36,7 @@ import 'package:frontend/app/features/home/presentation/presentation/providers/a
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 
 List<String> _dedupeBusinessProductValues(Iterable<String?> values) {
   final normalized = <String>[];
@@ -96,7 +97,6 @@ class BusinessProductDetailScreen extends ConsumerStatefulWidget {
 
 class _BusinessProductDetailScreenState
     extends ConsumerState<BusinessProductDetailScreen> {
-  static const String _ownerRole = "business_owner";
   static const String _preorderSectionTitle = "Linked production pre-order";
   static const String _preorderSectionHint =
       "Configure conservative pre-order controls for this product's linked plan.";
@@ -717,7 +717,10 @@ class _BusinessProductDetailScreenState
     final colorScheme = Theme.of(context).colorScheme;
     final session = ref.watch(authSessionProvider);
     final profile = ref.watch(userProfileProvider).valueOrNull;
-    final isOwner = session?.user.role == _ownerRole;
+    final isOwner = canUseBusinessOwnerEquivalentAccess(
+      role: session?.user.role,
+      staffRole: session?.user.staffRole,
+    );
     final businessBrandSuggestions = _dedupeBusinessProductValues([
       profile?.companyName,
       profile?.name,

@@ -30,6 +30,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 
 const String _logTag = "PRODUCTION_DETAIL";
 const String _buildMessage = "build()";
@@ -294,7 +295,6 @@ const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
 const String _extraProgressIdKey = "progressId";
 const String _extraErrorKey = "error";
-const String _ownerRole = "business_owner";
 const String _staffRole = "staff";
 const String _staffRoleEstateManager = "estate_manager";
 const String _staffRoleFarmManager = "farm_manager";
@@ -361,7 +361,15 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
     final profileAsync = ref.watch(userProfileProvider);
     final profileRole = profileAsync.valueOrNull?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
-    final isOwner = actorRole == _ownerRole;
+    final selfStaffRole = _resolveSelfStaffRole(
+      staffList:
+          staffAsync.valueOrNull ?? const <BusinessStaffProfileSummary>[],
+      userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+    );
+    final isOwner = canUseBusinessOwnerEquivalentAccess(
+      role: actorRole,
+      staffRole: selfStaffRole,
+    );
     ref.listen<ProductionDraftPresenceState>(
       productionDraftPresenceProvider(planId),
       (previous, next) {
@@ -409,10 +417,6 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
           data: (detail) {
             final staffList = staffAsync.valueOrNull ?? [];
             final staffMap = _buildStaffMap(staffList);
-            final selfStaffRole = _resolveSelfStaffRole(
-              staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
-            );
             final canLogProgress = _canLogTaskProgress(
               actorRole: actorRole,
               staffRole: selfStaffRole,
@@ -4908,7 +4912,10 @@ bool _canReviewTaskProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 
@@ -4922,7 +4929,10 @@ bool _canLogTaskProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 
@@ -4937,6 +4947,12 @@ bool _canViewPlanUnits({
   required String? staffRole,
 }) {
   // WHY: Unit visibility follows operational manager permissions used for production execution.
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
   return _canLogTaskProgress(actorRole: actorRole, staffRole: staffRole);
 }
 
@@ -4946,6 +4962,12 @@ bool _canViewPlanConfidence({
 }) {
   // CONFIDENCE-SCORE
   // WHY: Confidence visibility follows manager/owner governance permissions.
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
   return _canLogTaskProgress(actorRole: actorRole, staffRole: staffRole);
 }
 
