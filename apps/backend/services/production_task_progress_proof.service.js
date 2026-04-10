@@ -139,6 +139,7 @@ async function uploadTaskProgressProofImages({
   staffId,
   workDate,
   files,
+  uploadedBy = null,
 }) {
   debug("TASK PROGRESS PROOF: upload request", {
     businessId,
@@ -209,6 +210,9 @@ async function uploadTaskProgressProofImages({
         filename: file.originalname || "",
         mimeType: resolveMimeType(file),
         sizeBytes: file.size || 0,
+        uploadedAt: new Date(),
+        uploadedBy:
+          uploadedBy ? uploadedBy.toString() : null,
       });
     }
 

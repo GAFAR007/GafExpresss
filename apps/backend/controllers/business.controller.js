@@ -510,11 +510,11 @@ const PRODUCTION_COPY = {
   TASK_PROGRESS_DATE_INVALID:
     "Work date is invalid",
   TASK_PROGRESS_ACTUAL_REQUIRED:
-    "Actual plots is required",
+    "Actual amount is required",
   TASK_PROGRESS_ACTUAL_INVALID:
-    "Actual plots must be a valid non-negative number",
+    "Actual amount must be a valid non-negative number",
   TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED:
-    "Actual plots exceeds humane daily workload limit",
+    "Actual amount exceeds humane daily workload limit",
   TASK_PROGRESS_TARGET_EXCEEDED:
     "Actual progress exceeds the remaining planned task target",
   TASK_PROGRESS_PROOFS_REQUIRED:
@@ -522,11 +522,11 @@ const PRODUCTION_COPY = {
   TASK_PROGRESS_PROOFS_COUNT_INVALID:
     "Upload exactly the required number of proof images",
   TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS:
-    "Proof images are not allowed when actual plots is zero",
+    "Proof images are not allowed when actual amount is zero",
   TASK_PROGRESS_DELAY_REASON_INVALID:
     "Delay reason is invalid",
   TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
-    "Delay reason is required when actual plots is zero",
+    "Delay reason is required when actual amount is zero",
   TASK_PROGRESS_ATTENDANCE_REQUIRED:
     "Clock in and clock out before logging progress",
   TASK_PROGRESS_STAFF_ID_INVALID:
@@ -10547,6 +10547,9 @@ function buildTimelineRows({
         quantityAmount,
         quantityUnit:
           record.quantityUnit || "",
+        proofs: Array.isArray(record.proofs)
+          ? record.proofs
+          : [],
         proofCount,
         status,
         delay,
@@ -27075,6 +27078,7 @@ async function logProductionTaskProgress(
           staffId: effectiveStaffId,
           workDate: normalizedWorkDate,
           files: uploadedProofFiles,
+          uploadedBy: actor._id,
         });
     } else if (
       existingSelectionProofCount !==

@@ -2147,6 +2147,42 @@ class ProductionPreorderReservationListResponse {
   }
 }
 
+class ProductionTaskProgressProofRecord {
+  final String url;
+  final String publicId;
+  final String filename;
+  final String mimeType;
+  final int sizeBytes;
+  final DateTime? uploadedAt;
+  final String uploadedBy;
+
+  const ProductionTaskProgressProofRecord({
+    required this.url,
+    required this.publicId,
+    required this.filename,
+    required this.mimeType,
+    required this.sizeBytes,
+    required this.uploadedAt,
+    required this.uploadedBy,
+  });
+
+  factory ProductionTaskProgressProofRecord.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return ProductionTaskProgressProofRecord(
+      url: _parseNullableString(json[_keyProofUrl]) ?? "",
+      publicId: _parseNullableString(json[_keyProofPublicId]) ?? "",
+      filename: _parseNullableString(json[_keyProofFilename]) ?? "",
+      mimeType: _parseNullableString(json[_keyProofMimeType]) ?? "",
+      sizeBytes: _parseNullableNum(json[_keyProofSizeBytes])?.toInt() ?? 0,
+      uploadedAt: _parseDate(json[_keyProofUploadedAt]),
+      uploadedBy: _parseNullableString(json[_keyProofUploadedBy]) ?? "",
+    );
+  }
+
+  bool get hasUrl => url.trim().isNotEmpty;
+}
+
 class ProductionTimelineRow {
   final String id;
   final DateTime? workDate;
@@ -2169,6 +2205,7 @@ class ProductionTimelineRow {
   final String approvedBy;
   final DateTime? approvedAt;
   final String notes;
+  final List<ProductionTaskProgressProofRecord> proofs;
   final int proofCount;
 
   const ProductionTimelineRow({
@@ -2193,6 +2230,7 @@ class ProductionTimelineRow {
     required this.approvedBy,
     required this.approvedAt,
     required this.notes,
+    required this.proofs,
     required this.proofCount,
   });
 
@@ -2202,6 +2240,11 @@ class ProductionTimelineRow {
     final normalizedApprovalState = parsedApprovalState.trim().isNotEmpty
         ? parsedApprovalState
         : (approvedAt != null ? "approved" : "pending_approval");
+    final proofList = (json[_keyProofs] ?? []) as List<dynamic>;
+    final proofs = proofList
+        .whereType<Map<String, dynamic>>()
+        .map(ProductionTaskProgressProofRecord.fromJson)
+        .toList();
 
     return ProductionTimelineRow(
       id: _parseId(json),
@@ -2225,7 +2268,10 @@ class ProductionTimelineRow {
       approvedBy: _parseString(json[_keyApprovedBy]),
       approvedAt: approvedAt,
       notes: _parseString(json[_keyNotes]),
-      proofCount: _parseInt(json[_keyProofCount]),
+      proofs: proofs,
+      proofCount: proofs.isNotEmpty
+          ? proofs.length
+          : _parseInt(json[_keyProofCount]),
     );
   }
 }
@@ -2273,6 +2319,7 @@ class ProductionTaskProgressRecord {
   final String quantityUnit;
   final String delayReason;
   final String notes;
+  final List<ProductionTaskProgressProofRecord> proofs;
   final int proofCount;
   final String createdBy;
   final String approvedBy;
@@ -2292,6 +2339,7 @@ class ProductionTaskProgressRecord {
     required this.quantityUnit,
     required this.delayReason,
     required this.notes,
+    required this.proofs,
     required this.proofCount,
     required this.createdBy,
     required this.approvedBy,
@@ -2300,6 +2348,12 @@ class ProductionTaskProgressRecord {
 
   factory ProductionTaskProgressRecord.fromJson(Map<String, dynamic> json) {
     final proofList = json[_keyProofs];
+    final proofs = proofList is List
+        ? proofList
+              .whereType<Map<String, dynamic>>()
+              .map(ProductionTaskProgressProofRecord.fromJson)
+              .toList()
+        : const <ProductionTaskProgressProofRecord>[];
     return ProductionTaskProgressRecord(
       id: _parseId(json),
       taskId: _parseString(json[_keyTaskId]),
@@ -2314,8 +2368,9 @@ class ProductionTaskProgressRecord {
       quantityUnit: _parseString(json[_keyQuantityUnit]),
       delayReason: _parseString(json[_keyDelayReason]),
       notes: _parseString(json[_keyNotes]),
-      proofCount: proofList is List
-          ? proofList.length
+      proofs: proofs,
+      proofCount: proofs.isNotEmpty
+          ? proofs.length
           : _parseInt(json[_keyProofCount]),
       createdBy: _parseString(json[_keyCreatedBy]),
       approvedBy: _parseString(json[_keyApprovedBy]),

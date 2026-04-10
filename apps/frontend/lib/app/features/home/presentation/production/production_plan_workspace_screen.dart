@@ -33,6 +33,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_model.dart';
@@ -170,6 +171,7 @@ const String _logDialogNotesLabel = "Daily notes";
 const String _rejectDialogTitle = "Reject task";
 const String _rejectDialogHint = "Add a short reason";
 const String _rejectProgressDialogTitle = "Mark progress for review";
+const String _viewProofLabel = "View proof";
 const String _taskStatusPending = "pending";
 const String _taskStatusInProgress = "in_progress";
 const String _taskStatusDone = "done";
@@ -948,6 +950,7 @@ class _ProductionPlanWorkspaceScreenState
                             "${detail.plan.title} ${detail.plan.notes}",
                         selectedDay: selectedDay,
                         attendanceRecords: detail.attendanceRecords,
+                        timelineRows: detail.timelineRows,
                         rowsForDay: rowsForTask,
                         canManageCalendar: canManageCalendar,
                         canManageTaskAttendance: canManageTaskAttendance,
@@ -1037,11 +1040,17 @@ class _ProductionPlanWorkspaceScreenState
                                       ? setAttendanceForTaskStaff
                                       : null,
                                   onQuickClockInForStaff:
-                                      canManageTaskAttendance
+                                      (canManageTaskAttendance ||
+                                          (selfStaffId.trim().isNotEmpty &&
+                                              selfStaffId.trim() ==
+                                                  staffProfileId.trim()))
                                       ? quickClockInForTaskStaff
                                       : null,
                                   onQuickClockOutForStaff:
-                                      canManageTaskAttendance
+                                      (canManageTaskAttendance ||
+                                          (selfStaffId.trim().isNotEmpty &&
+                                              selfStaffId.trim() ==
+                                                  staffProfileId.trim()))
                                       ? quickClockOutForTaskStaff
                                       : null,
                                 );
@@ -1138,11 +1147,13 @@ class _ProductionPlanWorkspaceScreenState
                                       ? setAttendanceForTaskStaff
                                       : null,
                                   onQuickClockInForStaff:
-                                      canManageTaskAttendance
+                                      canManageTaskAttendance ||
+                                          selfStaffId.trim().isNotEmpty
                                       ? quickClockInForTaskStaff
                                       : null,
                                   onQuickClockOutForStaff:
-                                      canManageTaskAttendance
+                                      canManageTaskAttendance ||
+                                          selfStaffId.trim().isNotEmpty
                                       ? quickClockOutForTaskStaff
                                       : null,
                                 );
@@ -2905,6 +2916,7 @@ class _AgendaTaskCard extends StatelessWidget {
   final String planContextText;
   final DateTime selectedDay;
   final List<ProductionAttendanceRecord> attendanceRecords;
+  final List<ProductionTimelineRow> timelineRows;
   final List<ProductionTimelineRow> rowsForDay;
   final bool canManageCalendar;
   final bool canManageTaskAttendance;
@@ -2946,6 +2958,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.planContextText,
     required this.selectedDay,
     required this.attendanceRecords,
+    required this.timelineRows,
     required this.rowsForDay,
     required this.canManageCalendar,
     required this.canManageTaskAttendance,
@@ -3180,6 +3193,9 @@ class _AgendaTaskCard extends StatelessWidget {
                 final hasLoggedProgress = rowsForDay.any(
                   (row) => row.staffId == staffId,
                 );
+                final canClockOwnTaskAttendance =
+                    currentActorStaffId.trim().isNotEmpty &&
+                    currentActorStaffId.trim() == staffId.trim();
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Builder(
@@ -3218,14 +3234,19 @@ class _AgendaTaskCard extends StatelessWidget {
                             !(attendance?.clockInAt != null &&
                                 attendance?.clockOutAt != null),
                         hasLoggedProgress: hasLoggedProgress,
-                        onQuickClockIn: onQuickClockInForStaff == null
-                            ? null
-                            : () =>
-                                  onQuickClockInForStaff!(staffId, attendance),
-                        onQuickClockOut: onQuickClockOutForStaff == null
-                            ? null
-                            : () =>
-                                  onQuickClockOutForStaff!(staffId, attendance),
+                        onQuickClockIn:
+                            onQuickClockInForStaff != null &&
+                                (canManageTaskAttendance ||
+                                    canClockOwnTaskAttendance)
+                            ? () => onQuickClockInForStaff!(staffId, attendance)
+                            : null,
+                        onQuickClockOut:
+                            onQuickClockOutForStaff != null &&
+                                (canManageTaskAttendance ||
+                                    canClockOwnTaskAttendance)
+                            ? () =>
+                                  onQuickClockOutForStaff!(staffId, attendance)
+                            : null,
                         onSetAttendance: onSetAttendanceForStaff == null
                             ? null
                             : () =>
@@ -3338,6 +3359,15 @@ class _AgendaTaskCard extends StatelessWidget {
                   expectedTargetAmount: taskProgressSummary.plannedAmount,
                   singularUnitLabel: taskProgressSummary.singularUnitLabel,
                   canReviewProgress: canReviewProgress,
+                  onViewProof: row.proofs.isNotEmpty
+                      ? () {
+                          showProductionTaskProgressProofBrowser(
+                            context,
+                            rows: timelineRows,
+                            initialDate: row.workDate,
+                          );
+                        }
+                      : null,
                   onApprove: onApproveProgress == null
                       ? null
                       : () => onApproveProgress!(row.id),
@@ -3924,6 +3954,7 @@ class _TimelineLogRow extends StatelessWidget {
   final num expectedTargetAmount;
   final String singularUnitLabel;
   final bool canReviewProgress;
+  final VoidCallback? onViewProof;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
 
@@ -3932,6 +3963,7 @@ class _TimelineLogRow extends StatelessWidget {
     required this.expectedTargetAmount,
     required this.singularUnitLabel,
     required this.canReviewProgress,
+    required this.onViewProof,
     required this.onApprove,
     required this.onReject,
   });
@@ -3985,6 +4017,14 @@ class _TimelineLogRow extends StatelessWidget {
                 foregroundColor: _workspaceBerry,
                 borderColor: _workspaceBerry.withValues(alpha: 0.16),
               ),
+              if (row.proofs.isNotEmpty)
+                _InfoChip(
+                  label: "${row.proofCount} proof(s)",
+                  icon: Icons.photo_library_outlined,
+                  backgroundColor: _workspaceSoftSlate,
+                  foregroundColor: _workspaceNavy,
+                  borderColor: _workspaceNavy.withValues(alpha: 0.12),
+                ),
               if (row.quantityAmount > 0 &&
                   row.quantityActivityType.trim().isNotEmpty &&
                   row.quantityActivityType != _quantityActivityNone)
@@ -4004,6 +4044,17 @@ class _TimelineLogRow extends StatelessWidget {
               row.notes,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (row.proofs.isNotEmpty && onViewProof != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: onViewProof,
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text(_viewProofLabel),
               ),
             ),
           ],
@@ -5808,6 +5859,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final hasSelectedClockOut = selectedAttendance?.clockOutAt != null;
           final selectedAttendanceComplete =
               hasSelectedClockIn && hasSelectedClockOut;
+          final selectedStaffIsActor =
+              normalizedActorStaffId.isNotEmpty &&
+              selectedStaffId != null &&
+              selectedStaffId!.trim() == normalizedActorStaffId;
+          final canClockSelectedStaff =
+              canManageAttendance || selectedStaffIsActor;
           final canSubmitProgress =
               selectedAttendanceComplete &&
               selectedActualSelectionValid &&
@@ -6096,7 +6153,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                   ),
                                 ),
                               ],
-                              if (canManageAttendance &&
+                              if (canClockSelectedStaff &&
                                   (onQuickClockInForStaff != null ||
                                       onQuickClockOutForStaff != null ||
                                       onSetAttendanceForStaff != null)) ...[
@@ -6444,12 +6501,18 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                     runSpacing: 8,
                                     children: selectedProofs
                                         .map(
-                                          (proof) => Chip(
+                                          (proof) => ActionChip(
                                             avatar: const Icon(
                                               Icons.image_outlined,
                                               size: 18,
                                             ),
                                             label: Text(proof.displayLabel),
+                                            onPressed: () {
+                                              showProductionTaskProgressPickedProofPreview(
+                                                context,
+                                                proof: proof,
+                                              );
+                                            },
                                           ),
                                         )
                                         .toList(),
@@ -6673,7 +6736,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         if (!proofCountMatchesSelectedAmount) {
                           setDialogState(() {
                             validationError = requiredProofCount == 0
-                                ? "Proof images are not allowed when actual plots is 0."
+                                ? "Proof images are not allowed when actual amount is 0."
                                 : "Upload exactly $requiredProofCount proof image(s).";
                           });
                           return;

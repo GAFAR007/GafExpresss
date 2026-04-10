@@ -25,6 +25,7 @@ import 'package:frontend/app/features/home/presentation/production/production_mo
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
 
 const String _logTag = "PRODUCTION_DETAIL";
@@ -158,15 +159,15 @@ const String _batchLogHint =
 const String _batchLogValidationFix = "Fix row errors before submitting.";
 const String _batchLogValidationSelectRows =
     "Select at least one row to submit.";
-const String _batchLogActualRequired = "Enter actual plots";
+const String _batchLogActualRequired = "Enter actual amount";
 const String _batchLogActualInvalid = "Use a non-negative number";
 const String _batchLogZeroDelayRequired =
-    "Select a delay reason when actual is zero";
+    "Select a delay reason when actual amount is zero";
 const String _logProgressDialogTitle = "Log daily work";
 const String _logProgressDateLabel = "Date";
 const String _logProgressFarmerLabel = "Farmer";
 const String _logProgressUnitLabel = "Unit";
-const String _logProgressActualPlotsLabel = "Actual plots";
+const String _logProgressActualPlotsLabel = "Actual amount";
 const String _logProgressDelayReasonLabel = "Delay reason";
 const String _logProgressZeroHelperText =
     "Use this to record absence or blocked workdays";
@@ -179,7 +180,8 @@ const String _logProgressUnitRequiredText = "Select a unit";
 const String _logProgressAttendanceRequiredText =
     "Clock in and clock out before logging progress";
 const String _logProgressZeroDelayValidationText =
-    "Select a delay reason when actual plots is zero";
+    "Select a delay reason when actual amount is zero";
+const String _viewProofLabel = "View proof";
 const String _logProgressSaveLabel = "Save";
 const String _logProgressCancelLabel = "Cancel";
 const String _delayReasonNone = "none";
@@ -3120,6 +3122,11 @@ class _TimelineTaskTable extends StatelessWidget {
                                   icon: Icons.person_outline,
                                   label: row.approvedBy,
                                 ),
+                              if (row.proofs.isNotEmpty)
+                                _InfoPill(
+                                  icon: Icons.photo_library_outlined,
+                                  label: "${row.proofCount} proof(s)",
+                                ),
                             ],
                           ),
                           if (notes.isNotEmpty) ...[
@@ -3132,6 +3139,23 @@ class _TimelineTaskTable extends StatelessWidget {
                                       context,
                                     ).colorScheme.onSurfaceVariant,
                                   ),
+                            ),
+                          ],
+                          if (row.proofs.isNotEmpty) ...[
+                            const SizedBox(height: _cardSpacing),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  showProductionTaskProgressProofBrowser(
+                                    context,
+                                    rows: rows,
+                                    initialDate: row.workDate,
+                                  );
+                                },
+                                icon: const Icon(Icons.visibility_outlined),
+                                label: const Text(_viewProofLabel),
+                              ),
                             ),
                           ],
                           if (canAction) ...[
@@ -4313,12 +4337,18 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                             runSpacing: 8,
                             children: selectedProofs
                                 .map(
-                                  (proof) => Chip(
+                                  (proof) => ActionChip(
                                     avatar: const Icon(
                                       Icons.image_outlined,
                                       size: 18,
                                     ),
                                     label: Text(proof.displayLabel),
+                                    onPressed: () {
+                                      showProductionTaskProgressPickedProofPreview(
+                                        dialogContext,
+                                        proof: proof,
+                                      );
+                                    },
                                   ),
                                 )
                                 .toList(),
@@ -4353,7 +4383,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           ),
                           const SizedBox(height: 6),
                           Text(
-                            "Give the staff a 2 hour break, then create a follow-up task for $remainingAfterSaveLabel greenhouse(s) remaining.",
+                            "Give the staff a 2 hour break, then create a follow-up task for $remainingAfterSaveLabel work unit(s) remaining.",
                             style: Theme.of(dialogContext).textTheme.bodySmall
                                 ?.copyWith(
                                   color: Theme.of(
@@ -4431,7 +4461,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                             selectedProofs.isNotEmpty) {
                           setDialogState(() {
                             validationMessage =
-                                "Proof images are not allowed when actual plots is 0.";
+                                "Proof images are not allowed when actual amount is 0.";
                           });
                           return;
                         }
