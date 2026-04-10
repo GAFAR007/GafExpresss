@@ -1058,7 +1058,9 @@ class _ProductionPlanWorkspaceScreenState
                                 }
                               }
                             : null,
-                        onSetAttendanceForStaff: canManageTaskAttendance
+                        onSetAttendanceForStaff:
+                            (canManageTaskAttendance ||
+                                selfStaffId.trim().isNotEmpty)
                             ? (staffProfileId, existingAttendance) async {
                                 await setAttendanceForTaskStaff(
                                   staffProfileId,
@@ -1102,21 +1104,18 @@ class _ProductionPlanWorkspaceScreenState
                                   canPickAnyAssignedStaff: false,
                                   canManageAttendance: canManageTaskAttendance,
                                   onSetAttendanceForStaff:
-                                      canManageTaskAttendance
+                                      (canManageTaskAttendance ||
+                                          selfStaffId.trim().isNotEmpty)
                                       ? setAttendanceForTaskStaff
                                       : null,
                                   onQuickClockInForStaff:
                                       (canManageTaskAttendance ||
-                                          (selfStaffId.trim().isNotEmpty &&
-                                              selfStaffId.trim() ==
-                                                  staffProfileId.trim()))
+                                          selfStaffId.trim().isNotEmpty)
                                       ? quickClockInForTaskStaff
                                       : null,
                                   onQuickClockOutForStaff:
                                       (canManageTaskAttendance ||
-                                          (selfStaffId.trim().isNotEmpty &&
-                                              selfStaffId.trim() ==
-                                                  staffProfileId.trim()))
+                                          selfStaffId.trim().isNotEmpty)
                                       ? quickClockOutForTaskStaff
                                       : null,
                                 );
@@ -1209,7 +1208,8 @@ class _ProductionPlanWorkspaceScreenState
                                   canPickAnyAssignedStaff: canManageCalendar,
                                   canManageAttendance: canManageTaskAttendance,
                                   onSetAttendanceForStaff:
-                                      canManageTaskAttendance
+                                      (canManageTaskAttendance ||
+                                          selfStaffId.trim().isNotEmpty)
                                       ? setAttendanceForTaskStaff
                                       : null,
                                   onQuickClockInForStaff:
@@ -3785,7 +3785,8 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                       icon: const Icon(Icons.logout_outlined, size: 18),
                       label: const Text(_attendanceDialogClockOutLabel),
                     ),
-                  if (canManageAttendance && onSetAttendance != null)
+                  if ((canManageAttendance || canClockSelfAttendance) &&
+                      onSetAttendance != null)
                     OutlinedButton.icon(
                       onPressed: onSetAttendance,
                       icon: Icon(
