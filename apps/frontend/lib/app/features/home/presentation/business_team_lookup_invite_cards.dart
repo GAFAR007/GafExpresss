@@ -33,6 +33,8 @@ const String businessTeamServiceName = "BUSINESS_TEAM_API";
 // WHY: Keep request intent strings reusable across widgets.
 const String businessTeamLookupIntent = "Find tenant by email/id/phone";
 const String businessTeamInviteIntent = "Invite customer to join team/tenant";
+const String businessTeamRequestLinkIntent =
+    "Create shareable tenant request link";
 const String businessTeamUpdateRoleIntent = "Assign staff/tenant role";
 // WHY: Keep lookup modes consistent across screens.
 const String _kLookupModeEmail = "email";
@@ -79,9 +81,10 @@ class _Copy {
   static const String searching = "Searching...";
   static const String inviteTitle = "Send invite link";
   static const String inviteSubtitle =
-      "Invite a customer by email to join your team.";
+      "Invite a customer by email or create a shareable tenant request link.";
   static const String inviteEmailLabel = "Invitee email";
   static const String inviteEmailHint = "user@email.com";
+  static const String inviteEmailHelp = "Required only when sending by email.";
   static const String inviteRoleLabel = "Role";
   static const String inviteRoleStaff = "Staff";
   static const String inviteRoleTenant = "Tenant";
@@ -110,11 +113,12 @@ class _Copy {
   static const String sendRequest = "Send request";
   static const String createRequestLink = "Create request link";
   static const String inviteSentPrefix = "Invite sent to ";
-  static const String requestLinkCopied = "Request link copied to clipboard.";
+  static const String requestLinkCopied =
+      "Request link copied. Paste it to the tenant.";
   static const String inviteGenericError =
       "Couldn't complete the request. Please check the details and try again.";
   static const String invitePermissionDenied =
-      "You do not have permission to send tenant invites.";
+      "You do not have permission to manage tenant requests.";
   static const String inviteEstateNotFound =
       "Selected estate not found. Refresh and try again.";
   static const String inviteEstateDifferentBusiness =
@@ -125,7 +129,7 @@ class _Copy {
       "Server error. Please try again shortly.";
   static const String inviteMissingEmail = "Enter an email address.";
   static const String inviteMissingEstate =
-      "Select an estate for tenant invites.";
+      "Select an estate for tenant requests.";
   static const String inviteMissingAgreement =
       "Paste the tenancy agreement text.";
   static const String estateLoading = "Estate assets still loading...";
@@ -284,6 +288,7 @@ String businessTeamErrorMessage(Object error) {
     return _Copy.inviteEmailRequired;
   }
   if (lower.contains("estate asset is required for tenant invites") ||
+      lower.contains("estate asset is required for tenant request links") ||
       lower.contains("estate asset is required for estate assignment")) {
     return _Copy.inviteMissingEstate;
   }
@@ -830,20 +835,21 @@ class _BusinessInviteFormCardState
     final email = _emailCtrl.text.trim().toLowerCase();
     final inviteRole = widget.tenantOnly ? _kRoleTenant : _role;
     final isRequestLinkFlow = !sendEmail;
-    // WHY: Require minimum tenant invite inputs before calling the API.
-    if (email.isEmpty) {
-      setState(() => _error = _Copy.inviteMissingEmail);
-      return;
-    }
     if (inviteRole == _kRoleTenant && _estateAssetId == null) {
       setState(() => _error = _Copy.inviteMissingEstate);
       return;
     }
-    if (inviteRole == _kRoleTenant && _agreementCtrl.text.trim().isEmpty) {
+    if (sendEmail && email.isEmpty) {
+      setState(() => _error = _Copy.inviteMissingEmail);
+      return;
+    }
+    if (sendEmail &&
+        inviteRole == _kRoleTenant &&
+        _agreementCtrl.text.trim().isEmpty) {
       setState(() => _error = _Copy.inviteMissingAgreement);
       return;
     }
-    if (inviteRole == _kRoleStaff && _staffRole.trim().isEmpty) {
+    if (sendEmail && inviteRole == _kRoleStaff && _staffRole.trim().isEmpty) {
       setState(() => _error = _Copy.inviteMissingStaffRole);
       return;
     }
@@ -868,23 +874,31 @@ class _BusinessInviteFormCardState
         "role": _role,
         "staffRole": _staffRole,
         "hasEstate": _estateAssetId != null,
+        "hasEmail": email.isNotEmpty,
         "sendEmail": sendEmail,
       },
     );
 
     try {
       final api = ref.read(businessTeamApiProvider);
-      // WHY: Send invite data with tenant-only agreement text.
-      final response = await api.createInvite(
-        token: session.token,
-        email: email,
-        role: inviteRole,
-        staffRole: inviteRole == _kRoleStaff ? _staffRole : null,
-        estateAssetId: _estateAssetId,
-        agreementText: inviteRole == _kRoleTenant ? _agreementCtrl.text : null,
-        sendEmail: sendEmail,
-      );
-      final inviteLink = response["inviteLink"]?.toString().trim() ?? "";
+      final response = sendEmail
+          ? await api.createInvite(
+              token: session.token,
+              email: email,
+              role: inviteRole,
+              staffRole: inviteRole == _kRoleStaff ? _staffRole : null,
+              estateAssetId: _estateAssetId,
+              agreementText: inviteRole == _kRoleTenant
+                  ? _agreementCtrl.text
+                  : null,
+              sendEmail: true,
+            )
+          : await api.createTenantRequestLink(
+              token: session.token,
+              estateAssetId: _estateAssetId!,
+            );
+      final linkField = sendEmail ? "inviteLink" : "requestLink";
+      final inviteLink = response[linkField]?.toString().trim() ?? "";
 
       if (isRequestLinkFlow && inviteLink.isNotEmpty) {
         await Clipboard.setData(ClipboardData(text: inviteLink));
@@ -895,6 +909,7 @@ class _BusinessInviteFormCardState
         extra: {
           "role": inviteRole,
           "hasInviteLink": inviteLink.isNotEmpty,
+          "hasEmail": email.isNotEmpty,
           "sendEmail": sendEmail,
         },
       );
@@ -924,10 +939,13 @@ class _BusinessInviteFormCardState
         operation: isRequestLinkFlow
             ? _kOperationCreateRequestLink
             : _kOperationCreateInvite,
-        requestIntent: businessTeamInviteIntent,
+        requestIntent: isRequestLinkFlow
+            ? businessTeamRequestLinkIntent
+            : businessTeamInviteIntent,
         requestContext: {
           "hasEstate": _estateAssetId != null,
           "hasAgreement": _agreementCtrl.text.trim().isNotEmpty,
+          "hasEmail": email.isNotEmpty,
           "role": inviteRole,
           "staffRole": _staffRole,
           "sendEmail": sendEmail,
@@ -1076,7 +1094,10 @@ class _BusinessInviteFormBody extends StatelessWidget {
           _InviteHeader(title: title, subtitle: subtitle),
           const SizedBox(height: _UiSpacing.sectionGap),
         ],
-        _InviteEmailField(controller: emailCtrl),
+        _InviteEmailField(
+          controller: emailCtrl,
+          helperText: tenantOnly ? _Copy.inviteEmailHelp : null,
+        ),
         const SizedBox(height: _UiSpacing.sectionGap),
         if (!tenantOnly) ...[
           _InviteRoleField(
@@ -1173,8 +1194,9 @@ class _InviteHeader extends StatelessWidget {
 
 class _InviteEmailField extends StatelessWidget {
   final TextEditingController controller;
+  final String? helperText;
 
-  const _InviteEmailField({required this.controller});
+  const _InviteEmailField({required this.controller, this.helperText});
 
   @override
   Widget build(BuildContext context) {
@@ -1182,9 +1204,10 @@ class _InviteEmailField extends StatelessWidget {
     return TextField(
       controller: controller,
       keyboardType: TextInputType.emailAddress,
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         labelText: _Copy.inviteEmailLabel,
         hintText: _Copy.inviteEmailHint,
+        helperText: helperText,
       ),
     );
   }

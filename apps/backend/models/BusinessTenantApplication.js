@@ -9,8 +9,8 @@
  * - Preserves submitted details even if user/profile changes later.
  *
  * HOW:
- * - Links to businessId, estateAssetId, and tenantUserId.
- * - Stores selected unit, rent period, references, guarantors, and agreement.
+ * - Links to businessId, estateAssetId, and optional tenantUserId.
+ * - Stores selected unit, applicant identity, agreement, and review metadata.
  */
 
 const mongoose = require('mongoose');
@@ -118,10 +118,10 @@ const tenantSnapshotSchema = new mongoose.Schema(
 
 const tenantRulesSnapshotSchema = new mongoose.Schema(
   {
-    referencesMin: { type: Number, min: 1, default: 1 },
-    referencesMax: { type: Number, min: 1, default: 2 },
-    guarantorsMin: { type: Number, min: 1, default: 1 },
-    guarantorsMax: { type: Number, min: 1, default: 2 },
+    referencesMin: { type: Number, min: 0, default: 1 },
+    referencesMax: { type: Number, min: 0, default: 2 },
+    guarantorsMin: { type: Number, min: 0, default: 1 },
+    guarantorsMax: { type: Number, min: 0, default: 2 },
     requiresAgreementSigned: { type: Boolean, default: true },
   },
   { _id: false }
@@ -144,12 +144,59 @@ const tenantApplicationSchema = new mongoose.Schema(
     tenantUserId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
     },
     tenantSnapshot: {
       type: tenantSnapshotSchema,
       default: () => ({}),
+    },
+    applicantFirstName: {
+      type: String,
+      trim: true,
+    },
+    applicantMiddleName: {
+      type: String,
+      trim: true,
+    },
+    applicantLastName: {
+      type: String,
+      trim: true,
+    },
+    applicantDob: {
+      type: Date,
+      default: null,
+    },
+    applicantNinHash: {
+      type: String,
+      trim: true,
+      select: false,
+      default: null,
+    },
+    applicantNinLast4: {
+      type: String,
+      trim: true,
+    },
+    identityDocumentUrl: {
+      type: String,
+      trim: true,
+    },
+    identityDocumentPublicId: {
+      type: String,
+      trim: true,
+      select: false,
+    },
+    requestSource: {
+      type: String,
+      enum: ['tenant_verification', 'public_request', 'invite'],
+      default: 'tenant_verification',
+      index: true,
+    },
+    requestLinkId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BusinessTenantRequestLink',
+      default: null,
+      index: true,
     },
     unitType: {
       type: String,
@@ -180,7 +227,7 @@ const tenantApplicationSchema = new mongoose.Schema(
     },
     moveInDate: {
       type: Date,
-      required: true,
+      default: null,
     },
     references: {
       type: [contactSchema],

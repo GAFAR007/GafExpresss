@@ -17,6 +17,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
@@ -138,11 +139,12 @@ class _BusinessTenantReviewScreenState
 
       if (!mounted) return;
       // WHY: Refresh shared tenant/business data after verification updates.
+      final messenger = ScaffoldMessenger.of(context);
       await AppRefresh.refreshApp(
         ref: ref,
         source: "business_tenant_contact_verify",
       );
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text(
             "$label ${status == 'verified' ? 'verified' : 'rejected'}",
@@ -183,11 +185,12 @@ class _BusinessTenantReviewScreenState
 
       if (!mounted) return;
       // WHY: Refresh shared tenant/business data after approval.
+      final messenger = ScaffoldMessenger.of(context);
       await AppRefresh.refreshApp(
         ref: ref,
         source: "business_tenant_approve_success",
       );
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text("Tenant approved successfully")),
       );
     } catch (error) {
@@ -230,13 +233,14 @@ class _BusinessTenantReviewScreenState
 
       if (!mounted) return;
       // WHY: Refresh shared tenant/business data after agreement approval.
+      final messenger = ScaffoldMessenger.of(context);
       await AppRefresh.refreshApp(
         ref: ref,
         source: "business_agreement_approve_success",
       );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Agreement approved")));
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Agreement approved")),
+      );
     } catch (error) {
       _logTap("approve_agreement_fail", extra: {"error": error.toString()});
       if (!mounted) return;
@@ -264,6 +268,47 @@ class _BusinessTenantReviewScreenState
   String _formatDate(DateTime? date) {
     // WHY: Keep tenant review dates consistent across screens.
     return formatDateLabel(date, fallback: "Not provided");
+  }
+
+  String _humanizeLabel(String value) {
+    final cleaned = value.replaceAll('_', ' ').trim();
+    if (cleaned.isEmpty) return "Not provided";
+
+    return cleaned
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .map((part) {
+          if (part.length == 1) {
+            return part.toUpperCase();
+          }
+          return "${part[0].toUpperCase()}${part.substring(1).toLowerCase()}";
+        })
+        .join(' ');
+  }
+
+  String _displayText(String? value) {
+    final text = value?.trim() ?? "";
+    return text.isEmpty ? "Not provided" : text;
+  }
+
+  Future<void> _openIdentityDocument(String url) async {
+    _logTap("open_identity_document", extra: {"hasUrl": url.trim().isNotEmpty});
+
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Invalid document URL")));
+      return;
+    }
+
+    final launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Could not open document")));
+    }
   }
 
   @override
@@ -374,6 +419,31 @@ class _BusinessTenantReviewScreenState
                 canVerify &&
                 application.status.toLowerCase() == 'pending' &&
                 !isAlreadyApproved;
+            final applicantName =
+                [
+                      application.applicantFirstName,
+                      application.applicantMiddleName,
+                      application.applicantLastName,
+                    ]
+                    .whereType<String>()
+                    .map((part) => part.trim())
+                    .where((part) => part.isNotEmpty)
+                    .join(' ');
+            final requestSourceLabel = _humanizeLabel(
+              application.requestSource,
+            );
+            final requestLinkId = application.requestLinkId?.trim() ?? '';
+            final identityDocumentUrl =
+                application.identityDocumentUrl?.trim() ?? '';
+            final hasRequestDetails =
+                application.requestSource == 'public_request' ||
+                requestLinkId.isNotEmpty ||
+                application.applicantFirstName.trim().isNotEmpty ||
+                (application.applicantMiddleName ?? '').trim().isNotEmpty ||
+                application.applicantLastName.trim().isNotEmpty ||
+                application.applicantDob != null ||
+                application.applicantNinLast4.trim().isNotEmpty ||
+                identityDocumentUrl.isNotEmpty;
 
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -422,23 +492,88 @@ class _BusinessTenantReviewScreenState
                   agreementApproved: agreementApproved,
                 ),
 
-                const SizedBox(height: 16),
+                if (hasRequestDetails) ...[
+                  const SizedBox(height: 16),
+                  _SectionTitle(title: "Request details"),
+                  const SizedBox(height: 8),
+                  ReadOnlyValue(
+                    label: "Request source",
+                    value: requestSourceLabel,
+                  ),
+                  const SizedBox(height: 12),
+                  ReadOnlyValue(
+                    label: "Applicant first name",
+                    value: _displayText(application.applicantFirstName),
+                  ),
+                  if ((application.applicantMiddleName ?? '')
+                      .trim()
+                      .isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    ReadOnlyValue(
+                      label: "Applicant middle name",
+                      value: _displayText(application.applicantMiddleName),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  ReadOnlyValue(
+                    label: "Applicant last name",
+                    value: _displayText(application.applicantLastName),
+                  ),
+                  const SizedBox(height: 12),
+                  ReadOnlyValue(
+                    label: "Date of birth",
+                    value: _formatDate(application.applicantDob),
+                  ),
+                  const SizedBox(height: 12),
+                  ReadOnlyValue(
+                    label: "NIN last 4",
+                    value: _displayText(
+                      application.applicantNinLast4.isEmpty
+                          ? null
+                          : "**** ${application.applicantNinLast4}",
+                    ),
+                  ),
+                  if (requestLinkId.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    ReadOnlyValue(
+                      label: "Request link ID",
+                      value: requestLinkId,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  if (identityDocumentUrl.isNotEmpty)
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          _openIdentityDocument(identityDocumentUrl),
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text("Open verification ID"),
+                    )
+                  else
+                    ReadOnlyValue(
+                      label: "Verification ID",
+                      value: "Not provided",
+                    ),
+                ],
+
+                const SizedBox(height: 20),
                 _SectionTitle(title: "Tenant identity"),
                 const SizedBox(height: 8),
                 ReadOnlyValue(
                   label: "Full name",
-                  value: application.tenantSnapshot.name,
+                  value: applicantName.isEmpty
+                      ? _displayText(application.tenantSnapshot.name)
+                      : applicantName,
                 ),
                 const SizedBox(height: 12),
                 ReadOnlyValueWithStatus(
                   label: "Email",
-                  value: application.tenantSnapshot.email,
+                  value: _displayText(application.tenantSnapshot.email),
                   isVerified: userStatus?.isEmailVerified ?? false,
                 ),
                 const SizedBox(height: 12),
                 ReadOnlyValueWithStatus(
                   label: "Phone",
-                  value: application.tenantSnapshot.phone,
+                  value: _displayText(application.tenantSnapshot.phone),
                   isVerified: userStatus?.isPhoneVerified ?? false,
                 ),
                 const SizedBox(height: 12),

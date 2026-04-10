@@ -27,6 +27,7 @@ const {
   PERMISSION_CAPABILITIES,
 } = require("../middlewares/permissions.middleware");
 const businessController = require("../controllers/business.controller");
+const businessTenantRequestController = require("../controllers/business_tenant_request.controller");
 const {
   verifyPaystackSignature,
 } = require("../middlewares/paystackWebhook.middleware");
@@ -895,6 +896,20 @@ router.post(
     capability: PERMISSION_CAPABILITIES.APPROVE,
   }),
   businessController.setAgreementText,
+);
+
+router.post(
+  "/tenant/request-links",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
+  businessTenantRequestController.createTenantRequestLink,
 );
 
 router.get(

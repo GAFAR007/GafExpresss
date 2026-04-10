@@ -23,6 +23,7 @@ const adminRoutes = require("./admin.routes");
 const businessRoutes = require("./business.routes");
 const chatRoutes = require("./chat.routes");
 const purchaseRequestRoutes = require("./purchase_request.routes");
+const tenantRequestPublicRoutes = require("./tenant_request.public.routes");
 
 // Public product routes (no auth needed)
 const productPublicRoutes = require("./product.public.routes");
@@ -38,6 +39,7 @@ const ROUTE_GROUPS = [
   ["/business", businessRoutes],
   ["/chat", chatRoutes],
   ["/purchase-requests", purchaseRequestRoutes],
+  ["/tenant-request-links", tenantRequestPublicRoutes],
   ["/products", productPublicRoutes],
   ["/orders", orderRoutes],
   ["/payments", paymentRoutes],

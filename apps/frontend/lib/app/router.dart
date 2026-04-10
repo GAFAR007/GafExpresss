@@ -65,6 +65,7 @@ import 'package:frontend/app/features/home/presentation/paystack_checkout_screen
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
+import 'package:frontend/app/features/home/presentation/tenant_request_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_list_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_archive_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_calendar_screen.dart';
@@ -116,6 +117,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final bool isPublicProduct = path.startsWith('/product/');
       final bool isPaymentSuccess = path == '/payment-success';
       final bool isBusinessInvite = path.startsWith('/business-invite');
+      final bool isTenantRequest = path == '/tenant-request';
       final bool isTenantVerification = path == '/tenant-verification';
       final bool isTenantDashboard = path.startsWith('/tenant-dashboard');
       final bool isBuyerProtectedRoute =
@@ -124,7 +126,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           isAuthRoute ||
           isPublicProduct ||
           isPaymentSuccess ||
-          isBusinessInvite;
+          isBusinessInvite ||
+          isTenantRequest;
       final bool isBusinessProtectedRoute =
           path.startsWith('/business-dashboard') ||
           path.startsWith('/business-products') ||
@@ -357,6 +360,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           // WHY: Allow invite links to open without auth so users see instructions.
           return BusinessInviteScreen(token: token);
+        },
+      ),
+      GoRoute(
+        path: '/tenant-request',
+        builder: (context, state) {
+          final token = state.uri.queryParameters['token'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /tenant-request",
+            extra: {"hasToken": token.isNotEmpty},
+          );
+          return BusinessThemeWrapper(child: TenantRequestScreen(token: token));
         },
       ),
       GoRoute(

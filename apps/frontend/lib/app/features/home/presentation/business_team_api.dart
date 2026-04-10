@@ -11,6 +11,7 @@
 /// - GET /business/users/lookup (userId/email/phone)
 /// - PATCH /business/users/:id/role (staff/tenant)
 /// - POST /business/invites (email invite link)
+/// - POST /business/tenant/request-links (copyable tenant request link)
 /// - POST /business/invites/accept (accept invite)
 ///
 /// DEBUGGING:
@@ -185,6 +186,38 @@ class BusinessTeamApi {
       "BUSINESS_TEAM_API",
       "createInvite() success",
       extra: {"email": email.trim(), "role": role, "sendEmail": sendEmail},
+    );
+
+    return data;
+  }
+
+  /// ------------------------------------------------------
+  /// CREATE TENANT REQUEST LINK
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> createTenantRequestLink({
+    required String? token,
+    required String estateAssetId,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TEAM_API",
+      "createTenantRequestLink() start",
+      extra: {"hasEstate": estateAssetId.trim().isNotEmpty},
+    );
+
+    final resp = await _dio.post(
+      "/business/tenant/request-links",
+      data: {"estateAssetId": estateAssetId.trim()},
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    AppDebug.log(
+      "BUSINESS_TEAM_API",
+      "createTenantRequestLink() success",
+      extra: {
+        "hasRequestLink":
+            data["requestLink"]?.toString().trim().isNotEmpty == true,
+      },
     );
 
     return data;

@@ -41,7 +41,7 @@ const String _viewPaymentsAction = "view_payments";
 const double _actionSpacing = 8;
 const String _tenantInviteTitle = "Send tenant invite";
 const String _tenantInviteSubtitle =
-    "Invite a customer by email to start the tenancy flow.";
+    "Invite by email or create a shareable tenant request link.";
 
 class BusinessTenantApplicationsScreen extends ConsumerStatefulWidget {
   final String? estateAssetId;
