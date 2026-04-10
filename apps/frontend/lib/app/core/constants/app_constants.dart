@@ -29,7 +29,8 @@ class AppConstants {
       String.fromEnvironment("PAYSTACK_CALLBACK_BASE_URL");
 
   /// Base URLs you may need depending on where the app runs
-  static const String _webOrIosBaseUrl = "http://localhost:4000";
+  static const String _webOrIosBaseUrl =
+      "https://api.gafarsexpress.gafarstechnologies.com";
   static const String _androidEmulatorBaseUrl = "http://10.0.2.2:4000";
 
   /// ✅ This is the single source of truth for the API base URL.
@@ -68,7 +69,13 @@ class AppConstants {
   /// - For production builds, pass:
   ///   --dart-define=PAYSTACK_CALLBACK_BASE_URL=https://gafarsexpress.gafarstechnologies.com
   static String get paystackCallbackBaseUrl {
-    return _normalizeBaseUrl(_paystackCallbackBaseUrlFromEnvironment);
+    final configuredBaseUrl = _normalizeBaseUrl(
+      _paystackCallbackBaseUrlFromEnvironment,
+    );
+    if (configuredBaseUrl.isNotEmpty) {
+      return configuredBaseUrl;
+    }
+    return "https://gafarsexpress.gafarstechnologies.com";
   }
 
   /// Timeouts (safe defaults)
