@@ -13,6 +13,8 @@
 /// - Logs build, refresh, and action taps.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -366,7 +368,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
         if (previous?.updatedAt == next.updatedAt) {
           return;
         }
-        ref.invalidate(productionPlanDetailProvider(planId));
+        unawaited(ref.refresh(productionPlanDetailProvider(planId).future));
       },
     );
 
@@ -389,7 +391,9 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             icon: const Icon(Icons.refresh),
             onPressed: () {
               AppDebug.log(_logTag, _refreshAction);
-              ref.invalidate(productionPlanDetailProvider(planId));
+              unawaited(
+                ref.refresh(productionPlanDetailProvider(planId).future),
+              );
             },
           ),
         ],

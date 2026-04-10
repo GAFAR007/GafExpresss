@@ -13,6 +13,7 @@
 /// - Reuses existing production actions for task status, staff assignment, and progress logging.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -253,9 +254,65 @@ class ProductionPlanWorkspaceScreen extends ConsumerStatefulWidget {
 
 class _ProductionPlanWorkspaceScreenState
     extends ConsumerState<ProductionPlanWorkspaceScreen> {
+  static const Duration _liveRefreshInterval = Duration(seconds: 3);
+
   DateTime? _visibleMonth;
   DateTime? _selectedDay;
   _WorkspaceCalendarMode _calendarMode = _WorkspaceCalendarMode.month;
+  Timer? _liveRefreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startLiveRefreshTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProductionPlanWorkspaceScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.planId != widget.planId) {
+      _startLiveRefreshTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _liveRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startLiveRefreshTimer() {
+    _liveRefreshTimer?.cancel();
+    final planId = widget.planId.trim();
+    if (planId.isEmpty) {
+      return;
+    }
+
+    _liveRefreshTimer = Timer.periodic(_liveRefreshInterval, (_) {
+      if (!mounted || widget.planId.trim().isEmpty) {
+        return;
+      }
+
+      final presenceState = ref.read(
+        productionDraftPresenceProvider(widget.planId),
+      );
+      if (!presenceState.isConnected) {
+        return;
+      }
+
+      _triggerLivePlanDetailRefresh();
+    });
+  }
+
+  void _triggerLivePlanDetailRefresh() {
+    final planId = widget.planId.trim();
+    if (planId.isEmpty || !mounted) {
+      return;
+    }
+
+    unawaited(ref.refresh(productionPlanDetailProvider(planId).future));
+    ref.invalidate(productionPlansProvider);
+  }
 
   void _showSnackSafe(String message) {
     if (!mounted) {
@@ -309,8 +366,7 @@ class _ProductionPlanWorkspaceScreenState
         if (previous?.updatedAt == next.updatedAt) {
           return;
         }
-        ref.invalidate(productionPlanDetailProvider(widget.planId));
-        ref.invalidate(productionPlansProvider);
+        _triggerLivePlanDetailRefresh();
       },
     );
 
@@ -339,7 +395,7 @@ class _ProductionPlanWorkspaceScreenState
             tooltip: _refreshTooltip,
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              ref.invalidate(productionPlanDetailProvider(widget.planId));
+              _triggerLivePlanDetailRefresh();
             },
           ),
         ],
