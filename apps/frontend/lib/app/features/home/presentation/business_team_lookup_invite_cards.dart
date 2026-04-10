@@ -111,6 +111,18 @@ class _Copy {
   static const String createRequestLink = "Create request link";
   static const String inviteSentPrefix = "Invite sent to ";
   static const String requestLinkCopied = "Request link copied to clipboard.";
+  static const String inviteGenericError =
+      "Couldn't complete the request. Please check the details and try again.";
+  static const String invitePermissionDenied =
+      "You do not have permission to send tenant invites.";
+  static const String inviteEstateNotFound =
+      "Selected estate not found. Refresh and try again.";
+  static const String inviteEstateDifferentBusiness =
+      "Selected estate belongs to a different business.";
+  static const String inviteRateLimited =
+      "Too many requests. Please wait and try again.";
+  static const String inviteServerError =
+      "Server error. Please try again shortly.";
   static const String inviteMissingEmail = "Enter an email address.";
   static const String inviteMissingEstate =
       "Select an estate for tenant invites.";
@@ -248,29 +260,98 @@ class _CollapsibleCard extends StatelessWidget {
 
 /// WHY: Map API errors to user-friendly messages.
 String businessTeamErrorMessage(Object error) {
-  final raw = error.toString();
-  if (raw.contains("User must be NIN verified")) {
+  final raw = _extractApiErrorMessage(error);
+  final lower = raw.toLowerCase();
+  if (lower.contains("user must be nin verified")) {
     return _Copy.ninRequired;
   }
-  if (raw.contains("User belongs to a different business")) {
+  if (lower.contains("user belongs to a different business")) {
     return _Copy.differentBusiness;
   }
-  if (raw.contains("User not found")) {
+  if (lower.contains("user not found")) {
     return _Copy.userNotFound;
   }
-  if (raw.contains("Invalid user id")) {
+  if (lower.contains("invalid user id")) {
     return _Copy.invalidUserId;
   }
-  if (raw.contains("Invite has expired")) {
+  if (lower.contains("invite has expired")) {
     return _Copy.inviteExpired;
   }
-  if (raw.contains("Invite email does not match")) {
+  if (lower.contains("invite email does not match")) {
     return _Copy.inviteEmailMismatch;
   }
-  if (raw.contains("Invite email is required")) {
+  if (lower.contains("invite email is required")) {
     return _Copy.inviteEmailRequired;
   }
-  return raw.replaceAll("Exception:", "").trim();
+  if (lower.contains("estate asset is required for tenant invites") ||
+      lower.contains("estate asset is required for estate assignment")) {
+    return _Copy.inviteMissingEstate;
+  }
+  if (lower.contains("agreement text is required for tenant invites")) {
+    return _Copy.inviteMissingAgreement;
+  }
+  if (lower.contains("staff role is required for staff invites")) {
+    return _Copy.inviteMissingStaffRole;
+  }
+  if (lower.contains("estate asset not found")) {
+    return _Copy.inviteEstateNotFound;
+  }
+  if (lower.contains("estate asset belongs to a different business")) {
+    return _Copy.inviteEstateDifferentBusiness;
+  }
+  if (lower.contains(
+    "only business owners, shareholders, or estate managers can send tenant invites",
+  )) {
+    return _Copy.invitePermissionDenied;
+  }
+  if (lower.contains("rate") && lower.contains("limit")) {
+    return _Copy.inviteRateLimited;
+  }
+  if (lower.contains("server error") ||
+      lower.contains("internal server error")) {
+    return _Copy.inviteServerError;
+  }
+  if (error is DioException) {
+    final statusCode = error.response?.statusCode;
+    if (statusCode == 401 || statusCode == 403) {
+      return _Copy.invitePermissionDenied;
+    }
+    if (statusCode == 429) {
+      return _Copy.inviteRateLimited;
+    }
+    if (statusCode != null && statusCode >= 500) {
+      return _Copy.inviteServerError;
+    }
+  }
+  return _Copy.inviteGenericError;
+}
+
+String _extractApiErrorMessage(Object error) {
+  if (error is DioException) {
+    final data = error.response?.data;
+    if (data is Map) {
+      final candidates = [data["error"], data["message"], data["detail"]];
+      for (final candidate in candidates) {
+        final message = candidate?.toString().trim();
+        if (message != null && message.isNotEmpty) {
+          return message;
+        }
+      }
+    } else if (data is String) {
+      final message = data.trim();
+      if (message.isNotEmpty) {
+        return message;
+      }
+    }
+
+    final message = error.message?.toString().trim();
+    if (message != null && message.isNotEmpty) {
+      return message;
+    }
+    return "";
+  }
+
+  return error.toString().replaceAll("Exception:", "").trim();
 }
 
 /// WHY: Log API failures with mandatory diagnostics for support.
