@@ -1082,6 +1082,190 @@ class ProductionDailyRollup {
   }
 }
 
+enum ProductionRollupPeriod { week, month }
+
+class ProductionPeriodRollup {
+  final String periodKey;
+  final String periodKind;
+  final DateTime? periodStart;
+  final DateTime? periodEnd;
+  final int daysCovered;
+  final int scheduledTaskBlocks;
+  final int assignedStaffCount;
+  final int attendedStaffCount;
+  final int attendedAssignedStaffCount;
+  final int absentAssignedStaffCount;
+  final double attendanceCoverageRate;
+  final num expectedPlots;
+  final num actualPlots;
+  final double completionRate;
+  final int rowsLogged;
+  final int rowsWithAttendance;
+  final int rowsMissingAttendance;
+  final num attendanceMinutes;
+  final double plotsPerAttendedHour;
+
+  const ProductionPeriodRollup({
+    required this.periodKey,
+    required this.periodKind,
+    required this.periodStart,
+    required this.periodEnd,
+    required this.daysCovered,
+    required this.scheduledTaskBlocks,
+    required this.assignedStaffCount,
+    required this.attendedStaffCount,
+    required this.attendedAssignedStaffCount,
+    required this.absentAssignedStaffCount,
+    required this.attendanceCoverageRate,
+    required this.expectedPlots,
+    required this.actualPlots,
+    required this.completionRate,
+    required this.rowsLogged,
+    required this.rowsWithAttendance,
+    required this.rowsMissingAttendance,
+    required this.attendanceMinutes,
+    required this.plotsPerAttendedHour,
+  });
+}
+
+List<ProductionPeriodRollup> buildProductionPeriodRollups(
+  List<ProductionDailyRollup> dailyRollups,
+  ProductionRollupPeriod period,
+) {
+  final groupedRollups = <String, _ProductionPeriodRollupAccumulator>{};
+
+  for (final rollup in dailyRollups) {
+    final sourceDate = rollup.workDate?.toLocal();
+    if (sourceDate == null) {
+      continue;
+    }
+
+    final periodStart = _resolveProductionPeriodStart(sourceDate, period);
+    final periodEnd = _resolveProductionPeriodEnd(periodStart, period);
+    final periodKey = _formatIsoDateKey(periodStart);
+    final accumulator = groupedRollups.putIfAbsent(
+      periodKey,
+      () => _ProductionPeriodRollupAccumulator(
+        periodKey: periodKey,
+        periodKind: period.name,
+        periodStart: periodStart,
+        periodEnd: periodEnd,
+      ),
+    );
+    accumulator.daysCovered += 1;
+    accumulator.scheduledTaskBlocks += rollup.scheduledTaskBlocks;
+    accumulator.assignedStaffCount += rollup.assignedStaffCount;
+    accumulator.attendedStaffCount += rollup.attendedStaffCount;
+    accumulator.attendedAssignedStaffCount += rollup.attendedAssignedStaffCount;
+    accumulator.absentAssignedStaffCount += rollup.absentAssignedStaffCount;
+    accumulator.expectedPlots += rollup.expectedPlots;
+    accumulator.actualPlots += rollup.actualPlots;
+    accumulator.rowsLogged += rollup.rowsLogged;
+    accumulator.rowsWithAttendance += rollup.rowsWithAttendance;
+    accumulator.rowsMissingAttendance += rollup.rowsMissingAttendance;
+    accumulator.attendanceMinutes += rollup.attendanceMinutes;
+  }
+
+  return groupedRollups.values.map((accumulator) {
+    final attendanceCoverageRate = accumulator.assignedStaffCount > 0
+        ? accumulator.attendedAssignedStaffCount /
+              accumulator.assignedStaffCount
+        : 0.0;
+    final completionRate = accumulator.expectedPlots > 0
+        ? accumulator.actualPlots / accumulator.expectedPlots
+        : 0.0;
+    final plotsPerAttendedHour = accumulator.attendanceMinutes > 0
+        ? accumulator.actualPlots / (accumulator.attendanceMinutes / 60)
+        : 0.0;
+
+    return ProductionPeriodRollup(
+      periodKey: accumulator.periodKey,
+      periodKind: accumulator.periodKind,
+      periodStart: accumulator.periodStart,
+      periodEnd: accumulator.periodEnd,
+      daysCovered: accumulator.daysCovered,
+      scheduledTaskBlocks: accumulator.scheduledTaskBlocks,
+      assignedStaffCount: accumulator.assignedStaffCount,
+      attendedStaffCount: accumulator.attendedStaffCount,
+      attendedAssignedStaffCount: accumulator.attendedAssignedStaffCount,
+      absentAssignedStaffCount: accumulator.absentAssignedStaffCount,
+      attendanceCoverageRate: attendanceCoverageRate,
+      expectedPlots: accumulator.expectedPlots,
+      actualPlots: accumulator.actualPlots,
+      completionRate: completionRate,
+      rowsLogged: accumulator.rowsLogged,
+      rowsWithAttendance: accumulator.rowsWithAttendance,
+      rowsMissingAttendance: accumulator.rowsMissingAttendance,
+      attendanceMinutes: accumulator.attendanceMinutes,
+      plotsPerAttendedHour: plotsPerAttendedHour,
+    );
+  }).toList()..sort((left, right) {
+    final leftStart =
+        left.periodStart ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final rightStart =
+        right.periodStart ?? DateTime.fromMillisecondsSinceEpoch(0);
+    return rightStart.compareTo(leftStart);
+  });
+}
+
+DateTime _resolveProductionPeriodStart(
+  DateTime value,
+  ProductionRollupPeriod period,
+) {
+  final localDay = DateTime(value.year, value.month, value.day);
+  switch (period) {
+    case ProductionRollupPeriod.week:
+      return localDay.subtract(Duration(days: localDay.weekday - 1));
+    case ProductionRollupPeriod.month:
+      return DateTime(localDay.year, localDay.month, 1);
+  }
+}
+
+DateTime _resolveProductionPeriodEnd(
+  DateTime periodStart,
+  ProductionRollupPeriod period,
+) {
+  switch (period) {
+    case ProductionRollupPeriod.week:
+      return periodStart.add(const Duration(days: 6));
+    case ProductionRollupPeriod.month:
+      return DateTime(periodStart.year, periodStart.month + 1, 0);
+  }
+}
+
+String _formatIsoDateKey(DateTime value) {
+  final year = value.year.toString().padLeft(4, "0");
+  final month = value.month.toString().padLeft(2, "0");
+  final day = value.day.toString().padLeft(2, "0");
+  return "$year-$month-$day";
+}
+
+class _ProductionPeriodRollupAccumulator {
+  final String periodKey;
+  final String periodKind;
+  final DateTime periodStart;
+  final DateTime periodEnd;
+  int daysCovered = 0;
+  int scheduledTaskBlocks = 0;
+  int assignedStaffCount = 0;
+  int attendedStaffCount = 0;
+  int attendedAssignedStaffCount = 0;
+  int absentAssignedStaffCount = 0;
+  num expectedPlots = 0;
+  num actualPlots = 0;
+  int rowsLogged = 0;
+  int rowsWithAttendance = 0;
+  int rowsMissingAttendance = 0;
+  num attendanceMinutes = 0;
+
+  _ProductionPeriodRollupAccumulator({
+    required this.periodKey,
+    required this.periodKind,
+    required this.periodStart,
+    required this.periodEnd,
+  });
+}
+
 class ProductionPhaseUnitProgress {
   final String phaseId;
   final String phaseName;
@@ -1368,6 +1552,8 @@ class ProductionPlanDetail {
   final ProductionAttendanceImpact? attendanceImpact;
   final List<ProductionAttendanceRecord> attendanceRecords;
   final List<ProductionDailyRollup> dailyRollups;
+  final List<ProductionPeriodRollup> weeklyRollups;
+  final List<ProductionPeriodRollup> monthlyRollups;
   final ProductionProductLifecycle? product;
   final ProductionPreorderSummary? preorderSummary;
   final List<ProductionTimelineRow> timelineRows;
@@ -1391,6 +1577,8 @@ class ProductionPlanDetail {
     required this.attendanceImpact,
     required this.attendanceRecords,
     required this.dailyRollups,
+    required this.weeklyRollups,
+    required this.monthlyRollups,
     required this.product,
     required this.preorderSummary,
     required this.timelineRows,
@@ -1421,6 +1609,12 @@ class ProductionPlanDetail {
     final staffProfilesList = (json[_keyStaffProfiles] ?? []) as List<dynamic>;
     final staffProgressScoresList =
         (json[_keyStaffProgressScores] ?? []) as List<dynamic>;
+    final dailyRollups = dailyRollupsList
+        .map(
+          (item) =>
+              ProductionDailyRollup.fromJson(item as Map<String, dynamic>),
+        )
+        .toList();
     final draftAuditLogList = (json[_keyDraftAuditLog] ?? []) as List<dynamic>;
     final draftRevisionsList =
         (json[_keyDraftRevisions] ?? []) as List<dynamic>;
@@ -1462,12 +1656,15 @@ class ProductionPlanDetail {
           .whereType<Map<String, dynamic>>()
           .map(ProductionAttendanceRecord.fromJson)
           .toList(),
-      dailyRollups: dailyRollupsList
-          .map(
-            (item) =>
-                ProductionDailyRollup.fromJson(item as Map<String, dynamic>),
-          )
-          .toList(),
+      dailyRollups: dailyRollups,
+      weeklyRollups: buildProductionPeriodRollups(
+        dailyRollups,
+        ProductionRollupPeriod.week,
+      ),
+      monthlyRollups: buildProductionPeriodRollups(
+        dailyRollups,
+        ProductionRollupPeriod.month,
+      ),
       product: productMap is Map<String, dynamic>
           ? ProductionProductLifecycle.fromJson(productMap)
           : null,

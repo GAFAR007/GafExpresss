@@ -57,6 +57,8 @@ const String _riskViewTitle = "Risk";
 const String _kpiTitle = "KPIs";
 const String _attendanceImpactTitle = "HR impact KPIs";
 const String _dailyRollupTitle = "Daily execution rollup";
+const String _weeklyRollupTitle = "Weekly execution rollup";
+const String _monthlyRollupTitle = "Monthly execution rollup";
 const String _staffProgressTitle = "Farmer progress";
 const String _phaseTitle = "Phase progress";
 const String _phaseUnitProgressTitle = "Phase unit completion";
@@ -103,6 +105,12 @@ const String _timelineDelayLabel = "Delay";
 const String _timelineEmptyTitle = "No timeline data yet";
 const String _timelineEmptyMessage =
     "Task schedule rows will appear when tasks are added.";
+const String _weeklyRollupEmptyTitle = "No weekly rollups yet";
+const String _weeklyRollupEmptyMessage =
+    "Weekly rollups are derived from the saved daily execution rows.";
+const String _monthlyRollupEmptyTitle = "No monthly rollups yet";
+const String _monthlyRollupEmptyMessage =
+    "Monthly rollups are derived from the saved daily execution rows.";
 const String _phaseUnitEmptyTitle = "No phase unit data yet";
 const String _phaseUnitEmptyMessage =
     "Approved task completions will populate per-phase unit progress.";
@@ -1015,6 +1023,31 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
             canReviewProgress: widget.canReviewProgress,
             onApproveProgress: widget.onApproveProgress,
             onRejectProgress: widget.onRejectProgress,
+          ),
+        ),
+        breakpoint: _detailWideSplitBreakpoint,
+        leftFlex: 6,
+        rightFlex: 5,
+      ),
+      _ResponsiveSplit(
+        left: _buildSectionPane(
+          title: _weeklyRollupTitle,
+          subtitle:
+              "Weekly rollups are derived from the same saved daily execution rows.",
+          child: _PeriodRollupTable(
+            rollups: widget.detail.weeklyRollups,
+            emptyTitle: _weeklyRollupEmptyTitle,
+            emptyMessage: _weeklyRollupEmptyMessage,
+          ),
+        ),
+        right: _buildSectionPane(
+          title: _monthlyRollupTitle,
+          subtitle:
+              "Monthly rollups summarize the same daily execution truth into a longer horizon.",
+          child: _PeriodRollupTable(
+            rollups: widget.detail.monthlyRollups,
+            emptyTitle: _monthlyRollupEmptyTitle,
+            emptyMessage: _monthlyRollupEmptyMessage,
           ),
         ),
         breakpoint: _detailWideSplitBreakpoint,
@@ -2121,6 +2154,129 @@ class _DailyRollupTable extends StatelessWidget {
                           ? _taskStatusInProgress
                           : _taskStatusPending,
                     ),
+                  ],
+                ),
+                const SizedBox(height: _cardSpacing),
+                Wrap(
+                  spacing: _cardSpacing,
+                  runSpacing: _cardSpacing,
+                  children: [
+                    _MiniMetricCard(
+                      label: _dailyRollupBlocksLabel,
+                      value: "${rollup.scheduledTaskBlocks}",
+                    ),
+                    _MiniMetricCard(
+                      label: _dailyRollupAssignedLabel,
+                      value: "${rollup.assignedStaffCount}",
+                    ),
+                    _MiniMetricCard(
+                      label: _dailyRollupAttendedAssignedLabel,
+                      value: "${rollup.attendedAssignedStaffCount}",
+                    ),
+                    _MiniMetricCard(
+                      label: _dailyRollupAbsentLabel,
+                      value: "${rollup.absentAssignedStaffCount}",
+                    ),
+                  ],
+                ),
+                const SizedBox(height: _cardSpacing),
+                Wrap(
+                  spacing: _cardSpacing,
+                  runSpacing: _cardSpacing,
+                  children: [
+                    _InfoPill(
+                      icon: Icons.track_changes_outlined,
+                      label:
+                          "$_dailyRollupExpectedLabel: ${rollup.expectedPlots}",
+                    ),
+                    _InfoPill(
+                      icon: Icons.done_all_outlined,
+                      label: "$_dailyRollupActualLabel: ${rollup.actualPlots}",
+                    ),
+                    _InfoPill(
+                      icon: Icons.groups_outlined,
+                      label: "$_dailyRollupCoverageLabel: $coverage",
+                    ),
+                    _InfoPill(
+                      icon: Icons.speed_outlined,
+                      label: "$_dailyRollupPlotsPerHourLabel: $plotsPerHour",
+                    ),
+                    _InfoPill(
+                      icon: Icons.event_note_outlined,
+                      label: "${rollup.rowsLogged} logs",
+                    ),
+                    _InfoPill(
+                      icon: Icons.flag_outlined,
+                      label: "$_dailyRollupCompletionLabel: $completion",
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _PeriodRollupTable extends StatelessWidget {
+  final List<ProductionPeriodRollup> rollups;
+  final String emptyTitle;
+  final String emptyMessage;
+
+  const _PeriodRollupTable({
+    required this.rollups,
+    required this.emptyTitle,
+    required this.emptyMessage,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (rollups.isEmpty) {
+      return _InlineEmptyState(title: emptyTitle, message: emptyMessage);
+    }
+
+    final sortedRollups = [...rollups]
+      ..sort((left, right) {
+        final leftDate =
+            left.periodStart ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final rightDate =
+            right.periodStart ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return rightDate.compareTo(leftDate);
+      });
+
+    return Column(
+      children: sortedRollups.map((rollup) {
+        final coverage =
+            "${_formatPercent(rollup.attendanceCoverageRate)}$_percentSuffix";
+        final completion =
+            "${_formatPercent(rollup.completionRate)}$_percentSuffix";
+        final plotsPerHour = rollup.plotsPerAttendedHour.toStringAsFixed(
+          _delayFixedDigits,
+        );
+        final periodLabel = _formatPeriodRangeLabel(
+          rollup.periodStart,
+          rollup.periodEnd,
+        );
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: _cardSpacing),
+          child: _DetailPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        periodLabel,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    ProductionStatusPill(label: "${rollup.daysCovered} days"),
                   ],
                 ),
                 const SizedBox(height: _cardSpacing),
@@ -4833,6 +4989,19 @@ String _formatReadableDateRange(DateTime? start, DateTime? end) {
     return _formatReadableDate(start);
   }
   return "${_formatReadableDate(start)} - ${_formatReadableDate(end)}";
+}
+
+String _formatPeriodRangeLabel(DateTime? start, DateTime? end) {
+  if (start == null && end == null) {
+    return _dash;
+  }
+  if (start == null) {
+    return formatDateLabel(end);
+  }
+  if (end == null) {
+    return formatDateLabel(start);
+  }
+  return "${formatDateLabel(start)} - ${formatDateLabel(end)}";
 }
 
 String _formatPlanDuration(DateTime? start, DateTime? end) {
