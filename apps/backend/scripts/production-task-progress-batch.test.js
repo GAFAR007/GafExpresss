@@ -442,7 +442,7 @@ async function seedScenario() {
     title: "Task A",
     assignedStaffId: staffProfileAId,
     createdBy: ownerId,
-    weight: 2,
+    weight: 5,
   });
   await createTask({
     id: taskBId,
@@ -772,42 +772,66 @@ test("estate mismatch yields STAFF_SCOPE_INVALID", async () => {
   );
 });
 
-test("humane limit exceeded yields HUMANE_LIMIT_EXCEEDED", async () => {
-  const scenario = await seedScenario();
-  const response = await postBatch({
-    token: scenario.token,
-    entries: [
-      {
-        taskId:
-          scenario.taskAId.toString(),
-        staffId:
-          scenario.staffProfileAId.toString(),
-        actualPlots:
-          HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay + 1,
-        delayReason: STATUS_NONE,
-        notes: "over limit",
-      },
-    ],
-  });
-  debug(
-    TEST_LOG_TAG,
-    "humane limit response",
-    response,
-  );
+test(
+  "progress above the former humane limit succeeds when the task target allows it",
+  async () => {
+    const scenario = await seedScenario();
+    const allowedPlots =
+      HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay + 1;
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: allowedPlots,
+          delayReason: STATUS_NONE,
+          notes: "over limit",
+        },
+      ],
+    });
+    debug(
+      TEST_LOG_TAG,
+      "unit cap response",
+      response,
+    );
 
-  assert.equal(
-    response.statusCode,
-    HTTP_OK,
-  );
-  assert.equal(
-    response.body.summary.errorCount,
-    1,
-  );
-  assert.equal(
-    response.body.errors[0]?.errorCode,
-    "HUMANE_LIMIT_EXCEEDED",
-  );
-});
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      1,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      0,
+    );
+    assert.equal(
+      response.body.successes[0]?.progress.actualPlots,
+      allowedPlots,
+    );
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(savedProgress);
+    assert.equal(
+      savedProgress.expectedPlots,
+      allowedPlots,
+    );
+    assert.equal(
+      savedProgress.actualPlots,
+      allowedPlots,
+    );
+  });
 
 test("zero-output without delay reason yields ZERO_OUTPUT_DELAY_REQUIRED", async () => {
   const scenario = await seedScenario();

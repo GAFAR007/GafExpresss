@@ -11,13 +11,12 @@
  * HOW:
  * - Links each row to task, plan, and assigned staff profile.
  * - Enforces one row per (taskId + staffId + workDate).
- * - Guards humane workload limits via schema validation.
+ * - Keeps quantity values non-negative while controllers enforce task scope.
  */
 
 const mongoose = require("mongoose");
 const debug = require("../utils/debug");
 const {
-  HUMANE_WORKLOAD_LIMITS,
   PLOT_UNIT_SCALE,
   PRODUCTION_TASK_PROGRESS_DELAY_REASONS,
 } = require("../utils/production_engine.config");
@@ -122,20 +121,16 @@ const taskProgressSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    // WHY: Actual output must stay non-negative and humane.
+    // WHY: Actual output must stay non-negative.
     actualPlots: {
       type: Number,
       min: 0,
-      max: HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay,
       required: true,
     },
     // WHY: Integer unit storage avoids float drift for 0.5/0.25 plot progress entries.
     actualPlotUnits: {
       type: Number,
       min: 0,
-      max:
-        HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay *
-        PLOT_UNIT_SCALE,
       required: true,
       index: true,
     },

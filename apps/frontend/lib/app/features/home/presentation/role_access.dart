@@ -16,6 +16,14 @@ const Set<String> _sellerRequestFulfillmentStaffRoles = {
   "farm_manager",
   "estate_manager",
 };
+const Set<String> _tenantInviteStaffRoles = {"shareholder", "estate_manager"};
+
+String _normalizeStaffRole(String? staffRole) {
+  return (staffRole ?? "").trim().toLowerCase().replaceAll(
+    RegExp(r"[-\s]+"),
+    "_",
+  );
+}
 
 bool isBuyerRole(String? role) {
   return _buyerRoles.contains((role ?? "").trim().toLowerCase());
@@ -36,9 +44,18 @@ bool canUseBusinessOwnerEquivalentAccess({
   if (normalizedRole != "staff") {
     return false;
   }
-  return _ownerEquivalentStaffRoles.contains(
-    (staffRole ?? "").trim().toLowerCase(),
-  );
+  return _ownerEquivalentStaffRoles.contains(_normalizeStaffRole(staffRole));
+}
+
+bool canSendTenantInvites({required String? role, String? staffRole}) {
+  final normalizedRole = (role ?? "").trim().toLowerCase();
+  if (normalizedRole == "business_owner") {
+    return true;
+  }
+  if (normalizedRole != "staff") {
+    return false;
+  }
+  return _tenantInviteStaffRoles.contains(_normalizeStaffRole(staffRole));
 }
 
 bool canManageSellerRequests({required String? role, String? staffRole}) {
@@ -49,9 +66,7 @@ bool canManageSellerRequests({required String? role, String? staffRole}) {
   if (normalizedRole != "staff") {
     return false;
   }
-  return _sellerRequestStaffRoles.contains(
-    (staffRole ?? "").trim().toLowerCase(),
-  );
+  return _sellerRequestStaffRoles.contains(_normalizeStaffRole(staffRole));
 }
 
 bool canSendSellerRequestInvoice({required String? role, String? staffRole}) {
@@ -63,7 +78,7 @@ bool canSendSellerRequestInvoice({required String? role, String? staffRole}) {
     return false;
   }
   return _sellerRequestInvoiceStaffRoles.contains(
-    (staffRole ?? "").trim().toLowerCase(),
+    _normalizeStaffRole(staffRole),
   );
 }
 
@@ -79,6 +94,6 @@ bool canManageSellerRequestFulfillment({
     return false;
   }
   return _sellerRequestFulfillmentStaffRoles.contains(
-    (staffRole ?? "").trim().toLowerCase(),
+    _normalizeStaffRole(staffRole),
   );
 }

@@ -96,6 +96,7 @@ const ROLE_PERMISSIONS = {
     ],
     [PERMISSION_MODULES.TENANTS]: [
       PERMISSION_CAPABILITIES.VIEW,
+      PERMISSION_CAPABILITIES.MANAGE,
       PERMISSION_CAPABILITIES.APPROVE,
       PERMISSION_CAPABILITIES.VERIFY,
     ],
@@ -259,12 +260,47 @@ function isOwnerRole(role) {
 }
 
 function isOwnerEquivalentStaffRole(staffRole) {
-  return OWNER_EQUIVALENT_STAFF_ROLES.has(staffRole);
+  return OWNER_EQUIVALENT_STAFF_ROLES.has(
+    normalizeStaffRole(staffRole),
+  );
+}
+
+// WHY: Tenant invite links are available to owners, shareholders, and estate managers.
+const TENANT_INVITE_STAFF_ROLES = new Set([
+  STAFF_ROLES.SHAREHOLDER,
+  STAFF_ROLES.ESTATE_MANAGER,
+]);
+
+function normalizeStaffRole(staffRole) {
+  return (staffRole || "")
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, "_");
+}
+
+function canSendTenantInvite({
+  actorRole,
+  staffRole,
+}) {
+  if (isOwnerRole(actorRole)) {
+    return true;
+  }
+
+  if (actorRole !== USER_ROLES.STAFF) {
+    return false;
+  }
+
+  return TENANT_INVITE_STAFF_ROLES.has(
+    normalizeStaffRole(staffRole),
+  );
 }
 
 // WHY: Resolve allowed capabilities for a given staff role.
 function getRolePermissions(staffRole) {
-  return ROLE_PERMISSIONS[staffRole] || {};
+  return ROLE_PERMISSIONS[
+    normalizeStaffRole(staffRole)
+  ] || {};
 }
 
 // WHY: Central access check so middleware stays simple.
@@ -292,4 +328,5 @@ module.exports = {
   getRolePermissions,
   isOwnerRole,
   isOwnerEquivalentStaffRole,
+  canSendTenantInvite,
 };

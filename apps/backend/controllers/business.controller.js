@@ -122,6 +122,9 @@ const {
 const {
   PRODUCTION_FEATURE_FLAGS,
 } = require("../config/production_feature_flags");
+const {
+  canSendTenantInvite,
+} = require("../config/permissions");
 
 async function emitProductionPlanRoomSnapshot({
   businessId,
@@ -547,8 +550,6 @@ const PRODUCTION_COPY = {
     "Actual amount is required",
   TASK_PROGRESS_ACTUAL_INVALID:
     "Actual amount must be a valid non-negative number",
-  TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED:
-    "Actual amount exceeds humane daily workload limit",
   TASK_PROGRESS_TARGET_EXCEEDED:
     "Actual progress exceeds the remaining planned task target",
   TASK_PROGRESS_PROOFS_REQUIRED:
@@ -911,8 +912,6 @@ const TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_REQUIRED =
   "ACTUAL_PLOTS_REQUIRED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_INVALID =
   "ACTUAL_PLOTS_INVALID";
-const TASK_PROGRESS_BATCH_ENTRY_CODE_HUMANE_LIMIT_EXCEEDED =
-  "HUMANE_LIMIT_EXCEEDED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_TARGET_EXCEEDED =
   "TARGET_EXCEEDED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_DELAY_REASON_INVALID =
@@ -4186,7 +4185,6 @@ function resolveActualPlotProgressInput({
   actualPlotsRaw,
   hasActualPlotUnits,
   actualPlotUnitsRaw,
-  maxPlotsPerFarmerPerDay,
 }) {
   let plotsFromRaw = null;
   let unitsFromRaw = null;
@@ -4274,24 +4272,6 @@ function resolveActualPlotProgressInput({
       ok: false,
       errorCode:
         "TASK_PROGRESS_ACTUAL_INVALID",
-    };
-  }
-
-  const maxUnitsPerFarmerPerDay =
-    maxPlotsPerFarmerPerDay *
-    PLOT_UNIT_SCALE;
-  if (
-    resolvedUnits >
-    maxUnitsPerFarmerPerDay
-  ) {
-    return {
-      ok: false,
-      errorCode:
-        "TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED",
-      maxAllowedPlots:
-        maxPlotsPerFarmerPerDay,
-      maxAllowedPlotUnits:
-        maxUnitsPerFarmerPerDay,
     };
   }
 
@@ -4570,6 +4550,9 @@ function resolveTaskAssignedUnitIds(
 
 function resolveTaskProgressTargetPlots(
   task,
+  {
+    fallbackTotalUnits = 0,
+  } = {},
 ) {
   const assignedStaffIds =
     resolveTaskAssignedStaffIds(task);
@@ -4592,21 +4575,40 @@ function resolveTaskProgressTargetPlots(
     1,
     Number(task?.weight || 0),
   );
+  const fallbackUnitTarget = Math.max(
+    0,
+    Number(fallbackTotalUnits || 0),
+  );
+  if (unitTarget > 0) {
+    return Math.max(
+      weightTarget,
+      unitTarget,
+    );
+  }
+  if (fallbackUnitTarget > 0) {
+    return Math.max(
+      weightTarget,
+      fallbackUnitTarget,
+    );
+  }
   return Math.max(
     weightTarget,
-    Math.max(staffingTarget, unitTarget),
+    staffingTarget,
   );
 }
 
 function resolveTaskProgressTargetPlotUnits(
   task,
+  {
+    fallbackTotalUnits = 0,
+  } = {},
 ) {
   return (
     convertPlotsToPlotUnits(
-      resolveTaskProgressTargetPlots(
-        task,
-      ),
-  ) || 0
+      resolveTaskProgressTargetPlots(task, {
+        fallbackTotalUnits,
+      }),
+    ) || 0
   );
 }
 
@@ -14270,7 +14272,7 @@ async function updateUserRole(
 
 /**
  * POST /business/invites
- * Owner/staff: send staff invites; shareholder staff can send tenant invites.
+ * Owner/staff: send staff invites; owners/shareholders/estate managers can send tenant invites.
  */
 async function createInvite(req, res) {
   debug(
@@ -14311,25 +14313,25 @@ async function createInvite(req, res) {
         .trim()
         .toLowerCase() || "";
 
-    if (
-      !isBusinessOwnerEquivalentActor(actor)
-    ) {
-      if (requestedRole !== "tenant") {
-        return res.status(403).json({
-          error:
-            "Only business owners can send staff invites",
-        });
-      }
-
+    if (requestedRole === "tenant") {
       if (
-        staffProfile?.staffRole !==
-        STAFF_ROLE_SHAREHOLDER
+        !canSendTenantInvite({
+          actorRole: actor.role,
+          staffRole: staffProfile?.staffRole,
+        })
       ) {
         return res.status(403).json({
           error:
-            "Only business owners or shareholders can send tenant invites",
+            "Only business owners, shareholders, or estate managers can send tenant invites",
         });
       }
+    } else if (
+      !isBusinessOwnerEquivalentActor(actor)
+    ) {
+      return res.status(403).json({
+        error:
+          "Only business owners can send staff invites",
+      });
     }
 
     const inviteEmail =
@@ -26747,23 +26749,8 @@ async function logProductionTaskProgress(
         hasActualPlotUnits,
         actualPlotUnitsRaw:
           req.body?.actualPlotUnits,
-        maxPlotsPerFarmerPerDay:
-          HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay,
       });
     if (!resolvedProgressInput.ok) {
-      if (
-        resolvedProgressInput.errorCode ===
-        "TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED"
-      ) {
-        return res.status(400).json({
-          error:
-            PRODUCTION_COPY.TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED,
-          maxAllowedPlots:
-            HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay,
-          maxAllowedPlotUnits:
-            resolvedProgressInput.maxAllowedPlotUnits,
-        });
-      }
       return res.status(400).json({
         error:
           PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_INVALID,
@@ -26895,6 +26882,11 @@ async function logProductionTaskProgress(
           PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
       });
     }
+
+    const planWorkUnitCount = Math.max(
+      0,
+      Number(plan?.workloadContext?.totalWorkUnits || 0),
+    );
 
     const assignedStaffIds =
       resolveTaskAssignedStaffIds(task);
@@ -27068,6 +27060,10 @@ async function logProductionTaskProgress(
     const expectedPlotUnits =
       resolveTaskProgressTargetPlotUnits(
         task,
+        {
+          fallbackTotalUnits:
+            planWorkUnitCount,
+        },
       );
     const expectedPlots =
       convertPlotUnitsToPlots(
@@ -27923,22 +27919,8 @@ async function logProductionTaskProgressBatch(
           hasActualPlotUnits,
           actualPlotUnitsRaw:
             entry?.actualPlotUnits,
-          maxPlotsPerFarmerPerDay:
-            HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay,
         });
       if (!resolvedProgressInput.ok) {
-        if (
-          resolvedProgressInput.errorCode ===
-          "TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED"
-        ) {
-          pushEntryError({
-            errorCode:
-              TASK_PROGRESS_BATCH_ENTRY_CODE_HUMANE_LIMIT_EXCEEDED,
-            error:
-              PRODUCTION_COPY.TASK_PROGRESS_HUMANE_LIMIT_EXCEEDED,
-          });
-          continue;
-        }
         pushEntryError({
           errorCode:
             TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_INVALID,
@@ -27986,9 +27968,17 @@ async function logProductionTaskProgressBatch(
         entry?.notes
           ?.toString()
           .trim() || "";
+      const planWorkUnitCount = Math.max(
+        0,
+        Number(plan?.workloadContext?.totalWorkUnits || 0),
+      );
       const expectedPlotUnits =
         resolveTaskProgressTargetPlotUnits(
           task,
+          {
+            fallbackTotalUnits:
+              planWorkUnitCount,
+          },
         );
       const expectedPlots =
         convertPlotUnitsToPlots(

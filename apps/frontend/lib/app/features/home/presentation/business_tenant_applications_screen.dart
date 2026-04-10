@@ -29,7 +29,8 @@ import 'package:frontend/app/features/home/presentation/business_team_lookup_inv
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
-import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart'
+    as role_access;
 import 'package:frontend/app/theme/app_theme.dart';
 
 // WHY: Centralize payment history route values for business navigation.
@@ -184,10 +185,10 @@ class _BusinessTenantApplicationsScreenState
     final session = ref.watch(authSessionProvider);
     final query = _buildQuery();
     final tenantsAsync = ref.watch(businessTenantApplicationsProvider(query));
-    final canSendTenantInvites =
-        session?.user.role == "business_owner" ||
-        (session?.user.role == "staff" &&
-            session?.user.staffRole == staffRoleShareholder);
+    final canSendTenantInvites = role_access.canSendTenantInvites(
+      role: session?.user.role,
+      staffRole: session?.user.staffRole,
+    );
     final isEstateScoped =
         widget.estateAssetId != null && widget.estateAssetId!.isNotEmpty;
     final estateAnalyticsAsync = isEstateScoped
@@ -1115,7 +1116,7 @@ class _TenantInviteAccessHint extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              "Tenant invites are available to business owners and shareholders.",
+              "Tenant invites are available to business owners, shareholders, and estate managers.",
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
