@@ -350,7 +350,14 @@ router.patch(
 router.post(
   "/invites",
   requireAuth,
-  requireRole("business_owner"),
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.createInvite,
 );
 
@@ -867,6 +874,7 @@ router.post(
   requireAuth,
   requireAnyRole([
     "business_owner",
+    "staff",
   ]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
@@ -1015,6 +1023,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
   businessController.approveTenantApplication,
 );
 
@@ -1038,6 +1050,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.VERIFY,
+  }),
   businessController.verifyContact,
 );
 
@@ -1047,7 +1063,14 @@ router.post(
 router.post(
   "/tenants/:tenantId/approve",
   requireAuth,
-  requireRole("business_owner"),
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
   businessController.approveTenantApplication,
 );
 

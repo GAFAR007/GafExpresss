@@ -264,6 +264,8 @@ const STAFF_ROLE_FARM_MANAGER =
   "farm_manager";
 const STAFF_ROLE_ASSET_MANAGER =
   "asset_manager";
+const STAFF_ROLE_SHAREHOLDER =
+  "shareholder";
 const STAFF_STATUS_ACTIVE = "active";
 
 // WHY: Reuse copy for staff endpoints to avoid inline magic strings.
@@ -13034,7 +13036,7 @@ async function generateProductDraftHandler(
 
 /**
  * POST /business/tenant/applications/:id/approve-agreement
- * Owner-only: mark tenancy agreement as approved after payment + signature.
+ * Owner/staff: mark tenancy agreement as approved after payment + signature.
  */
 async function approveAgreement(
   req,
@@ -13055,11 +13057,12 @@ async function approveAgreement(
       );
 
     if (
-      actor.role !== "business_owner"
+      actor.role !== "business_owner" &&
+      actor.role !== "staff"
     ) {
       return res.status(403).json({
         error:
-          "Only business owners can approve agreements",
+          "Only business owners or staff can approve agreements",
       });
     }
 
@@ -14228,7 +14231,7 @@ async function updateUserRole(
 
 /**
  * POST /business/invites
- * Business-owner only: send a role invite via email.
+ * Owner/staff: send staff invites; shareholder staff can send tenant invites.
  */
 async function createInvite(req, res) {
   debug(
@@ -14254,13 +14257,40 @@ async function createInvite(req, res) {
         req.user.sub,
       );
 
+    let staffProfile = null;
+    if (actor.role === "staff") {
+      staffProfile = await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: false,
+      });
+    }
+
+    const requestedRole =
+      req.body?.role
+        ?.toString()
+        .trim()
+        .toLowerCase() || "";
+
     if (
       actor.role !== "business_owner"
     ) {
-      return res.status(403).json({
-        error:
-          "Only business owners can send invites",
-      });
+      if (requestedRole !== "tenant") {
+        return res.status(403).json({
+          error:
+            "Only business owners can send staff invites",
+        });
+      }
+
+      if (
+        staffProfile?.staffRole !==
+        STAFF_ROLE_SHAREHOLDER
+      ) {
+        return res.status(403).json({
+          error:
+            "Only business owners or shareholders can send tenant invites",
+        });
+      }
     }
 
     const inviteEmail =
@@ -14273,6 +14303,8 @@ async function createInvite(req, res) {
       req.body?.role
         ?.toString()
         .trim() || "";
+    const normalizedRole =
+      role.toLowerCase();
 
     const agreementText =
       req.body?.agreementText
@@ -14296,7 +14328,7 @@ async function createInvite(req, res) {
       });
     }
     if (
-      role === "tenant" &&
+      normalizedRole === "tenant" &&
       (!agreementText ||
         agreementText.length === 0)
     ) {
@@ -14306,7 +14338,7 @@ async function createInvite(req, res) {
       });
     }
     if (
-      role === "staff" &&
+      normalizedRole === "staff" &&
       (!staffRole ||
         staffRole.length === 0)
     ) {
@@ -14316,7 +14348,7 @@ async function createInvite(req, res) {
       });
     }
     if (
-      role === "staff" &&
+      normalizedRole === "staff" &&
       !STAFF_ROLE_VALUES.includes(
         staffRole,
       )
@@ -14339,7 +14371,7 @@ async function createInvite(req, res) {
           businessId,
           inviterId: actor._id,
           inviteeEmail: inviteEmail,
-          role,
+          role: normalizedRole,
           staffRole,
           estateAssetId,
           agreementText,

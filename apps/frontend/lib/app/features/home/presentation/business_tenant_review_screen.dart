@@ -27,6 +27,7 @@ import 'package:frontend/app/features/home/presentation/business_tenant_model.da
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/settings/widgets/read_only_value.dart';
+import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
 class BusinessTenantReviewScreen extends ConsumerStatefulWidget {
@@ -275,9 +276,15 @@ class _BusinessTenantReviewScreenState
 
     final session = ref.watch(authSessionProvider);
     final role = session?.user.role ?? 'unknown';
+    final staffRole = session?.user.staffRole ?? '';
+    final canHandleTenantReviews =
+        role == 'business_owner' ||
+        (role == 'staff' &&
+            (staffRole == staffRoleShareholder ||
+                staffRole == staffRoleEstateManager));
     final isAdminView = role != 'tenant';
-    final canVerify = role == 'business_owner' || role == 'staff';
-    final canApprove = role == 'business_owner';
+    final canVerify = canHandleTenantReviews;
+    final canApprove = canHandleTenantReviews;
 
     final detailAsync = ref.watch(
       businessTenantByIdProvider(widget.applicationId),
@@ -540,7 +547,9 @@ class _BusinessTenantReviewScreenState
                             ],
                           ),
                         ),
-                        if (canApprove && !isAlreadyApproved && !agreementApproved)
+                        if (canApprove &&
+                            !isAlreadyApproved &&
+                            !agreementApproved)
                           ElevatedButton.icon(
                             onPressed: _isApprovingAgreement
                                 ? null
@@ -995,8 +1004,7 @@ class _VerificationChecklist extends StatelessWidget {
     final guarVerified = _verified(guar);
 
     // WHY: Agreement is done only when approved (or not required).
-    final agreementDone =
-        !rules.requiresAgreementSigned || agreementApproved;
+    final agreementDone = !rules.requiresAgreementSigned || agreementApproved;
 
     return Container(
       padding: const EdgeInsets.all(14),

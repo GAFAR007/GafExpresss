@@ -687,6 +687,7 @@ class BusinessInviteFormCard extends ConsumerStatefulWidget {
   final ValueChanged<String>? onInviteSent;
   final String title;
   final String subtitle;
+  final bool tenantOnly;
   final bool isCollapsible;
   final bool initiallyExpanded;
 
@@ -698,6 +699,7 @@ class BusinessInviteFormCard extends ConsumerStatefulWidget {
     this.onInviteSent,
     this.title = _Copy.inviteTitle,
     this.subtitle = _Copy.inviteSubtitle,
+    this.tenantOnly = false,
     this.isCollapsible = false,
     this.initiallyExpanded = true,
   });
@@ -736,20 +738,21 @@ class _BusinessInviteFormCardState
   Future<void> _sendInvite() async {
     // WHY: Normalize email casing so lookup/identity checks stay consistent.
     final email = _emailCtrl.text.trim().toLowerCase();
+    final inviteRole = widget.tenantOnly ? _kRoleTenant : _role;
     // WHY: Require minimum tenant invite inputs before calling the API.
     if (email.isEmpty) {
       setState(() => _error = _Copy.inviteMissingEmail);
       return;
     }
-    if (_role == _kRoleTenant && _estateAssetId == null) {
+    if (inviteRole == _kRoleTenant && _estateAssetId == null) {
       setState(() => _error = _Copy.inviteMissingEstate);
       return;
     }
-    if (_role == _kRoleTenant && _agreementCtrl.text.trim().isEmpty) {
+    if (inviteRole == _kRoleTenant && _agreementCtrl.text.trim().isEmpty) {
       setState(() => _error = _Copy.inviteMissingAgreement);
       return;
     }
-    if (_role == _kRoleStaff && _staffRole.trim().isEmpty) {
+    if (inviteRole == _kRoleStaff && _staffRole.trim().isEmpty) {
       setState(() => _error = _Copy.inviteMissingStaffRole);
       return;
     }
@@ -782,13 +785,13 @@ class _BusinessInviteFormCardState
       await api.createInvite(
         token: session.token,
         email: email,
-        role: _role,
-        staffRole: _role == _kRoleStaff ? _staffRole : null,
+        role: inviteRole,
+        staffRole: inviteRole == _kRoleStaff ? _staffRole : null,
         estateAssetId: _estateAssetId,
-        agreementText: _role == _kRoleTenant ? _agreementCtrl.text : null,
+        agreementText: inviteRole == _kRoleTenant ? _agreementCtrl.text : null,
       );
 
-      _log(_LogKeys.inviteSendSuccess, extra: {"role": _role});
+      _log(_LogKeys.inviteSendSuccess, extra: {"role": inviteRole});
       widget.onInviteSent?.call(email);
       if (!mounted) return;
       // WHY: Confirm success at the boundary so the user can proceed.
@@ -800,7 +803,7 @@ class _BusinessInviteFormCardState
         _emailCtrl.clear();
         _agreementCtrl.clear();
         _estateAssetId = null;
-        _role = _kRoleStaff;
+        _role = widget.tenantOnly ? _kRoleTenant : _kRoleStaff;
         _staffRole = _kDefaultStaffRole;
       });
     } catch (e) {
@@ -811,7 +814,7 @@ class _BusinessInviteFormCardState
         requestContext: {
           "hasEstate": _estateAssetId != null,
           "hasAgreement": _agreementCtrl.text.trim().isNotEmpty,
-          "role": _role,
+          "role": inviteRole,
           "staffRole": _staffRole,
         },
         error: e,
@@ -834,14 +837,16 @@ class _BusinessInviteFormCardState
       subtitle: widget.subtitle,
       emailCtrl: _emailCtrl,
       agreementCtrl: _agreementCtrl,
-      role: _role,
+      role: widget.tenantOnly ? _kRoleTenant : _role,
       staffRole: _staffRole,
       estateAssetId: _estateAssetId,
       error: _error,
       isSending: _isSending,
       estateAssets: widget.estateAssets,
       estateAssetsLoading: widget.estateAssetsLoading,
+      tenantOnly: widget.tenantOnly,
       onRoleChanged: (value) {
+        if (widget.tenantOnly) return;
         if (value == null) return;
         // WHY: Update role state so required fields re-render immediately.
         setState(() {
@@ -899,6 +904,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
   final bool isSending;
   final bool estateAssetsLoading;
   final List<BusinessAsset> estateAssets;
+  final bool tenantOnly;
   final ValueChanged<String?> onRoleChanged;
   final ValueChanged<String?> onStaffRoleChanged;
   final ValueChanged<String?> onEstateChanged;
@@ -918,6 +924,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
     required this.isSending,
     required this.estateAssetsLoading,
     required this.estateAssets,
+    required this.tenantOnly,
     required this.onRoleChanged,
     required this.onStaffRoleChanged,
     required this.onEstateChanged,
@@ -943,11 +950,13 @@ class _BusinessInviteFormBody extends StatelessWidget {
         ],
         _InviteEmailField(controller: emailCtrl),
         const SizedBox(height: _UiSpacing.sectionGap),
-        _InviteRoleField(
-          role: role,
-          isSending: isSending,
-          onRoleChanged: onRoleChanged,
-        ),
+        if (!tenantOnly) ...[
+          _InviteRoleField(
+            role: role,
+            isSending: isSending,
+            onRoleChanged: onRoleChanged,
+          ),
+        ],
         if (showStaffRole) ...[
           const SizedBox(height: _UiSpacing.sectionGap),
           _InviteStaffRoleField(
