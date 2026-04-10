@@ -83,6 +83,9 @@ const {
   writeAuditLog,
 } = require("../utils/audit");
 const {
+  emitDraftPresenceSnapshot,
+} = require("../services/production_draft_presence_socket.service");
+const {
   resolveBusinessContext,
   resolveStaffProfile,
 } = require("../services/business_context.service");
@@ -119,6 +122,35 @@ const {
 const {
   PRODUCTION_FEATURE_FLAGS,
 } = require("../config/production_feature_flags");
+
+async function emitProductionPlanRoomSnapshot({
+  businessId,
+  planId,
+  context,
+}) {
+  const normalizedPlanId =
+    (planId || "").toString().trim();
+  if (!businessId || !normalizedPlanId) {
+    return;
+  }
+
+  try {
+    await emitDraftPresenceSnapshot({
+      businessId,
+      planId: normalizedPlanId,
+    });
+  } catch (error) {
+    debug(
+      "BUSINESS CONTROLLER: production plan room snapshot emit skipped",
+      {
+        businessId,
+        planId: normalizedPlanId,
+        context,
+        reason: error?.message,
+      },
+    );
+  }
+}
 
 const {
   PRODUCTION_TASK_TIMING_MODES,
@@ -15693,7 +15725,15 @@ async function clockInStaff(req, res) {
           reason: confidenceErr.message,
           next: "Retry confidence recompute on next availability trigger",
         },
-      );
+        );
+    }
+
+    if (relatedPlanId) {
+      await emitProductionPlanRoomSnapshot({
+        businessId,
+        planId: relatedPlanId,
+        context: "staff_clock_in",
+      });
     }
 
     debug(
@@ -15961,7 +16001,15 @@ async function clockOutStaff(req, res) {
           reason: confidenceErr.message,
           next: "Retry confidence recompute on next availability trigger",
         },
-      );
+        );
+    }
+
+    if (relatedPlanId) {
+      await emitProductionPlanRoomSnapshot({
+        businessId,
+        planId: relatedPlanId,
+        context: "staff_clock_out",
+      });
     }
 
     debug(
@@ -27165,6 +27213,12 @@ async function logProductionTaskProgress(
       },
     );
 
+    await emitProductionPlanRoomSnapshot({
+      businessId,
+      planId: plan._id,
+      context: "task_progress_logged",
+    });
+
     return res.status(200).json({
       message:
         PRODUCTION_COPY.TASK_PROGRESS_CREATED,
@@ -27990,6 +28044,29 @@ async function logProductionTaskProgressBatch(
       },
     );
 
+    if (successes.length > 0) {
+      const planIdsToRefresh = Array.from(
+        new Set(
+          successes
+            .map((entry) =>
+              (entry?.progress?.planId || "")
+                .toString()
+                .trim(),
+            )
+            .filter(Boolean),
+        ),
+      );
+      await Promise.all(
+        planIdsToRefresh.map((planId) =>
+          emitProductionPlanRoomSnapshot({
+            businessId,
+            planId,
+            context: "task_progress_batch_logged",
+          }),
+        ),
+      );
+    }
+
     return res.status(200).json({
       message:
         PRODUCTION_COPY.TASK_PROGRESS_BATCH_PROCESSED,
@@ -28262,6 +28339,12 @@ async function approveTaskProgress(
       },
     });
 
+    await emitProductionPlanRoomSnapshot({
+      businessId,
+      planId: progress.planId,
+      context: "task_progress_approved",
+    });
+
     return res.status(200).json({
       message:
         PRODUCTION_COPY.TASK_PROGRESS_APPROVED,
@@ -28448,6 +28531,12 @@ async function rejectTaskProgress(
         reasonLength: reason.length,
       },
     );
+
+    await emitProductionPlanRoomSnapshot({
+      businessId,
+      planId: progress.planId,
+      context: "task_progress_rejected",
+    });
 
     return res.status(200).json({
       message:

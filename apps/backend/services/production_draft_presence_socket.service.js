@@ -409,4 +409,5 @@ function registerDraftPresenceSocket(io) {
 
 module.exports = {
   registerDraftPresenceSocket,
+  emitDraftPresenceSnapshot: emitPresenceSnapshot,
 };

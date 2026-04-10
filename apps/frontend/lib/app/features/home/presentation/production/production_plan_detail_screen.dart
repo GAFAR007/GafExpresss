@@ -21,6 +21,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
+import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
@@ -359,6 +360,15 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
     final profileRole = profileAsync.valueOrNull?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
     final isOwner = actorRole == _ownerRole;
+    ref.listen<ProductionDraftPresenceState>(
+      productionDraftPresenceProvider(planId),
+      (previous, next) {
+        if (previous?.updatedAt == next.updatedAt) {
+          return;
+        }
+        ref.invalidate(productionPlanDetailProvider(planId));
+      },
+    );
 
     return Scaffold(
       appBar: AppBar(

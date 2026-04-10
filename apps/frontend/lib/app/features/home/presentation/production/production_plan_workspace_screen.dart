@@ -303,6 +303,16 @@ class _ProductionPlanWorkspaceScreenState
     final presenceState = ref.watch(
       productionDraftPresenceProvider(widget.planId),
     );
+    ref.listen<ProductionDraftPresenceState>(
+      productionDraftPresenceProvider(widget.planId),
+      (previous, next) {
+        if (previous?.updatedAt == next.updatedAt) {
+          return;
+        }
+        ref.invalidate(productionPlanDetailProvider(widget.planId));
+        ref.invalidate(productionPlansProvider);
+      },
+    );
 
     return Scaffold(
       appBar: AppBar(
