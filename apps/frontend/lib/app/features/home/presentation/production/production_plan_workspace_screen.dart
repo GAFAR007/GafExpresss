@@ -384,6 +384,8 @@ class _ProductionPlanWorkspaceScreenState
               actorRole: actorRole,
               staffRole: selfStaffRole,
             );
+            final canManageOwnAttendance =
+                actorRole == "staff" && selfStaffId.trim().isNotEmpty;
             final selectedDay = _selectedDay ?? _resolveInitialDay(detail.plan);
             final visibleMonth = _visibleMonth ?? _firstDayOfMonth(selectedDay);
             final planUnitsResponse = ref
@@ -928,6 +930,7 @@ class _ProductionPlanWorkspaceScreenState
                         rowsForDay: rowsForTask,
                         canManageCalendar: canManageCalendar,
                         canManageTaskAttendance: canManageTaskAttendance,
+                        selfStaffId: selfStaffId,
                         canReviewProgress: canReviewProgress,
                         isOwner: actorRole == "business_owner",
                         progressEnabledStaffIds: progressEnabledStaffIds,
@@ -966,24 +969,39 @@ class _ProductionPlanWorkspaceScreenState
                                 }
                               }
                             : null,
-                        onSetAttendanceForStaff: canManageTaskAttendance
+                        onSetAttendanceForStaff:
+                            canManageTaskAttendance || canManageOwnAttendance
                             ? (staffProfileId, existingAttendance) async {
+                                if (!canManageTaskAttendance &&
+                                    staffProfileId != selfStaffId) {
+                                  return;
+                                }
                                 await setAttendanceForTaskStaff(
                                   staffProfileId,
                                   existingAttendance,
                                 );
                               }
                             : null,
-                        onQuickClockInForStaff: canManageTaskAttendance
+                        onQuickClockInForStaff:
+                            canManageTaskAttendance || canManageOwnAttendance
                             ? (staffProfileId, existingAttendance) async {
+                                if (!canManageTaskAttendance &&
+                                    staffProfileId != selfStaffId) {
+                                  return;
+                                }
                                 await quickClockInForTaskStaff(
                                   staffProfileId,
                                   existingAttendance,
                                 );
                               }
                             : null,
-                        onQuickClockOutForStaff: canManageTaskAttendance
+                        onQuickClockOutForStaff:
+                            canManageTaskAttendance || canManageOwnAttendance
                             ? (staffProfileId, existingAttendance) async {
+                                if (!canManageTaskAttendance &&
+                                    staffProfileId != selfStaffId) {
+                                  return;
+                                }
                                 await quickClockOutForTaskStaff(
                                   staffProfileId,
                                   existingAttendance,
@@ -1008,17 +1026,22 @@ class _ProductionPlanWorkspaceScreenState
                                   attendanceRecords: detail.attendanceRecords,
                                   actorStaffId: staffProfileId,
                                   canPickAnyAssignedStaff: false,
-                                  canManageAttendance: canManageTaskAttendance,
+                                  canManageAttendance:
+                                      canManageTaskAttendance ||
+                                      staffProfileId == selfStaffId,
                                   onSetAttendanceForStaff:
-                                      canManageTaskAttendance
+                                      canManageTaskAttendance ||
+                                          staffProfileId == selfStaffId
                                       ? setAttendanceForTaskStaff
                                       : null,
                                   onQuickClockInForStaff:
-                                      canManageTaskAttendance
+                                      canManageTaskAttendance ||
+                                          staffProfileId == selfStaffId
                                       ? quickClockInForTaskStaff
                                       : null,
                                   onQuickClockOutForStaff:
-                                      canManageTaskAttendance
+                                      canManageTaskAttendance ||
+                                          staffProfileId == selfStaffId
                                       ? quickClockOutForTaskStaff
                                       : null,
                                 );
@@ -2882,6 +2905,7 @@ class _AgendaTaskCard extends StatelessWidget {
   final List<ProductionTimelineRow> rowsForDay;
   final bool canManageCalendar;
   final bool canManageTaskAttendance;
+  final String selfStaffId;
   final bool canReviewProgress;
   final bool isOwner;
   final Set<String> progressEnabledStaffIds;
@@ -2922,6 +2946,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.rowsForDay,
     required this.canManageCalendar,
     required this.canManageTaskAttendance,
+    required this.selfStaffId,
     required this.canReviewProgress,
     required this.isOwner,
     required this.progressEnabledStaffIds,
@@ -3153,6 +3178,8 @@ class _AgendaTaskCard extends StatelessWidget {
                 final hasLoggedProgress = rowsForDay.any(
                   (row) => row.staffId == staffId,
                 );
+                final canManageAttendanceForStaff =
+                    canManageTaskAttendance || staffId == selfStaffId;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Builder(
@@ -3177,20 +3204,26 @@ class _AgendaTaskCard extends StatelessWidget {
                                   : _attendanceClockOutUnsetLabel),
                         hasClockIn: attendance?.clockInAt != null,
                         hasClockOut: attendance?.clockOutAt != null,
-                        canManageAttendance: canManageTaskAttendance,
+                        canManageAttendance: canManageAttendanceForStaff,
                         canLogProgress: progressEnabledStaffIds.contains(
                           staffId,
                         ),
                         hasLoggedProgress: hasLoggedProgress,
-                        onQuickClockIn: onQuickClockInForStaff == null
+                        onQuickClockIn:
+                            onQuickClockInForStaff == null ||
+                                !canManageAttendanceForStaff
                             ? null
                             : () =>
                                   onQuickClockInForStaff!(staffId, attendance),
-                        onQuickClockOut: onQuickClockOutForStaff == null
+                        onQuickClockOut:
+                            onQuickClockOutForStaff == null ||
+                                !canManageAttendanceForStaff
                             ? null
                             : () =>
                                   onQuickClockOutForStaff!(staffId, attendance),
-                        onSetAttendance: onSetAttendanceForStaff == null
+                        onSetAttendance:
+                            onSetAttendanceForStaff == null ||
+                                !canManageAttendanceForStaff
                             ? null
                             : () =>
                                   onSetAttendanceForStaff!(staffId, attendance),
