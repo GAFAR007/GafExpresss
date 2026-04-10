@@ -31435,13 +31435,36 @@ async function approveTenantApplication(
         req.user.sub,
       );
 
-    const applicationId = req.params?.id
+    const directApplicationId = req.params?.id
       ?.toString()
       .trim();
+    const tenantId = req.params?.tenantId
+      ?.toString()
+      .trim();
+    let applicationId = directApplicationId || "";
+    if (!applicationId && tenantId) {
+      const latestApplication =
+        await BusinessTenantApplication.findOne({
+          businessId,
+          tenantUserId: tenantId,
+        })
+          .sort({ createdAt: -1 })
+          .select("_id estateAssetId tenantUserId status");
+
+      if (!latestApplication) {
+        return res.status(404).json({
+          error:
+            "Tenant application not found",
+        });
+      }
+
+      applicationId =
+        latestApplication._id.toString();
+    }
     if (!applicationId) {
       return res.status(400).json({
         error:
-          "Application id is required",
+          "Application id or tenant id is required",
       });
     }
 
@@ -31529,7 +31552,6 @@ async function togglePaymentStatus(
  * VERIFY CONTACT
  */
 async function verifyContact(req, res) {
-  // TODO: This route seems redundant with verifyTenantContact
   debug(
     "BUSINESS CONTROLLER: verifyContact - entry",
     {
@@ -31537,9 +31559,87 @@ async function verifyContact(req, res) {
       tenantId: req.params?.tenantId,
     },
   );
-  return res.status(501).json({
-    message: "Not Implemented",
-  });
+
+  try {
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const tenantId = req.params?.tenantId
+      ?.toString()
+      .trim();
+    if (!tenantId) {
+      return res.status(400).json({
+        error: "Tenant id is required",
+      });
+    }
+
+    const application =
+      await BusinessTenantApplication.findOne(
+        {
+          businessId,
+          tenantUserId: tenantId,
+        },
+      ).sort({ createdAt: -1 });
+
+    if (!application) {
+      return res.status(404).json({
+        error:
+          "Tenant application not found",
+      });
+    }
+
+    if (isEstateScopedStaff(actor)) {
+      const estateId =
+        application?.estateAssetId
+          ?._id ||
+        application?.estateAssetId;
+      if (
+        estateId &&
+        estateId.toString() !==
+          actor.estateAssetId.toString()
+      ) {
+        return res.status(403).json({
+          error:
+            "Estate-scoped staff can only verify contacts for their assigned estate",
+        });
+      }
+    }
+
+    const updated =
+      await businessTenantService.verifyTenantContact(
+        {
+          businessId,
+          applicationId: application._id,
+          actorId: actor._id,
+          type: req.body?.type
+            ?.toString()
+            .trim(),
+          status: req.body?.status
+            ?.toString()
+            .trim(),
+          index: req.body?.index,
+          note: req.body?.note
+            ?.toString()
+            .trim(),
+        },
+      );
+
+    return res.status(200).json({
+      message:
+        "Tenant contact verified successfully",
+      application: updated,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: verifyContact - error",
+      err.message,
+    );
+    return res
+      .status(400)
+      .json({ error: err.message });
+  }
 }
 
 /**
