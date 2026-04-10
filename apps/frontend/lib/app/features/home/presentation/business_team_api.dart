@@ -33,10 +33,7 @@ class BusinessInviteAcceptance {
   final BusinessTeamUser user;
   final String? token;
 
-  const BusinessInviteAcceptance({
-    required this.user,
-    required this.token,
-  });
+  const BusinessInviteAcceptance({required this.user, required this.token});
 }
 
 class BusinessTeamApi {
@@ -114,7 +111,11 @@ class BusinessTeamApi {
     AppDebug.log(
       "BUSINESS_TEAM_API",
       "updateUserRole() start",
-      extra: {"userId": userId, "role": role, "hasEstate": estateAssetId != null},
+      extra: {
+        "userId": userId,
+        "role": role,
+        "hasEstate": estateAssetId != null,
+      },
     );
 
     final resp = await _dio.patch(
@@ -150,6 +151,7 @@ class BusinessTeamApi {
     String? staffRole,
     String? estateAssetId,
     String? agreementText,
+    bool sendEmail = true,
   }) async {
     AppDebug.log(
       "BUSINESS_TEAM_API",
@@ -158,6 +160,7 @@ class BusinessTeamApi {
         "role": role,
         "staffRole": staffRole,
         "hasEstate": estateAssetId != null,
+        "sendEmail": sendEmail,
       },
     );
 
@@ -166,6 +169,7 @@ class BusinessTeamApi {
       data: {
         "email": email.trim(),
         "role": role,
+        "sendEmail": sendEmail,
         if (staffRole != null && staffRole.trim().isNotEmpty)
           "staffRole": staffRole.trim(),
         if (estateAssetId != null && estateAssetId.trim().isNotEmpty)
@@ -180,7 +184,7 @@ class BusinessTeamApi {
     AppDebug.log(
       "BUSINESS_TEAM_API",
       "createInvite() success",
-      extra: {"email": email.trim(), "role": role},
+      extra: {"email": email.trim(), "role": role, "sendEmail": sendEmail},
     );
 
     return data;

@@ -14352,6 +14352,15 @@ async function createInvite(req, res) {
         ?.toString()
         .trim() || "";
 
+    const sendEmailRaw = req.body?.sendEmail;
+    const shouldSendEmail = !(
+      sendEmailRaw === false ||
+      (sendEmailRaw ?? "")
+        .toString()
+        .trim()
+        .toLowerCase() === "false"
+    );
+
     const staffRole =
       req.body?.staffRole
         ?.toString()
@@ -14416,6 +14425,7 @@ async function createInvite(req, res) {
           staffRole,
           estateAssetId,
           agreementText,
+          shouldSendEmail,
         },
       );
 
@@ -14429,7 +14439,9 @@ async function createInvite(req, res) {
 
     return res.status(201).json({
       message:
-        "Invite sent successfully",
+        shouldSendEmail ?
+          "Invite sent successfully"
+        : "Request link created successfully",
       invite: {
         id: invite._id,
         email: invite.inviteeEmail,

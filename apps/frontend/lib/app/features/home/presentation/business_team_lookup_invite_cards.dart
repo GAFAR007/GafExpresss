@@ -16,6 +16,7 @@ library;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
@@ -51,6 +52,7 @@ const String _kLogInviteBuild = "Invite build()";
 // WHY: Keep operation names consistent across logs.
 const String _kOperationLookupUser = "lookupUser";
 const String _kOperationCreateInvite = "createInvite";
+const String _kOperationCreateRequestLink = "createRequestLink";
 
 // WHY: Keep failure classification values in one place.
 const String _kFailureInvalidInput = "INVALID_INPUT";
@@ -105,7 +107,10 @@ class _Copy {
   static const String inviteAgreementHint =
       "Paste the tenancy agreement tenants must accept";
   static const String inviteSend = "Send invite";
+  static const String sendRequest = "Send request";
+  static const String createRequestLink = "Create request link";
   static const String inviteSentPrefix = "Invite sent to ";
+  static const String requestLinkCopied = "Request link copied to clipboard.";
   static const String inviteMissingEmail = "Enter an email address.";
   static const String inviteMissingEstate =
       "Select an estate for tenant invites.";
@@ -136,6 +141,9 @@ class _LogKeys {
   static const String inviteSendStart = "invite_send_start";
   static const String inviteSendSuccess = "invite_send_success";
   static const String inviteSendFailed = "invite_send_failed";
+  static const String requestLinkStart = "request_link_start";
+  static const String requestLinkSuccess = "request_link_success";
+  static const String requestLinkFailed = "request_link_failed";
   static const String inviteToggle = "invite_toggle";
 }
 
@@ -719,6 +727,7 @@ class _BusinessInviteFormCardState
   String? _estateAssetId;
   String? _error;
   bool _isSending = false;
+  bool _isCreatingLink = false;
 
   @override
   void dispose() {
@@ -735,10 +744,11 @@ class _BusinessInviteFormCardState
     );
   }
 
-  Future<void> _sendInvite() async {
+  Future<void> _submitInvite({required bool sendEmail}) async {
     // WHY: Normalize email casing so lookup/identity checks stay consistent.
     final email = _emailCtrl.text.trim().toLowerCase();
     final inviteRole = widget.tenantOnly ? _kRoleTenant : _role;
+    final isRequestLinkFlow = !sendEmail;
     // WHY: Require minimum tenant invite inputs before calling the API.
     if (email.isEmpty) {
       setState(() => _error = _Copy.inviteMissingEmail);
@@ -767,64 +777,93 @@ class _BusinessInviteFormCardState
     setState(() {
       // WHY: Clear old errors and lock the form while submitting.
       _error = null;
-      _isSending = true;
+      _isSending = sendEmail;
+      _isCreatingLink = isRequestLinkFlow;
     });
 
     _log(
-      _LogKeys.inviteSendStart,
+      sendEmail ? _LogKeys.inviteSendStart : _LogKeys.requestLinkStart,
       extra: {
         "role": _role,
         "staffRole": _staffRole,
         "hasEstate": _estateAssetId != null,
+        "sendEmail": sendEmail,
       },
     );
 
     try {
       final api = ref.read(businessTeamApiProvider);
       // WHY: Send invite data with tenant-only agreement text.
-      await api.createInvite(
+      final response = await api.createInvite(
         token: session.token,
         email: email,
         role: inviteRole,
         staffRole: inviteRole == _kRoleStaff ? _staffRole : null,
         estateAssetId: _estateAssetId,
         agreementText: inviteRole == _kRoleTenant ? _agreementCtrl.text : null,
+        sendEmail: sendEmail,
       );
+      final inviteLink = response["inviteLink"]?.toString().trim() ?? "";
 
-      _log(_LogKeys.inviteSendSuccess, extra: {"role": inviteRole});
-      widget.onInviteSent?.call(email);
-      if (!mounted) return;
-      // WHY: Confirm success at the boundary so the user can proceed.
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("${_Copy.inviteSentPrefix}$email")),
+      if (isRequestLinkFlow && inviteLink.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: inviteLink));
+      }
+
+      _log(
+        sendEmail ? _LogKeys.inviteSendSuccess : _LogKeys.requestLinkSuccess,
+        extra: {
+          "role": inviteRole,
+          "hasInviteLink": inviteLink.isNotEmpty,
+          "sendEmail": sendEmail,
+        },
       );
-      setState(() {
-        // WHY: Reset the form so the next invite starts clean.
-        _emailCtrl.clear();
-        _agreementCtrl.clear();
-        _estateAssetId = null;
-        _role = widget.tenantOnly ? _kRoleTenant : _kRoleStaff;
-        _staffRole = _kDefaultStaffRole;
-      });
+      if (!mounted) return;
+      if (sendEmail) {
+        widget.onInviteSent?.call(email);
+        // WHY: Confirm success at the boundary so the user can proceed.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("${_Copy.inviteSentPrefix}$email")),
+        );
+        setState(() {
+          // WHY: Reset the form so the next invite starts clean.
+          _emailCtrl.clear();
+          _agreementCtrl.clear();
+          _estateAssetId = null;
+          _role = widget.tenantOnly ? _kRoleTenant : _kRoleStaff;
+          _staffRole = _kDefaultStaffRole;
+        });
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text(_Copy.requestLinkCopied)));
+      }
     } catch (e) {
       logBusinessTeamApiFailure(
         source: widget.source,
-        operation: _kOperationCreateInvite,
+        operation: isRequestLinkFlow
+            ? _kOperationCreateRequestLink
+            : _kOperationCreateInvite,
         requestIntent: businessTeamInviteIntent,
         requestContext: {
           "hasEstate": _estateAssetId != null,
           "hasAgreement": _agreementCtrl.text.trim().isNotEmpty,
           "role": inviteRole,
           "staffRole": _staffRole,
+          "sendEmail": sendEmail,
         },
         error: e,
       );
       // WHY: Surface user-friendly errors while keeping diagnostics in logs.
       setState(() => _error = businessTeamErrorMessage(e));
-      _log(_LogKeys.inviteSendFailed);
+      _log(sendEmail ? _LogKeys.inviteSendFailed : _LogKeys.requestLinkFailed);
     } finally {
       // WHY: Always unlock the form after the request completes.
-      if (mounted) setState(() => _isSending = false);
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+          _isCreatingLink = false;
+        });
+      }
     }
   }
 
@@ -842,6 +881,7 @@ class _BusinessInviteFormCardState
       estateAssetId: _estateAssetId,
       error: _error,
       isSending: _isSending,
+      isCreatingLink: _isCreatingLink,
       estateAssets: widget.estateAssets,
       estateAssetsLoading: widget.estateAssetsLoading,
       tenantOnly: widget.tenantOnly,
@@ -868,7 +908,8 @@ class _BusinessInviteFormCardState
         // WHY: Track estate selection for tenant invites.
         setState(() => _estateAssetId = value);
       },
-      onSendInvite: _sendInvite,
+      onSendInvite: () => _submitInvite(sendEmail: true),
+      onCreateRequestLink: () => _submitInvite(sendEmail: false),
       // WHY: Collapsible shell renders the header when enabled.
       showHeader: !widget.isCollapsible,
       // WHY: Card shell moves to the collapsible wrapper when enabled.
@@ -902,6 +943,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
   final String? estateAssetId;
   final String? error;
   final bool isSending;
+  final bool isCreatingLink;
   final bool estateAssetsLoading;
   final List<BusinessAsset> estateAssets;
   final bool tenantOnly;
@@ -909,6 +951,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
   final ValueChanged<String?> onStaffRoleChanged;
   final ValueChanged<String?> onEstateChanged;
   final VoidCallback onSendInvite;
+  final VoidCallback onCreateRequestLink;
   final bool showHeader;
   final bool wrapInCard;
 
@@ -922,6 +965,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
     required this.estateAssetId,
     required this.error,
     required this.isSending,
+    required this.isCreatingLink,
     required this.estateAssetsLoading,
     required this.estateAssets,
     required this.tenantOnly,
@@ -929,6 +973,7 @@ class _BusinessInviteFormBody extends StatelessWidget {
     required this.onStaffRoleChanged,
     required this.onEstateChanged,
     required this.onSendInvite,
+    required this.onCreateRequestLink,
     this.showHeader = true,
     this.wrapInCard = true,
   });
@@ -939,6 +984,8 @@ class _BusinessInviteFormBody extends StatelessWidget {
     final showTenantFields = role == _kRoleTenant;
     // WHY: Staff role is required when inviting staff.
     final showStaffRole = role == _kRoleStaff;
+    final showRequestActions = showTenantFields;
+    final isBusy = isSending || isCreatingLink;
 
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -981,7 +1028,20 @@ class _BusinessInviteFormBody extends StatelessWidget {
           _InviteErrorText(message: error!),
         ],
         const SizedBox(height: _UiSpacing.sectionGap),
-        _InviteSendButton(isSending: isSending, onSendInvite: onSendInvite),
+        if (showRequestActions) ...[
+          _InviteRequestButtons(
+            isSending: isSending,
+            isCreatingLink: isCreatingLink,
+            onSendRequest: onSendInvite,
+            onCreateRequestLink: onCreateRequestLink,
+          ),
+        ] else ...[
+          _InviteSendButton(
+            isBusy: isBusy,
+            label: _Copy.inviteSend,
+            onSendInvite: onSendInvite,
+          ),
+        ],
       ],
     );
 
@@ -1199,12 +1259,70 @@ class _InviteErrorText extends StatelessWidget {
   }
 }
 
-class _InviteSendButton extends StatelessWidget {
+class _InviteRequestButtons extends StatelessWidget {
   final bool isSending;
+  final bool isCreatingLink;
+  final VoidCallback onSendRequest;
+  final VoidCallback onCreateRequestLink;
+
+  const _InviteRequestButtons({
+    required this.isSending,
+    required this.isCreatingLink,
+    required this.onSendRequest,
+    required this.onCreateRequestLink,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isBusy = isSending || isCreatingLink;
+
+    return Column(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: isBusy ? null : onSendRequest,
+            child: isSending
+                ? const SizedBox(
+                    width: _kLoaderSize,
+                    height: _kLoaderSize,
+                    child: CircularProgressIndicator(
+                      strokeWidth: _kLoaderStroke,
+                    ),
+                  )
+                : const Text(_Copy.sendRequest),
+          ),
+        ),
+        const SizedBox(height: _UiSpacing.sectionGap),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: isBusy ? null : onCreateRequestLink,
+            icon: isCreatingLink
+                ? const SizedBox(
+                    width: _kLoaderSize,
+                    height: _kLoaderSize,
+                    child: CircularProgressIndicator(
+                      strokeWidth: _kLoaderStroke,
+                    ),
+                  )
+                : const Icon(Icons.copy_outlined),
+            label: const Text(_Copy.createRequestLink),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InviteSendButton extends StatelessWidget {
+  final bool isBusy;
+  final String label;
   final VoidCallback onSendInvite;
 
   const _InviteSendButton({
-    required this.isSending,
+    required this.isBusy,
+    required this.label,
     required this.onSendInvite,
   });
 
@@ -1214,14 +1332,14 @@ class _InviteSendButton extends StatelessWidget {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: isSending ? null : onSendInvite,
-        child: isSending
+        onPressed: isBusy ? null : onSendInvite,
+        child: isBusy
             ? const SizedBox(
                 width: _kLoaderSize,
                 height: _kLoaderSize,
                 child: CircularProgressIndicator(strokeWidth: _kLoaderStroke),
               )
-            : const Text(_Copy.inviteSend),
+            : Text(label),
       ),
     );
   }
