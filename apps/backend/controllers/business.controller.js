@@ -15378,37 +15378,49 @@ async function clockInStaff(req, res) {
         staffRole:
           staffProfile?.staffRole,
       });
+    const requestedStaffProfileId =
+      req.body?.staffProfileId
+        ?.toString()
+        .trim() || "";
+    const canEditSelfAttendance =
+      actor.role === "staff" &&
+      staffProfile?._id &&
+      (requestedStaffProfileId === "" ||
+        requestedStaffProfileId ===
+          staffProfile._id.toString());
+    const canEditAttendance =
+      canManage || canEditSelfAttendance;
     const requestedAttendanceId =
-      canManage ?
+      canEditAttendance ?
         normalizeStaffIdInput(
           req.body?.attendanceId,
         )
       : "";
     const manualClockInAt =
-      canManage ?
+      canEditAttendance ?
         parseDateInput(
           req.body?.clockInAt,
         )
       : null;
     const requestedWorkDate =
-      canManage ?
+      canEditAttendance ?
         normalizeWorkDateToDayStart(
           req.body?.workDate,
         )
       : null;
     const relatedPlanId =
-      canManage ?
+      canEditAttendance ?
         normalizeStaffIdInput(
           req.body?.planId,
         )
       : "";
     const relatedTaskId =
-      canManage ?
+      canEditAttendance ?
         normalizeStaffIdInput(
           req.body?.taskId,
         )
       : "";
-    const auditNote = canManage ?
+    const auditNote = canEditAttendance ?
         (
           req.body?.notes
             ?.toString()
@@ -15416,12 +15428,23 @@ async function clockInStaff(req, res) {
         )
       : "";
 
+    if (
+      actor.role === "staff" &&
+      requestedStaffProfileId &&
+      staffProfile?._id &&
+      requestedStaffProfileId !==
+        staffProfile._id.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
     // WHY: Managers can clock in on behalf of staff.
     const targetStaffProfileId =
       canManage ?
-        req.body?.staffProfileId
-          ?.toString()
-          .trim()
+        requestedStaffProfileId
       : staffProfile?._id?.toString();
 
     if (!targetStaffProfileId) {
@@ -15527,21 +15550,45 @@ async function clockInStaff(req, res) {
         });
 
       if (existingOpen) {
-        return res.status(400).json({
-          error:
-            STAFF_COPY.STAFF_CLOCK_IN_OPEN,
-        });
+        if (!canEditAttendance) {
+          return res.status(400).json({
+            error:
+              STAFF_COPY.STAFF_CLOCK_IN_OPEN,
+          });
+        }
+        previousClockInAt =
+          existingOpen.clockInAt || null;
+        existingOpen.clockInAt =
+          resolvedClockInAt;
+        existingOpen.clockInBy =
+          actor._id;
+        if (existingOpen.clockOutAt) {
+          existingOpen.durationMinutes =
+            resolveAttendanceDurationMinutes(
+              {
+                ...existingOpen.toObject(),
+                clockInAt:
+                  resolvedClockInAt,
+                clockOutAt:
+                  existingOpen.clockOutAt,
+              },
+            );
+        }
+        await existingOpen.save();
+        attendance = existingOpen;
+        auditAction =
+          "staff_attendance_clock_in_update";
+      } else {
+        attendance =
+          await StaffAttendance.create({
+            staffProfileId:
+              targetProfile._id,
+            clockInAt:
+              resolvedClockInAt,
+            clockInBy: actor._id,
+            notes: auditNote,
+          });
       }
-
-      attendance =
-        await StaffAttendance.create({
-          staffProfileId:
-            targetProfile._id,
-          clockInAt:
-            resolvedClockInAt,
-          clockInBy: actor._id,
-          notes: auditNote,
-        });
     }
 
     await writeAuditLog({
@@ -15569,7 +15616,7 @@ async function clockInStaff(req, res) {
         clockInAt:
           attendance.clockInAt,
         manualEntry:
-          canManage &&
+          canEditAttendance &&
           manualClockInAt != null,
         note:
           auditNote || null,
@@ -15662,37 +15709,49 @@ async function clockOutStaff(req, res) {
         staffRole:
           staffProfile?.staffRole,
       });
+    const requestedStaffProfileId =
+      req.body?.staffProfileId
+        ?.toString()
+        .trim() || "";
+    const canEditSelfAttendance =
+      actor.role === "staff" &&
+      staffProfile?._id &&
+      (requestedStaffProfileId === "" ||
+        requestedStaffProfileId ===
+          staffProfile._id.toString());
+    const canEditAttendance =
+      canManage || canEditSelfAttendance;
     const requestedAttendanceId =
-      canManage ?
+      canEditAttendance ?
         normalizeStaffIdInput(
           req.body?.attendanceId,
         )
       : "";
     const manualClockOutAt =
-      canManage ?
+      canEditAttendance ?
         parseDateInput(
           req.body?.clockOutAt,
         )
       : null;
     const requestedWorkDate =
-      canManage ?
+      canEditAttendance ?
         normalizeWorkDateToDayStart(
           req.body?.workDate,
         )
       : null;
     const relatedPlanId =
-      canManage ?
+      canEditAttendance ?
         normalizeStaffIdInput(
           req.body?.planId,
         )
       : "";
     const relatedTaskId =
-      canManage ?
+      canEditAttendance ?
         normalizeStaffIdInput(
           req.body?.taskId,
         )
       : "";
-    const auditNote = canManage ?
+    const auditNote = canEditAttendance ?
         (
           req.body?.notes
             ?.toString()
@@ -15700,12 +15759,23 @@ async function clockOutStaff(req, res) {
         )
       : "";
 
+    if (
+      actor.role === "staff" &&
+      requestedStaffProfileId &&
+      staffProfile?._id &&
+      requestedStaffProfileId !==
+        staffProfile._id.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
     // WHY: Managers can clock out on behalf of staff.
     const targetStaffProfileId =
       canManage ?
-        req.body?.staffProfileId
-          ?.toString()
-          .trim()
+        requestedStaffProfileId
       : staffProfile?._id?.toString();
 
     if (!targetStaffProfileId) {
@@ -15837,7 +15907,7 @@ async function clockOutStaff(req, res) {
         clockOutAt,
         durationMinutes,
         manualEntry:
-          canManage &&
+          canEditAttendance &&
           manualClockOutAt != null,
         note:
           auditNote || null,
