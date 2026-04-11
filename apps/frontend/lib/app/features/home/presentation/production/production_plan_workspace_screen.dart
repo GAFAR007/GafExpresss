@@ -3668,6 +3668,36 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
         : hasClockIn || hasClockOut
         ? _workspaceSoftBlue
         : _workspaceSoftSlate;
+    final headerActions = <Widget>[
+      if (canManageAttendance && onSetAttendance != null)
+        OutlinedButton.icon(
+          onPressed: onSetAttendance,
+          icon: Icon(
+            hasClockIn || hasClockOut
+                ? Icons.edit_calendar_outlined
+                : Icons.schedule_outlined,
+            size: 18,
+          ),
+          label: Text(
+            hasClockIn || hasClockOut
+                ? _editAttendanceLabel
+                : _setAttendanceLabel,
+          ),
+        ),
+      if (canLogProgress)
+        FilledButton.tonalIcon(
+          onPressed: onLogProgress,
+          icon: Icon(
+            hasLoggedProgress
+                ? Icons.edit_note_outlined
+                : Icons.playlist_add_check_circle_outlined,
+            size: 18,
+          ),
+          label: Text(
+            hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
+          ),
+        ),
+    ];
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -3696,81 +3726,91 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: _workspaceSoftBlue,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.person_outline, color: _workspaceBlue),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stackHeader = constraints.maxWidth < 560;
+              Widget buildIdentityRow({required int maxNameLines}) {
+                return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      staffName,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: _workspaceNavy,
-                        fontWeight: FontWeight.w800,
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: _workspaceSoftBlue,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.person_outline,
+                        color: _workspaceBlue,
                       ),
                     ),
-                    if (staffRoleLabel.trim().isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        staffRoleLabel,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            staffName,
+                            maxLines: maxNameLines,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: _workspaceNavy,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (staffRoleLabel.trim().isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              staffRoleLabel,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
+                    ),
+                  ],
+                );
+              }
+
+              if (stackHeader) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    buildIdentityRow(maxNameLines: 2),
+                    if (headerActions.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Wrap(spacing: 8, runSpacing: 8, children: headerActions),
                     ],
                   ],
-                ),
-              ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.end,
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (canManageAttendance && onSetAttendance != null)
-                    OutlinedButton.icon(
-                      onPressed: onSetAttendance,
-                      icon: Icon(
-                        hasClockIn || hasClockOut
-                            ? Icons.edit_calendar_outlined
-                            : Icons.schedule_outlined,
-                        size: 18,
-                      ),
-                      label: Text(
-                        hasClockIn || hasClockOut
-                            ? _editAttendanceLabel
-                            : _setAttendanceLabel,
-                      ),
-                    ),
-                  if (canLogProgress)
-                    FilledButton.tonalIcon(
-                      onPressed: onLogProgress,
-                      icon: Icon(
-                        hasLoggedProgress
-                            ? Icons.edit_note_outlined
-                            : Icons.playlist_add_check_circle_outlined,
-                        size: 18,
-                      ),
-                      label: Text(
-                        hasLoggedProgress
-                            ? _editProgressLabel
-                            : _logProgressLabel,
+                  Expanded(child: buildIdentityRow(maxNameLines: 2)),
+                  if (headerActions.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Align(
+                        alignment: Alignment.topRight,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.end,
+                          children: headerActions,
+                        ),
                       ),
                     ),
+                  ],
                 ],
-              ),
-            ],
+              );
+            },
           ),
           const SizedBox(height: 12),
           LayoutBuilder(
