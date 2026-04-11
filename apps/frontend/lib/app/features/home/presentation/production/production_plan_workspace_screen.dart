@@ -113,9 +113,11 @@ const String _attendanceQuickClockInSuccess = "Clock-in recorded.";
 const String _attendanceQuickClockOutSuccess =
     "Proof saved and clock-out recorded.";
 const String _attendanceClockOutProgressTitle = "Record work before clock-out";
-const String _attendanceClockOutProgressSaveLabel = "Continue to proof";
+const String _attendanceClockOutProgressSaveLabel = "Submit";
+const String _attendanceClockOutProgressUploadProofLabel = "Upload proof";
+const String _attendanceClockOutProgressReplaceProofLabel = "Replace proof";
 const String _attendanceClockOutProgressHint =
-    "Before clocking out, record how many greenhouse or plot units this staff completed. Upload proof next, then review the task title, date, and remaining units before the final clock-out save.";
+    "Before clocking out, record how many greenhouse or plot units this staff completed. Upload proof here, then submit only after every required proof is uploaded.";
 const String _attendanceClockOutPartialFailure =
     "Daily progress was saved, but the attendance update did not finish. Retry the attendance action.";
 const String _attendanceClockOutActualRequired =
@@ -739,6 +741,7 @@ class _ProductionPlanWorkspaceScreenState
                     collectClockOutAuditForTaskStaff(
                       String staffProfileId,
                     ) async {
+                      ProductionAttendanceRecord? proofReadyAttendance;
                       final input = await _showWorkspaceLogDialog(
                         context,
                         workDate: selectedDay,
@@ -762,6 +765,58 @@ class _ProductionPlanWorkspaceScreenState
                         requireCompletedActual: true,
                         requiredActualMessage:
                             _attendanceClockOutActualRequired,
+                        onUploadProofForInput: (input) async {
+                          final activeAttendance =
+                              proofReadyAttendance ??
+                              _attendanceForStaffOnDay(
+                                attendanceRecords: detail.attendanceRecords,
+                                staffProfileId: staffProfileId,
+                                day: selectedDay,
+                              ) ??
+                              _findOpenAttendanceForStaff(
+                                attendanceRecords: detail.attendanceRecords,
+                                staffProfileId: staffProfileId,
+                              );
+                          if (activeAttendance == null) {
+                            return null;
+                          }
+                          final auditSubmission = _buildClockOutAuditSubmission(
+                            input: input,
+                            workDate: selectedDay,
+                            task: task,
+                            planId: widget.planId,
+                            timelineRows: detail.timelineRows,
+                            staffMap: staffMap,
+                            planUnitLabelById: planUnitLabelById,
+                            fallbackTotalUnits: workScopeSummary.totalUnits,
+                            fallbackWorkUnitLabel:
+                                workScopeSummary.singularLabel,
+                            planContextText:
+                                "${detail.plan.title} ${detail.plan.notes}",
+                          );
+                          final uploadedAttendance =
+                              await requireAttendanceProofUpload(
+                                context: context,
+                                ref: ref,
+                                attendance: _toStaffAttendanceRecord(
+                                  activeAttendance,
+                                ),
+                                subjectLabel: auditSubmission.proofSubjectLabel,
+                                taskLabel: auditSubmission.proofTaskLabel,
+                                clockOutAuditPayload:
+                                    auditSubmission.proofAuditPayload,
+                              );
+                          if (!context.mounted) {
+                            return null;
+                          }
+                          proofReadyAttendance = _toProductionAttendanceRecord(
+                            uploadedAttendance,
+                          );
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          return proofReadyAttendance;
+                        },
                       );
                       if (input == null) {
                         return null;
@@ -805,7 +860,12 @@ class _ProductionPlanWorkspaceScreenState
                               notes: input.notes,
                               planId: widget.planId,
                             );
-                        return auditSubmission;
+                        return _ClockOutAuditSubmission(
+                          proofAuditPayload: auditSubmission.proofAuditPayload,
+                          proofSubjectLabel: auditSubmission.proofSubjectLabel,
+                          proofTaskLabel: auditSubmission.proofTaskLabel,
+                          proofReadyAttendance: proofReadyAttendance,
+                        );
                       } catch (error) {
                         _showSnackSafe(
                           _resolveProductionWorkspaceErrorMessage(
@@ -923,7 +983,10 @@ class _ProductionPlanWorkspaceScreenState
                         if (shouldSetClockOutFirst) {
                           final proofReadyAttendance =
                               await prepareClockOutProofReview(
-                                attendance: existingAttendance,
+                                attendance:
+                                    clockOutAuditSubmission
+                                        ?.proofReadyAttendance ??
+                                    existingAttendance,
                                 plannedClockOutAt: input.clockOutAt!,
                                 clockOutAuditSubmission:
                                     clockOutAuditSubmission,
@@ -1119,7 +1182,10 @@ class _ProductionPlanWorkspaceScreenState
                         );
                         final proofReadyAttendance =
                             await prepareClockOutProofReview(
-                              attendance: openAttendance,
+                              attendance:
+                                  clockOutAuditSubmission
+                                      ?.proofReadyAttendance ??
+                                  openAttendance,
                               plannedClockOutAt: clockOutAt,
                               clockOutAuditSubmission: clockOutAuditSubmission,
                             );
@@ -4880,11 +4946,13 @@ class _ClockOutAuditSubmission {
   final Map<String, dynamic> proofAuditPayload;
   final String proofSubjectLabel;
   final String proofTaskLabel;
+  final ProductionAttendanceRecord? proofReadyAttendance;
 
   const _ClockOutAuditSubmission({
     required this.proofAuditPayload,
     required this.proofSubjectLabel,
     required this.proofTaskLabel,
+    required this.proofReadyAttendance,
   });
 }
 
@@ -6771,6 +6839,7 @@ _ClockOutAuditSubmission _buildClockOutAuditSubmission({
       "$doneLabel done",
       "$remainingLabel left",
     ].join(" • "),
+    proofReadyAttendance: null,
   );
 }
 
@@ -6991,6 +7060,10 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   String? workflowHintOverride,
   bool requireCompletedActual = false,
   String requiredActualMessage = _logDialogActualInvalid,
+  Future<ProductionAttendanceRecord?> Function(
+    _WorkspaceLogProgressInput input,
+  )?
+  onUploadProofForInput,
 }) async {
   final assignedStaffIds = _resolveAssignedStaffIds(task);
   if (assignedStaffIds.isEmpty) {
@@ -7243,6 +7316,29 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                     : _attendanceClockOutUnsetLabel);
           final hasSelectedClockIn = selectedAttendance?.clockInAt != null;
           final hasSelectedClockOut = selectedAttendance?.clockOutAt != null;
+          final requiredProofCount = selectedActualAmount <= 0
+              ? 0
+              : selectedActualAmount.ceil();
+          final uploadedProofCount = _attendanceProofCount(selectedAttendance);
+          final proofAuditMatchesSelection = onUploadProofForInput == null
+              ? true
+              : selectedAttendance?.clockOutAudit != null &&
+                    _sameProgressAmount(
+                      selectedAttendance!.clockOutAudit!.unitsCompleted ?? -1,
+                      selectedActualAmount,
+                    ) &&
+                    selectedAttendance.clockOutAudit!.unitId.trim() ==
+                        (selectedUnitId?.trim() ?? "");
+          final proofCountMatchesSelectedAmount = requiredProofCount == 0
+              ? uploadedProofCount == 0
+              : uploadedProofCount == requiredProofCount;
+          final proofInstructionText = requiredProofCount == 0
+              ? "Select a positive completed amount to unlock proof upload and Submit."
+              : !proofAuditMatchesSelection
+              ? "Completed units changed. Upload proof again before submitting."
+              : proofCountMatchesSelectedAmount
+              ? "Uploaded $uploadedProofCount of $requiredProofCount required proof image(s)."
+              : "Upload exactly $requiredProofCount proof image(s) before submitting.";
           final selectedStaffLabel =
               (selectedStaffId != null && selectedStaffId!.trim().isNotEmpty)
               ? _resolveStaffDisplayLabel(
@@ -7251,6 +7347,37 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                   fallbackRole: task.roleRequired,
                 )
               : _unassignedLabel;
+          final canUploadProof =
+              onUploadProofForInput != null &&
+              hasSelectedClockIn &&
+              !hasSelectedClockOut &&
+              selectedActualAmount > 0 &&
+              selectedStaffId != null &&
+              selectedStaffId!.trim().isNotEmpty;
+          final canSubmitDialog =
+              progressOptions.any(
+                (amount) => _sameProgressAmount(amount, selectedActualAmount),
+              ) &&
+              (!requireCompletedActual || selectedActualAmount > 0) &&
+              (onUploadProofForInput == null ||
+                  (proofCountMatchesSelectedAmount &&
+                      proofAuditMatchesSelection));
+
+          _WorkspaceLogProgressInput buildCurrentInput() {
+            return _WorkspaceLogProgressInput(
+              staffId: selectedStaffId,
+              unitId: selectedUnitId,
+              actualPlots: selectedActualAmount,
+              quantityActivityType: selectedQuantityActivityType,
+              quantityAmount: selectedQuantityAmount,
+              quantityUnit:
+                  selectedQuantityActivityType == _quantityActivityNone
+                  ? ""
+                  : resolveQuantityUnit(selectedQuantityActivityType),
+              delayReason: selectedDelayReason,
+              notes: notesController.text.trim(),
+            );
+          }
 
           Future<void> applyAttendanceAction(
             Future<ProductionAttendanceRecord?> Function(
@@ -7786,6 +7913,62 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                   height: 1.4,
                                 ),
                           ),
+                          if (onUploadProofForInput != null) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest
+                                    .withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant
+                                      .withValues(alpha: 0.7),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Proof images",
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    proofInstructionText,
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                          height: 1.3,
+                                        ),
+                                  ),
+                                  if (uploadedProofCount > 0) ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      "$uploadedProofCount proof image(s) uploaded for this clock-out flow.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -7923,48 +8106,104 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text(_logDialogCancelLabel),
               ),
+              if (onUploadProofForInput != null)
+                OutlinedButton.icon(
+                  onPressed: !canUploadProof
+                      ? null
+                      : () async {
+                          final isValidActualSelection = progressOptions.any(
+                            (amount) => _sameProgressAmount(
+                              amount,
+                              selectedActualAmount,
+                            ),
+                          );
+                          if (!isValidActualSelection) {
+                            setDialogState(() {
+                              validationError = _logDialogActualInvalid;
+                            });
+                            return;
+                          }
+                          if (requireCompletedActual &&
+                              selectedActualAmount <= 0) {
+                            setDialogState(() {
+                              validationError = requiredActualMessage;
+                            });
+                            return;
+                          }
+                          final updatedAttendance = await onUploadProofForInput(
+                            buildCurrentInput(),
+                          );
+                          if (!dialogContext.mounted ||
+                              updatedAttendance == null) {
+                            return;
+                          }
+                          setDialogState(() {
+                            attendanceOverridesByStaffId[updatedAttendance
+                                    .staffProfileId
+                                    .trim()] =
+                                updatedAttendance;
+                            validationError = "";
+                          });
+                        },
+                  icon: Icon(
+                    uploadedProofCount > 0
+                        ? Icons.refresh_outlined
+                        : Icons.upload_file_outlined,
+                  ),
+                  label: Text(
+                    uploadedProofCount > 0
+                        ? _attendanceClockOutProgressReplaceProofLabel
+                        : _attendanceClockOutProgressUploadProofLabel,
+                  ),
+                ),
               FilledButton(
-                onPressed: () {
-                  final isValidActualSelection = progressOptions.any(
-                    (amount) =>
-                        _sameProgressAmount(amount, selectedActualAmount),
-                  );
-                  if (!isValidActualSelection) {
-                    setDialogState(() {
-                      validationError = _logDialogActualInvalid;
-                    });
-                    return;
-                  }
-                  if (requireCompletedActual && selectedActualAmount <= 0) {
-                    setDialogState(() {
-                      validationError = requiredActualMessage;
-                    });
-                    return;
-                  }
-                  if (selectedActualAmount == 0 &&
-                      selectedQuantityAmount == 0 &&
-                      selectedDelayReason == _delayReasonNone) {
-                    setDialogState(() {
-                      validationError = _logDialogDelayRequired;
-                    });
-                    return;
-                  }
-                  Navigator.of(dialogContext).pop(
-                    _WorkspaceLogProgressInput(
-                      staffId: selectedStaffId,
-                      unitId: selectedUnitId,
-                      actualPlots: selectedActualAmount,
-                      quantityActivityType: selectedQuantityActivityType,
-                      quantityAmount: selectedQuantityAmount,
-                      quantityUnit:
-                          selectedQuantityActivityType == _quantityActivityNone
-                          ? ""
-                          : resolveQuantityUnit(selectedQuantityActivityType),
-                      delayReason: selectedDelayReason,
-                      notes: notesController.text.trim(),
-                    ),
-                  );
-                },
+                onPressed: !canSubmitDialog
+                    ? null
+                    : () {
+                        final isValidActualSelection = progressOptions.any(
+                          (amount) =>
+                              _sameProgressAmount(amount, selectedActualAmount),
+                        );
+                        if (!isValidActualSelection) {
+                          setDialogState(() {
+                            validationError = _logDialogActualInvalid;
+                          });
+                          return;
+                        }
+                        if (requireCompletedActual &&
+                            selectedActualAmount <= 0) {
+                          setDialogState(() {
+                            validationError = requiredActualMessage;
+                          });
+                          return;
+                        }
+                        if (onUploadProofForInput != null &&
+                            !proofCountMatchesSelectedAmount) {
+                          setDialogState(() {
+                            validationError = requiredProofCount == 0
+                                ? "Select a positive completed amount before submitting."
+                                : "Upload exactly $requiredProofCount proof image(s) before submitting.";
+                          });
+                          return;
+                        }
+                        if (onUploadProofForInput != null &&
+                            !proofAuditMatchesSelection) {
+                          setDialogState(() {
+                            validationError =
+                                "Completed units changed. Upload proof again before submitting.";
+                          });
+                          return;
+                        }
+                        if (selectedActualAmount == 0 &&
+                            selectedQuantityAmount == 0 &&
+                            selectedDelayReason == _delayReasonNone) {
+                          setDialogState(() {
+                            validationError = _logDialogDelayRequired;
+                          });
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(buildCurrentInput());
+                      },
                 child: Text(saveLabel),
               ),
             ],
