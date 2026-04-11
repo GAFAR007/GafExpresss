@@ -137,6 +137,11 @@ class _ProductionPlanListScreenState
 
   bool get _selectionMode => _selectedDraftIds.isNotEmpty;
 
+  void _openCreatePlan() {
+    AppDebug.log(_logTag, _openCreate);
+    context.push(productionPlanCreateRoute);
+  }
+
   void _clearSelection() {
     if (_selectedDraftIds.isEmpty) {
       return;
@@ -347,6 +352,8 @@ class _ProductionPlanListScreenState
   @override
   Widget build(BuildContext context) {
     AppDebug.log(_logTag, _buildMessage);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final useBottomCreateBar = screenWidth < 680;
     final plansAsync = ref.watch(productionPlansProvider);
     final portfolioAsync = ref.watch(
       productionPortfolioConfidenceProvider(null),
@@ -453,13 +460,30 @@ class _ProductionPlanListScreenState
       ),
       floatingActionButton: _selectionMode
           ? null
+          : useBottomCreateBar
+          ? null
           : FloatingActionButton.extended(
-              onPressed: () {
-                AppDebug.log(_logTag, _openCreate);
-                context.push(productionPlanCreateRoute);
-              },
+              onPressed: _openCreatePlan,
               icon: const Icon(Icons.add),
               label: const Text(_createButtonLabel),
+            ),
+      bottomNavigationBar: _selectionMode || !useBottomCreateBar
+          ? null
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  _pagePadding,
+                  12,
+                  _pagePadding,
+                  _pagePadding,
+                ),
+                child: FilledButton.icon(
+                  onPressed: _openCreatePlan,
+                  icon: const Icon(Icons.add),
+                  label: const Text(_createButtonLabel),
+                ),
+              ),
             ),
       body: RefreshIndicator(
         onRefresh: () async {
@@ -493,9 +517,30 @@ class _ProductionPlanListScreenState
             }
 
             if (visiblePlans.isEmpty) {
-              return const ProductionEmptyState(
-                title: _emptyTitle,
-                message: _emptyMessage,
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final topPadding = constraints.maxHeight >= 640
+                      ? constraints.maxHeight * 0.16
+                      : 32.0;
+                  final bottomPadding = useBottomCreateBar ? 120.0 : 40.0;
+                  return ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.fromLTRB(
+                      _pagePadding,
+                      topPadding,
+                      _pagePadding,
+                      bottomPadding,
+                    ),
+                    children: [
+                      ProductionEmptyState(
+                        title: _emptyTitle,
+                        message: _emptyMessage,
+                        actionLabel: _createButtonLabel,
+                        onAction: _openCreatePlan,
+                      ),
+                    ],
+                  );
+                },
               );
             }
             final portfolioSummary = portfolioAsync.valueOrNull?.summary;

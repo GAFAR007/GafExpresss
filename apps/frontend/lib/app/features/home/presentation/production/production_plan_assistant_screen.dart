@@ -14720,6 +14720,10 @@ class _ProductionPlanAssistantScreenState
   Widget build(BuildContext context) {
     AppDebug.log(_logTag, _buildLog);
     final theme = Theme.of(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isCompactAssistantLayout = screenWidth < 760;
+    final bodyHorizontalPadding = isCompactAssistantLayout ? 14.0 : 18.0;
+    final bodyTopPadding = isCompactAssistantLayout ? 12.0 : 16.0;
     if (_isInitializingSession) {
       return Scaffold(
         appBar: AppBar(title: const Text("New production plan")),
@@ -14822,12 +14826,15 @@ class _ProductionPlanAssistantScreenState
       required String title,
       required String subtitle,
       required Widget child,
-      EdgeInsetsGeometry padding = const EdgeInsets.all(24),
+      EdgeInsetsGeometry? padding,
     }) {
+      final shellPadding =
+          padding ?? EdgeInsets.all(isCompactAssistantLayout ? 18 : 24);
+      final shellRadius = isCompactAssistantLayout ? 22.0 : 28.0;
       return Container(
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(shellRadius),
           border: Border.all(color: theme.colorScheme.outlineVariant),
           boxShadow: [
             BoxShadow(
@@ -14837,7 +14844,7 @@ class _ProductionPlanAssistantScreenState
             ),
           ],
         ),
-        padding: padding,
+        padding: shellPadding,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -16423,6 +16430,51 @@ class _ProductionPlanAssistantScreenState
         ),
     ];
 
+    Widget buildCompactFooter({
+      required List<Widget> secondaryActions,
+      required Widget primaryAction,
+    }) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (secondaryActions.isNotEmpty)
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: secondaryActions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  return ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 148),
+                    child: secondaryActions[index],
+                  );
+                },
+              ),
+            ),
+          if (secondaryActions.isNotEmpty) const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: primaryAction),
+        ],
+      );
+    }
+
+    final pageTitleStyle =
+        (isCompactAssistantLayout
+                ? (screenWidth < 420
+                      ? theme.textTheme.headlineSmall
+                      : theme.textTheme.headlineMedium)
+                : theme.textTheme.displaySmall)
+            ?.copyWith(
+              fontWeight: FontWeight.w800,
+              letterSpacing: isCompactAssistantLayout ? -0.6 : -1.2,
+            );
+    final pageSubtitleStyle =
+        (isCompactAssistantLayout
+                ? theme.textTheme.bodyMedium
+                : theme.textTheme.bodyLarge)
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant, height: 1.45);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -16556,21 +16608,9 @@ class _ProductionPlanAssistantScreenState
                   ),
                 ),
                 child: useColumn
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (
-                            var index = 0;
-                            index < secondaryActions.length;
-                            index++
-                          ) ...[
-                            secondaryActions[index],
-                            if (index < secondaryActions.length - 1)
-                              const SizedBox(height: 10),
-                          ],
-                          const SizedBox(height: 10),
-                          primaryAction,
-                        ],
+                    ? buildCompactFooter(
+                        secondaryActions: secondaryActions,
+                        primaryAction: primaryAction,
                       )
                     : Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -16646,19 +16686,12 @@ class _ProductionPlanAssistantScreenState
                 ),
               ),
               child: useColumn
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (
-                          var index = 0;
-                          index < secondaryChildren.length;
-                          index++
-                        ) ...[
-                          secondaryChildren[index],
-                          if (index != secondaryChildren.length - 1)
-                            const SizedBox(height: 10),
-                        ],
-                      ],
+                  ? buildCompactFooter(
+                      secondaryActions: secondaryChildren.sublist(
+                        0,
+                        secondaryChildren.length - 1,
+                      ),
+                      primaryAction: secondaryChildren.last,
                     )
                   : Row(
                       children: [
@@ -16700,64 +16733,60 @@ class _ProductionPlanAssistantScreenState
           ),
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  hasDraftStudio
-                      ? "Edit the draft, not the chaos."
-                      : "Blank start. One clear step at a time.",
-                  style: theme.textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -1.2,
+          child: isCompactAssistantLayout
+              ? ListView(
+                  padding: EdgeInsets.fromLTRB(
+                    bodyHorizontalPadding,
+                    bodyTopPadding,
+                    bodyHorizontalPadding,
+                    24,
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  hasDraftStudio
-                      ? "The timeline is primary. AI stays optional. You can adjust tasks, staffing, notes, and dates without getting trapped in a chat UI."
-                      : "Build the production context first, then generate a timeline you can actually understand and edit.",
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                LinearProgressIndicator(
-                  value: hasDraftStudio
-                      ? 1
-                      : _wizardStepNumber(_currentWizardStep) /
-                            _wizardSteps().length,
-                  minHeight: 8,
-                  borderRadius: BorderRadius.circular(999),
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                ),
-                if (summaryChips.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (
-                          var index = 0;
-                          index < summaryChips.length;
-                          index++
-                        ) ...[
-                          summaryChips[index],
-                          if (index != summaryChips.length - 1)
-                            const SizedBox(width: 10),
-                        ],
-                      ],
+                  children: [
+                    Text(
+                      hasDraftStudio
+                          ? "Edit the draft, not the chaos."
+                          : "Blank start. One clear step at a time.",
+                      style: pageTitleStyle,
                     ),
-                  ),
-                ],
-                const SizedBox(height: 18),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.only(bottom: 24),
-                    child: Center(
+                    const SizedBox(height: 8),
+                    Text(
+                      hasDraftStudio
+                          ? "The timeline is primary. AI stays optional. You can adjust tasks, staffing, notes, and dates without getting trapped in a chat UI."
+                          : "Build the production context first, then generate a timeline you can actually understand and edit.",
+                      style: pageSubtitleStyle,
+                    ),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(
+                      value: hasDraftStudio
+                          ? 1
+                          : _wizardStepNumber(_currentWizardStep) /
+                                _wizardSteps().length,
+                      minHeight: 8,
+                      borderRadius: BorderRadius.circular(999),
+                      backgroundColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                    ),
+                    if (summaryChips.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            for (
+                              var index = 0;
+                              index < summaryChips.length;
+                              index++
+                            ) ...[
+                              summaryChips[index],
+                              if (index != summaryChips.length - 1)
+                                const SizedBox(width: 10),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    Center(
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
                           maxWidth: hasDraftStudio ? 1340 : 980,
@@ -16767,11 +16796,81 @@ class _ProductionPlanAssistantScreenState
                             : buildWizardContent(),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                  ],
+                )
+              : Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    bodyHorizontalPadding,
+                    bodyTopPadding,
+                    bodyHorizontalPadding,
+                    0,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hasDraftStudio
+                            ? "Edit the draft, not the chaos."
+                            : "Blank start. One clear step at a time.",
+                        style: pageTitleStyle,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        hasDraftStudio
+                            ? "The timeline is primary. AI stays optional. You can adjust tasks, staffing, notes, and dates without getting trapped in a chat UI."
+                            : "Build the production context first, then generate a timeline you can actually understand and edit.",
+                        style: pageSubtitleStyle,
+                      ),
+                      const SizedBox(height: 16),
+                      LinearProgressIndicator(
+                        value: hasDraftStudio
+                            ? 1
+                            : _wizardStepNumber(_currentWizardStep) /
+                                  _wizardSteps().length,
+                        minHeight: 8,
+                        borderRadius: BorderRadius.circular(999),
+                        backgroundColor:
+                            theme.colorScheme.surfaceContainerHighest,
+                      ),
+                      if (summaryChips.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              for (
+                                var index = 0;
+                                index < summaryChips.length;
+                                index++
+                              ) ...[
+                                summaryChips[index],
+                                if (index != summaryChips.length - 1)
+                                  const SizedBox(width: 10),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.only(bottom: 24),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: hasDraftStudio ? 1340 : 980,
+                              ),
+                              child: hasDraftStudio
+                                  ? buildDraftStudioContent()
+                                  : buildWizardContent(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
         ),
       ),
     );

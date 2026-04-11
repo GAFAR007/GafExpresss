@@ -173,24 +173,36 @@ class ProductionStatusPill extends StatelessWidget {
 class ProductionEmptyState extends StatelessWidget {
   final String title;
   final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   const ProductionEmptyState({
     super.key,
     required this.title,
     required this.message,
+    this.actionLabel,
+    this.onAction,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isCompact = screenWidth < 640;
+    final hasAction =
+        actionLabel?.trim().isNotEmpty == true && onAction != null;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(_emptyStatePadding),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
+          constraints: BoxConstraints(maxWidth: isCompact ? 380 : 460),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+            padding: EdgeInsets.symmetric(
+              horizontal: isCompact ? 22 : 28,
+              vertical: isCompact ? 24 : 32,
+            ),
             decoration: BoxDecoration(
               color: colorScheme.surface,
               borderRadius: BorderRadius.circular(AppRadius.xxl),
@@ -235,6 +247,17 @@ class ProductionEmptyState extends StatelessWidget {
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ),
+                if (hasAction) ...[
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: onAction,
+                      icon: const Icon(Icons.add),
+                      label: Text(actionLabel!),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
