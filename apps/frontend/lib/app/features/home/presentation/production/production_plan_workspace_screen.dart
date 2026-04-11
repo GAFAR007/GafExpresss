@@ -96,10 +96,14 @@ const String _workingOnLabel = "Working on";
 const String _doneTodayLabel = "Done today";
 const String _leftTodayLabel = "Left today";
 const String _approvalLabel = "Approval";
-const String _noActivityLabel = "No progress logs yet for this day.";
+const String _noActivityLabel =
+    "No attendance or progress activity yet for this day.";
 const String _estimatedDatesLabel = "Estimated";
 const String _clockedInLabel = "Clocked in";
 const String _clockedOutLabel = "Clocked out";
+const String _clockInActivityLabel = "Clocked in";
+const String _clockOutActivityLabel = "Clocked out";
+const String _attendanceAuditRecordedLabel = "Recorded for audit";
 const String _attendanceClockInUnsetLabel = "Not clocked in";
 const String _attendanceClockOutUnsetLabel = "Not clocked out";
 const String _attendanceClockOutPendingLabel = "Awaiting clock-out";
@@ -822,8 +826,43 @@ class _ProductionPlanWorkspaceScreenState
                       String staffProfileId,
                       ProductionAttendanceRecord? existingAttendance,
                     ) async {
-                      if (existingAttendance != null) {
-                        return null;
+                      Future<ProductionAttendanceRecord?>
+                      recoverOpenAttendance() async {
+                        final knownOpenAttendance = _findOpenAttendanceForStaff(
+                          attendanceRecords: detail.attendanceRecords,
+                          staffProfileId: staffProfileId,
+                        );
+                        if (knownOpenAttendance != null) {
+                          return knownOpenAttendance;
+                        }
+                        try {
+                          final records = await ref.refresh(
+                            staffAttendanceProvider(staffProfileId).future,
+                          );
+                          final recoveredRecord =
+                              _findLatestOpenStaffAttendanceRecord(records);
+                          if (recoveredRecord == null) {
+                            return null;
+                          }
+                          return _toProductionAttendanceRecord(recoveredRecord);
+                        } catch (_) {
+                          return null;
+                        }
+                      }
+
+                      final existingOpenAttendance =
+                          existingAttendance?.clockOutAt == null
+                          ? existingAttendance
+                          : await recoverOpenAttendance();
+                      if (existingOpenAttendance != null &&
+                          existingOpenAttendance.clockOutAt == null) {
+                        _showSnackSafe(
+                          _buildOpenAttendanceRecoveredMessage(
+                            attendance: existingOpenAttendance,
+                            selectedDay: selectedDay,
+                          ),
+                        );
+                        return existingOpenAttendance;
                       }
                       try {
                         final clockInAt = _resolveQuickAttendanceTime(
@@ -844,6 +883,19 @@ class _ProductionPlanWorkspaceScreenState
                         _showSnackSafe(_attendanceQuickClockInSuccess);
                         return _toProductionAttendanceRecord(attendanceRecord);
                       } catch (error) {
+                        if (_isOpenAttendanceSessionError(error)) {
+                          final recoveredAttendance =
+                              await recoverOpenAttendance();
+                          if (recoveredAttendance != null) {
+                            _showSnackSafe(
+                              _buildOpenAttendanceRecoveredMessage(
+                                attendance: recoveredAttendance,
+                                selectedDay: selectedDay,
+                              ),
+                            );
+                            return recoveredAttendance;
+                          }
+                        }
                         _showSnackSafe(
                           _resolveProductionWorkspaceErrorMessage(
                             error,
@@ -2992,6 +3044,13 @@ class _AgendaTaskCard extends StatelessWidget {
       fallbackWorkUnitLabel: fallbackWorkUnitLabel,
       contextText: "$planContextText ${task.title} ${task.instructions}",
     );
+    final attendanceActivityEntries = _buildAttendanceActivityEntries(
+      attendanceRecords: attendanceRecords,
+      assignedStaffIds: assignedStaffIds,
+      day: selectedDay,
+      staffMap: staffMap,
+      fallbackRole: task.roleRequired,
+    );
 
     return Container(
       padding: const EdgeInsets.all(_agendaCardPadding),
@@ -3168,11 +3227,16 @@ class _AgendaTaskCard extends StatelessWidget {
           else
             Column(
               children: assignedStaffIds.map((staffId) {
-                final attendance = _attendanceForStaffOnDay(
-                  attendanceRecords: attendanceRecords,
-                  staffProfileId: staffId,
-                  day: selectedDay,
-                );
+                final attendance =
+                    _attendanceForStaffOnDay(
+                      attendanceRecords: attendanceRecords,
+                      staffProfileId: staffId,
+                      day: selectedDay,
+                    ) ??
+                    _findOpenAttendanceForStaff(
+                      attendanceRecords: attendanceRecords,
+                      staffProfileId: staffId,
+                    );
                 final clockInAt = attendance?.clockInAt?.toLocal();
                 final clockOutAt = attendance?.clockOutAt?.toLocal();
                 final hasLoggedProgress = rowsForDay.any(
@@ -3193,12 +3257,17 @@ class _AgendaTaskCard extends StatelessWidget {
                         staffName: staffIdentity.displayName,
                         staffRoleLabel: staffIdentity.roleLabel,
                         estimatedWindow: estimatedWindow,
-                        clockInValue: _formatAttendanceTimeValue(
+                        clockInValue: _formatAttendanceDisplayValue(
                           clockInAt,
+                          selectedDay: selectedDay,
                           emptyLabel: _attendanceClockInUnsetLabel,
                         ),
                         clockOutValue: clockOutAt != null
-                            ? _clockLabel(clockOutAt)
+                            ? _formatAttendanceDisplayValue(
+                                clockOutAt,
+                                selectedDay: selectedDay,
+                                emptyLabel: _attendanceClockOutUnsetLabel,
+                              )
                             : (clockInAt != null
                                   ? _attendanceClockOutPendingLabel
                                   : _attendanceClockOutUnsetLabel),
@@ -3317,14 +3386,20 @@ class _AgendaTaskCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          if (rowsForDay.isEmpty)
+          if (attendanceActivityEntries.isEmpty && rowsForDay.isEmpty)
             Text(
               _noActivityLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             )
-          else
+          else ...[
+            ...attendanceActivityEntries.map(
+              (entry) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _AttendanceActivityRow(entry: entry),
+              ),
+            ),
             ...rowsForDay.map(
               (row) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -3342,6 +3417,7 @@ class _AgendaTaskCard extends StatelessWidget {
                 ),
               ),
             ),
+          ],
         ],
       ),
     );
@@ -3662,24 +3738,6 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 runSpacing: 8,
                 alignment: WrapAlignment.end,
                 children: [
-                  if (canManageAttendance &&
-                      !hasClockIn &&
-                      !hasClockOut &&
-                      onQuickClockIn != null)
-                    FilledButton.tonalIcon(
-                      onPressed: onQuickClockIn,
-                      icon: const Icon(Icons.login_outlined, size: 18),
-                      label: const Text(_attendanceDialogClockInLabel),
-                    ),
-                  if (canManageAttendance &&
-                      hasClockIn &&
-                      !hasClockOut &&
-                      onQuickClockOut != null)
-                    FilledButton.tonalIcon(
-                      onPressed: onQuickClockOut,
-                      icon: const Icon(Icons.logout_outlined, size: 18),
-                      label: const Text(_attendanceDialogClockOutLabel),
-                    ),
                   if (canManageAttendance && onSetAttendance != null)
                     OutlinedButton.icon(
                       onPressed: onSetAttendance,
@@ -3731,6 +3789,21 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 accentColor: hasClockIn ? _workspaceTeal : _workspaceBlue,
                 softColor: hasClockIn ? _workspaceSoftTeal : _workspaceSoftBlue,
                 icon: Icons.login_outlined,
+                actionLabel:
+                    canManageAttendance &&
+                        !hasClockIn &&
+                        !hasClockOut &&
+                        onQuickClockIn != null
+                    ? _attendanceDialogClockInLabel
+                    : null,
+                actionIcon: Icons.login_outlined,
+                onAction:
+                    canManageAttendance &&
+                        !hasClockIn &&
+                        !hasClockOut &&
+                        onQuickClockIn != null
+                    ? onQuickClockIn
+                    : null,
               );
               final clockOutCard = _AttendanceTimingCard(
                 label: _clockedOutLabel,
@@ -3746,6 +3819,21 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                     : (hasClockIn
                           ? Icons.timelapse_outlined
                           : Icons.pending_outlined),
+                actionLabel:
+                    canManageAttendance &&
+                        hasClockIn &&
+                        !hasClockOut &&
+                        onQuickClockOut != null
+                    ? _attendanceDialogClockOutLabel
+                    : null,
+                actionIcon: Icons.logout_outlined,
+                onAction:
+                    canManageAttendance &&
+                        hasClockIn &&
+                        !hasClockOut &&
+                        onQuickClockOut != null
+                    ? onQuickClockOut
+                    : null,
               );
               if (stacked) {
                 return Column(
@@ -3806,6 +3894,9 @@ class _AttendanceTimingCard extends StatelessWidget {
   final Color accentColor;
   final Color softColor;
   final IconData icon;
+  final String? actionLabel;
+  final IconData? actionIcon;
+  final VoidCallback? onAction;
 
   const _AttendanceTimingCard({
     required this.label,
@@ -3813,6 +3904,9 @@ class _AttendanceTimingCard extends StatelessWidget {
     required this.accentColor,
     required this.softColor,
     required this.icon,
+    this.actionLabel,
+    this.actionIcon,
+    this.onAction,
   });
 
   @override
@@ -3837,43 +3931,147 @@ class _AttendanceTimingCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: accentColor.withValues(alpha: 0.20)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: Colors.white, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: accentColor,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.2,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: _workspaceNavy,
-                    fontWeight: FontWeight.w900,
-                    height: 1.3,
-                  ),
+                child: Icon(icon, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: accentColor,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      value,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: _workspaceNavy,
+                        fontWeight: FontWeight.w900,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: onAction,
+              icon: Icon(actionIcon ?? icon, size: 16, color: accentColor),
+              label: Text(
+                actionLabel!,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: accentColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: Size.zero,
+                alignment: Alignment.centerLeft,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AttendanceActivityRow extends StatelessWidget {
+  final _AttendanceActivityEntry entry;
+
+  const _AttendanceActivityRow({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final accentColor = entry.isClockIn ? _workspaceTeal : _workspaceBerry;
+    final softColor = entry.isClockIn
+        ? _workspaceSoftTeal
+        : _workspaceSoftBerry;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoChip(
+                label: entry.staffName,
+                icon: Icons.person_outline,
+                backgroundColor: _workspaceSoftBlue,
+                foregroundColor: _workspaceBlue,
+                borderColor: _workspaceBlue.withValues(alpha: 0.16),
+              ),
+              _InfoChip(
+                label: "Staff ID: ${entry.staffId}",
+                icon: Icons.badge_outlined,
+                backgroundColor: _workspaceSoftSlate,
+                foregroundColor: _workspaceNavy,
+                borderColor: _workspaceNavy.withValues(alpha: 0.12),
+              ),
+              _InfoChip(
+                label: entry.actionLabel,
+                icon: entry.isClockIn
+                    ? Icons.login_outlined
+                    : Icons.logout_outlined,
+                backgroundColor: softColor,
+                foregroundColor: accentColor,
+                borderColor: accentColor.withValues(alpha: 0.16),
+              ),
+              _InfoChip(
+                label: formatDateTimeLabel(entry.recordedAt),
+                icon: Icons.schedule_outlined,
+                backgroundColor: _workspaceSoftAmber,
+                foregroundColor: _workspaceAmber,
+                borderColor: _workspaceAmber.withValues(alpha: 0.16),
+              ),
+              _InfoChip(
+                label: _attendanceAuditRecordedLabel,
+                icon: Icons.verified_outlined,
+                backgroundColor: _workspaceSoftSlate,
+                foregroundColor: _workspaceNavy,
+                borderColor: _workspaceNavy.withValues(alpha: 0.12),
+              ),
+            ],
+          ),
+          if (entry.note.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              entry.note,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -4368,6 +4566,164 @@ ProductionAttendanceRecord? _attendanceForStaffOnDay({
     return leftValue.compareTo(rightValue);
   });
   return items.first;
+}
+
+String _formatAttendanceDisplayValue(
+  DateTime? value, {
+  required DateTime selectedDay,
+  required String emptyLabel,
+}) {
+  if (value == null) {
+    return emptyLabel;
+  }
+  final localValue = value.toLocal();
+  if (_isSameDay(localValue, selectedDay)) {
+    return _clockLabel(localValue);
+  }
+  return "${formatDateLabel(localValue)} • ${_clockLabel(localValue)}";
+}
+
+ProductionAttendanceRecord? _findOpenAttendanceForStaff({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+}) {
+  final normalizedStaffId = staffProfileId.trim();
+  if (normalizedStaffId.isEmpty) {
+    return null;
+  }
+  final items = attendanceRecords.where((record) {
+    return record.staffProfileId.trim() == normalizedStaffId &&
+        record.clockOutAt == null;
+  }).toList();
+  if (items.isEmpty) {
+    return null;
+  }
+  items.sort((left, right) {
+    final leftValue =
+        (left.clockInAt ??
+                left.createdAt ??
+                DateTime.fromMillisecondsSinceEpoch(0))
+            .toLocal();
+    final rightValue =
+        (right.clockInAt ??
+                right.createdAt ??
+                DateTime.fromMillisecondsSinceEpoch(0))
+            .toLocal();
+    return rightValue.compareTo(leftValue);
+  });
+  return items.first;
+}
+
+StaffAttendanceRecord? _findLatestOpenStaffAttendanceRecord(
+  List<StaffAttendanceRecord> records,
+) {
+  final items = records.where((record) => record.isOpen).toList();
+  if (items.isEmpty) {
+    return null;
+  }
+  items.sort((left, right) {
+    final leftValue = (left.clockInAt).toLocal();
+    final rightValue = (right.clockInAt).toLocal();
+    return rightValue.compareTo(leftValue);
+  });
+  return items.first;
+}
+
+bool _isOpenAttendanceSessionError(Object error) {
+  final message = _resolveProductionWorkspaceErrorMessage(
+    error,
+    fallback: "",
+  ).toLowerCase();
+  return message.contains("open attendance session");
+}
+
+String _buildOpenAttendanceRecoveredMessage({
+  required ProductionAttendanceRecord attendance,
+  required DateTime selectedDay,
+}) {
+  final referenceTime = (attendance.clockInAt ?? attendance.createdAt)
+      ?.toLocal();
+  if (referenceTime == null) {
+    return "This staff already has an open attendance session. Close it or edit the time before starting a new shift.";
+  }
+  if (_isSameDay(referenceTime, selectedDay)) {
+    return "This staff is already clocked in at ${_clockLabel(referenceTime)}. Close it or edit the time before starting a new shift.";
+  }
+  return "Open attendance found from ${formatDateLabel(referenceTime)} at ${_clockLabel(referenceTime)}. Close it or edit the time before starting a new shift.";
+}
+
+class _AttendanceActivityEntry {
+  final String staffId;
+  final String staffName;
+  final String actionLabel;
+  final DateTime recordedAt;
+  final String note;
+  final bool isClockIn;
+
+  const _AttendanceActivityEntry({
+    required this.staffId,
+    required this.staffName,
+    required this.actionLabel,
+    required this.recordedAt,
+    required this.note,
+    required this.isClockIn,
+  });
+}
+
+List<_AttendanceActivityEntry> _buildAttendanceActivityEntries({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required List<String> assignedStaffIds,
+  required DateTime day,
+  required Map<String, BusinessStaffProfileSummary> staffMap,
+  required String fallbackRole,
+}) {
+  final assignedStaffIdSet = assignedStaffIds
+      .map((staffId) => staffId.trim())
+      .where((staffId) => staffId.isNotEmpty)
+      .toSet();
+  final items = <_AttendanceActivityEntry>[];
+
+  for (final record in attendanceRecords) {
+    final normalizedStaffId = record.staffProfileId.trim();
+    if (!assignedStaffIdSet.contains(normalizedStaffId)) {
+      continue;
+    }
+    final staffIdentity = _resolveStaffIdentity(
+      normalizedStaffId,
+      staffMap,
+      fallbackRole: fallbackRole,
+    );
+    final note = record.notes.trim();
+    final localClockInAt = record.clockInAt?.toLocal();
+    final localClockOutAt = record.clockOutAt?.toLocal();
+    if (localClockInAt != null && _isSameDay(localClockInAt, day)) {
+      items.add(
+        _AttendanceActivityEntry(
+          staffId: normalizedStaffId,
+          staffName: staffIdentity.displayName,
+          actionLabel: _clockInActivityLabel,
+          recordedAt: localClockInAt,
+          note: note,
+          isClockIn: true,
+        ),
+      );
+    }
+    if (localClockOutAt != null && _isSameDay(localClockOutAt, day)) {
+      items.add(
+        _AttendanceActivityEntry(
+          staffId: normalizedStaffId,
+          staffName: staffIdentity.displayName,
+          actionLabel: _clockOutActivityLabel,
+          recordedAt: localClockOutAt,
+          note: note,
+          isClockIn: false,
+        ),
+      );
+    }
+  }
+
+  items.sort((left, right) => left.recordedAt.compareTo(right.recordedAt));
+  return items;
 }
 
 ProductionAttendanceRecord _toProductionAttendanceRecord(
@@ -5347,16 +5703,6 @@ String _clockLabel(DateTime value) {
   return "$hour:$minute";
 }
 
-String _formatAttendanceTimeValue(
-  DateTime? value, {
-  required String emptyLabel,
-}) {
-  if (value == null) {
-    return emptyLabel;
-  }
-  return _clockLabel(value);
-}
-
 DateTime _mergeDateAndTime(DateTime day, TimeOfDay time) {
   return DateTime(day.year, day.month, day.day, time.hour, time.minute);
 }
@@ -5560,6 +5906,10 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           attendanceRecords: attendanceRecords,
           staffProfileId: normalizedStaffId,
           day: workDate,
+        ) ??
+        _findOpenAttendanceForStaff(
+          attendanceRecords: attendanceRecords,
+          staffProfileId: normalizedStaffId,
         );
   }
 
@@ -5726,12 +6076,20 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final selectedAttendance = resolveDialogAttendance(selectedStaffId);
           final selectedClockInAt = selectedAttendance?.clockInAt?.toLocal();
           final selectedClockOutAt = selectedAttendance?.clockOutAt?.toLocal();
-          final selectedClockInValue = _formatAttendanceTimeValue(
+          final selectedAttendanceReferenceTime =
+              (selectedAttendance?.clockInAt ?? selectedAttendance?.createdAt)
+                  ?.toLocal();
+          final selectedClockInValue = _formatAttendanceDisplayValue(
             selectedClockInAt,
+            selectedDay: workDate,
             emptyLabel: _attendanceClockInUnsetLabel,
           );
           final selectedClockOutValue = selectedClockOutAt != null
-              ? _clockLabel(selectedClockOutAt)
+              ? _formatAttendanceDisplayValue(
+                  selectedClockOutAt,
+                  selectedDay: workDate,
+                  emptyLabel: _attendanceClockOutUnsetLabel,
+                )
               : (selectedClockInAt != null
                     ? _attendanceClockOutPendingLabel
                     : _attendanceClockOutUnsetLabel);
@@ -5927,102 +6285,129 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                     ),
                               )
                             else ...[
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
+                              Column(
                                 children: [
-                                  _InfoChip(
-                                    label:
-                                        "$_clockedInLabel: $selectedClockInValue",
-                                    icon: Icons.login_outlined,
-                                    backgroundColor: hasSelectedClockIn
-                                        ? _workspaceSoftTeal
-                                        : _workspaceSoftBlue,
-                                    foregroundColor: hasSelectedClockIn
+                                  _AttendanceTimingCard(
+                                    label: _clockedInLabel,
+                                    value: selectedClockInValue,
+                                    accentColor: hasSelectedClockIn
                                         ? _workspaceTeal
                                         : _workspaceBlue,
-                                    borderColor:
-                                        (hasSelectedClockIn
-                                                ? _workspaceTeal
-                                                : _workspaceBlue)
-                                            .withValues(alpha: 0.18),
-                                  ),
-                                  _InfoChip(
-                                    label:
-                                        "$_clockedOutLabel: $selectedClockOutValue",
-                                    icon: Icons.logout_outlined,
-                                    backgroundColor: hasSelectedClockOut
+                                    softColor: hasSelectedClockIn
                                         ? _workspaceSoftTeal
-                                        : _workspaceSoftSlate,
-                                    foregroundColor: hasSelectedClockOut
-                                        ? _workspaceTeal
-                                        : _workspaceNavy,
-                                    borderColor:
-                                        (hasSelectedClockOut
-                                                ? _workspaceTeal
-                                                : _workspaceNavy)
-                                            .withValues(alpha: 0.14),
+                                        : _workspaceSoftBlue,
+                                    icon: Icons.login_outlined,
+                                    actionLabel:
+                                        canManageAttendance &&
+                                            !hasSelectedClockIn &&
+                                            !hasSelectedClockOut &&
+                                            onQuickClockInForStaff != null
+                                        ? _attendanceDialogClockInLabel
+                                        : null,
+                                    actionIcon: Icons.login_outlined,
+                                    onAction:
+                                        canManageAttendance &&
+                                            !hasSelectedClockIn &&
+                                            !hasSelectedClockOut &&
+                                            onQuickClockInForStaff != null
+                                        ? () => applyAttendanceAction(
+                                            onQuickClockInForStaff,
+                                          )
+                                        : null,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _AttendanceTimingCard(
+                                    label: _clockedOutLabel,
+                                    value: selectedClockOutValue,
+                                    accentColor: hasSelectedClockOut
+                                        ? _workspaceBerry
+                                        : (hasSelectedClockIn
+                                              ? _workspaceBlue
+                                              : _workspaceNavy),
+                                    softColor: hasSelectedClockOut
+                                        ? _workspaceSoftBerry
+                                        : (hasSelectedClockIn
+                                              ? _workspaceSoftBlue
+                                              : _workspaceSoftSlate),
+                                    icon: hasSelectedClockOut
+                                        ? Icons.logout_outlined
+                                        : (hasSelectedClockIn
+                                              ? Icons.timelapse_outlined
+                                              : Icons.pending_outlined),
+                                    actionLabel:
+                                        canManageAttendance &&
+                                            hasSelectedClockIn &&
+                                            !hasSelectedClockOut &&
+                                            onQuickClockOutForStaff != null
+                                        ? _attendanceDialogClockOutLabel
+                                        : null,
+                                    actionIcon: Icons.logout_outlined,
+                                    onAction:
+                                        canManageAttendance &&
+                                            hasSelectedClockIn &&
+                                            !hasSelectedClockOut &&
+                                            onQuickClockOutForStaff != null
+                                        ? () => applyAttendanceAction(
+                                            onQuickClockOutForStaff,
+                                          )
+                                        : null,
                                   ),
                                 ],
                               ),
+                              if (selectedAttendanceReferenceTime != null &&
+                                  selectedAttendance?.clockOutAt == null &&
+                                  !_isSameDay(
+                                    selectedAttendanceReferenceTime,
+                                    workDate,
+                                  )) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: _workspaceSoftAmber,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: _workspaceAmber.withValues(
+                                        alpha: 0.16,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    "Open attendance started on ${formatDateLabel(selectedAttendanceReferenceTime)} at ${_clockLabel(selectedAttendanceReferenceTime)}. Close it or edit the time before saving ${formatDateLabel(workDate)} progress.",
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: _workspaceNavy,
+                                          height: 1.35,
+                                        ),
+                                  ),
+                                ),
+                              ],
                               if (canManageAttendance &&
-                                  (onQuickClockInForStaff != null ||
-                                      onQuickClockOutForStaff != null ||
-                                      onSetAttendanceForStaff != null)) ...[
+                                  onSetAttendanceForStaff != null) ...[
                                 const SizedBox(height: 12),
                                 Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
                                   children: [
-                                    if (!hasSelectedClockIn &&
-                                        !hasSelectedClockOut &&
-                                        onQuickClockInForStaff != null)
-                                      FilledButton.tonalIcon(
-                                        onPressed: () => applyAttendanceAction(
-                                          onQuickClockInForStaff,
-                                        ),
-                                        icon: const Icon(
-                                          Icons.login_outlined,
-                                          size: 18,
-                                        ),
-                                        label: const Text(
-                                          _attendanceDialogClockInLabel,
-                                        ),
+                                    OutlinedButton.icon(
+                                      onPressed: () => applyAttendanceAction(
+                                        onSetAttendanceForStaff,
                                       ),
-                                    if (hasSelectedClockIn &&
-                                        !hasSelectedClockOut &&
-                                        onQuickClockOutForStaff != null)
-                                      FilledButton.tonalIcon(
-                                        onPressed: () => applyAttendanceAction(
-                                          onQuickClockOutForStaff,
-                                        ),
-                                        icon: const Icon(
-                                          Icons.logout_outlined,
-                                          size: 18,
-                                        ),
-                                        label: const Text(
-                                          _attendanceDialogClockOutLabel,
-                                        ),
+                                      icon: Icon(
+                                        hasSelectedClockIn ||
+                                                hasSelectedClockOut
+                                            ? Icons.edit_calendar_outlined
+                                            : Icons.schedule_outlined,
+                                        size: 18,
                                       ),
-                                    if (onSetAttendanceForStaff != null)
-                                      OutlinedButton.icon(
-                                        onPressed: () => applyAttendanceAction(
-                                          onSetAttendanceForStaff,
-                                        ),
-                                        icon: Icon(
-                                          hasSelectedClockIn ||
-                                                  hasSelectedClockOut
-                                              ? Icons.edit_calendar_outlined
-                                              : Icons.schedule_outlined,
-                                          size: 18,
-                                        ),
-                                        label: Text(
-                                          hasSelectedClockIn ||
-                                                  hasSelectedClockOut
-                                              ? _editAttendanceLabel
-                                              : _setAttendanceLabel,
-                                        ),
+                                      label: Text(
+                                        hasSelectedClockIn ||
+                                                hasSelectedClockOut
+                                            ? _editAttendanceLabel
+                                            : _setAttendanceLabel,
                                       ),
+                                    ),
                                   ],
                                 ),
                               ],
