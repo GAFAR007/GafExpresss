@@ -111,6 +111,12 @@ const String _setAttendanceLabel = "Set time";
 const String _editAttendanceLabel = "Edit time";
 const String _attendanceQuickClockInSuccess = "Clock-in recorded.";
 const String _attendanceQuickClockOutSuccess = "Clock-out and proof saved.";
+const String _attendanceClockOutProgressTitle = "Record work before clock-out";
+const String _attendanceClockOutProgressSaveLabel = "Continue to proof";
+const String _attendanceClockOutProgressHint =
+    "Before clocking out, record how many greenhouse or plot units this staff completed. Proof upload is required next, and the remaining units update immediately for audit.";
+const String _attendanceClockOutPartialFailure =
+    "Daily progress was saved, but the attendance update did not finish. Retry the attendance action.";
 const String _attendanceNotStartedHint =
     "Use Clock in to start this shift, or Set time if you need to backfill the exact hours.";
 const String _attendanceShiftOpenHint =
@@ -718,6 +724,85 @@ class _ProductionPlanWorkspaceScreenState
                         : <String>{};
                     final attendanceActions = StaffAttendanceActions(ref);
 
+                    Future<_ClockOutAuditSubmission?>
+                    collectClockOutAuditForTaskStaff(
+                      String staffProfileId,
+                    ) async {
+                      final input = await _showWorkspaceLogDialog(
+                        context,
+                        workDate: selectedDay,
+                        task: task,
+                        plan: detail.plan,
+                        timelineRows: detail.timelineRows,
+                        staffMap: staffMap,
+                        planUnitLabelById: planUnitLabelById,
+                        fallbackTotalUnits: workScopeSummary.totalUnits,
+                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
+                        attendanceRecords: detail.attendanceRecords,
+                        actorStaffId: staffProfileId,
+                        canPickAnyAssignedStaff: false,
+                        canManageAttendance: false,
+                        onSetAttendanceForStaff: null,
+                        onQuickClockInForStaff: null,
+                        onQuickClockOutForStaff: null,
+                        dialogTitle: _attendanceClockOutProgressTitle,
+                        saveLabel: _attendanceClockOutProgressSaveLabel,
+                        workflowHintOverride: _attendanceClockOutProgressHint,
+                      );
+                      if (input == null) {
+                        return null;
+                      }
+                      final auditSubmission = _buildClockOutAuditSubmission(
+                        input: input,
+                        workDate: selectedDay,
+                        task: task,
+                        planId: widget.planId,
+                        timelineRows: detail.timelineRows,
+                        staffMap: staffMap,
+                        planUnitLabelById: planUnitLabelById,
+                        fallbackTotalUnits: workScopeSummary.totalUnits,
+                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
+                        planContextText:
+                            "${detail.plan.title} ${detail.plan.notes}",
+                      );
+                      AppDebug.log(
+                        _logTag,
+                        _logProgress,
+                        extra: {
+                          "planId": widget.planId,
+                          "taskId": task.id,
+                          "staffId": input.staffId ?? staffProfileId,
+                          "source": "clock_out_gate",
+                        },
+                      );
+                      try {
+                        await ref
+                            .read(productionPlanActionsProvider)
+                            .logTaskProgress(
+                              taskId: task.id,
+                              workDate: selectedDay,
+                              staffId: input.staffId,
+                              unitId: input.unitId,
+                              actualPlots: input.actualPlots,
+                              quantityActivityType: input.quantityActivityType,
+                              quantityAmount: input.quantityAmount,
+                              quantityUnit: input.quantityUnit,
+                              delayReason: input.delayReason,
+                              notes: input.notes,
+                              planId: widget.planId,
+                            );
+                        return auditSubmission;
+                      } catch (error) {
+                        _showSnackSafe(
+                          _resolveProductionWorkspaceErrorMessage(
+                            error,
+                            fallback: _taskProgressFailure,
+                          ),
+                        );
+                        return null;
+                      }
+                    }
+
                     Future<ProductionAttendanceRecord?>
                     setAttendanceForTaskStaff(
                       String staffProfileId,
@@ -736,6 +821,15 @@ class _ProductionPlanWorkspaceScreenState
                         existingAttendance: existingAttendance,
                       );
                       if (input == null) {
+                        return null;
+                      }
+                      final clockOutAuditSubmission = input.clockOutAt != null
+                          ? await collectClockOutAuditForTaskStaff(
+                              staffProfileId,
+                            )
+                          : null;
+                      if (input.clockOutAt != null &&
+                          clockOutAuditSubmission == null) {
                         return null;
                       }
                       try {
@@ -764,12 +858,21 @@ class _ProductionPlanWorkspaceScreenState
                                 taskId: task.id,
                                 notes: note,
                               );
+                          if (!context.mounted) {
+                            return null;
+                          }
                           await requireAttendanceProofUpload(
                             context: context,
                             ref: ref,
                             attendance: updatedClockOut,
-                            subjectLabel: staffLabel,
-                            taskLabel: task.title,
+                            subjectLabel:
+                                clockOutAuditSubmission?.proofSubjectLabel ??
+                                staffLabel,
+                            taskLabel:
+                                clockOutAuditSubmission?.proofTaskLabel ??
+                                task.title,
+                            clockOutAuditPayload:
+                                clockOutAuditSubmission?.proofAuditPayload,
                           );
                           attendanceRecord = await attendanceActions.clockIn(
                             staffProfileId: staffProfileId,
@@ -800,13 +903,23 @@ class _ProductionPlanWorkspaceScreenState
                               taskId: task.id,
                               notes: note,
                             );
+                            if (!context.mounted) {
+                              return null;
+                            }
                             attendanceRecord =
                                 await requireAttendanceProofUpload(
                                   context: context,
                                   ref: ref,
                                   attendance: attendanceRecord,
-                                  subjectLabel: staffLabel,
-                                  taskLabel: task.title,
+                                  subjectLabel:
+                                      clockOutAuditSubmission
+                                          ?.proofSubjectLabel ??
+                                      staffLabel,
+                                  taskLabel:
+                                      clockOutAuditSubmission?.proofTaskLabel ??
+                                      task.title,
+                                  clockOutAuditPayload: clockOutAuditSubmission
+                                      ?.proofAuditPayload,
                                 );
                           }
                         }
@@ -815,8 +928,15 @@ class _ProductionPlanWorkspaceScreenState
                         );
                         _showSnackSafe(_attendanceUpdateSuccess);
                         return _toProductionAttendanceRecord(attendanceRecord);
-                      } catch (_) {
-                        _showSnackSafe(_attendanceUpdateFailure);
+                      } catch (error) {
+                        _showSnackSafe(
+                          _resolveProductionWorkspaceErrorMessage(
+                            error,
+                            fallback: clockOutAuditSubmission != null
+                                ? _attendanceClockOutPartialFailure
+                                : _attendanceUpdateFailure,
+                          ),
+                        );
                         return null;
                       }
                     }
@@ -920,6 +1040,13 @@ class _ProductionPlanWorkspaceScreenState
                       if (clockInAt == null) {
                         return null;
                       }
+                      final clockOutAuditSubmission =
+                          await collectClockOutAuditForTaskStaff(
+                            staffProfileId,
+                          );
+                      if (clockOutAuditSubmission == null) {
+                        return null;
+                      }
                       try {
                         final clockOutAt = _resolveQuickClockOutTime(
                           workDate: selectedDay,
@@ -935,17 +1062,19 @@ class _ProductionPlanWorkspaceScreenState
                               taskId: task.id,
                               notes: "Clocked out from production workspace",
                             );
+                        if (!context.mounted) {
+                          return null;
+                        }
                         final attendanceWithProof =
                             await requireAttendanceProofUpload(
                               context: context,
                               ref: ref,
                               attendance: attendanceRecord,
-                              subjectLabel: _resolveStaffDisplayLabel(
-                                staffProfileId,
-                                staffMap,
-                                fallbackRole: task.roleRequired,
-                              ),
-                              taskLabel: task.title,
+                              subjectLabel:
+                                  clockOutAuditSubmission.proofSubjectLabel,
+                              taskLabel: clockOutAuditSubmission.proofTaskLabel,
+                              clockOutAuditPayload:
+                                  clockOutAuditSubmission.proofAuditPayload,
                             );
                         ref.invalidate(
                           productionPlanDetailProvider(widget.planId),
@@ -958,7 +1087,7 @@ class _ProductionPlanWorkspaceScreenState
                         _showSnackSafe(
                           _resolveProductionWorkspaceErrorMessage(
                             error,
-                            fallback: _attendanceUpdateFailure,
+                            fallback: _attendanceClockOutPartialFailure,
                           ),
                         );
                         return null;
@@ -1091,11 +1220,7 @@ class _ProductionPlanWorkspaceScreenState
                                           staffProfileId == selfStaffId
                                       ? quickClockInForTaskStaff
                                       : null,
-                                  onQuickClockOutForStaff:
-                                      canManageTaskAttendance ||
-                                          staffProfileId == selfStaffId
-                                      ? quickClockOutForTaskStaff
-                                      : null,
+                                  onQuickClockOutForStaff: null,
                                 );
                                 if (input == null) {
                                   return;
@@ -1192,10 +1317,7 @@ class _ProductionPlanWorkspaceScreenState
                                       canManageTaskAttendance
                                       ? quickClockInForTaskStaff
                                       : null,
-                                  onQuickClockOutForStaff:
-                                      canManageTaskAttendance
-                                      ? quickClockOutForTaskStaff
-                                      : null,
+                                  onQuickClockOutForStaff: null,
                                 );
                                 if (input == null) {
                                   return;
@@ -4252,6 +4374,18 @@ class _WorkspaceLogProgressInput {
   });
 }
 
+class _ClockOutAuditSubmission {
+  final Map<String, dynamic> proofAuditPayload;
+  final String proofSubjectLabel;
+  final String proofTaskLabel;
+
+  const _ClockOutAuditSubmission({
+    required this.proofAuditPayload,
+    required this.proofSubjectLabel,
+    required this.proofTaskLabel,
+  });
+}
+
 class _FarmQuantitySummary {
   final String plantingUnit;
   final String harvestUnit;
@@ -5674,6 +5808,117 @@ String _buildProgressCountHelperText({
   return "Pick only what this one staff completed today. Planned target: $targetLabel. Already logged: $loggedLabel. Remaining now: $remainingLabel.";
 }
 
+_ClockOutAuditSubmission _buildClockOutAuditSubmission({
+  required _WorkspaceLogProgressInput input,
+  required DateTime workDate,
+  required ProductionTask task,
+  required String planId,
+  required List<ProductionTimelineRow> timelineRows,
+  required Map<String, BusinessStaffProfileSummary> staffMap,
+  required Map<String, String> planUnitLabelById,
+  required int fallbackTotalUnits,
+  required String fallbackWorkUnitLabel,
+  required String planContextText,
+}) {
+  final effectiveStaffId = input.staffId?.trim().isNotEmpty == true
+      ? input.staffId!.trim()
+      : "";
+  final assignedUnitIds = task.assignedUnitIds
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList();
+  final taskTargetAmount = _resolveTaskProgressTargetAmount(
+    task: task,
+    assignedUnitIds: assignedUnitIds,
+    fallbackTotalUnits: fallbackTotalUnits,
+  );
+  final existingSelectionRow = _findExistingProgressRowForSelection(
+    timelineRows: timelineRows,
+    taskId: task.id,
+    workDate: workDate,
+    staffId: effectiveStaffId,
+    unitId: input.unitId,
+  );
+  final loggedTotal = timelineRows
+      .where((row) => row.taskId.trim() == task.id.trim())
+      .fold<num>(0, (sum, row) => sum + row.actualPlots);
+  final existingSelectionAmount = existingSelectionRow?.actualPlots ?? 0;
+  final totalLoggedAfterSave =
+      (loggedTotal - existingSelectionAmount) + input.actualPlots;
+  final remainingAfterSave = math.max(
+    0,
+    taskTargetAmount - totalLoggedAfterSave,
+  );
+  final progressContextText = [
+    planContextText,
+    task.title,
+    task.instructions,
+    task.taskType,
+    fallbackWorkUnitLabel,
+  ].join(" ");
+  final progressUnitSingularLabel = _resolveProgressUnitSingularLabel(
+    assignedUnitIds: assignedUnitIds,
+    planUnitLabelById: planUnitLabelById,
+    selectedUnitId: input.unitId,
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: progressContextText,
+  );
+  final selectedUnitLabel = _normalizeProgressUnitDisplayLabel(
+    (input.unitId != null && input.unitId!.trim().isNotEmpty)
+        ? (planUnitLabelById[input.unitId!.trim()] ?? input.unitId!.trim())
+        : (assignedUnitIds.length == 1
+              ? (planUnitLabelById[assignedUnitIds.first] ??
+                    assignedUnitIds.first)
+              : ""),
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    contextText: progressContextText,
+  );
+  final staffLabel = effectiveStaffId.isEmpty
+      ? _assignedStaffFallbackLabel
+      : _resolveStaffDisplayLabel(
+          effectiveStaffId,
+          staffMap,
+          fallbackRole: task.roleRequired,
+        );
+  final doneLabel = _formatProgressAmountWithUnit(
+    amount: input.actualPlots,
+    singularUnitLabel: progressUnitSingularLabel,
+  );
+  final remainingLabel = _formatProgressAmountWithUnit(
+    amount: remainingAfterSave,
+    singularUnitLabel: progressUnitSingularLabel,
+  );
+
+  return _ClockOutAuditSubmission(
+    proofAuditPayload: {
+      "workDate": workDate.toUtc().toIso8601String(),
+      "planId": planId,
+      "taskId": task.id,
+      "taskTitle": task.title,
+      "staffProfileId": effectiveStaffId,
+      "staffName": staffLabel,
+      "unitId": input.unitId?.trim() ?? "",
+      "unitLabel": selectedUnitLabel,
+      "progressUnitLabel": progressUnitSingularLabel,
+      "unitsCompleted": input.actualPlots,
+      "unitsRemaining": remainingAfterSave,
+      "quantityActivityType": input.quantityActivityType,
+      "quantityAmount": input.quantityAmount,
+      "quantityUnit": input.quantityUnit,
+      "notes": input.notes,
+    },
+    proofSubjectLabel: effectiveStaffId.isEmpty
+        ? staffLabel
+        : "$staffLabel • ID $effectiveStaffId",
+    proofTaskLabel: [
+      task.title,
+      if (selectedUnitLabel.isNotEmpty) selectedUnitLabel,
+      "$doneLabel done",
+      "$remainingLabel left",
+    ].join(" • "),
+  );
+}
+
 String _normalizeRole(String value) {
   return value.trim().toLowerCase().replaceAll(RegExp(r"[^a-z0-9]+"), "_");
 }
@@ -5886,6 +6131,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
     ProductionAttendanceRecord? existingAttendance,
   )?
   onQuickClockOutForStaff,
+  String dialogTitle = _logDialogTitle,
+  String saveLabel = _logDialogSaveLabel,
+  String? workflowHintOverride,
 }) async {
   final assignedStaffIds = _resolveAssignedStaffIds(task);
   if (assignedStaffIds.isEmpty) {
@@ -6097,9 +6345,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
             contextText: progressContextText,
             selectedUnitId: selectedUnitId,
           );
-          final progressWorkflowHint = _buildProgressWorkflowHint(
-            singularUnitLabel: progressUnitSingularLabel,
-          );
+          final progressWorkflowHint =
+              workflowHintOverride?.trim().isNotEmpty == true
+              ? workflowHintOverride!.trim()
+              : _buildProgressWorkflowHint(
+                  singularUnitLabel: progressUnitSingularLabel,
+                );
           final progressActualLabel = _buildProgressActualLabel(
             singularUnitLabel: progressUnitSingularLabel,
           );
@@ -6202,7 +6453,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               ? 0
               : (cappedQuantityRemaining - selectedQuantityAmount);
           return AlertDialog(
-            title: const Text(_logDialogTitle),
+            title: Text(dialogTitle),
             content: SizedBox(
               width: 420,
               child: SingleChildScrollView(
@@ -6851,7 +7102,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                     ),
                   );
                 },
-                child: const Text(_logDialogSaveLabel),
+                child: Text(saveLabel),
               ),
             ],
           );

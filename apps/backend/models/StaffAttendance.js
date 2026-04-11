@@ -18,6 +18,90 @@ const debug = require('../utils/debug');
 
 debug('Loading StaffAttendance model...');
 
+const clockOutAuditSchema = new mongoose.Schema(
+  {
+    workDate: {
+      type: Date,
+      default: null,
+    },
+    planId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    taskId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    taskTitle: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    staffProfileId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    staffName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    unitId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    unitLabel: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    progressUnitLabel: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    unitsCompleted: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    unitsRemaining: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    quantityActivityType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    quantityAmount: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    quantityUnit: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    capturedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const staffAttendanceSchema = new mongoose.Schema(
   {
     // WHY: Connect attendance to a staff profile.
@@ -101,6 +185,10 @@ const staffAttendanceSchema = new mongoose.Schema(
     proofUploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+      default: null,
+    },
+    clockOutAudit: {
+      type: clockOutAuditSchema,
       default: null,
     },
   },

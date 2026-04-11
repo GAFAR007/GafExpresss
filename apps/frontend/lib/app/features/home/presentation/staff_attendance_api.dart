@@ -15,6 +15,8 @@
 /// - Logs start/success/failure with safe context.
 library;
 
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
@@ -45,12 +47,12 @@ const String _keyWorkDate = "workDate";
 const String _keyPlanId = "planId";
 const String _keyTaskId = "taskId";
 const String _keyNotes = "notes";
+const String _keyClockOutAudit = "clockOutAudit";
 
 const String _attendancePath = "/business/staff/attendance";
 const String _clockInPath = "/business/staff/attendance/clock-in";
 const String _clockOutPath = "/business/staff/attendance/clock-out";
-const String _attendanceProofPathPrefix =
-    "/business/staff/attendance";
+const String _attendanceProofPathPrefix = "/business/staff/attendance";
 const String _keyProof = "proof";
 
 const String _extraServiceKey = "service";
@@ -369,6 +371,7 @@ class StaffAttendanceApi {
     required String attendanceId,
     required List<int> bytes,
     required String filename,
+    Map<String, dynamic>? clockOutAuditPayload,
   }) async {
     // WHY: Log intent so proof uploads are traceable alongside clock-outs.
     AppDebug.log(
@@ -391,10 +394,9 @@ class StaffAttendanceApi {
     try {
       final authOptions = _authOptions(token);
       final formData = FormData.fromMap({
-        _keyProof: MultipartFile.fromBytes(
-          bytes,
-          filename: filename,
-        ),
+        _keyProof: MultipartFile.fromBytes(bytes, filename: filename),
+        if (clockOutAuditPayload != null)
+          _keyClockOutAudit: jsonEncode(clockOutAuditPayload),
       });
 
       final resp = await _dio.post(
@@ -407,8 +409,7 @@ class StaffAttendanceApi {
       );
 
       final data = resp.data as Map<String, dynamic>;
-      final attendanceMap =
-          data[_keyAttendance] as Map<String, dynamic>;
+      final attendanceMap = data[_keyAttendance] as Map<String, dynamic>;
       final record = StaffAttendanceRecord.fromJson(attendanceMap);
 
       AppDebug.log(

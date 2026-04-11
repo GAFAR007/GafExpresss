@@ -88,6 +88,7 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
   required StaffAttendanceRecord attendance,
   String? subjectLabel,
   String? taskLabel,
+  Map<String, dynamic>? clockOutAuditPayload,
 }) async {
   AppDebug.log(
     _logTag,
@@ -144,6 +145,7 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                   attendanceId: attendance.id,
                   bytes: selectedFile!.bytes,
                   filename: selectedFile!.filename,
+                  clockOutAuditPayload: clockOutAuditPayload,
                 );
                 if (!dialogContext.mounted) {
                   return;

@@ -15969,6 +15969,123 @@ async function clockOutStaff(req, res) {
   }
 }
 
+function resolveAttendanceClockOutAuditPayload(rawValue) {
+  if (
+    rawValue === undefined ||
+    rawValue === null
+  ) {
+    return null;
+  }
+
+  const rawText =
+    typeof rawValue === "string" ?
+      rawValue.trim()
+    : "";
+  if (rawText === "") {
+    return null;
+  }
+
+  let parsedValue = rawValue;
+  if (typeof rawValue === "string") {
+    try {
+      parsedValue = JSON.parse(rawText);
+    } catch (error) {
+      throw new Error(
+        "Clock-out audit payload is invalid",
+      );
+    }
+  }
+
+  if (
+    !parsedValue ||
+    Array.isArray(parsedValue) ||
+    typeof parsedValue !== "object"
+  ) {
+    throw new Error(
+      "Clock-out audit payload is invalid",
+    );
+  }
+
+  const workDate =
+    normalizeWorkDateToDayStart(
+      parsedValue.workDate,
+    );
+  const unitsCompleted =
+    parseNonNegativeNumberInput(
+      parsedValue.unitsCompleted,
+    );
+  const unitsRemaining =
+    parseNonNegativeNumberInput(
+      parsedValue.unitsRemaining,
+    );
+
+  if (unitsCompleted == null) {
+    throw new Error(
+      "Clock-out audit completed units are required",
+    );
+  }
+  if (unitsRemaining == null) {
+    throw new Error(
+      "Clock-out audit remaining units are required",
+    );
+  }
+
+  return {
+    workDate,
+    planId:
+      normalizeStaffIdInput(
+        parsedValue.planId,
+      ) || "",
+    taskId:
+      normalizeStaffIdInput(
+        parsedValue.taskId,
+      ) || "",
+    taskTitle:
+      parsedValue.taskTitle
+        ?.toString()
+        .trim() || "",
+    staffProfileId:
+      normalizeStaffIdInput(
+        parsedValue.staffProfileId,
+      ) || "",
+    staffName:
+      parsedValue.staffName
+        ?.toString()
+        .trim() || "",
+    unitId:
+      normalizeStaffIdInput(
+        parsedValue.unitId,
+      ) || "",
+    unitLabel:
+      parsedValue.unitLabel
+        ?.toString()
+        .trim() || "",
+    progressUnitLabel:
+      parsedValue.progressUnitLabel
+        ?.toString()
+        .trim() || "",
+    unitsCompleted,
+    unitsRemaining,
+    quantityActivityType:
+      parsedValue.quantityActivityType
+        ?.toString()
+        .trim() || "",
+    quantityAmount:
+      parseNonNegativeNumberInput(
+        parsedValue.quantityAmount,
+      ),
+    quantityUnit:
+      parsedValue.quantityUnit
+        ?.toString()
+        .trim() || "",
+    notes:
+      parsedValue.notes
+        ?.toString()
+        .trim() || "",
+    capturedAt: new Date(),
+  };
+}
+
 /**
  * POST /business/staff/attendance/:attendanceId/proof
  * Staff + managers: upload proof immediately after clock-out.
@@ -15980,6 +16097,10 @@ async function uploadStaffAttendanceProof(req, res) {
       actorId: req.user?.sub,
       attendanceId: req.params?.attendanceId,
       hasFile: Boolean(req.file),
+      hasClockOutAudit:
+        Boolean(
+          req.body?.clockOutAudit,
+        ),
     },
   );
 
@@ -16017,6 +16138,10 @@ async function uploadStaffAttendanceProof(req, res) {
         error: "Proof file is required",
       });
     }
+    const clockOutAudit =
+      resolveAttendanceClockOutAuditPayload(
+        req.body?.clockOutAudit,
+      );
 
     const attendance =
       await StaffAttendance.findById(
@@ -16071,6 +16196,16 @@ async function uploadStaffAttendanceProof(req, res) {
           "Clock-out must be recorded before uploading proof",
       });
     }
+    if (
+      clockOutAudit?.staffProfileId &&
+      clockOutAudit.staffProfileId !==
+        attendance.staffProfileId.toString()
+    ) {
+      return res.status(400).json({
+        error:
+          "Clock-out audit staff does not match the attendance record",
+      });
+    }
 
     const proof =
       await staffAttendanceProofService.uploadStaffAttendanceProof(
@@ -16089,6 +16224,14 @@ async function uploadStaffAttendanceProof(req, res) {
     attendance.proofSizeBytes = proof.sizeBytes;
     attendance.proofUploadedAt = new Date();
     attendance.proofUploadedBy = actor._id;
+    if (clockOutAudit) {
+      attendance.clockOutAudit = {
+        ...clockOutAudit,
+        staffProfileId:
+          clockOutAudit.staffProfileId ||
+          attendance.staffProfileId.toString(),
+      };
+    }
     await attendance.save();
 
     await writeAuditLog({
@@ -16106,6 +16249,8 @@ async function uploadStaffAttendanceProof(req, res) {
         proofFilename: proof.filename,
         proofMimeType: proof.mimeType,
         proofSizeBytes: proof.sizeBytes,
+        clockOutAudit:
+          clockOutAudit || null,
       },
     });
 

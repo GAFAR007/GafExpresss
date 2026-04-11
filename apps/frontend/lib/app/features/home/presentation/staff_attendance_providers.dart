@@ -173,6 +173,7 @@ class StaffAttendanceActions {
     required String attendanceId,
     required List<int> bytes,
     required String filename,
+    Map<String, dynamic>? clockOutAuditPayload,
   }) async {
     // WHY: Ensure auth is valid before attempting a proof upload.
     final session = _ref.read(authSessionProvider);
@@ -195,6 +196,7 @@ class StaffAttendanceActions {
       attendanceId: attendanceId,
       bytes: bytes,
       filename: filename,
+      clockOutAuditPayload: clockOutAuditPayload,
     );
 
     _ref.invalidate(staffAttendanceProvider(record.staffProfileId));
