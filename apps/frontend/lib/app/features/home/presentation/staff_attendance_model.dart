@@ -34,6 +34,80 @@ const String _keyProofMimeType = "proofMimeType";
 const String _keyProofSizeBytes = "proofSizeBytes";
 const String _keyProofUploadedAt = "proofUploadedAt";
 const String _keyProofUploadedBy = "proofUploadedBy";
+const String _keyClockOutAudit = "clockOutAudit";
+const String _keyPlanId = "planId";
+const String _keyTaskId = "taskId";
+const String _keyTaskTitle = "taskTitle";
+const String _keyStaffName = "staffName";
+const String _keyUnitId = "unitId";
+const String _keyUnitLabel = "unitLabel";
+const String _keyProgressUnitLabel = "progressUnitLabel";
+const String _keyUnitsCompleted = "unitsCompleted";
+const String _keyUnitsRemaining = "unitsRemaining";
+const String _keyQuantityActivityType = "quantityActivityType";
+const String _keyQuantityAmount = "quantityAmount";
+const String _keyQuantityUnit = "quantityUnit";
+const String _keyWorkDate = "workDate";
+const String _keyCapturedAt = "capturedAt";
+
+class StaffAttendanceClockOutAudit {
+  final DateTime? workDate;
+  final String planId;
+  final String taskId;
+  final String taskTitle;
+  final String staffProfileId;
+  final String staffName;
+  final String unitId;
+  final String unitLabel;
+  final String progressUnitLabel;
+  final num? unitsCompleted;
+  final num? unitsRemaining;
+  final String quantityActivityType;
+  final num? quantityAmount;
+  final String quantityUnit;
+  final String notes;
+  final DateTime? capturedAt;
+
+  const StaffAttendanceClockOutAudit({
+    required this.workDate,
+    required this.planId,
+    required this.taskId,
+    required this.taskTitle,
+    required this.staffProfileId,
+    required this.staffName,
+    required this.unitId,
+    required this.unitLabel,
+    required this.progressUnitLabel,
+    required this.unitsCompleted,
+    required this.unitsRemaining,
+    required this.quantityActivityType,
+    required this.quantityAmount,
+    required this.quantityUnit,
+    required this.notes,
+    required this.capturedAt,
+  });
+
+  factory StaffAttendanceClockOutAudit.fromJson(Map<String, dynamic> json) {
+    return StaffAttendanceClockOutAudit(
+      workDate: _parseDate(json[_keyWorkDate]),
+      planId: (json[_keyPlanId] ?? "").toString(),
+      taskId: (json[_keyTaskId] ?? "").toString(),
+      taskTitle: (json[_keyTaskTitle] ?? "").toString(),
+      staffProfileId: (json[_keyStaffProfileId] ?? "").toString(),
+      staffName: (json[_keyStaffName] ?? "").toString(),
+      unitId: (json[_keyUnitId] ?? "").toString(),
+      unitLabel: (json[_keyUnitLabel] ?? "").toString(),
+      progressUnitLabel: (json[_keyProgressUnitLabel] ?? "").toString(),
+      unitsCompleted: _parseNullableNum(json[_keyUnitsCompleted]),
+      unitsRemaining: _parseNullableNum(json[_keyUnitsRemaining]),
+      quantityActivityType: (json[_keyQuantityActivityType] ?? "").toString(),
+      quantityAmount: _parseNullableNum(json[_keyQuantityAmount]),
+      quantityUnit: (json[_keyQuantityUnit] ?? "").toString(),
+      notes: (json[_keyNotes] ?? "").toString(),
+      capturedAt: _parseDate(json[_keyCapturedAt]),
+    );
+  }
+}
 
 class StaffAttendanceRecord {
   final String id;
@@ -51,6 +125,7 @@ class StaffAttendanceRecord {
   final int? proofSizeBytes;
   final DateTime? proofUploadedAt;
   final String? proofUploadedBy;
+  final StaffAttendanceClockOutAudit? clockOutAudit;
 
   const StaffAttendanceRecord({
     required this.id,
@@ -68,6 +143,7 @@ class StaffAttendanceRecord {
     required this.proofSizeBytes,
     required this.proofUploadedAt,
     required this.proofUploadedBy,
+    required this.clockOutAudit,
   });
 
   factory StaffAttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -94,6 +170,7 @@ class StaffAttendanceRecord {
       proofSizeBytes: _parseNullableInt(json[_keyProofSizeBytes]),
       proofUploadedAt: _parseDate(json[_keyProofUploadedAt]),
       proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+      clockOutAudit: _parseClockOutAudit(json[_keyClockOutAudit]),
     );
   }
 
@@ -129,11 +206,7 @@ class StaffAttendanceKpiSummary {
     List<StaffAttendanceRecord> records,
   ) {
     // WHY: Log KPI calculation to debug summary mismatches.
-    AppDebug.log(
-      _logTag,
-      _logKpi,
-      extra: {"count": records.length},
-    );
+    AppDebug.log(_logTag, _logKpi, extra: {"count": records.length});
 
     // WHY: Derive counts to power KPI tiles without backend summaries.
     final total = records.length;
@@ -171,9 +244,26 @@ int? _parseNullableInt(dynamic value) {
   return int.tryParse(value.toString());
 }
 
+num? _parseNullableNum(dynamic value) {
+  if (value == null) return null;
+  if (value is num) return value;
+  return num.tryParse(value.toString());
+}
+
 String? _parseNullableString(dynamic value) {
   if (value == null) return null;
   final text = value.toString();
   if (text.trim().isEmpty) return null;
   return text;
+}
+
+StaffAttendanceClockOutAudit? _parseClockOutAudit(dynamic value) {
+  if (value is! Map) {
+    return null;
+  }
+  final map = <String, dynamic>{};
+  value.forEach((key, fieldValue) {
+    map[key.toString()] = fieldValue;
+  });
+  return StaffAttendanceClockOutAudit.fromJson(map);
 }

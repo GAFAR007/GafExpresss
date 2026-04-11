@@ -380,7 +380,7 @@ class StaffAttendanceApi {
       extra: {
         _extraServiceKey: _serviceName,
         _extraOperationKey: "uploadAttendanceProof",
-        _extraIntentKey: "upload proof after clock-out",
+        _extraIntentKey: "upload proof for attendance sign-out",
         "attendanceId": attendanceId,
         "bytes": bytes.length,
         "filename": filename,

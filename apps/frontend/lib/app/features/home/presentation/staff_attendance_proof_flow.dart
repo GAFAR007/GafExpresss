@@ -4,7 +4,7 @@
 /// - Required proof picker + upload dialog for staff clock-outs.
 ///
 /// WHY:
-/// - Clock-out must be backed by a file or picture immediately after save.
+/// - Attendance sign-out must be backed by a file or picture.
 /// - Keeps proof upload logic out of the calling screens.
 ///
 /// HOW:
@@ -24,7 +24,7 @@ import 'package:frontend/app/features/home/presentation/staff_attendance_provide
 const String _logTag = "STAFF_ATTENDANCE_PROOF_FLOW";
 const String _dialogTitle = "Upload proof";
 const String _dialogBody =
-    "Upload a file or picture now to complete this clock-out.";
+    "Upload a file or picture now for this attendance record. After proof is saved, continue the clock-out flow.";
 const String _chooseFileLabel = "Choose file";
 const String _replaceFileLabel = "Replace file";
 const String _uploadLabel = "Upload proof";
@@ -35,6 +35,9 @@ const String _uploadFailedMessage = "Unable to upload proof. Try another file.";
 const String _noFileSelectedLabel = "No file selected yet";
 const String _subjectPrefix = "Subject";
 const String _taskPrefix = "Task";
+const String _completedPrefix = "Completed";
+const String _remainingPrefix = "Remaining";
+const String _unitPrefix = "Unit";
 const int _maxBytes = 5 * 1024 * 1024;
 const List<String> _allowedExtensions = ["pdf", "png", "jpg", "jpeg", "webp"];
 
@@ -176,6 +179,17 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
             final taskText = taskLabel?.trim().isNotEmpty == true
                 ? taskLabel!.trim()
                 : "";
+            final auditUnitText = _resolveAuditUnitText(clockOutAuditPayload);
+            final auditCompletedText = _resolveAuditAmountText(
+              payload: clockOutAuditPayload,
+              amountKey: "unitsCompleted",
+              unitKey: "progressUnitLabel",
+            );
+            final auditRemainingText = _resolveAuditAmountText(
+              payload: clockOutAuditPayload,
+              amountKey: "unitsRemaining",
+              unitKey: "progressUnitLabel",
+            );
 
             return AlertDialog(
               title: const Text(_dialogTitle),
@@ -204,6 +218,30 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                           label: _taskPrefix,
                           value: taskText,
                           icon: Icons.assignment_outlined,
+                        ),
+                      ],
+                      if (auditUnitText.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _ProofMetaLine(
+                          label: _unitPrefix,
+                          value: auditUnitText,
+                          icon: Icons.grid_view_outlined,
+                        ),
+                      ],
+                      if (auditCompletedText.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _ProofMetaLine(
+                          label: _completedPrefix,
+                          value: auditCompletedText,
+                          icon: Icons.task_alt_outlined,
+                        ),
+                      ],
+                      if (auditRemainingText.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _ProofMetaLine(
+                          label: _remainingPrefix,
+                          value: auditRemainingText,
+                          icon: Icons.pending_actions_outlined,
                         ),
                       ],
                       const SizedBox(height: 16),
@@ -359,6 +397,54 @@ class _ProofMetaLine extends StatelessWidget {
       ),
     );
   }
+}
+
+String _resolveAuditUnitText(Map<String, dynamic>? payload) {
+  if (payload == null) {
+    return "";
+  }
+  final unitLabel = payload["unitLabel"]?.toString().trim() ?? "";
+  if (unitLabel.isNotEmpty) {
+    return unitLabel;
+  }
+  final progressUnitLabel =
+      payload["progressUnitLabel"]?.toString().trim() ?? "";
+  return progressUnitLabel;
+}
+
+String _resolveAuditAmountText({
+  required Map<String, dynamic>? payload,
+  required String amountKey,
+  required String unitKey,
+}) {
+  if (payload == null) {
+    return "";
+  }
+  final rawAmount = payload[amountKey];
+  if (rawAmount == null) {
+    return "";
+  }
+  final amount = num.tryParse(rawAmount.toString());
+  if (amount == null) {
+    return "";
+  }
+  final unit = payload[unitKey]?.toString().trim() ?? "";
+  final formattedAmount = _formatAuditAmount(amount);
+  if (unit.isEmpty) {
+    return formattedAmount;
+  }
+  return "$formattedAmount $unit";
+}
+
+String _formatAuditAmount(num value) {
+  final normalized = value.toDouble();
+  if ((normalized - normalized.roundToDouble()).abs() < 0.001) {
+    return normalized.round().toString();
+  }
+  if (((normalized * 10) - (normalized * 10).roundToDouble()).abs() < 0.001) {
+    return normalized.toStringAsFixed(1);
+  }
+  return normalized.toStringAsFixed(2);
 }
 
 String _resolveProofUploadErrorMessage(Object error) {

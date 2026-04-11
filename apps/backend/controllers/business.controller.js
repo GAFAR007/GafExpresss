@@ -16088,7 +16088,7 @@ function resolveAttendanceClockOutAuditPayload(rawValue) {
 
 /**
  * POST /business/staff/attendance/:attendanceId/proof
- * Staff + managers: upload proof immediately after clock-out.
+ * Staff + managers: upload proof before or after clock-out.
  */
 async function uploadStaffAttendanceProof(req, res) {
   debug(
@@ -16190,12 +16190,6 @@ async function uploadStaffAttendanceProof(req, res) {
       });
     }
 
-    if (!attendance.clockOutAt) {
-      return res.status(409).json({
-        error:
-          "Clock-out must be recorded before uploading proof",
-      });
-    }
     if (
       clockOutAudit?.staffProfileId &&
       clockOutAudit.staffProfileId !==
