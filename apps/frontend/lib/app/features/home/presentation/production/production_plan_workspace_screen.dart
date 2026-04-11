@@ -164,11 +164,15 @@ const String _staffDialogCancelLabel = "Cancel";
 const String _staffDialogEmptyLabel =
     "No staff profiles match this task role yet. Add staff first or broaden the role assignment.";
 const String _logDialogTitle = "Record daily progress";
-const String _logDialogSaveLabel = "Save daily log";
+const String _logDialogSubmitLabel = "Submit";
+const String _logDialogUploadProofLabel = "Upload proof";
+const String _logDialogReplaceProofLabel = "Replace proof";
 const String _logDialogCancelLabel = "Cancel";
 const String _logDialogDelayRequired =
     "Choose a delay reason if this staff completed 0 today.";
 const String _logDialogActualInvalid = "Select a valid progress amount.";
+const String _logDialogActualRequiredForSubmit =
+    "Select how many plots or greenhouses were completed before submitting.";
 const String _logDialogStaffLabel = "Staff who did this work today";
 const String _logDialogDelayLabel = "Delay reason";
 const String _logDialogDelayHelper =
@@ -6259,20 +6263,19 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               ? selectedProofs.length == requiredProofCount
               : existingSelectionProofCount == requiredProofCount;
           final proofInstructionText = requiredProofCount == 0
-              ? "Enter a positive actual amount to unlock proof uploads."
+              ? "Enter a positive actual amount to unlock proof uploads and Submit."
               : proofCountMatchesSelectedAmount
               ? selectedProofs.isEmpty
                     ? existingSelectionProofCount > 0 &&
                               existingSelectionProofCount == requiredProofCount
                           ? "This staff/unit already has $existingSelectionProofCount proof image(s) saved."
-                          : "Upload exactly $requiredProofCount proof image(s) before saving."
+                          : "Upload exactly $requiredProofCount proof image(s) before submitting."
                     : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s)."
               : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s).";
-          final proofButtonLabel = selectedProofs.isEmpty
-              ? (existingSelectionProofCount > 0
-                    ? "Update proof images"
-                    : "Add proof images")
-              : "Replace proof images";
+          final proofButtonLabel =
+              selectedProofs.isNotEmpty || existingSelectionProofCount > 0
+              ? _logDialogReplaceProofLabel
+              : _logDialogUploadProofLabel;
           final selectedAttendance = resolveDialogAttendance(selectedStaffId);
           final selectedClockInAt = selectedAttendance?.clockInAt?.toLocal();
           final selectedClockOutAt = selectedAttendance?.clockOutAt?.toLocal();
@@ -6289,6 +6292,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final hasSelectedClockOut = selectedAttendance?.clockOutAt != null;
           final selectedAttendanceComplete =
               hasSelectedClockIn && hasSelectedClockOut;
+          final hasPositiveSelectedActualAmount = selectedActualAmountValue > 0;
           final selectedStaffIsActor =
               normalizedActorStaffId.isNotEmpty &&
               selectedStaffId != null &&
@@ -6297,6 +6301,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               canManageAttendance || selectedStaffIsActor;
           final canSubmitProgress =
               selectedAttendanceComplete &&
+              hasPositiveSelectedActualAmount &&
               selectedActualSelectionValid &&
               proofCountMatchesSelectedAmount;
           final selectedStaffLabel =
@@ -6912,18 +6917,6 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                         height: 1.3,
                                       ),
                                 ),
-                                const SizedBox(height: 10),
-                                OutlinedButton.icon(
-                                  onPressed: requiredProofCount == 0
-                                      ? null
-                                      : chooseProofs,
-                                  icon: Icon(
-                                    selectedProofs.isEmpty
-                                        ? Icons.add_photo_alternate_outlined
-                                        : Icons.refresh_outlined,
-                                  ),
-                                  label: Text(proofButtonLabel),
-                                ),
                                 if (selectedProofs.isNotEmpty) ...[
                                   const SizedBox(height: 10),
                                   Wrap(
@@ -7147,12 +7140,27 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text(_logDialogCancelLabel),
               ),
+              OutlinedButton.icon(
+                onPressed: requiredProofCount == 0 ? null : chooseProofs,
+                icon: Icon(
+                  selectedProofs.isEmpty
+                      ? Icons.add_photo_alternate_outlined
+                      : Icons.refresh_outlined,
+                ),
+                label: Text(proofButtonLabel),
+              ),
               FilledButton(
                 onPressed: canSubmitProgress
                     ? () {
                         if (!selectedAttendanceComplete) {
                           setDialogState(() {
                             validationError = _taskProgressAttendanceRequired;
+                          });
+                          return;
+                        }
+                        if (!hasPositiveSelectedActualAmount) {
+                          setDialogState(() {
+                            validationError = _logDialogActualRequiredForSubmit;
                           });
                           return;
                         }
@@ -7202,7 +7210,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         );
                       }
                     : null,
-                child: const Text(_logDialogSaveLabel),
+                child: const Text(_logDialogSubmitLabel),
               ),
             ],
           );
