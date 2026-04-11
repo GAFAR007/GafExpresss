@@ -257,6 +257,15 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                 ? "$requiredProofs proof${requiredProofs == 1 ? "" : "s"} required"
                 : "${_formatAuditAmount(unitsCompleted)} unit${unitsCompleted == 1 ? "" : "s"} completed • $requiredProofs proof${requiredProofs == 1 ? "" : "s"} required";
             final uploadedProofCount = uploadedProofsByUnitIndex.length;
+            final readyProofCount = List.generate(requiredProofs, (index) {
+              final unitIndex = index + 1;
+              return selectedFilesByUnitIndex.containsKey(unitIndex) ||
+                  uploadedProofsByUnitIndex.containsKey(unitIndex);
+            }).where((isReady) => isReady).length;
+            final canSubmitProofs =
+                !isUploading &&
+                requiredProofs > 0 &&
+                readyProofCount == requiredProofs;
 
             return AlertDialog(
               title: const Text(_dialogTitle),
@@ -380,7 +389,7 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                   label: const Text(_chooseFileLabel),
                 ),
                 FilledButton(
-                  onPressed: isUploading ? null : submitProofs,
+                  onPressed: canSubmitProofs ? submitProofs : null,
                   child: Text(isUploading ? "Submitting..." : _submitLabel),
                 ),
               ],

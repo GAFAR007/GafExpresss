@@ -34,6 +34,13 @@ const String _keyProofMimeType = "proofMimeType";
 const String _keyProofSizeBytes = "proofSizeBytes";
 const String _keyProofUploadedAt = "proofUploadedAt";
 const String _keyProofUploadedBy = "proofUploadedBy";
+const String _keyProofEntryUrl = "url";
+const String _keyProofEntryPublicId = "publicId";
+const String _keyProofEntryFilename = "filename";
+const String _keyProofEntryMimeType = "mimeType";
+const String _keyProofEntrySizeBytes = "sizeBytes";
+const String _keyProofEntryUploadedAt = "uploadedAt";
+const String _keyProofEntryUploadedBy = "uploadedBy";
 const String _keyProofs = "proofs";
 const String _keyUnitIndex = "unitIndex";
 const String _keyType = "type";
@@ -84,14 +91,23 @@ class StaffAttendanceProof {
   factory StaffAttendanceProof.fromJson(Map<String, dynamic> json) {
     return StaffAttendanceProof(
       unitIndex: _parseNullableInt(json[_keyUnitIndex]) ?? 1,
-      url: (json[_keyProofUrl] ?? "").toString(),
-      publicId: (json[_keyProofPublicId] ?? "").toString(),
-      filename: (json[_keyProofFilename] ?? "").toString(),
-      mimeType: (json[_keyProofMimeType] ?? "").toString(),
+      url: (json[_keyProofEntryUrl] ?? json[_keyProofUrl] ?? "").toString(),
+      publicId: (json[_keyProofEntryPublicId] ?? json[_keyProofPublicId] ?? "")
+          .toString(),
+      filename: (json[_keyProofEntryFilename] ?? json[_keyProofFilename] ?? "")
+          .toString(),
+      mimeType: (json[_keyProofEntryMimeType] ?? json[_keyProofMimeType] ?? "")
+          .toString(),
       type: (json[_keyType] ?? "").toString(),
-      sizeBytes: _parseNullableInt(json[_keyProofSizeBytes]),
-      uploadedAt: _parseDate(json[_keyProofUploadedAt]),
-      uploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+      sizeBytes: _parseNullableInt(
+        json[_keyProofEntrySizeBytes] ?? json[_keyProofSizeBytes],
+      ),
+      uploadedAt: _parseDate(
+        json[_keyProofEntryUploadedAt] ?? json[_keyProofUploadedAt],
+      ),
+      uploadedBy: _parseNullableString(
+        json[_keyProofEntryUploadedBy] ?? json[_keyProofUploadedBy],
+      ),
     );
   }
 
