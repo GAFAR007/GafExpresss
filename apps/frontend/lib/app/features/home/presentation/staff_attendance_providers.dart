@@ -173,6 +173,7 @@ class StaffAttendanceActions {
     required String attendanceId,
     required List<int> bytes,
     required String filename,
+    int unitIndex = 1,
     Map<String, dynamic>? clockOutAuditPayload,
   }) async {
     // WHY: Ensure auth is valid before attempting a proof upload.
@@ -196,6 +197,7 @@ class StaffAttendanceActions {
       attendanceId: attendanceId,
       bytes: bytes,
       filename: filename,
+      unitIndex: unitIndex,
       clockOutAuditPayload: clockOutAuditPayload,
     );
 

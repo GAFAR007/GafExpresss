@@ -161,7 +161,13 @@ const String _keyProofMimeType = "proofMimeType";
 const String _keyProofSizeBytes = "proofSizeBytes";
 const String _keyProofUploadedAt = "proofUploadedAt";
 const String _keyProofUploadedBy = "proofUploadedBy";
+const String _keyProofs = "proofs";
+const String _keyUnitIndex = "unitIndex";
+const String _keyType = "type";
 const String _keyClockOutAudit = "clockOutAudit";
+const String _keyNumberOfUnitsCompleted = "numberOfUnitsCompleted";
+const String _keyRequiredProofs = "requiredProofs";
+const String _keySessionStatus = "sessionStatus";
 const String _keyPreorderEnabled = "preorderEnabled";
 const String _keyPreorderCapQuantity = "preorderCapQuantity";
 const String _keyPreorderReservedQuantity = "preorderReservedQuantity";
@@ -272,7 +278,6 @@ const String _keyTimezone = "timezone";
 const String _keyRoles = "roles";
 const String _keyAvailable = "available";
 const String _keyUnits = "units";
-const String _keyUnitIndex = "unitIndex";
 const String _keyLabel = "label";
 const String _keyTotalUnits = "totalUnits";
 const String _keyAlertId = "alertId";
@@ -1465,6 +1470,46 @@ class ProductionDeviationAlert {
   }
 }
 
+class ProductionAttendanceProof {
+  final int unitIndex;
+  final String url;
+  final String publicId;
+  final String filename;
+  final String mimeType;
+  final String type;
+  final int? sizeBytes;
+  final DateTime? uploadedAt;
+  final String? uploadedBy;
+
+  const ProductionAttendanceProof({
+    required this.unitIndex,
+    required this.url,
+    required this.publicId,
+    required this.filename,
+    required this.mimeType,
+    required this.type,
+    required this.sizeBytes,
+    required this.uploadedAt,
+    required this.uploadedBy,
+  });
+
+  factory ProductionAttendanceProof.fromJson(Map<String, dynamic> json) {
+    return ProductionAttendanceProof(
+      unitIndex: _parseInt(json[_keyUnitIndex], fallback: 1),
+      url: _parseString(json[_keyProofUrl]),
+      publicId: _parseString(json[_keyProofPublicId]),
+      filename: _parseString(json[_keyProofFilename]),
+      mimeType: _parseString(json[_keyProofMimeType]),
+      type: _parseString(json[_keyType]),
+      sizeBytes: _parseNullableNum(json[_keyProofSizeBytes])?.toInt(),
+      uploadedAt: _parseDate(json[_keyProofUploadedAt]),
+      uploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+    );
+  }
+
+  bool get isUploaded => url.trim().isNotEmpty && filename.trim().isNotEmpty;
+}
+
 class ProductionAttendanceClockOutAudit {
   final DateTime? workDate;
   final String planId;
@@ -1477,6 +1522,8 @@ class ProductionAttendanceClockOutAudit {
   final String progressUnitLabel;
   final num? unitsCompleted;
   final num? unitsRemaining;
+  final int? requiredProofs;
+  final String unitType;
   final String quantityActivityType;
   final num? quantityAmount;
   final String quantityUnit;
@@ -1495,6 +1542,8 @@ class ProductionAttendanceClockOutAudit {
     required this.progressUnitLabel,
     required this.unitsCompleted,
     required this.unitsRemaining,
+    required this.requiredProofs,
+    required this.unitType,
     required this.quantityActivityType,
     required this.quantityAmount,
     required this.quantityUnit,
@@ -1517,6 +1566,8 @@ class ProductionAttendanceClockOutAudit {
       progressUnitLabel: _parseString(json[_keyProgressUnitLabel]),
       unitsCompleted: _parseNullableNum(json[_keyUnitsCompleted]),
       unitsRemaining: _parseNullableNum(json[_keyUnitsRemaining]),
+      requiredProofs: _parseNullableInt(json[_keyRequiredProofs]),
+      unitType: _parseString(json[_keyUnitType]),
       quantityActivityType: _parseString(json[_keyQuantityActivityType]),
       quantityAmount: _parseNullableNum(json[_keyQuantityAmount]),
       quantityUnit: _parseString(json[_keyQuantityUnit]),
@@ -1541,7 +1592,13 @@ class ProductionAttendanceRecord {
   final int? proofSizeBytes;
   final DateTime? proofUploadedAt;
   final String? proofUploadedBy;
+  final List<ProductionAttendanceProof> proofs;
   final ProductionAttendanceClockOutAudit? clockOutAudit;
+  final String sessionStatus;
+  final num? numberOfUnitsCompleted;
+  final int? requiredProofs;
+  final String unitType;
+  final DateTime? updatedAt;
 
   const ProductionAttendanceRecord({
     required this.id,
@@ -1558,7 +1615,13 @@ class ProductionAttendanceRecord {
     required this.proofSizeBytes,
     required this.proofUploadedAt,
     required this.proofUploadedBy,
+    required this.proofs,
     required this.clockOutAudit,
+    required this.sessionStatus,
+    required this.numberOfUnitsCompleted,
+    required this.requiredProofs,
+    required this.unitType,
+    required this.updatedAt,
   });
 
   factory ProductionAttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -1577,7 +1640,15 @@ class ProductionAttendanceRecord {
       proofSizeBytes: _parseNullableNum(json[_keyProofSizeBytes])?.toInt(),
       proofUploadedAt: _parseDate(json[_keyProofUploadedAt]),
       proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+      proofs: _parseAttendanceProofs(json[_keyProofs]),
       clockOutAudit: _parseClockOutAudit(json[_keyClockOutAudit]),
+      sessionStatus: _parseNullableString(json[_keySessionStatus]) ?? "active",
+      numberOfUnitsCompleted: _parseNullableNum(
+        json[_keyNumberOfUnitsCompleted],
+      ),
+      requiredProofs: _parseNullableInt(json[_keyRequiredProofs]),
+      unitType: _parseNullableString(json[_keyUnitType]) ?? "",
+      updatedAt: _parseDate(json[_keyUpdatedAt]),
     );
   }
 }
@@ -2825,6 +2896,27 @@ num? _parseNullableNum(dynamic value) {
   if (value == null) return null;
   if (value is num) return value;
   return num.tryParse(value.toString());
+}
+
+int? _parseNullableInt(dynamic value) {
+  final parsed = _parseNullableNum(value);
+  return parsed?.toInt();
+}
+
+List<ProductionAttendanceProof> _parseAttendanceProofs(dynamic value) {
+  if (value is! List) {
+    return const <ProductionAttendanceProof>[];
+  }
+  return value
+      .whereType<Map>()
+      .map(
+        (item) => item.map((key, fieldValue) {
+          return MapEntry(key.toString(), fieldValue);
+        }),
+      )
+      .map(ProductionAttendanceProof.fromJson)
+      .toList()
+    ..sort((left, right) => left.unitIndex.compareTo(right.unitIndex));
 }
 
 ProductionAttendanceClockOutAudit? _parseClockOutAudit(dynamic value) {

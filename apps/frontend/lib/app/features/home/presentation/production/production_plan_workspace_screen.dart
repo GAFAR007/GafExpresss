@@ -825,7 +825,12 @@ class _ProductionPlanWorkspaceScreenState
                     }) async {
                       var proofReadyAttendance = attendance;
                       if (!_attendanceHasProofAudit(attendance)) {
-                        if (clockOutAuditSubmission == null) {
+                        final effectiveAuditPayload =
+                            clockOutAuditSubmission?.proofAuditPayload ??
+                            _buildClockOutAuditPayloadFromAttendance(
+                              attendance,
+                            );
+                        if (effectiveAuditPayload == null) {
                           return null;
                         }
                         final updatedAttendance =
@@ -834,10 +839,12 @@ class _ProductionPlanWorkspaceScreenState
                               ref: ref,
                               attendance: _toStaffAttendanceRecord(attendance),
                               subjectLabel:
-                                  clockOutAuditSubmission.proofSubjectLabel,
-                              taskLabel: clockOutAuditSubmission.proofTaskLabel,
-                              clockOutAuditPayload:
-                                  clockOutAuditSubmission.proofAuditPayload,
+                                  clockOutAuditSubmission?.proofSubjectLabel ??
+                                  _buildClockOutAuditSubjectLabel(attendance),
+                              taskLabel:
+                                  clockOutAuditSubmission?.proofTaskLabel ??
+                                  _buildClockOutAuditTaskLabel(attendance),
+                              clockOutAuditPayload: effectiveAuditPayload,
                             );
                         if (!context.mounted) {
                           return null;
@@ -886,17 +893,15 @@ class _ProductionPlanWorkspaceScreenState
                       if (input == null) {
                         return null;
                       }
-                      final existingProofReady = _attendanceHasProofAudit(
-                        existingAttendance,
-                      );
-                      final clockOutAuditSubmission =
-                          input.clockOutAt != null && !existingProofReady
+                      final needsClockOutAudit =
+                          input.clockOutAt != null &&
+                          existingAttendance?.clockOutAudit == null;
+                      final clockOutAuditSubmission = needsClockOutAudit
                           ? await collectClockOutAuditForTaskStaff(
                               staffProfileId,
                             )
                           : null;
-                      if (input.clockOutAt != null &&
-                          !existingProofReady &&
+                      if (needsClockOutAudit &&
                           clockOutAuditSubmission == null) {
                         return null;
                       }
@@ -1096,9 +1101,8 @@ class _ProductionPlanWorkspaceScreenState
                       if (clockInAt == null) {
                         return null;
                       }
-                      final needsClockOutAudit = !_attendanceHasProofAudit(
-                        openAttendance,
-                      );
+                      final needsClockOutAudit =
+                          openAttendance.clockOutAudit == null;
                       final clockOutAuditSubmission = needsClockOutAudit
                           ? await collectClockOutAuditForTaskStaff(
                               staffProfileId,
@@ -3455,6 +3459,10 @@ class _AgendaTaskCard extends StatelessWidget {
                         proofFilename: attendance?.proofFilename,
                         proofMimeType: attendance?.proofMimeType,
                         proofUploadedAt: attendance?.proofUploadedAt?.toLocal(),
+                        requiredProofs: attendance?.requiredProofs,
+                        proofs:
+                            attendance?.proofs ??
+                            const <ProductionAttendanceProof>[],
                         clockOutAudit: attendance?.clockOutAudit,
                         canManageAttendance: canManageAttendanceForStaff,
                         canLogProgress: progressEnabledStaffIds.contains(
@@ -3818,6 +3826,8 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final String? proofFilename;
   final String? proofMimeType;
   final DateTime? proofUploadedAt;
+  final int? requiredProofs;
+  final List<ProductionAttendanceProof> proofs;
   final ProductionAttendanceClockOutAudit? clockOutAudit;
   final bool canManageAttendance;
   final bool canLogProgress;
@@ -3841,6 +3851,8 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.proofFilename,
     required this.proofMimeType,
     required this.proofUploadedAt,
+    required this.requiredProofs,
+    required this.proofs,
     required this.clockOutAudit,
     required this.canManageAttendance,
     required this.canLogProgress,
@@ -3896,9 +3908,15 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
         ),
     ];
     final hasProofSummary =
+        proofs.any((proof) => proof.isUploaded) ||
         (proofUrl?.trim().isNotEmpty == true) ||
         (proofFilename?.trim().isNotEmpty == true) ||
         clockOutAudit != null;
+    final uploadedProofCount = proofs.where((proof) => proof.isUploaded).length;
+    final resolvedRequiredProofs =
+        (requiredProofs != null && requiredProofs! > 0)
+        ? requiredProofs!
+        : (clockOutAudit?.requiredProofs ?? 0);
     final auditTaskTitle = clockOutAudit?.taskTitle.trim().isNotEmpty == true
         ? clockOutAudit!.taskTitle.trim()
         : taskTitle;
@@ -3912,7 +3930,10 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
       clockOutAudit,
     );
     final attendanceHintText = hasProofSummary && !hasClockOut
-        ? _attendanceProofReadyHint
+        ? (resolvedRequiredProofs > 0 &&
+                  uploadedProofCount < resolvedRequiredProofs
+              ? "Proofs uploaded: $uploadedProofCount/$resolvedRequiredProofs. Upload the remaining proof${resolvedRequiredProofs - uploadedProofCount == 1 ? "" : "s"}, then click Clock out to finish this shift."
+              : _attendanceProofReadyHint)
         : hasClockIn && hasClockOut && hasProofSummary
         ? _attendanceClockOutAuditReadyHint
         : hasClockIn && hasClockOut
@@ -4127,6 +4148,8 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 clockOutAudit,
                 fallbackDay: selectedDay,
               ),
+              requiredProofs: requiredProofs ?? clockOutAudit?.requiredProofs,
+              proofs: proofs,
               proofUrl: proofUrl,
               proofFilename: proofFilename,
               proofMimeType: proofMimeType,
@@ -4283,6 +4306,8 @@ class _AttendanceTimingCard extends StatelessWidget {
 class _AttendanceProofAuditCard extends StatelessWidget {
   final String taskTitle;
   final String workDateLabel;
+  final int? requiredProofs;
+  final List<ProductionAttendanceProof> proofs;
   final String? proofUrl;
   final String? proofFilename;
   final String? proofMimeType;
@@ -4300,6 +4325,8 @@ class _AttendanceProofAuditCard extends StatelessWidget {
   const _AttendanceProofAuditCard({
     required this.taskTitle,
     required this.workDateLabel,
+    required this.requiredProofs,
+    required this.proofs,
     required this.proofUrl,
     required this.proofFilename,
     required this.proofMimeType,
@@ -4319,23 +4346,45 @@ class _AttendanceProofAuditCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final uploadedProofs = proofs.where((proof) => proof.isUploaded).toList()
+      ..sort((left, right) => left.unitIndex.compareTo(right.unitIndex));
+    final resolvedRequiredProofs =
+        (requiredProofs != null && requiredProofs! > 0)
+        ? requiredProofs!
+        : uploadedProofs.length;
+    final primaryProof = uploadedProofs.isNotEmpty
+        ? uploadedProofs.first
+        : null;
+    final resolvedProofUrl = primaryProof?.url.trim().isNotEmpty == true
+        ? primaryProof!.url.trim()
+        : proofUrl?.trim();
+    final resolvedProofFilename =
+        primaryProof?.filename.trim().isNotEmpty == true
+        ? primaryProof!.filename.trim()
+        : proofFilename?.trim();
+    final resolvedProofMimeType =
+        primaryProof?.mimeType.trim().isNotEmpty == true
+        ? primaryProof!.mimeType.trim()
+        : proofMimeType?.trim();
+    final resolvedProofUploadedAt = primaryProof?.uploadedAt ?? proofUploadedAt;
     final hasProof =
+        uploadedProofs.isNotEmpty ||
         (proofUrl?.trim().isNotEmpty == true) ||
         (proofFilename?.trim().isNotEmpty == true);
     final hasProofPreview =
         hasProof &&
         showPreview &&
-        proofUrl?.trim().isNotEmpty == true &&
+        resolvedProofUrl?.isNotEmpty == true &&
         _isProofImage(
-          proofMimeType: proofMimeType,
-          proofFilename: proofFilename,
+          proofMimeType: resolvedProofMimeType,
+          proofFilename: resolvedProofFilename,
         );
-    final proofLabel = proofFilename?.trim().isNotEmpty == true
-        ? proofFilename!.trim()
+    final proofLabel = resolvedProofFilename?.isNotEmpty == true
+        ? resolvedProofFilename!
         : _attendanceProofUploadedLabel;
-    final uploadedLabel = proofUploadedAt == null
+    final uploadedLabel = resolvedProofUploadedAt == null
         ? ""
-        : formatDateTimeLabel(proofUploadedAt!.toLocal());
+        : formatDateTimeLabel(resolvedProofUploadedAt.toLocal());
     final chips = <Widget>[
       _InfoChip(
         label: workDateLabel,
@@ -4388,6 +4437,16 @@ class _AttendanceProofAuditCard extends StatelessWidget {
         _InfoChip(
           label: "Uploaded: $uploadedLabel",
           icon: Icons.verified_outlined,
+          backgroundColor: _workspaceSoftSlate,
+          foregroundColor: _workspaceNavy,
+          borderColor: _workspaceNavy.withValues(alpha: 0.12),
+        ),
+      if (uploadedProofs.isNotEmpty || resolvedRequiredProofs > 0)
+        _InfoChip(
+          label: resolvedRequiredProofs > 0
+              ? "Proofs: ${uploadedProofs.length}/$resolvedRequiredProofs"
+              : "Proofs: ${uploadedProofs.length}",
+          icon: Icons.collections_outlined,
           backgroundColor: _workspaceSoftSlate,
           foregroundColor: _workspaceNavy,
           borderColor: _workspaceNavy.withValues(alpha: 0.12),
@@ -4461,7 +4520,7 @@ class _AttendanceProofAuditCard extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(14),
                 child: Image.network(
-                  proofUrl!.trim(),
+                  resolvedProofUrl!,
                   height: 140,
                   width: double.infinity,
                   fit: BoxFit.cover,
@@ -4581,7 +4640,8 @@ class _AttendanceActivityRow extends StatelessWidget {
     final auditUnitLabel = _resolveClockOutAuditUnitLabel(audit);
     final hasProofSummary =
         !entry.isClockIn &&
-        ((entry.proofUrl?.trim().isNotEmpty == true) ||
+        (entry.proofs.any((proof) => proof.isUploaded) ||
+            (entry.proofUrl?.trim().isNotEmpty == true) ||
             (entry.proofFilename?.trim().isNotEmpty == true) ||
             audit != null);
     return Container(
@@ -4655,6 +4715,8 @@ class _AttendanceActivityRow extends StatelessWidget {
                 audit,
                 fallbackDay: entry.recordedAt,
               ),
+              requiredProofs: entry.requiredProofs ?? audit?.requiredProofs,
+              proofs: entry.proofs,
               proofUrl: entry.proofUrl,
               proofFilename: entry.proofFilename,
               proofMimeType: entry.proofMimeType,
@@ -5201,12 +5263,56 @@ bool _attendanceHasProof(ProductionAttendanceRecord? attendance) {
   if (attendance == null) {
     return false;
   }
+  if (attendance.proofs.any((proof) => proof.isUploaded)) {
+    return true;
+  }
   return (attendance.proofUrl?.trim().isNotEmpty == true) ||
       (attendance.proofFilename?.trim().isNotEmpty == true);
 }
 
+int _attendanceProofCount(ProductionAttendanceRecord? attendance) {
+  if (attendance == null) {
+    return 0;
+  }
+  final uploadedProofs = attendance.proofs.where((proof) => proof.isUploaded);
+  if (uploadedProofs.isNotEmpty) {
+    return uploadedProofs.length;
+  }
+  return _attendanceHasProof(attendance) ? 1 : 0;
+}
+
+int _attendanceRequiredProofs(ProductionAttendanceRecord? attendance) {
+  if (attendance == null) {
+    return 0;
+  }
+  final recordRequiredProofs =
+      attendance.requiredProofs ?? attendance.clockOutAudit?.requiredProofs;
+  if (recordRequiredProofs != null && recordRequiredProofs > 0) {
+    return recordRequiredProofs;
+  }
+  final unitsCompleted =
+      attendance.clockOutAudit?.unitsCompleted ??
+      attendance.numberOfUnitsCompleted;
+  if (unitsCompleted == null || unitsCompleted <= 0) {
+    return _attendanceHasProof(attendance) ? 1 : 0;
+  }
+  return unitsCompleted.ceil();
+}
+
+bool _attendanceHasAllRequiredProofs(ProductionAttendanceRecord? attendance) {
+  if (attendance == null) {
+    return false;
+  }
+  final requiredProofs = _attendanceRequiredProofs(attendance);
+  if (requiredProofs <= 0) {
+    return true;
+  }
+  return _attendanceProofCount(attendance) == requiredProofs;
+}
+
 bool _attendanceHasProofAudit(ProductionAttendanceRecord? attendance) {
-  return _attendanceHasProof(attendance) && attendance?.clockOutAudit != null;
+  return _attendanceHasAllRequiredProofs(attendance) &&
+      attendance?.clockOutAudit != null;
 }
 
 String _resolveClockOutAuditUnitLabel(
@@ -5220,6 +5326,25 @@ String _resolveClockOutAuditUnitLabel(
     return unitLabel;
   }
   return audit.progressUnitLabel.trim();
+}
+
+String _resolveAttendanceUnitTypeLabel({
+  required String unitLabel,
+  required String progressUnitLabel,
+}) {
+  final sourceText = "$unitLabel $progressUnitLabel".trim().toLowerCase();
+  final hasPlot = sourceText.contains("plot");
+  final hasGreenhouse = sourceText.contains("greenhouse");
+  if (hasPlot && hasGreenhouse) {
+    return "mixed";
+  }
+  if (hasGreenhouse) {
+    return "greenhouse";
+  }
+  if (hasPlot) {
+    return "plot";
+  }
+  return progressUnitLabel.trim().toLowerCase();
 }
 
 String _formatClockOutAuditAmount(
@@ -5241,6 +5366,85 @@ String _resolveClockOutAuditWorkDateLabel(
 }) {
   final workDate = audit?.workDate?.toLocal() ?? fallbackDay.toLocal();
   return formatDateLabel(workDate);
+}
+
+Map<String, dynamic>? _buildClockOutAuditPayloadFromAttendance(
+  ProductionAttendanceRecord attendance,
+) {
+  final audit = attendance.clockOutAudit;
+  if (audit == null) {
+    return null;
+  }
+  return {
+    "workDate": audit.workDate?.toUtc().toIso8601String(),
+    "planId": audit.planId,
+    "taskId": audit.taskId,
+    "taskTitle": audit.taskTitle,
+    "staffProfileId": audit.staffProfileId,
+    "staffName": audit.staffName,
+    "unitId": audit.unitId,
+    "unitLabel": audit.unitLabel,
+    "progressUnitLabel": audit.progressUnitLabel,
+    "unitsCompleted": audit.unitsCompleted,
+    "unitsRemaining": audit.unitsRemaining,
+    "requiredProofs": audit.requiredProofs ?? attendance.requiredProofs,
+    "unitType": audit.unitType.isNotEmpty
+        ? audit.unitType
+        : attendance.unitType,
+    "quantityActivityType": audit.quantityActivityType,
+    "quantityAmount": audit.quantityAmount,
+    "quantityUnit": audit.quantityUnit,
+    "notes": audit.notes,
+  };
+}
+
+String _buildClockOutAuditSubjectLabel(ProductionAttendanceRecord attendance) {
+  final audit = attendance.clockOutAudit;
+  if (audit == null) {
+    return attendance.staffProfileId.trim().isNotEmpty
+        ? attendance.staffProfileId.trim()
+        : _assignedStaffFallbackLabel;
+  }
+  final staffName = audit.staffName.trim();
+  final staffProfileId = audit.staffProfileId.trim();
+  if (staffName.isEmpty) {
+    return staffProfileId.isEmpty
+        ? _assignedStaffFallbackLabel
+        : staffProfileId;
+  }
+  if (staffProfileId.isEmpty) {
+    return staffName;
+  }
+  return "$staffName • ID $staffProfileId";
+}
+
+String _buildClockOutAuditTaskLabel(ProductionAttendanceRecord attendance) {
+  final audit = attendance.clockOutAudit;
+  if (audit == null) {
+    return "";
+  }
+  final parts = <String>[
+    if (audit.taskTitle.trim().isNotEmpty) audit.taskTitle.trim(),
+    if (audit.unitLabel.trim().isNotEmpty)
+      audit.unitLabel.trim()
+    else if (audit.progressUnitLabel.trim().isNotEmpty)
+      audit.progressUnitLabel.trim(),
+  ];
+  final completedLabel = _formatClockOutAuditAmount(
+    audit.unitsCompleted,
+    audit,
+  );
+  final remainingLabel = _formatClockOutAuditAmount(
+    audit.unitsRemaining,
+    audit,
+  );
+  if (completedLabel.isNotEmpty) {
+    parts.add("$completedLabel done");
+  }
+  if (remainingLabel.isNotEmpty) {
+    parts.add("$remainingLabel left");
+  }
+  return parts.join(" • ");
 }
 
 bool _isProofImage({
@@ -5340,6 +5544,8 @@ class _AttendanceActivityEntry {
   final String? proofFilename;
   final String? proofMimeType;
   final DateTime? proofUploadedAt;
+  final int? requiredProofs;
+  final List<ProductionAttendanceProof> proofs;
   final ProductionAttendanceClockOutAudit? clockOutAudit;
 
   const _AttendanceActivityEntry({
@@ -5355,6 +5561,8 @@ class _AttendanceActivityEntry {
     required this.proofFilename,
     required this.proofMimeType,
     required this.proofUploadedAt,
+    required this.requiredProofs,
+    required this.proofs,
     required this.clockOutAudit,
   });
 }
@@ -5401,6 +5609,8 @@ List<_AttendanceActivityEntry> _buildAttendanceActivityEntries({
           proofFilename: record.proofFilename,
           proofMimeType: record.proofMimeType,
           proofUploadedAt: record.proofUploadedAt?.toLocal(),
+          requiredProofs: record.requiredProofs,
+          proofs: record.proofs,
           clockOutAudit: record.clockOutAudit,
         ),
       );
@@ -5420,6 +5630,8 @@ List<_AttendanceActivityEntry> _buildAttendanceActivityEntries({
           proofFilename: record.proofFilename,
           proofMimeType: record.proofMimeType,
           proofUploadedAt: record.proofUploadedAt?.toLocal(),
+          requiredProofs: record.requiredProofs,
+          proofs: record.proofs,
           clockOutAudit: record.clockOutAudit,
         ),
       );
@@ -5451,6 +5663,21 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
     proofSizeBytes: record.proofSizeBytes,
     proofUploadedAt: record.proofUploadedAt,
     proofUploadedBy: record.proofUploadedBy,
+    proofs: record.proofs
+        .map(
+          (proof) => ProductionAttendanceProof(
+            unitIndex: proof.unitIndex,
+            url: proof.url,
+            publicId: proof.publicId,
+            filename: proof.filename,
+            mimeType: proof.mimeType,
+            type: proof.type,
+            sizeBytes: proof.sizeBytes,
+            uploadedAt: proof.uploadedAt,
+            uploadedBy: proof.uploadedBy,
+          ),
+        )
+        .toList(),
     clockOutAudit: record.clockOutAudit == null
         ? null
         : ProductionAttendanceClockOutAudit(
@@ -5465,12 +5692,19 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
             progressUnitLabel: record.clockOutAudit!.progressUnitLabel,
             unitsCompleted: record.clockOutAudit!.unitsCompleted,
             unitsRemaining: record.clockOutAudit!.unitsRemaining,
+            requiredProofs: record.clockOutAudit!.requiredProofs,
+            unitType: record.clockOutAudit!.unitType,
             quantityActivityType: record.clockOutAudit!.quantityActivityType,
             quantityAmount: record.clockOutAudit!.quantityAmount,
             quantityUnit: record.clockOutAudit!.quantityUnit,
             notes: record.clockOutAudit!.notes,
             capturedAt: record.clockOutAudit!.capturedAt,
           ),
+    sessionStatus: record.sessionStatus,
+    numberOfUnitsCompleted: record.numberOfUnitsCompleted,
+    requiredProofs: record.requiredProofs,
+    unitType: record.unitType,
+    updatedAt: record.updatedAt,
   );
 }
 
@@ -5493,6 +5727,21 @@ StaffAttendanceRecord _toStaffAttendanceRecord(
     proofSizeBytes: record.proofSizeBytes,
     proofUploadedAt: record.proofUploadedAt,
     proofUploadedBy: record.proofUploadedBy,
+    proofs: record.proofs
+        .map(
+          (proof) => StaffAttendanceProof(
+            unitIndex: proof.unitIndex,
+            url: proof.url,
+            publicId: proof.publicId,
+            filename: proof.filename,
+            mimeType: proof.mimeType,
+            type: proof.type,
+            sizeBytes: proof.sizeBytes,
+            uploadedAt: proof.uploadedAt,
+            uploadedBy: proof.uploadedBy,
+          ),
+        )
+        .toList(),
     clockOutAudit: record.clockOutAudit == null
         ? null
         : StaffAttendanceClockOutAudit(
@@ -5507,12 +5756,19 @@ StaffAttendanceRecord _toStaffAttendanceRecord(
             progressUnitLabel: record.clockOutAudit!.progressUnitLabel,
             unitsCompleted: record.clockOutAudit!.unitsCompleted,
             unitsRemaining: record.clockOutAudit!.unitsRemaining,
+            requiredProofs: record.clockOutAudit!.requiredProofs,
+            unitType: record.clockOutAudit!.unitType,
             quantityActivityType: record.clockOutAudit!.quantityActivityType,
             quantityAmount: record.clockOutAudit!.quantityAmount,
             quantityUnit: record.clockOutAudit!.quantityUnit,
             notes: record.clockOutAudit!.notes,
             capturedAt: record.clockOutAudit!.capturedAt,
           ),
+    sessionStatus: record.sessionStatus,
+    numberOfUnitsCompleted: record.numberOfUnitsCompleted,
+    requiredProofs: record.requiredProofs,
+    unitType: record.unitType,
+    updatedAt: record.updatedAt,
   );
 }
 
@@ -6480,6 +6736,11 @@ _ClockOutAuditSubmission _buildClockOutAuditSubmission({
     amount: remainingAfterSave,
     singularUnitLabel: progressUnitSingularLabel,
   );
+  final requiredProofs = input.actualPlots.ceil();
+  final unitType = _resolveAttendanceUnitTypeLabel(
+    unitLabel: selectedUnitLabel,
+    progressUnitLabel: progressUnitSingularLabel,
+  );
 
   return _ClockOutAuditSubmission(
     proofAuditPayload: {
@@ -6494,6 +6755,8 @@ _ClockOutAuditSubmission _buildClockOutAuditSubmission({
       "progressUnitLabel": progressUnitSingularLabel,
       "unitsCompleted": input.actualPlots,
       "unitsRemaining": remainingAfterSave,
+      "requiredProofs": requiredProofs,
+      "unitType": unitType,
       "quantityActivityType": input.quantityActivityType,
       "quantityAmount": input.quantityAmount,
       "quantityUnit": input.quantityUnit,
@@ -7740,6 +8003,9 @@ Future<bool> _showClockOutProofReviewDialog(
                 audit,
                 fallbackDay: workDate,
               ),
+              requiredProofs:
+                  attendance.requiredProofs ?? audit?.requiredProofs,
+              proofs: attendance.proofs,
               proofUrl: attendance.proofUrl,
               proofFilename: attendance.proofFilename,
               proofMimeType: attendance.proofMimeType,

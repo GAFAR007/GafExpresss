@@ -34,6 +34,9 @@ const String _keyProofMimeType = "proofMimeType";
 const String _keyProofSizeBytes = "proofSizeBytes";
 const String _keyProofUploadedAt = "proofUploadedAt";
 const String _keyProofUploadedBy = "proofUploadedBy";
+const String _keyProofs = "proofs";
+const String _keyUnitIndex = "unitIndex";
+const String _keyType = "type";
 const String _keyClockOutAudit = "clockOutAudit";
 const String _keyPlanId = "planId";
 const String _keyTaskId = "taskId";
@@ -44,11 +47,56 @@ const String _keyUnitLabel = "unitLabel";
 const String _keyProgressUnitLabel = "progressUnitLabel";
 const String _keyUnitsCompleted = "unitsCompleted";
 const String _keyUnitsRemaining = "unitsRemaining";
+const String _keyNumberOfUnitsCompleted = "numberOfUnitsCompleted";
+const String _keyRequiredProofs = "requiredProofs";
+const String _keyUnitType = "unitType";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
 const String _keyWorkDate = "workDate";
 const String _keyCapturedAt = "capturedAt";
+const String _keySessionStatus = "sessionStatus";
+const String _keyUpdatedAt = "updatedAt";
+
+class StaffAttendanceProof {
+  final int unitIndex;
+  final String url;
+  final String publicId;
+  final String filename;
+  final String mimeType;
+  final String type;
+  final int? sizeBytes;
+  final DateTime? uploadedAt;
+  final String? uploadedBy;
+
+  const StaffAttendanceProof({
+    required this.unitIndex,
+    required this.url,
+    required this.publicId,
+    required this.filename,
+    required this.mimeType,
+    required this.type,
+    required this.sizeBytes,
+    required this.uploadedAt,
+    required this.uploadedBy,
+  });
+
+  factory StaffAttendanceProof.fromJson(Map<String, dynamic> json) {
+    return StaffAttendanceProof(
+      unitIndex: _parseNullableInt(json[_keyUnitIndex]) ?? 1,
+      url: (json[_keyProofUrl] ?? "").toString(),
+      publicId: (json[_keyProofPublicId] ?? "").toString(),
+      filename: (json[_keyProofFilename] ?? "").toString(),
+      mimeType: (json[_keyProofMimeType] ?? "").toString(),
+      type: (json[_keyType] ?? "").toString(),
+      sizeBytes: _parseNullableInt(json[_keyProofSizeBytes]),
+      uploadedAt: _parseDate(json[_keyProofUploadedAt]),
+      uploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+    );
+  }
+
+  bool get isUploaded => url.trim().isNotEmpty && filename.trim().isNotEmpty;
+}
 
 class StaffAttendanceClockOutAudit {
   final DateTime? workDate;
@@ -62,6 +110,8 @@ class StaffAttendanceClockOutAudit {
   final String progressUnitLabel;
   final num? unitsCompleted;
   final num? unitsRemaining;
+  final int? requiredProofs;
+  final String unitType;
   final String quantityActivityType;
   final num? quantityAmount;
   final String quantityUnit;
@@ -80,6 +130,8 @@ class StaffAttendanceClockOutAudit {
     required this.progressUnitLabel,
     required this.unitsCompleted,
     required this.unitsRemaining,
+    required this.requiredProofs,
+    required this.unitType,
     required this.quantityActivityType,
     required this.quantityAmount,
     required this.quantityUnit,
@@ -100,6 +152,8 @@ class StaffAttendanceClockOutAudit {
       progressUnitLabel: (json[_keyProgressUnitLabel] ?? "").toString(),
       unitsCompleted: _parseNullableNum(json[_keyUnitsCompleted]),
       unitsRemaining: _parseNullableNum(json[_keyUnitsRemaining]),
+      requiredProofs: _parseNullableInt(json[_keyRequiredProofs]),
+      unitType: (json[_keyUnitType] ?? "").toString(),
       quantityActivityType: (json[_keyQuantityActivityType] ?? "").toString(),
       quantityAmount: _parseNullableNum(json[_keyQuantityAmount]),
       quantityUnit: (json[_keyQuantityUnit] ?? "").toString(),
@@ -125,7 +179,13 @@ class StaffAttendanceRecord {
   final int? proofSizeBytes;
   final DateTime? proofUploadedAt;
   final String? proofUploadedBy;
+  final List<StaffAttendanceProof> proofs;
   final StaffAttendanceClockOutAudit? clockOutAudit;
+  final String sessionStatus;
+  final num? numberOfUnitsCompleted;
+  final int? requiredProofs;
+  final String unitType;
+  final DateTime? updatedAt;
 
   const StaffAttendanceRecord({
     required this.id,
@@ -143,7 +203,13 @@ class StaffAttendanceRecord {
     required this.proofSizeBytes,
     required this.proofUploadedAt,
     required this.proofUploadedBy,
+    required this.proofs,
     required this.clockOutAudit,
+    required this.sessionStatus,
+    required this.numberOfUnitsCompleted,
+    required this.requiredProofs,
+    required this.unitType,
+    required this.updatedAt,
   });
 
   factory StaffAttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -170,12 +236,21 @@ class StaffAttendanceRecord {
       proofSizeBytes: _parseNullableInt(json[_keyProofSizeBytes]),
       proofUploadedAt: _parseDate(json[_keyProofUploadedAt]),
       proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+      proofs: _parseProofs(json[_keyProofs]),
       clockOutAudit: _parseClockOutAudit(json[_keyClockOutAudit]),
+      sessionStatus: _parseNullableString(json[_keySessionStatus]) ?? "active",
+      numberOfUnitsCompleted: _parseNullableNum(
+        json[_keyNumberOfUnitsCompleted],
+      ),
+      requiredProofs: _parseNullableInt(json[_keyRequiredProofs]),
+      unitType: _parseNullableString(json[_keyUnitType]) ?? "",
+      updatedAt: _parseDate(json[_keyUpdatedAt]),
     );
   }
 
   // WHY: Open sessions are the ones without a clock-out time.
-  bool get isOpen => clockOutAt == null;
+  bool get isOpen =>
+      sessionStatus.trim().toLowerCase() == "active" || clockOutAt == null;
 
   int? get effectiveDurationMinutes {
     // WHY: Prefer server-calculated duration for accuracy.
@@ -255,6 +330,22 @@ String? _parseNullableString(dynamic value) {
   final text = value.toString();
   if (text.trim().isEmpty) return null;
   return text;
+}
+
+List<StaffAttendanceProof> _parseProofs(dynamic value) {
+  if (value is! List) {
+    return const <StaffAttendanceProof>[];
+  }
+  return value
+      .whereType<Map>()
+      .map(
+        (item) => item.map((key, fieldValue) {
+          return MapEntry(key.toString(), fieldValue);
+        }),
+      )
+      .map(StaffAttendanceProof.fromJson)
+      .toList()
+    ..sort((left, right) => left.unitIndex.compareTo(right.unitIndex));
 }
 
 StaffAttendanceClockOutAudit? _parseClockOutAudit(dynamic value) {

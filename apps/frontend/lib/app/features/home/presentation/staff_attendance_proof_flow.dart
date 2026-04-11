@@ -25,9 +25,9 @@ const String _logTag = "STAFF_ATTENDANCE_PROOF_FLOW";
 const String _dialogTitle = "Upload proof";
 const String _dialogBody =
     "Upload a file or picture now for this attendance record. After proof is saved, continue the clock-out flow.";
-const String _chooseFileLabel = "Choose file";
-const String _replaceFileLabel = "Replace file";
-const String _uploadLabel = "Upload proof";
+const String _chooseFileLabel = "Upload proof";
+const String _replaceFileLabel = "Change proof";
+const String _submitLabel = "Submit";
 const String _allowedLabel = "Allowed: PDF, JPG, PNG, WEBP. Max 5 MB.";
 const String _missingFileMessage = "Choose a proof file or picture first.";
 const String _tooLargeMessage = "Proof must be 5 MB or smaller.";
@@ -103,7 +103,19 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
   );
 
   final actions = StaffAttendanceActions(ref);
-  PickedAttendanceProofData? selectedFile;
+  final requiredProofs = _resolveRequiredProofCount(
+    attendance: attendance,
+    clockOutAuditPayload: clockOutAuditPayload,
+  );
+  final unitsCompleted = _resolveUnitsCompleted(
+    attendance: attendance,
+    clockOutAuditPayload: clockOutAuditPayload,
+  );
+  final uploadedProofsByUnitIndex = <int, StaffAttendanceProof>{
+    for (final proof in _buildExistingAttendanceProofs(attendance))
+      if (proof.isUploaded) proof.unitIndex: proof,
+  };
+  final selectedFilesByUnitIndex = <int, PickedAttendanceProofData>{};
   bool isUploading = false;
   String errorText = "";
   final uploaded = await showDialog<StaffAttendanceRecord>(
@@ -114,27 +126,43 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
         canPop: false,
         child: StatefulBuilder(
           builder: (context, setDialogState) {
-            Future<void> chooseFile() async {
+            Future<void> chooseFile(int unitIndex) async {
               final picked = await pickAttendanceProofFile();
               if (picked == null) {
                 return;
               }
               setDialogState(() {
-                selectedFile = picked;
+                selectedFilesByUnitIndex[unitIndex] = picked;
                 errorText = "";
               });
             }
 
-            Future<void> uploadProof() async {
-              if (selectedFile == null) {
+            Future<void> submitProofs() async {
+              final latestAttendanceByRef = <StaffAttendanceRecord>[attendance];
+              for (
+                var unitIndex = 1;
+                unitIndex <= requiredProofs;
+                unitIndex++
+              ) {
+                final pickedFile = selectedFilesByUnitIndex[unitIndex];
+                final uploadedProof = uploadedProofsByUnitIndex[unitIndex];
+                if (pickedFile == null && uploadedProof == null) {
+                  setDialogState(() {
+                    errorText =
+                        "Upload all $requiredProofs required proof${requiredProofs == 1 ? "" : "s"} before clock-out.";
+                  });
+                  return;
+                }
+                if (pickedFile != null && pickedFile.bytes.length > _maxBytes) {
+                  setDialogState(() {
+                    errorText = "Proof $unitIndex: $_tooLargeMessage";
+                  });
+                  return;
+                }
+              }
+              if (requiredProofs <= 0) {
                 setDialogState(() {
                   errorText = _missingFileMessage;
-                });
-                return;
-              }
-              if (selectedFile!.bytes.length > _maxBytes) {
-                setDialogState(() {
-                  errorText = _tooLargeMessage;
                 });
                 return;
               }
@@ -144,12 +172,45 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
               });
 
               try {
-                final updatedAttendance = await actions.uploadProof(
-                  attendanceId: attendance.id,
-                  bytes: selectedFile!.bytes,
-                  filename: selectedFile!.filename,
-                  clockOutAuditPayload: clockOutAuditPayload,
-                );
+                var updatedAttendance = attendance;
+                for (
+                  var unitIndex = 1;
+                  unitIndex <= requiredProofs;
+                  unitIndex++
+                ) {
+                  final pickedFile = selectedFilesByUnitIndex[unitIndex];
+                  if (pickedFile == null) {
+                    continue;
+                  }
+                  updatedAttendance = await actions.uploadProof(
+                    attendanceId: updatedAttendance.id,
+                    bytes: pickedFile.bytes,
+                    filename: pickedFile.filename,
+                    unitIndex: unitIndex,
+                    clockOutAuditPayload: clockOutAuditPayload,
+                  );
+                  latestAttendanceByRef
+                    ..clear()
+                    ..add(updatedAttendance);
+                  final refreshedProofs = _buildExistingAttendanceProofs(
+                    updatedAttendance,
+                  );
+                  setDialogState(() {
+                    selectedFilesByUnitIndex.remove(unitIndex);
+                    uploadedProofsByUnitIndex
+                      ..clear()
+                      ..addEntries(
+                        refreshedProofs
+                            .where((proof) => proof.isUploaded)
+                            .map((proof) => MapEntry(proof.unitIndex, proof)),
+                      );
+                  });
+                }
+                if (uploadedProofsByUnitIndex.length != requiredProofs) {
+                  throw Exception(
+                    "Upload all $requiredProofs required proof${requiredProofs == 1 ? "" : "s"} before clock-out.",
+                  );
+                }
                 if (!dialogContext.mounted) {
                   return;
                 }
@@ -158,10 +219,12 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                   "requireAttendanceProofUpload() success",
                   extra: {
                     "attendanceId": attendance.id,
-                    "staffProfileId": updatedAttendance.staffProfileId,
+                    "staffProfileId":
+                        latestAttendanceByRef.first.staffProfileId,
+                    "requiredProofs": requiredProofs,
                   },
                 );
-                Navigator.of(dialogContext).pop(updatedAttendance);
+                Navigator.of(dialogContext).pop(latestAttendanceByRef.first);
               } catch (error) {
                 if (!dialogContext.mounted) {
                   return;
@@ -190,6 +253,10 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
               amountKey: "unitsRemaining",
               unitKey: "progressUnitLabel",
             );
+            final proofRequirementLabel = unitsCompleted == null
+                ? "$requiredProofs proof${requiredProofs == 1 ? "" : "s"} required"
+                : "${_formatAuditAmount(unitsCompleted)} unit${unitsCompleted == 1 ? "" : "s"} completed • $requiredProofs proof${requiredProofs == 1 ? "" : "s"} required";
+            final uploadedProofCount = uploadedProofsByUnitIndex.length;
 
             return AlertDialog(
               title: const Text(_dialogTitle),
@@ -245,74 +312,32 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                         ),
                       ],
                       const SizedBox(height: 16),
-                      OutlinedButton.icon(
-                        onPressed: isUploading ? null : chooseFile,
-                        icon: Icon(
-                          selectedFile == null
-                              ? Icons.attach_file_outlined
-                              : Icons.refresh_outlined,
-                        ),
-                        label: Text(
-                          selectedFile == null
-                              ? _chooseFileLabel
-                              : _replaceFileLabel,
-                        ),
+                      _ProofMetaLine(
+                        label: "Proofs",
+                        value:
+                            "$proofRequirementLabel • uploaded $uploadedProofCount of $requiredProofs",
+                        icon: Icons.verified_outlined,
                       ),
                       const SizedBox(height: 12),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest
-                              .withValues(alpha: 0.45),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.outlineVariant.withValues(alpha: 0.8),
+                      ...List.generate(requiredProofs, (index) {
+                        final unitIndex = index + 1;
+                        final selectedFile =
+                            selectedFilesByUnitIndex[unitIndex];
+                        final uploadedProof =
+                            uploadedProofsByUnitIndex[unitIndex];
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: unitIndex == requiredProofs ? 0 : 12,
                           ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              selectedFile == null
-                                  ? Icons.pending_outlined
-                                  : selectedFile!.isImage
-                                  ? Icons.image_outlined
-                                  : Icons.description_outlined,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    selectedFile == null
-                                        ? _noFileSelectedLabel
-                                        : selectedFile!.filename,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    selectedFile == null
-                                        ? _allowedLabel
-                                        : "Proof selected • ${_formatBytes(selectedFile!.sizeBytes)}",
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                          child: _ProofUploadSlotCard(
+                            unitIndex: unitIndex,
+                            selectedFile: selectedFile,
+                            uploadedProof: uploadedProof,
+                            isUploading: isUploading,
+                            onChooseFile: () => chooseFile(unitIndex),
+                          ),
+                        );
+                      }),
                       if (errorText.isNotEmpty) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -340,9 +365,23 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                 ),
               ),
               actions: [
+                OutlinedButton.icon(
+                  onPressed: isUploading
+                      ? null
+                      : () => chooseFile(
+                          _firstMissingProofSlot(
+                            requiredProofs: requiredProofs,
+                            selectedFilesByUnitIndex: selectedFilesByUnitIndex,
+                            uploadedProofsByUnitIndex:
+                                uploadedProofsByUnitIndex,
+                          ),
+                        ),
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: const Text(_chooseFileLabel),
+                ),
                 FilledButton(
-                  onPressed: isUploading ? null : uploadProof,
-                  child: Text(isUploading ? "Uploading..." : _uploadLabel),
+                  onPressed: isUploading ? null : submitProofs,
+                  child: Text(isUploading ? "Submitting..." : _submitLabel),
                 ),
               ],
             );
@@ -391,6 +430,110 @@ class _ProofMetaLine extends StatelessWidget {
               style: Theme.of(
                 context,
               ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProofUploadSlotCard extends StatelessWidget {
+  final int unitIndex;
+  final PickedAttendanceProofData? selectedFile;
+  final StaffAttendanceProof? uploadedProof;
+  final bool isUploading;
+  final VoidCallback onChooseFile;
+
+  const _ProofUploadSlotCard({
+    required this.unitIndex,
+    required this.selectedFile,
+    required this.uploadedProof,
+    required this.isUploading,
+    required this.onChooseFile,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayFilename = selectedFile?.filename ?? uploadedProof?.filename;
+    final displaySize = selectedFile?.sizeBytes ?? uploadedProof?.sizeBytes;
+    final isSelected = selectedFile != null;
+    final isUploaded = uploadedProof?.isUploaded == true && !isSelected;
+    final icon = isSelected
+        ? (selectedFile!.isImage
+              ? Icons.image_outlined
+              : Icons.description_outlined)
+        : isUploaded
+        ? Icons.verified_outlined
+        : Icons.pending_outlined;
+    final headline = displayFilename?.trim().isNotEmpty == true
+        ? displayFilename!.trim()
+        : _noFileSelectedLabel;
+    final supportingText = isSelected
+        ? "Ready to upload • ${_formatBytes(displaySize ?? 0)}"
+        : isUploaded
+        ? "Uploaded${uploadedProof?.uploadedAt == null ? "" : " • ${_formatUploadMoment(uploadedProof!.uploadedAt!)}"}"
+        : _allowedLabel;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(
+          context,
+        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Proof $unitIndex",
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      headline,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      supportingText,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: isUploading ? null : onChooseFile,
+            icon: Icon(
+              isUploaded || isSelected
+                  ? Icons.refresh_outlined
+                  : Icons.upload_file_outlined,
+            ),
+            label: Text(
+              isUploaded || isSelected ? _replaceFileLabel : _chooseFileLabel,
             ),
           ),
         ],
@@ -467,6 +610,120 @@ String _resolveProofUploadErrorMessage(Object error) {
     return text.substring("Exception: ".length);
   }
   return text.isEmpty ? _uploadFailedMessage : text;
+}
+
+List<StaffAttendanceProof> _buildExistingAttendanceProofs(
+  StaffAttendanceRecord attendance,
+) {
+  if (attendance.proofs.isNotEmpty) {
+    return [...attendance.proofs]
+      ..sort((left, right) => left.unitIndex.compareTo(right.unitIndex));
+  }
+  final hasTopLevelProof =
+      attendance.proofUrl?.trim().isNotEmpty == true &&
+      attendance.proofFilename?.trim().isNotEmpty == true;
+  if (!hasTopLevelProof) {
+    return const <StaffAttendanceProof>[];
+  }
+  return <StaffAttendanceProof>[
+    StaffAttendanceProof(
+      unitIndex: 1,
+      url: attendance.proofUrl!.trim(),
+      publicId: attendance.proofPublicId?.trim() ?? "",
+      filename: attendance.proofFilename!.trim(),
+      mimeType: attendance.proofMimeType?.trim() ?? "",
+      type: _resolveProofType(attendance.proofMimeType),
+      sizeBytes: attendance.proofSizeBytes,
+      uploadedAt: attendance.proofUploadedAt,
+      uploadedBy: attendance.proofUploadedBy,
+    ),
+  ];
+}
+
+int _resolveRequiredProofCount({
+  required StaffAttendanceRecord attendance,
+  required Map<String, dynamic>? clockOutAuditPayload,
+}) {
+  final unitsCompleted = _resolveUnitsCompleted(
+    attendance: attendance,
+    clockOutAuditPayload: clockOutAuditPayload,
+  );
+  if (unitsCompleted != null) {
+    final resolvedCount = unitsCompleted.ceil();
+    return resolvedCount < 1 ? 1 : resolvedCount;
+  }
+  final auditRequiredProofs =
+      attendance.clockOutAudit?.requiredProofs ?? attendance.requiredProofs;
+  if (auditRequiredProofs != null && auditRequiredProofs > 0) {
+    return auditRequiredProofs;
+  }
+  return 1;
+}
+
+num? _resolveUnitsCompleted({
+  required StaffAttendanceRecord attendance,
+  required Map<String, dynamic>? clockOutAuditPayload,
+}) {
+  final payloadValue = clockOutAuditPayload?["unitsCompleted"];
+  final parsedPayload = _parseNum(payloadValue);
+  if (parsedPayload != null && parsedPayload >= 0) {
+    return parsedPayload;
+  }
+  final recordValue =
+      attendance.clockOutAudit?.unitsCompleted ??
+      attendance.numberOfUnitsCompleted;
+  if (recordValue != null && recordValue >= 0) {
+    return recordValue;
+  }
+  return null;
+}
+
+int _firstMissingProofSlot({
+  required int requiredProofs,
+  required Map<int, PickedAttendanceProofData> selectedFilesByUnitIndex,
+  required Map<int, StaffAttendanceProof> uploadedProofsByUnitIndex,
+}) {
+  for (var unitIndex = 1; unitIndex <= requiredProofs; unitIndex++) {
+    if (selectedFilesByUnitIndex.containsKey(unitIndex)) {
+      continue;
+    }
+    if (uploadedProofsByUnitIndex.containsKey(unitIndex)) {
+      continue;
+    }
+    return unitIndex;
+  }
+  return requiredProofs;
+}
+
+num? _parseNum(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is num) {
+    return value;
+  }
+  return num.tryParse(value.toString());
+}
+
+String _resolveProofType(String? mimeType) {
+  final normalizedMimeType = mimeType?.trim().toLowerCase() ?? "";
+  if (normalizedMimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/")) {
+    return "video";
+  }
+  if (normalizedMimeType.isNotEmpty) {
+    return "document";
+  }
+  return "";
+}
+
+String _formatUploadMoment(DateTime value) {
+  final localValue = value.toLocal();
+  final hour = localValue.hour.toString().padLeft(2, "0");
+  final minute = localValue.minute.toString().padLeft(2, "0");
+  return "${localValue.year}-${localValue.month.toString().padLeft(2, "0")}-${localValue.day.toString().padLeft(2, "0")} $hour:$minute";
 }
 
 String _formatBytes(int bytes) {

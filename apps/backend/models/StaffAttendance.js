@@ -18,6 +18,56 @@ const debug = require('../utils/debug');
 
 debug('Loading StaffAttendance model...');
 
+const attendanceProofSchema = new mongoose.Schema(
+  {
+    unitIndex: {
+      type: Number,
+      min: 1,
+      required: true,
+    },
+    url: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    publicId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    filename: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    type: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    sizeBytes: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    uploadedAt: {
+      type: Date,
+      default: null,
+    },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const clockOutAuditSchema = new mongoose.Schema(
   {
     workDate: {
@@ -73,6 +123,16 @@ const clockOutAuditSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: null,
+    },
+    requiredProofs: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    unitType: {
+      type: String,
+      trim: true,
+      default: '',
     },
     quantityActivityType: {
       type: String,
@@ -187,9 +247,34 @@ const staffAttendanceSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    proofs: {
+      type: [attendanceProofSchema],
+      default: [],
+    },
     clockOutAudit: {
       type: clockOutAuditSchema,
       default: null,
+    },
+    sessionStatus: {
+      type: String,
+      enum: ['active', 'completed'],
+      default: 'active',
+      index: true,
+    },
+    numberOfUnitsCompleted: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    requiredProofs: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    unitType: {
+      type: String,
+      trim: true,
+      default: '',
     },
   },
   {

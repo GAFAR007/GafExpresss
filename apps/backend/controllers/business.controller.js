@@ -15527,6 +15527,8 @@ async function clockInStaff(req, res) {
       attendance.clockInBy =
         actor._id;
       if (existingClockOutAt) {
+        attendance.sessionStatus =
+          "completed";
         attendance.durationMinutes =
           resolveAttendanceDurationMinutes(
             {
@@ -15537,6 +15539,9 @@ async function clockInStaff(req, res) {
                 existingClockOutAt,
             },
           );
+      } else {
+        attendance.sessionStatus =
+          "active";
       }
       await attendance.save();
       auditAction =
@@ -15562,6 +15567,8 @@ async function clockInStaff(req, res) {
           resolvedClockInAt;
         existingOpen.clockInBy =
           actor._id;
+        existingOpen.sessionStatus =
+          "active";
         if (existingOpen.clockOutAt) {
           existingOpen.durationMinutes =
             resolveAttendanceDurationMinutes(
@@ -15587,6 +15594,8 @@ async function clockInStaff(req, res) {
               resolvedClockInAt,
             clockInBy: actor._id,
             notes: auditNote,
+            sessionStatus:
+              "active",
           });
       }
     }
@@ -15838,6 +15847,36 @@ async function clockOutStaff(req, res) {
       });
     }
 
+    const requiredProofs =
+      Number.isFinite(
+        attendance.requiredProofs,
+      ) ?
+        Number(
+          attendance.requiredProofs,
+        )
+      : Number.isFinite(
+          attendance.clockOutAudit
+            ?.requiredProofs,
+        ) ?
+        Number(
+          attendance.clockOutAudit
+            ?.requiredProofs,
+        )
+      : 0;
+    if (
+      requiredProofs > 0 &&
+      !hasCompleteAttendanceProofSet(
+        {
+          attendance,
+          requiredProofs,
+        },
+      )
+    ) {
+      return res.status(400).json({
+        error: `Upload ${requiredProofs} proof${requiredProofs === 1 ? "" : "s"} before clock-out`,
+      });
+    }
+
     const clockOutAt =
       manualClockOutAt ||
       new Date();
@@ -15877,6 +15916,30 @@ async function clockOutStaff(req, res) {
       actor._id;
     attendance.durationMinutes =
       durationMinutes;
+    attendance.sessionStatus =
+      "completed";
+    if (
+      attendance.clockOutAudit
+        ?.unitsCompleted != null
+    ) {
+      attendance.numberOfUnitsCompleted =
+        attendance.clockOutAudit
+          .unitsCompleted;
+    }
+    if (requiredProofs > 0) {
+      attendance.requiredProofs =
+        requiredProofs;
+    }
+    if (
+      attendance.clockOutAudit
+        ?.unitType
+        ?.trim()
+    ) {
+      attendance.unitType =
+        attendance.clockOutAudit
+          .unitType
+          .trim();
+    }
     await attendance.save();
 
     await writeAuditLog({
@@ -15969,6 +16032,254 @@ async function clockOutStaff(req, res) {
   }
 }
 
+function resolveAttendanceUnitType({
+  unitLabel,
+  progressUnitLabel,
+}) {
+  const sourceText = [
+    unitLabel,
+    progressUnitLabel,
+  ]
+    .map((value) =>
+      value?.toString().trim().toLowerCase() || "",
+    )
+    .filter(Boolean)
+    .join(" ");
+
+  const hasPlot =
+    sourceText.includes("plot");
+  const hasGreenhouse =
+    sourceText.includes("greenhouse");
+  if (hasPlot && hasGreenhouse) {
+    return "mixed";
+  }
+  if (hasGreenhouse) {
+    return "greenhouse";
+  }
+  if (hasPlot) {
+    return "plot";
+  }
+  return sourceText;
+}
+
+function resolveAttendanceRequiredProofs(
+  unitsCompleted,
+) {
+  const normalizedUnits =
+    parseNonNegativeNumberInput(
+      unitsCompleted,
+    );
+  if (normalizedUnits == null) {
+    return null;
+  }
+  return Math.max(
+    1,
+    Math.ceil(normalizedUnits),
+  );
+}
+
+function parseAttendanceProofUnitIndex(
+  rawValue,
+) {
+  if (
+    rawValue === undefined ||
+    rawValue === null ||
+    rawValue === ""
+  ) {
+    return 1;
+  }
+  const normalizedValue = Number(
+    rawValue,
+  );
+  if (
+    !Number.isFinite(
+      normalizedValue,
+    ) ||
+    normalizedValue <= 0
+  ) {
+    throw new Error(
+      "Proof unit index is invalid",
+    );
+  }
+  return Math.max(
+    1,
+    Math.floor(normalizedValue),
+  );
+}
+
+function resolveAttendanceProofType(
+  mimeType,
+) {
+  const normalizedMimeType =
+    mimeType
+      ?.toString()
+      .trim()
+      .toLowerCase() || "";
+  if (
+    normalizedMimeType.startsWith(
+      "image/",
+    )
+  ) {
+    return "image";
+  }
+  if (
+    normalizedMimeType.startsWith(
+      "video/",
+    )
+  ) {
+    return "video";
+  }
+  if (normalizedMimeType) {
+    return "document";
+  }
+  return "";
+}
+
+function normalizeAttendanceProofEntries(
+  rawProofs,
+) {
+  if (!Array.isArray(rawProofs)) {
+    return [];
+  }
+
+  const byUnitIndex = new Map();
+  for (const rawProof of rawProofs) {
+    if (
+      !rawProof ||
+      typeof rawProof !== "object"
+    ) {
+      continue;
+    }
+    const unitIndex =
+      parseAttendanceProofUnitIndex(
+        rawProof.unitIndex,
+      );
+    const normalizedProof = {
+      unitIndex,
+      url:
+        rawProof.url
+          ?.toString()
+          .trim() || "",
+      publicId:
+        rawProof.publicId
+          ?.toString()
+          .trim() || "",
+      filename:
+        rawProof.filename
+          ?.toString()
+          .trim() || "",
+      mimeType:
+        rawProof.mimeType
+          ?.toString()
+          .trim() || "",
+      type:
+        rawProof.type
+          ?.toString()
+          .trim() ||
+        resolveAttendanceProofType(
+          rawProof.mimeType,
+        ),
+      sizeBytes:
+        parseNonNegativeNumberInput(
+          rawProof.sizeBytes,
+        ),
+      uploadedAt:
+        parseDateInput(
+          rawProof.uploadedAt,
+        ) || null,
+      uploadedBy:
+        normalizeStaffIdInput(
+          rawProof.uploadedBy,
+        ) || null,
+    };
+    if (
+      !normalizedProof.url ||
+      !normalizedProof.filename
+    ) {
+      continue;
+    }
+    byUnitIndex.set(
+      unitIndex,
+      normalizedProof,
+    );
+  }
+
+  return Array.from(
+    byUnitIndex.values(),
+  ).sort(
+    (left, right) =>
+      Number(left.unitIndex || 0) -
+      Number(right.unitIndex || 0),
+  );
+}
+
+function countAttendanceProofs(
+  rawProofs,
+) {
+  return normalizeAttendanceProofEntries(
+    rawProofs,
+  ).length;
+}
+
+function hasCompleteAttendanceProofSet({
+  attendance,
+  requiredProofs,
+}) {
+  if (!requiredProofs) {
+    return true;
+  }
+  const proofs =
+    normalizeAttendanceProofEntries(
+      attendance?.proofs,
+    );
+  if (proofs.length !== requiredProofs) {
+    return false;
+  }
+  for (
+    let expectedIndex = 1;
+    expectedIndex <= requiredProofs;
+    expectedIndex += 1
+  ) {
+    const matchingProof =
+      proofs.find(
+        (proof) =>
+          proof.unitIndex ===
+          expectedIndex,
+      );
+    if (!matchingProof) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function syncAttendanceProofSummary(
+  attendance,
+) {
+  const proofs =
+    normalizeAttendanceProofEntries(
+      attendance?.proofs,
+    );
+  attendance.proofs = proofs;
+
+  const primaryProof =
+    proofs[0] || null;
+  attendance.proofUrl =
+    primaryProof?.url || "";
+  attendance.proofPublicId =
+    primaryProof?.publicId || "";
+  attendance.proofFilename =
+    primaryProof?.filename || "";
+  attendance.proofMimeType =
+    primaryProof?.mimeType || "";
+  attendance.proofSizeBytes =
+    primaryProof?.sizeBytes || null;
+  attendance.proofUploadedAt =
+    primaryProof?.uploadedAt || null;
+  attendance.proofUploadedBy =
+    primaryProof?.uploadedBy || null;
+}
+
 function resolveAttendanceClockOutAuditPayload(rawValue) {
   if (
     rawValue === undefined ||
@@ -16030,6 +16341,19 @@ function resolveAttendanceClockOutAuditPayload(rawValue) {
     );
   }
 
+  const unitLabel =
+    parsedValue.unitLabel
+      ?.toString()
+      .trim() || "";
+  const progressUnitLabel =
+    parsedValue.progressUnitLabel
+      ?.toString()
+      .trim() || "";
+  const requiredProofs =
+    resolveAttendanceRequiredProofs(
+      unitsCompleted,
+    );
+
   return {
     workDate,
     planId:
@@ -16056,16 +16380,16 @@ function resolveAttendanceClockOutAuditPayload(rawValue) {
       normalizeStaffIdInput(
         parsedValue.unitId,
       ) || "",
-    unitLabel:
-      parsedValue.unitLabel
-        ?.toString()
-        .trim() || "",
-    progressUnitLabel:
-      parsedValue.progressUnitLabel
-        ?.toString()
-        .trim() || "",
+    unitLabel,
+    progressUnitLabel,
     unitsCompleted,
     unitsRemaining,
+    requiredProofs,
+    unitType:
+      resolveAttendanceUnitType({
+        unitLabel,
+        progressUnitLabel,
+      }),
     quantityActivityType:
       parsedValue.quantityActivityType
         ?.toString()
@@ -16138,6 +16462,10 @@ async function uploadStaffAttendanceProof(req, res) {
         error: "Proof file is required",
       });
     }
+    const proofUnitIndex =
+      parseAttendanceProofUnitIndex(
+        req.body?.unitIndex,
+      );
     const clockOutAudit =
       resolveAttendanceClockOutAuditPayload(
         req.body?.clockOutAudit,
@@ -16201,6 +16529,23 @@ async function uploadStaffAttendanceProof(req, res) {
       });
     }
 
+    const requiredProofs =
+      clockOutAudit
+        ?.requiredProofs ||
+      attendance.requiredProofs ||
+      attendance.clockOutAudit
+        ?.requiredProofs ||
+      1;
+    if (
+      requiredProofs > 0 &&
+      proofUnitIndex >
+        requiredProofs
+    ) {
+      return res.status(400).json({
+        error: `Only ${requiredProofs} proof slot${requiredProofs === 1 ? "" : "s"} ${requiredProofs === 1 ? "is" : "are"} required for this session`,
+      });
+    }
+
     const proof =
       await staffAttendanceProofService.uploadStaffAttendanceProof(
         {
@@ -16211,21 +16556,104 @@ async function uploadStaffAttendanceProof(req, res) {
         },
       );
 
-    attendance.proofUrl = proof.url;
-    attendance.proofPublicId = proof.publicId;
-    attendance.proofFilename = proof.filename;
-    attendance.proofMimeType = proof.mimeType;
-    attendance.proofSizeBytes = proof.sizeBytes;
-    attendance.proofUploadedAt = new Date();
-    attendance.proofUploadedBy = actor._id;
-    if (clockOutAudit) {
+    const uploadedAt =
+      new Date();
+    const normalizedProofs =
+      normalizeAttendanceProofEntries(
+        [
+          ...(Array.isArray(
+            attendance.proofs,
+          ) ?
+            attendance.proofs
+          : []),
+          {
+            unitIndex:
+              proofUnitIndex,
+            url: proof.url,
+            publicId:
+              proof.publicId,
+            filename:
+              proof.filename,
+            mimeType:
+              proof.mimeType,
+            type:
+              resolveAttendanceProofType(
+                proof.mimeType,
+              ),
+            sizeBytes:
+              proof.sizeBytes,
+            uploadedAt,
+            uploadedBy:
+              actor._id,
+          },
+        ],
+      );
+    const boundedProofs =
+      requiredProofs > 0 ?
+        normalizedProofs.filter(
+          (item) =>
+            item.unitIndex <=
+            requiredProofs,
+        )
+      : normalizedProofs;
+    attendance.proofs =
+      boundedProofs;
+    syncAttendanceProofSummary(
+      attendance,
+    );
+
+    const effectiveClockOutAudit =
+      clockOutAudit ?
+        {
+          ...clockOutAudit,
+          staffProfileId:
+            clockOutAudit.staffProfileId ||
+            attendance.staffProfileId.toString(),
+        }
+      : attendance.clockOutAudit
+          ?.toObject?.() ||
+        attendance.clockOutAudit;
+    if (effectiveClockOutAudit) {
       attendance.clockOutAudit = {
-        ...clockOutAudit,
-        staffProfileId:
-          clockOutAudit.staffProfileId ||
-          attendance.staffProfileId.toString(),
+        ...effectiveClockOutAudit,
+        requiredProofs:
+          effectiveClockOutAudit.requiredProofs ||
+          requiredProofs,
+        unitType:
+          effectiveClockOutAudit.unitType ||
+          resolveAttendanceUnitType(
+            {
+              unitLabel:
+                effectiveClockOutAudit.unitLabel,
+              progressUnitLabel:
+                effectiveClockOutAudit.progressUnitLabel,
+            },
+          ),
       };
+      attendance.numberOfUnitsCompleted =
+        effectiveClockOutAudit.unitsCompleted;
+      attendance.requiredProofs =
+        effectiveClockOutAudit.requiredProofs ||
+        requiredProofs;
+      attendance.unitType =
+        effectiveClockOutAudit.unitType ||
+        resolveAttendanceUnitType({
+          unitLabel:
+            effectiveClockOutAudit.unitLabel,
+          progressUnitLabel:
+            effectiveClockOutAudit.progressUnitLabel,
+        });
+    } else if (
+      attendance.requiredProofs ==
+      null
+    ) {
+      attendance.requiredProofs =
+        requiredProofs;
     }
+    attendance.sessionStatus =
+      attendance.clockOutAt ?
+        "completed"
+      : "active";
     await attendance.save();
 
     await writeAuditLog({
@@ -16243,6 +16671,14 @@ async function uploadStaffAttendanceProof(req, res) {
         proofFilename: proof.filename,
         proofMimeType: proof.mimeType,
         proofSizeBytes: proof.sizeBytes,
+        unitIndex:
+          proofUnitIndex,
+        proofsCount:
+          countAttendanceProofs(
+            boundedProofs,
+          ),
+        requiredProofs:
+          attendance.requiredProofs,
         clockOutAudit:
           clockOutAudit || null,
       },
