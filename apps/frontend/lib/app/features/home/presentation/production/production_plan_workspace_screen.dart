@@ -131,8 +131,16 @@ const String _attendanceUpdateSuccess =
 const String _attendanceUpdateFailure = "Unable to update attendance.";
 const String _daySummaryTasksLabel = "Tasks";
 const String _daySummaryAssignedLabel = "Assigned";
+const String _daySummaryClockedInLabel = "Clocked in";
+const String _daySummaryClockedOutLabel = "Clocked out";
 const String _daySummaryLoggedLabel = "Logged";
-const String _daySummaryDoneLabel = "Done";
+const String _daySummaryUnitsTouchedLabel = "Units";
+const String _daySummaryProgressLabel = "Progress";
+const String _daySummaryFirstClockInLabel = "First in";
+const String _daySummaryLastClockOutLabel = "Last out";
+const String _dayQuantityPlantingLabel = "Planting";
+const String _dayQuantityTransplantLabel = "Transplant";
+const String _dayQuantityHarvestLabel = "Harvest";
 const String _taskAssignmentSuccess = "Staff assignment updated.";
 const String _taskAssignmentFailure = "Unable to update task staff.";
 const String _taskStatusSuccess = "Task status updated.";
@@ -774,7 +782,15 @@ class _ProductionPlanWorkspaceScreenState
                   },
                 ),
                 const SizedBox(height: _cardSpacing),
-                _SelectedDayMetricsRow(tasks: tasksForDay, rows: rowsForDay),
+                _SelectedDayMetricsRow(
+                  plan: detail.plan,
+                  selectedDay: selectedDay,
+                  workScopeSummary: workScopeSummary,
+                  tasks: tasksForDay,
+                  rows: rowsForDay,
+                  timelineRows: detail.timelineRows,
+                  attendanceRecords: detail.attendanceRecords,
+                ),
                 const SizedBox(height: _cardSpacing),
                 if (tasksForDay.isEmpty)
                   const ProductionEmptyState(
@@ -849,6 +865,9 @@ class _ProductionPlanWorkspaceScreenState
                                 taskId: task.id,
                                 notes: note,
                               );
+                          if (!mounted || !context.mounted) {
+                            return null;
+                          }
                           await requireAttendanceProofUpload(
                             context: context,
                             ref: ref,
@@ -885,6 +904,9 @@ class _ProductionPlanWorkspaceScreenState
                               taskId: task.id,
                               notes: note,
                             );
+                            if (!mounted || !context.mounted) {
+                              return null;
+                            }
                             attendanceRecord =
                                 await requireAttendanceProofUpload(
                                   context: context,
@@ -972,6 +994,9 @@ class _ProductionPlanWorkspaceScreenState
                               taskId: task.id,
                               notes: "Clocked out from production workspace",
                             );
+                        if (!mounted || !context.mounted) {
+                          return null;
+                        }
                         final attendanceWithProof =
                             await requireAttendanceProofUpload(
                               context: context,
@@ -2834,66 +2859,218 @@ class _MonthDayTile extends StatelessWidget {
 }
 
 class _SelectedDayMetricsRow extends StatelessWidget {
+  final ProductionPlan plan;
+  final DateTime selectedDay;
+  final _WorkspaceWorkScopeSummary workScopeSummary;
   final List<ProductionTask> tasks;
   final List<ProductionTimelineRow> rows;
+  final List<ProductionTimelineRow> timelineRows;
+  final List<ProductionAttendanceRecord> attendanceRecords;
 
-  const _SelectedDayMetricsRow({required this.tasks, required this.rows});
+  const _SelectedDayMetricsRow({
+    required this.plan,
+    required this.selectedDay,
+    required this.workScopeSummary,
+    required this.tasks,
+    required this.rows,
+    required this.timelineRows,
+    required this.attendanceRecords,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final assignedCount = tasks.fold<int>(
-      0,
-      (sum, task) => sum + _resolveAssignedStaffIds(task).length,
+    final assignedStaffIds = tasks
+        .expand(_resolveAssignedStaffIds)
+        .map((staffId) => staffId.trim())
+        .where((staffId) => staffId.isNotEmpty)
+        .toSet();
+    final dayAttendanceRecords = _attendanceRowsForDay(
+      attendanceRecords: attendanceRecords,
+      day: selectedDay,
     );
-    final doneCount = tasks
-        .where((task) => task.status == _taskStatusDone)
+    final clockedInCount = dayAttendanceRecords.length;
+    final clockedOutCount = dayAttendanceRecords
+        .where((record) => record.clockOutAt != null)
         .length;
-    const metricWidth = 168.0;
-    return Wrap(
-      spacing: _cardSpacing,
-      runSpacing: _cardSpacing,
-      children: [
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryTasksLabel,
-            value: "${tasks.length}",
-            accentColor: _workspaceBlue,
-            softColor: _workspaceSoftBlue,
-            icon: Icons.checklist_outlined,
-          ),
-        ),
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryAssignedLabel,
-            value: "$assignedCount",
-            accentColor: _workspaceTeal,
-            softColor: _workspaceSoftTeal,
-            icon: Icons.groups_2_outlined,
-          ),
-        ),
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryLoggedLabel,
-            value: "${rows.length}",
-            accentColor: _workspaceAmber,
-            softColor: _workspaceSoftAmber,
-            icon: Icons.edit_note_outlined,
-          ),
-        ),
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryDoneLabel,
-            value: "$doneCount",
-            accentColor: _workspaceBerry,
-            softColor: _workspaceSoftBerry,
-            icon: Icons.task_alt_outlined,
-          ),
-        ),
-      ],
+    final unitsTouched = rows
+        .map((row) => row.unitId.trim())
+        .where((unitId) => unitId.isNotEmpty)
+        .toSet();
+    final plannedAmount = tasks.fold<num>(0, (sum, task) {
+      final assignedUnitIds = task.assignedUnitIds
+          .map((unitId) => unitId.trim())
+          .where((unitId) => unitId.isNotEmpty)
+          .toList();
+      return sum +
+          _resolveTaskProgressTargetAmount(
+            task: task,
+            assignedUnitIds: assignedUnitIds,
+            fallbackTotalUnits: workScopeSummary.totalUnits,
+          );
+    });
+    final actualAmount = rows.fold<num>(0, (sum, row) => sum + row.actualPlots);
+    final quantityMetrics = _buildSelectedDayQuantityMetrics(
+      plan: plan,
+      dayRows: rows,
+      timelineRows: timelineRows,
+    );
+
+    DateTime? firstClockInAt;
+    DateTime? lastClockOutAt;
+    for (final record in dayAttendanceRecords) {
+      final clockInAt = record.clockInAt;
+      if (clockInAt != null &&
+          (firstClockInAt == null || clockInAt.isBefore(firstClockInAt))) {
+        firstClockInAt = clockInAt;
+      }
+      final clockOutAt = record.clockOutAt;
+      if (clockOutAt != null &&
+          (lastClockOutAt == null || clockOutAt.isAfter(lastClockOutAt))) {
+        lastClockOutAt = clockOutAt;
+      }
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final metricWidth = _resolveSelectedDayMetricTileWidth(
+          constraints.maxWidth,
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: _cardSpacing,
+              runSpacing: _cardSpacing,
+              children: [
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryTasksLabel,
+                    value: "${tasks.length}",
+                    helper: "Scheduled on this day",
+                    accentColor: _workspaceBlue,
+                    softColor: _workspaceSoftBlue,
+                    icon: Icons.checklist_outlined,
+                  ),
+                ),
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryAssignedLabel,
+                    value: "${assignedStaffIds.length}",
+                    helper: "Unique staff assigned",
+                    accentColor: _workspaceTeal,
+                    softColor: _workspaceSoftTeal,
+                    icon: Icons.groups_2_outlined,
+                  ),
+                ),
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryClockedInLabel,
+                    value: "$clockedInCount",
+                    helper: "Attendance started",
+                    accentColor: _workspaceNavy,
+                    softColor: _workspaceSoftSlate,
+                    icon: Icons.login_outlined,
+                  ),
+                ),
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryClockedOutLabel,
+                    value: "$clockedOutCount",
+                    helper: "Shifts fully closed",
+                    accentColor: _workspaceBerry,
+                    softColor: _workspaceSoftBerry,
+                    icon: Icons.logout_outlined,
+                  ),
+                ),
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryLoggedLabel,
+                    value: "${rows.length}",
+                    helper: "Progress rows saved",
+                    accentColor: _workspaceAmber,
+                    softColor: _workspaceSoftAmber,
+                    icon: Icons.edit_note_outlined,
+                  ),
+                ),
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryUnitsTouchedLabel,
+                    value: "${unitsTouched.length}",
+                    helper: unitsTouched.isEmpty
+                        ? "No ${workScopeSummary.pluralLabel} logged yet"
+                        : "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} with progress",
+                    accentColor: _workspaceBerry,
+                    softColor: _workspaceSoftBerry,
+                    icon: Icons.grid_view_rounded,
+                  ),
+                ),
+                SizedBox(
+                  width: metricWidth,
+                  child: _WorkspaceDayMetricCard(
+                    label: _daySummaryProgressLabel,
+                    value:
+                        "${_formatProgressAmount(actualAmount)} / ${_formatProgressAmount(plannedAmount)}",
+                    helper:
+                        "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} logged against plan",
+                    accentColor: _workspaceTeal,
+                    softColor: _workspaceSoftTeal,
+                    icon: Icons.insights_outlined,
+                  ),
+                ),
+              ],
+            ),
+            if (firstClockInAt != null || lastClockOutAt != null) ...[
+              const SizedBox(height: _cardSpacing),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (firstClockInAt != null)
+                    _SummaryPill(
+                      icon: Icons.login_outlined,
+                      label:
+                          "$_daySummaryFirstClockInLabel ${_clockLabel(firstClockInAt.toLocal())}",
+                    ),
+                  if (lastClockOutAt != null)
+                    _SummaryPill(
+                      icon: Icons.logout_outlined,
+                      label:
+                          "$_daySummaryLastClockOutLabel ${_clockLabel(lastClockOutAt.toLocal())}",
+                    ),
+                ],
+              ),
+            ],
+            if (quantityMetrics.isNotEmpty) ...[
+              const SizedBox(height: _cardSpacing),
+              Wrap(
+                spacing: _cardSpacing,
+                runSpacing: _cardSpacing,
+                children: quantityMetrics
+                    .map(
+                      (metric) => SizedBox(
+                        width: metricWidth,
+                        child: _WorkspaceDayMetricCard(
+                          label: metric.label,
+                          value: metric.value,
+                          helper: metric.helper,
+                          accentColor: metric.accentColor,
+                          softColor: metric.softColor,
+                          icon: metric.icon,
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -2901,6 +3078,7 @@ class _SelectedDayMetricsRow extends StatelessWidget {
 class _WorkspaceDayMetricCard extends StatelessWidget {
   final String label;
   final String value;
+  final String? helper;
   final Color accentColor;
   final Color softColor;
   final IconData icon;
@@ -2908,6 +3086,7 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
   const _WorkspaceDayMetricCard({
     required this.label,
     required this.value,
+    this.helper,
     this.accentColor = _workspaceBlue,
     this.softColor = _workspaceSoftBlue,
     this.icon = Icons.analytics_outlined,
@@ -2972,6 +3151,19 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
+                if (helper != null && helper!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    helper!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -2979,6 +3171,24 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SelectedDayQuantityMetric {
+  final String label;
+  final String value;
+  final String helper;
+  final Color accentColor;
+  final Color softColor;
+  final IconData icon;
+
+  const _SelectedDayQuantityMetric({
+    required this.label,
+    required this.value,
+    required this.helper,
+    required this.accentColor,
+    required this.softColor,
+    required this.icon,
+  });
 }
 
 class _AgendaTaskCard extends StatelessWidget {
@@ -3707,6 +3917,55 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
         : hasClockIn || hasClockOut
         ? _workspaceSoftBlue
         : _workspaceSoftSlate;
+    final actionButtons = <Widget>[
+      if ((canManageAttendance || canClockSelfAttendance) &&
+          !hasClockIn &&
+          !hasClockOut &&
+          onQuickClockIn != null)
+        FilledButton.tonalIcon(
+          onPressed: onQuickClockIn,
+          icon: const Icon(Icons.login_outlined, size: 18),
+          label: const Text(_attendanceDialogClockInLabel),
+        ),
+      if ((canManageAttendance || canClockSelfAttendance) &&
+          hasClockIn &&
+          !hasClockOut &&
+          onQuickClockOut != null)
+        FilledButton.tonalIcon(
+          onPressed: onQuickClockOut,
+          icon: const Icon(Icons.logout_outlined, size: 18),
+          label: const Text(_attendanceDialogClockOutLabel),
+        ),
+      if ((canManageAttendance || canClockSelfAttendance) &&
+          onSetAttendance != null)
+        OutlinedButton.icon(
+          onPressed: onSetAttendance,
+          icon: Icon(
+            hasClockIn || hasClockOut
+                ? Icons.edit_calendar_outlined
+                : Icons.schedule_outlined,
+            size: 18,
+          ),
+          label: Text(
+            hasClockIn || hasClockOut
+                ? _editAttendanceLabel
+                : _setAttendanceLabel,
+          ),
+        ),
+      if (canLogProgress)
+        FilledButton.tonalIcon(
+          onPressed: onLogProgress,
+          icon: Icon(
+            hasLoggedProgress
+                ? Icons.edit_note_outlined
+                : Icons.playlist_add_check_circle_outlined,
+            size: 18,
+          ),
+          label: Text(
+            hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
+          ),
+        ),
+    ];
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
@@ -3735,100 +3994,91 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: _workspaceSoftBlue,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.person_outline, color: _workspaceBlue),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      staffName,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: _workspaceNavy,
-                        fontWeight: FontWeight.w800,
-                      ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stackActions = constraints.maxWidth < 620;
+              final identityBlock = Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: _workspaceSoftBlue,
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    if (staffRoleLabel.trim().isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        staffRoleLabel,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
+                    child: const Icon(
+                      Icons.person_outline,
+                      color: _workspaceBlue,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          staffName,
+                          maxLines: stackActions ? 2 : 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: _workspaceNavy,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Wrap(
+                        if (staffRoleLabel.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            staffRoleLabel,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              );
+              final actionsWrap = Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                alignment: WrapAlignment.end,
+                alignment: stackActions
+                    ? WrapAlignment.start
+                    : WrapAlignment.end,
+                children: actionButtons,
+              );
+              if (stackActions) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    identityBlock,
+                    if (actionButtons.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      actionsWrap,
+                    ],
+                  ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if ((canManageAttendance || canClockSelfAttendance) &&
-                      !hasClockIn &&
-                      !hasClockOut &&
-                      onQuickClockIn != null)
-                    FilledButton.tonalIcon(
-                      onPressed: onQuickClockIn,
-                      icon: const Icon(Icons.login_outlined, size: 18),
-                      label: const Text(_attendanceDialogClockInLabel),
-                    ),
-                  if ((canManageAttendance || canClockSelfAttendance) &&
-                      hasClockIn &&
-                      !hasClockOut &&
-                      onQuickClockOut != null)
-                    FilledButton.tonalIcon(
-                      onPressed: onQuickClockOut,
-                      icon: const Icon(Icons.logout_outlined, size: 18),
-                      label: const Text(_attendanceDialogClockOutLabel),
-                    ),
-                  if ((canManageAttendance || canClockSelfAttendance) &&
-                      onSetAttendance != null)
-                    OutlinedButton.icon(
-                      onPressed: onSetAttendance,
-                      icon: Icon(
-                        hasClockIn || hasClockOut
-                            ? Icons.edit_calendar_outlined
-                            : Icons.schedule_outlined,
-                        size: 18,
-                      ),
-                      label: Text(
-                        hasClockIn || hasClockOut
-                            ? _editAttendanceLabel
-                            : _setAttendanceLabel,
+                  Expanded(child: identityBlock),
+                  if (actionButtons.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Align(
+                        alignment: Alignment.topRight,
+                        child: actionsWrap,
                       ),
                     ),
-                  if (canLogProgress)
-                    FilledButton.tonalIcon(
-                      onPressed: onLogProgress,
-                      icon: Icon(
-                        hasLoggedProgress
-                            ? Icons.edit_note_outlined
-                            : Icons.playlist_add_check_circle_outlined,
-                        size: 18,
-                      ),
-                      label: Text(
-                        hasLoggedProgress
-                            ? _editProgressLabel
-                            : _logProgressLabel,
-                      ),
-                    ),
+                  ],
                 ],
-              ),
-            ],
+              );
+            },
           ),
           const SizedBox(height: 12),
           LayoutBuilder(
@@ -4512,6 +4762,36 @@ List<ProductionTimelineRow> _rowsForDay(
   return items;
 }
 
+double _resolveSelectedDayMetricTileWidth(double maxWidth) {
+  if (maxWidth >= 720) {
+    return (maxWidth - (_cardSpacing * 2)) / 3;
+  }
+  if (maxWidth >= 460) {
+    return (maxWidth - _cardSpacing) / 2;
+  }
+  return maxWidth;
+}
+
+List<ProductionAttendanceRecord> _attendanceRowsForDay({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required DateTime day,
+}) {
+  final key = _toWorkDateKey(day);
+  final items = attendanceRecords.where((record) {
+    final referenceTime = record.clockInAt ?? record.createdAt;
+    if (referenceTime == null) {
+      return false;
+    }
+    return _toWorkDateKey(referenceTime.toLocal()) == key;
+  }).toList();
+  items.sort((left, right) {
+    final leftValue = (left.clockInAt ?? left.createdAt ?? day).toLocal();
+    final rightValue = (right.clockInAt ?? right.createdAt ?? day).toLocal();
+    return leftValue.compareTo(rightValue);
+  });
+  return items;
+}
+
 ProductionAttendanceRecord? _attendanceForStaffOnDay({
   required List<ProductionAttendanceRecord> attendanceRecords,
   required String staffProfileId,
@@ -4561,6 +4841,67 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
     proofUploadedAt: record.proofUploadedAt,
     proofUploadedBy: record.proofUploadedBy,
   );
+}
+
+List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
+  required ProductionPlan plan,
+  required List<ProductionTimelineRow> dayRows,
+  required List<ProductionTimelineRow> timelineRows,
+}) {
+  final plantingTargets = plan.plantingTargets;
+  final farmQuantitySummary = _summarizeFarmQuantities(
+    plan: plan,
+    timelineRows: timelineRows,
+  );
+  if (plantingTargets == null || farmQuantitySummary == null) {
+    return const <_SelectedDayQuantityMetric>[];
+  }
+
+  final plantingToday = _sumQuantityForActivity(
+    timelineRows: dayRows,
+    activityType: _quantityActivityPlanting,
+  );
+  final transplantToday = _sumQuantityForActivity(
+    timelineRows: dayRows,
+    activityType: _quantityActivityTransplant,
+  );
+  final harvestToday = _sumQuantityForActivity(
+    timelineRows: dayRows,
+    activityType: _quantityActivityHarvest,
+  );
+
+  return <_SelectedDayQuantityMetric>[
+    _SelectedDayQuantityMetric(
+      label: _dayQuantityPlantingLabel,
+      value:
+          "${_formatProgressAmount(plantingToday)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
+      helper:
+          "${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} left ${farmQuantitySummary.plantingUnit}",
+      accentColor: _workspaceTeal,
+      softColor: _workspaceSoftTeal,
+      icon: Icons.grass_outlined,
+    ),
+    _SelectedDayQuantityMetric(
+      label: _dayQuantityTransplantLabel,
+      value:
+          "${_formatProgressAmount(transplantToday)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
+      helper:
+          "${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} left ${farmQuantitySummary.plantingUnit}",
+      accentColor: _workspaceBlue,
+      softColor: _workspaceSoftBlue,
+      icon: Icons.swap_horiz_outlined,
+    ),
+    _SelectedDayQuantityMetric(
+      label: _dayQuantityHarvestLabel,
+      value:
+          "${_formatProgressAmount(harvestToday)} / ${_formatProgressAmount(plantingTargets.estimatedHarvestQuantity)}",
+      helper:
+          "${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} left ${farmQuantitySummary.harvestUnit}",
+      accentColor: _workspaceAmber,
+      softColor: _workspaceSoftAmber,
+      icon: Icons.agriculture_outlined,
+    ),
+  ];
 }
 
 Map<String, BusinessStaffProfileSummary> _buildStaffMap(

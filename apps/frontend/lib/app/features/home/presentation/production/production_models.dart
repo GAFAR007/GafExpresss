@@ -456,9 +456,9 @@ class ProductionPlantingTargets {
 
   bool get isConfigured {
     return materialType.trim().isNotEmpty &&
-        plannedPlantingQuantity > 0 &&
         plannedPlantingUnit.trim().isNotEmpty &&
-        estimatedHarvestQuantity > 0 &&
+        plannedPlantingQuantity >= 0 &&
+        estimatedHarvestQuantity >= 0 &&
         estimatedHarvestUnit.trim().isNotEmpty;
   }
 
