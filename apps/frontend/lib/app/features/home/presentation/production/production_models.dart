@@ -74,10 +74,12 @@ const String _keyOutputs = "outputs";
 const String _keyKpis = "kpis";
 const String _keyPlan = "plan";
 const String _keyPlans = "plans";
+const String _keyLedger = "ledger";
 const String _keyProduct = "product";
 const String _keyPreorderSummary = "preorderSummary";
 const String _keyProgress = "progress";
 const String _keyTimelineRows = "timelineRows";
+const String _keyTaskDayLedgers = "taskDayLedgers";
 const String _keyStaffProfiles = "staffProfiles";
 const String _keyStaffProgressScores = "staffProgressScores";
 const String _keyPhaseUnitProgress = "phaseUnitProgress";
@@ -153,9 +155,13 @@ const String _keyRole = "role";
 const String _keyWorkDate = "workDate";
 const String _keyClockInAt = "clockInAt";
 const String _keyClockOutAt = "clockOutAt";
+const String _keyClockInTime = "clockInTime";
+const String _keyClockOutTime = "clockOutTime";
 const String _keyDurationMinutes = "durationMinutes";
 const String _keyProofs = "proofs";
 const String _keyProofCount = "proofCount";
+const String _keyProofCountRequired = "proofCountRequired";
+const String _keyProofCountUploaded = "proofCountUploaded";
 const String _keyProofUrl = "proofUrl";
 const String _keyProofPublicId = "proofPublicId";
 const String _keyProofFilename = "proofFilename";
@@ -214,12 +220,24 @@ const String _keyPhaseName = "phaseName";
 const String _keyFarmerName = "farmerName";
 const String _keyExpectedPlots = "expectedPlots";
 const String _keyActualPlots = "actualPlots";
+const String _keyUnitTarget = "unitTarget";
+const String _keyUnitCompleted = "unitCompleted";
+const String _keyUnitRemaining = "unitRemaining";
+const String _keyUnitContribution = "unitContribution";
+const String _keyTaskDayLedgerId = "taskDayLedgerId";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
+const String _keyActivityType = "activityType";
+const String _keyActivityQuantity = "activityQuantity";
+const String _keyActivityTargets = "activityTargets";
+const String _keyActivityCompleted = "activityCompleted";
+const String _keyActivityRemaining = "activityRemaining";
+const String _keyActivityUnits = "activityUnits";
 const String _keyDelay = "delay";
 const String _keyDelayReason = "delayReason";
 const String _keyApprovalState = "approvalState";
+const String _keySessionStatus = "sessionStatus";
 const String _keyCompletionRatio = "completionRatio";
 const String _keyCompletedUnitCount = "completedUnitCount";
 const String _keyRemainingUnits = "remainingUnits";
@@ -1463,7 +1481,10 @@ class ProductionDeviationAlert {
 
 class ProductionAttendanceRecord {
   final String id;
+  final String planId;
+  final String taskId;
   final String staffProfileId;
+  final DateTime? workDate;
   final DateTime? clockInAt;
   final DateTime? clockOutAt;
   final int durationMinutes;
@@ -1479,7 +1500,10 @@ class ProductionAttendanceRecord {
 
   const ProductionAttendanceRecord({
     required this.id,
+    required this.planId,
+    required this.taskId,
     required this.staffProfileId,
+    required this.workDate,
     required this.clockInAt,
     required this.clockOutAt,
     required this.durationMinutes,
@@ -1497,7 +1521,10 @@ class ProductionAttendanceRecord {
   factory ProductionAttendanceRecord.fromJson(Map<String, dynamic> json) {
     return ProductionAttendanceRecord(
       id: _parseId(json),
+      planId: _parseString(json[_keyPlanId]),
+      taskId: _parseString(json[_keyTaskId]),
       staffProfileId: _parseString(json[_keyStaffProfileId]),
+      workDate: _parseDate(json[_keyWorkDate]),
       clockInAt: _parseDate(json[_keyClockInAt]),
       clockOutAt: _parseDate(json[_keyClockOutAt]),
       durationMinutes: _parseInt(json[_keyDurationMinutes]),
@@ -1542,6 +1569,175 @@ class ProductionTaskProgressProofInput {
   }
 }
 
+class ProductionTaskDayActivityTargets {
+  final num? planted;
+  final num? transplanted;
+  final num? harvested;
+
+  const ProductionTaskDayActivityTargets({
+    required this.planted,
+    required this.transplanted,
+    required this.harvested,
+  });
+
+  factory ProductionTaskDayActivityTargets.fromJson(Map<String, dynamic> json) {
+    return ProductionTaskDayActivityTargets(
+      planted: _parseNullableNum(json["planted"]),
+      transplanted: _parseNullableNum(json["transplanted"]),
+      harvested: _parseNullableNum(json["harvested"]),
+    );
+  }
+
+  num? valueFor(String activityType) {
+    switch (activityType.trim().toLowerCase()) {
+      case "planted":
+        return planted;
+      case "transplanted":
+        return transplanted;
+      case "harvested":
+        return harvested;
+      default:
+        return null;
+    }
+  }
+}
+
+class ProductionTaskDayActivityTotals {
+  final num planted;
+  final num transplanted;
+  final num harvested;
+
+  const ProductionTaskDayActivityTotals({
+    required this.planted,
+    required this.transplanted,
+    required this.harvested,
+  });
+
+  factory ProductionTaskDayActivityTotals.fromJson(Map<String, dynamic> json) {
+    return ProductionTaskDayActivityTotals(
+      planted: _parseNum(json["planted"]),
+      transplanted: _parseNum(json["transplanted"]),
+      harvested: _parseNum(json["harvested"]),
+    );
+  }
+
+  num valueFor(String activityType) {
+    switch (activityType.trim().toLowerCase()) {
+      case "planted":
+        return planted;
+      case "transplanted":
+        return transplanted;
+      case "harvested":
+        return harvested;
+      default:
+        return 0;
+    }
+  }
+}
+
+class ProductionTaskDayActivityUnits {
+  final String planted;
+  final String transplanted;
+  final String harvested;
+
+  const ProductionTaskDayActivityUnits({
+    required this.planted,
+    required this.transplanted,
+    required this.harvested,
+  });
+
+  factory ProductionTaskDayActivityUnits.fromJson(Map<String, dynamic> json) {
+    return ProductionTaskDayActivityUnits(
+      planted: _parseString(json["planted"]),
+      transplanted: _parseString(json["transplanted"]),
+      harvested: _parseString(json["harvested"]),
+    );
+  }
+
+  String valueFor(String activityType) {
+    switch (activityType.trim().toLowerCase()) {
+      case "planted":
+        return planted;
+      case "transplanted":
+        return transplanted;
+      case "harvested":
+        return harvested;
+      default:
+        return "";
+    }
+  }
+}
+
+class ProductionTaskDayLedger {
+  final String id;
+  final String planId;
+  final String taskId;
+  final DateTime? workDate;
+  final String unitType;
+  final num unitTarget;
+  final num unitCompleted;
+  final num unitRemaining;
+  final String status;
+  final ProductionTaskDayActivityTargets activityTargets;
+  final ProductionTaskDayActivityTotals activityCompleted;
+  final ProductionTaskDayActivityTargets activityRemaining;
+  final ProductionTaskDayActivityUnits activityUnits;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  const ProductionTaskDayLedger({
+    required this.id,
+    required this.planId,
+    required this.taskId,
+    required this.workDate,
+    required this.unitType,
+    required this.unitTarget,
+    required this.unitCompleted,
+    required this.unitRemaining,
+    required this.status,
+    required this.activityTargets,
+    required this.activityCompleted,
+    required this.activityRemaining,
+    required this.activityUnits,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory ProductionTaskDayLedger.fromJson(Map<String, dynamic> json) {
+    final targetsMap =
+        (json[_keyActivityTargets] ?? const <String, dynamic>{})
+            as Map<String, dynamic>;
+    final completedMap =
+        (json[_keyActivityCompleted] ?? const <String, dynamic>{})
+            as Map<String, dynamic>;
+    final remainingMap =
+        (json[_keyActivityRemaining] ?? const <String, dynamic>{})
+            as Map<String, dynamic>;
+    final unitsMap =
+        (json[_keyActivityUnits] ?? const <String, dynamic>{})
+            as Map<String, dynamic>;
+    return ProductionTaskDayLedger(
+      id: _parseId(json),
+      planId: _parseString(json[_keyPlanId]),
+      taskId: _parseString(json[_keyTaskId]),
+      workDate: _parseDate(json[_keyWorkDate]),
+      unitType: _parseString(json[_keyUnitType]),
+      unitTarget: _parseNum(json[_keyUnitTarget]),
+      unitCompleted: _parseNum(json[_keyUnitCompleted]),
+      unitRemaining: _parseNum(json[_keyUnitRemaining]),
+      status: _parseString(json[_keyStatus]),
+      activityTargets: ProductionTaskDayActivityTargets.fromJson(targetsMap),
+      activityCompleted: ProductionTaskDayActivityTotals.fromJson(completedMap),
+      activityRemaining: ProductionTaskDayActivityTargets.fromJson(
+        remainingMap,
+      ),
+      activityUnits: ProductionTaskDayActivityUnits.fromJson(unitsMap),
+      createdAt: _parseDate(json[_keyCreatedAt]),
+      updatedAt: _parseDate(json[_keyUpdatedAt]),
+    );
+  }
+}
+
 class ProductionPlanDetail {
   final ProductionPlan plan;
   final ProductionPlanConfidence? confidence;
@@ -1557,6 +1753,7 @@ class ProductionPlanDetail {
   final ProductionProductLifecycle? product;
   final ProductionPreorderSummary? preorderSummary;
   final List<ProductionTimelineRow> timelineRows;
+  final List<ProductionTaskDayLedger> taskDayLedgers;
   final List<BusinessStaffProfileSummary> staffProfiles;
   final List<ProductionStaffProgressScore> staffProgressScores;
   final List<ProductionDraftAuditEntry> draftAuditLog;
@@ -1582,6 +1779,7 @@ class ProductionPlanDetail {
     required this.product,
     required this.preorderSummary,
     required this.timelineRows,
+    required this.taskDayLedgers,
     required this.staffProfiles,
     required this.staffProgressScores,
     required this.draftAuditLog,
@@ -1606,6 +1804,8 @@ class ProductionPlanDetail {
     final productMap = json[_keyProduct];
     final preorderSummaryMap = json[_keyPreorderSummary];
     final timelineRowsList = (json[_keyTimelineRows] ?? []) as List<dynamic>;
+    final taskDayLedgersList =
+        (json[_keyTaskDayLedgers] ?? []) as List<dynamic>;
     final staffProfilesList = (json[_keyStaffProfiles] ?? []) as List<dynamic>;
     final staffProgressScoresList =
         (json[_keyStaffProgressScores] ?? []) as List<dynamic>;
@@ -1676,6 +1876,10 @@ class ProductionPlanDetail {
             (item) =>
                 ProductionTimelineRow.fromJson(item as Map<String, dynamic>),
           )
+          .toList(),
+      taskDayLedgers: taskDayLedgersList
+          .whereType<Map<String, dynamic>>()
+          .map(ProductionTaskDayLedger.fromJson)
           .toList(),
       staffProfiles: staffProfilesList
           .whereType<Map<String, dynamic>>()
@@ -2387,13 +2591,17 @@ class ProductionTimelineRow {
   final String planId;
   final String staffId;
   final String unitId;
+  final String taskDayLedgerId;
   final String taskTitle;
   final String phaseName;
   final String farmerName;
   final num expectedPlots;
   final num actualPlots;
+  final num unitContribution;
   final String quantityActivityType;
   final num quantityAmount;
+  final String activityType;
+  final num activityQuantity;
   final String quantityUnit;
   final String status;
   final String delay;
@@ -2404,6 +2612,11 @@ class ProductionTimelineRow {
   final String notes;
   final List<ProductionTaskProgressProofRecord> proofs;
   final int proofCount;
+  final int proofCountRequired;
+  final int proofCountUploaded;
+  final String sessionStatus;
+  final DateTime? clockInTime;
+  final DateTime? clockOutTime;
 
   const ProductionTimelineRow({
     required this.id,
@@ -2412,13 +2625,17 @@ class ProductionTimelineRow {
     required this.planId,
     required this.staffId,
     required this.unitId,
+    required this.taskDayLedgerId,
     required this.taskTitle,
     required this.phaseName,
     required this.farmerName,
     required this.expectedPlots,
     required this.actualPlots,
+    required this.unitContribution,
     required this.quantityActivityType,
     required this.quantityAmount,
+    required this.activityType,
+    required this.activityQuantity,
     required this.quantityUnit,
     required this.status,
     required this.delay,
@@ -2429,6 +2646,11 @@ class ProductionTimelineRow {
     required this.notes,
     required this.proofs,
     required this.proofCount,
+    required this.proofCountRequired,
+    required this.proofCountUploaded,
+    required this.sessionStatus,
+    required this.clockInTime,
+    required this.clockOutTime,
   });
 
   factory ProductionTimelineRow.fromJson(Map<String, dynamic> json) {
@@ -2450,13 +2672,30 @@ class ProductionTimelineRow {
       planId: _parseString(json[_keyPlanId]),
       staffId: _parseString(json[_keyStaffId]),
       unitId: _parseString(json[_keyUnitId]),
+      taskDayLedgerId: _parseString(json[_keyTaskDayLedgerId]),
       taskTitle: _parseString(json[_keyTaskTitle]),
       phaseName: _parseString(json[_keyPhaseName]),
       farmerName: _parseString(json[_keyFarmerName]),
       expectedPlots: _parseNum(json[_keyExpectedPlots]),
-      actualPlots: _parseNum(json[_keyActualPlots]),
-      quantityActivityType: _parseString(json[_keyQuantityActivityType]),
-      quantityAmount: _parseNum(json[_keyQuantityAmount]),
+      actualPlots:
+          _parseNullableNum(json[_keyUnitContribution]) ??
+          _parseNum(json[_keyActualPlots]),
+      unitContribution:
+          _parseNullableNum(json[_keyUnitContribution]) ??
+          _parseNum(json[_keyActualPlots]),
+      quantityActivityType:
+          _parseString(json[_keyActivityType]).trim().isNotEmpty
+          ? _parseString(json[_keyActivityType])
+          : _parseString(json[_keyQuantityActivityType]),
+      quantityAmount:
+          _parseNullableNum(json[_keyActivityQuantity]) ??
+          _parseNum(json[_keyQuantityAmount]),
+      activityType: _parseString(json[_keyActivityType]).trim().isNotEmpty
+          ? _parseString(json[_keyActivityType])
+          : _parseString(json[_keyQuantityActivityType]),
+      activityQuantity:
+          _parseNullableNum(json[_keyActivityQuantity]) ??
+          _parseNum(json[_keyQuantityAmount]),
       quantityUnit: _parseString(json[_keyQuantityUnit]),
       status: _parseString(json[_keyStatus]),
       delay: _parseString(json[_keyDelay]),
@@ -2469,6 +2708,15 @@ class ProductionTimelineRow {
       proofCount: proofs.isNotEmpty
           ? proofs.length
           : _parseInt(json[_keyProofCount]),
+      proofCountRequired: _parseInt(json[_keyProofCountRequired]),
+      proofCountUploaded: proofs.isNotEmpty
+          ? proofs.length
+          : (_parseInt(json[_keyProofCountUploaded]) > 0
+                ? _parseInt(json[_keyProofCountUploaded])
+                : _parseInt(json[_keyProofCount])),
+      sessionStatus: _parseString(json[_keySessionStatus]),
+      clockInTime: _parseDate(json[_keyClockInTime]),
+      clockOutTime: _parseDate(json[_keyClockOutTime]),
     );
   }
 }
@@ -2508,16 +2756,25 @@ class ProductionTaskProgressRecord {
   final String planId;
   final String staffId;
   final String unitId;
+  final String taskDayLedgerId;
   final DateTime? workDate;
   final num expectedPlots;
   final num actualPlots;
+  final num unitContribution;
   final String quantityActivityType;
   final num quantityAmount;
+  final String activityType;
+  final num activityQuantity;
   final String quantityUnit;
   final String delayReason;
   final String notes;
   final List<ProductionTaskProgressProofRecord> proofs;
   final int proofCount;
+  final int proofCountRequired;
+  final int proofCountUploaded;
+  final String sessionStatus;
+  final DateTime? clockInTime;
+  final DateTime? clockOutTime;
   final String createdBy;
   final String approvedBy;
   final DateTime? approvedAt;
@@ -2528,16 +2785,25 @@ class ProductionTaskProgressRecord {
     required this.planId,
     required this.staffId,
     required this.unitId,
+    required this.taskDayLedgerId,
     required this.workDate,
     required this.expectedPlots,
     required this.actualPlots,
+    required this.unitContribution,
     required this.quantityActivityType,
     required this.quantityAmount,
+    required this.activityType,
+    required this.activityQuantity,
     required this.quantityUnit,
     required this.delayReason,
     required this.notes,
     required this.proofs,
     required this.proofCount,
+    required this.proofCountRequired,
+    required this.proofCountUploaded,
+    required this.sessionStatus,
+    required this.clockInTime,
+    required this.clockOutTime,
     required this.createdBy,
     required this.approvedBy,
     required this.approvedAt,
@@ -2557,11 +2823,28 @@ class ProductionTaskProgressRecord {
       planId: _parseString(json[_keyPlanId]),
       staffId: _parseString(json[_keyStaffId]),
       unitId: _parseString(json[_keyUnitId]),
+      taskDayLedgerId: _parseString(json[_keyTaskDayLedgerId]),
       workDate: _parseDate(json[_keyWorkDate]),
       expectedPlots: _parseNum(json[_keyExpectedPlots]),
-      actualPlots: _parseNum(json[_keyActualPlots]),
-      quantityActivityType: _parseString(json[_keyQuantityActivityType]),
-      quantityAmount: _parseNum(json[_keyQuantityAmount]),
+      actualPlots:
+          _parseNullableNum(json[_keyUnitContribution]) ??
+          _parseNum(json[_keyActualPlots]),
+      unitContribution:
+          _parseNullableNum(json[_keyUnitContribution]) ??
+          _parseNum(json[_keyActualPlots]),
+      quantityActivityType:
+          _parseString(json[_keyActivityType]).trim().isNotEmpty
+          ? _parseString(json[_keyActivityType])
+          : _parseString(json[_keyQuantityActivityType]),
+      quantityAmount:
+          _parseNullableNum(json[_keyActivityQuantity]) ??
+          _parseNum(json[_keyQuantityAmount]),
+      activityType: _parseString(json[_keyActivityType]).trim().isNotEmpty
+          ? _parseString(json[_keyActivityType])
+          : _parseString(json[_keyQuantityActivityType]),
+      activityQuantity:
+          _parseNullableNum(json[_keyActivityQuantity]) ??
+          _parseNum(json[_keyQuantityAmount]),
       quantityUnit: _parseString(json[_keyQuantityUnit]),
       delayReason: _parseString(json[_keyDelayReason]),
       notes: _parseString(json[_keyNotes]),
@@ -2569,6 +2852,15 @@ class ProductionTaskProgressRecord {
       proofCount: proofs.isNotEmpty
           ? proofs.length
           : _parseInt(json[_keyProofCount]),
+      proofCountRequired: _parseInt(json[_keyProofCountRequired]),
+      proofCountUploaded: proofs.isNotEmpty
+          ? proofs.length
+          : (_parseInt(json[_keyProofCountUploaded]) > 0
+                ? _parseInt(json[_keyProofCountUploaded])
+                : _parseInt(json[_keyProofCount])),
+      sessionStatus: _parseString(json[_keySessionStatus]),
+      clockInTime: _parseDate(json[_keyClockInTime]),
+      clockOutTime: _parseDate(json[_keyClockOutTime]),
       createdBy: _parseString(json[_keyCreatedBy]),
       approvedBy: _parseString(json[_keyApprovedBy]),
       approvedAt: _parseDate(json[_keyApprovedAt]),
@@ -2578,13 +2870,23 @@ class ProductionTaskProgressRecord {
 
 class ProductionTaskProgressResponse {
   final ProductionTaskProgressRecord progress;
+  final ProductionTaskDayLedger? ledger;
 
-  const ProductionTaskProgressResponse({required this.progress});
+  const ProductionTaskProgressResponse({
+    required this.progress,
+    required this.ledger,
+  });
 
   factory ProductionTaskProgressResponse.fromJson(Map<String, dynamic> json) {
     final progressMap = (json[_keyProgress] ?? {}) as Map<String, dynamic>;
+    final ledgerMap = json[_keyLedger] is Map<String, dynamic>
+        ? json[_keyLedger] as Map<String, dynamic>
+        : null;
     return ProductionTaskProgressResponse(
       progress: ProductionTaskProgressRecord.fromJson(progressMap),
+      ledger: ledgerMap == null
+          ? null
+          : ProductionTaskDayLedger.fromJson(ledgerMap),
     );
   }
 }

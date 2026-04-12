@@ -23,9 +23,17 @@ const {
 
 const PRODUCTION_QUANTITY_ACTIVITY_TYPES = [
   "none",
+  "planted",
+  "transplanted",
+  "harvested",
   "planting",
   "transplant",
   "harvest",
+];
+
+const PRODUCTION_TASK_PROGRESS_SESSION_STATUSES = [
+  "active",
+  "completed",
 ];
 
 const taskProgressProofSchema =
@@ -134,8 +142,28 @@ const taskProgressSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // WHY: Explicit unit contribution keeps the personal log semantics readable.
+    unitContribution: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    // WHY: Integer contribution units preserve deterministic decimal math.
+    unitContributionPlotUnits: {
+      type: Number,
+      min: 0,
+      default: 0,
+      index: true,
+    },
     // WHY: Farm execution also tracks planting, transplant, and harvest quantities per day.
     quantityActivityType: {
+      type: String,
+      enum: PRODUCTION_QUANTITY_ACTIVITY_TYPES,
+      default: "none",
+      index: true,
+    },
+    // WHY: Canonical activity naming supports the shared task-day ledger.
+    activityType: {
       type: String,
       enum: PRODUCTION_QUANTITY_ACTIVITY_TYPES,
       default: "none",
@@ -146,15 +174,52 @@ const taskProgressSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    activityQuantity: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     quantityUnit: {
       type: String,
       trim: true,
       default: "",
     },
+    proofCountRequired: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    proofCountUploaded: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
     // WHY: Execution proof images keep each progress row auditable.
     proofs: {
       type: [taskProgressProofSchema],
       default: [],
+    },
+    // WHY: Shared ledger linkage makes task/day reads deterministic.
+    taskDayLedgerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductionTaskDayLedger",
+      default: null,
+      index: true,
+    },
+    // WHY: Progress logs also preserve the linked production session state.
+    sessionStatus: {
+      type: String,
+      enum: PRODUCTION_TASK_PROGRESS_SESSION_STATUSES,
+      default: "completed",
+      index: true,
+    },
+    clockInTime: {
+      type: Date,
+      default: null,
+    },
+    clockOutTime: {
+      type: Date,
+      default: null,
     },
     // WHY: Structured delay reasons avoid vague "task failed" records.
     delayReason: {
@@ -216,3 +281,5 @@ module.exports.PLOT_UNIT_SCALE =
   PLOT_UNIT_SCALE;
 module.exports.PRODUCTION_QUANTITY_ACTIVITY_TYPES =
   PRODUCTION_QUANTITY_ACTIVITY_TYPES;
+module.exports.PRODUCTION_TASK_PROGRESS_SESSION_STATUSES =
+  PRODUCTION_TASK_PROGRESS_SESSION_STATUSES;

@@ -130,10 +130,13 @@ const String _keyStaffId = "staffId";
 const String _keyUnitId = "unitId";
 const String _keyAssignedStaffProfileIds = "assignedStaffProfileIds";
 const String _keyActualPlots = "actualPlots";
+const String _keyUnitContribution = "unitContribution";
 const String _keyProofs = "proofs";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
+const String _keyActivityType = "activityType";
+const String _keyActivityQuantity = "activityQuantity";
 const String _keyDelayReason = "delayReason";
 const String _keyNotes = "notes";
 const String _keyNote = "note";
@@ -1946,10 +1949,13 @@ class ProductionApi {
     required DateTime workDate,
     String? staffId,
     String? unitId,
-    required num actualPlots,
+    num? actualPlots,
+    num? unitContribution,
     List<ProductionTaskProgressProofInput> proofs = const [],
     String? quantityActivityType,
+    String? activityType,
     num? quantityAmount,
+    num? activityQuantity,
     String? quantityUnit,
     required String delayReason,
     required String notes,
@@ -1968,14 +1974,18 @@ class ProductionApi {
     try {
       final normalizedStaffId = staffId?.trim() ?? "";
       final normalizedUnitId = unitId?.trim() ?? "";
-      final normalizedQuantityActivityType = quantityActivityType?.trim() ?? "";
+      final normalizedQuantityActivityType =
+          (activityType ?? quantityActivityType)?.trim() ?? "";
       final normalizedQuantityUnit = quantityUnit?.trim() ?? "";
+      final normalizedUnitContribution = unitContribution ?? actualPlots ?? 0;
+      final normalizedActivityQuantity = activityQuantity ?? quantityAmount;
       final payload = <String, dynamic>{
         _keyWorkDate: workDate.toIso8601String().split("T").first,
-        _keyActualPlots: actualPlots,
         _keyDelayReason: delayReason,
         _keyNotes: notes,
       };
+      payload[_keyUnitContribution] = normalizedUnitContribution;
+      payload[_keyActualPlots] = normalizedUnitContribution;
       if (normalizedStaffId.isNotEmpty) {
         payload[_keyStaffId] = normalizedStaffId;
       }
@@ -1983,10 +1993,12 @@ class ProductionApi {
         payload[_keyUnitId] = normalizedUnitId;
       }
       if (normalizedQuantityActivityType.isNotEmpty) {
+        payload[_keyActivityType] = normalizedQuantityActivityType;
         payload[_keyQuantityActivityType] = normalizedQuantityActivityType;
       }
-      if (quantityAmount != null) {
-        payload[_keyQuantityAmount] = quantityAmount;
+      if (normalizedActivityQuantity != null) {
+        payload[_keyActivityQuantity] = normalizedActivityQuantity;
+        payload[_keyQuantityAmount] = normalizedActivityQuantity;
       }
       if (normalizedQuantityUnit.isNotEmpty) {
         payload[_keyQuantityUnit] = normalizedQuantityUnit;

@@ -27,6 +27,26 @@ const staffAttendanceSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // WHY: Production attendance can be scoped to one plan when clocking from the workspace.
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductionPlan',
+      default: null,
+      index: true,
+    },
+    // WHY: Production workspace sessions must be scoped to one task/day.
+    taskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductionTask',
+      default: null,
+      index: true,
+    },
+    // WHY: Work date stays stable even when manual times are adjusted later.
+    workDate: {
+      type: Date,
+      default: null,
+      index: true,
+    },
     // WHY: Clock-in time anchors the attendance session.
     clockInAt: {
       type: Date,
@@ -108,6 +128,13 @@ const staffAttendanceSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+staffAttendanceSchema.index({
+  staffProfileId: 1,
+  taskId: 1,
+  workDate: 1,
+  clockOutAt: 1,
+});
 
 const StaffAttendance = mongoose.model(
   'StaffAttendance',

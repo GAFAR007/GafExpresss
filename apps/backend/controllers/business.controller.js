@@ -29,6 +29,22 @@ const staffAttendanceProofService = require("../services/staff_attendance_proof.
 const {
   uploadTaskProgressProofImages,
 } = require("../services/production_task_progress_proof.service");
+const {
+  SHARED_ACTIVITY_NONE,
+  SHARED_ACTIVITY_PLANTED,
+  SHARED_ACTIVITY_TRANSPLANTED,
+  SHARED_ACTIVITY_HARVESTED,
+  normalizeLedgerWorkDate,
+  normalizeProductionLedgerActivityType,
+  resolveLedgerActivityTargetsFromPlan,
+  resolveLedgerActivityUnitsFromPlan,
+  resolveLedgerUnitType,
+  isTaskProgressCountedInSharedLedger,
+  resolveTaskProgressUnitContribution,
+  resolveTaskProgressActivityQuantity,
+  resolveTaskProgressActivityType,
+  recomputeProductionTaskDayLedger,
+} = require("../services/production_task_day_ledger.service");
 const paymentService = require("../services/payment.service");
 const {
   generateProductionPlanDraft,
@@ -61,6 +77,7 @@ const StaffCompensation = require("../models/StaffCompensation");
 const ProductionPlan = require("../models/ProductionPlan");
 const ProductionPhase = require("../models/ProductionPhase");
 const ProductionTask = require("../models/ProductionTask");
+const ProductionTaskDayLedger = require("../models/ProductionTaskDayLedger");
 const ProductionOutput = require("../models/ProductionOutput");
 const PlanUnit = require("../models/PlanUnit");
 const ProductionPhaseUnitCompletion = require("../models/ProductionPhaseUnitCompletion");
@@ -552,6 +569,10 @@ const PRODUCTION_COPY = {
     "Actual amount must be a valid non-negative number",
   TASK_PROGRESS_TARGET_EXCEEDED:
     "Actual progress exceeds the remaining planned task target",
+  TASK_PROGRESS_ACTIVITY_QUANTITY_INVALID:
+    "Activity quantity must be a valid non-negative number",
+  TASK_PROGRESS_ACTIVITY_TARGET_EXCEEDED:
+    "Activity quantity exceeds the remaining shared activity target",
   TASK_PROGRESS_PROOFS_REQUIRED:
     "Upload proof images before logging progress",
   TASK_PROGRESS_PROOFS_COUNT_INVALID:
@@ -875,13 +896,13 @@ const TASK_PROGRESS_APPROVAL_APPROVED =
 const TASK_PROGRESS_APPROVAL_NEEDS_REVIEW =
   "needs_review";
 const PRODUCTION_QUANTITY_ACTIVITY_NONE =
-  "none";
+  SHARED_ACTIVITY_NONE;
 const PRODUCTION_QUANTITY_ACTIVITY_PLANTING =
-  "planting";
+  SHARED_ACTIVITY_PLANTED;
 const PRODUCTION_QUANTITY_ACTIVITY_TRANSPLANT =
-  "transplant";
+  SHARED_ACTIVITY_TRANSPLANTED;
 const PRODUCTION_QUANTITY_ACTIVITY_HARVEST =
-  "harvest";
+  SHARED_ACTIVITY_HARVESTED;
 const TASK_PROGRESS_REJECTION_NOTE_PREFIX =
   "[TASK_PROGRESS_REJECTED]";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_TASK_ID_REQUIRED =
@@ -2517,27 +2538,9 @@ function parseNonNegativeIntegerInput(
 function normalizeProductionQuantityActivityType(
   value,
 ) {
-  const normalized =
-    (value || "")
-      .toString()
-      .trim()
-      .toLowerCase();
-  switch (normalized) {
-    case "plant":
-    case "planted":
-    case "planting":
-      return PRODUCTION_QUANTITY_ACTIVITY_PLANTING;
-    case "transplant":
-    case "transplanted":
-    case "transplanting":
-      return PRODUCTION_QUANTITY_ACTIVITY_TRANSPLANT;
-    case "harvest":
-    case "harvested":
-    case "harvesting":
-      return PRODUCTION_QUANTITY_ACTIVITY_HARVEST;
-    default:
-      return PRODUCTION_QUANTITY_ACTIVITY_NONE;
-  }
+  return normalizeProductionLedgerActivityType(
+    value,
+  );
 }
 
 function resolveFarmQuantityTrackingConfig({
@@ -4303,12 +4306,15 @@ function normalizeWorkDateToDayStart(
 async function findCompletedAttendanceForStaffOnWorkDate({
   staffProfileId,
   workDate,
+  taskId = "",
 }) {
   const normalizedStaffId = normalizeStaffIdInput(
     staffProfileId,
   );
   const normalizedWorkDate =
     normalizeWorkDateToDayStart(workDate);
+  const normalizedTaskId =
+    normalizeStaffIdInput(taskId);
   if (
     !normalizedStaffId ||
     !normalizedWorkDate
@@ -4320,16 +4326,29 @@ async function findCompletedAttendanceForStaffOnWorkDate({
     normalizedWorkDate.getTime() + MS_PER_DAY,
   );
 
-  return StaffAttendance.findOne({
+  const attendanceFilter = {
     staffProfileId: normalizedStaffId,
-    clockInAt: {
-      $lt: workDateEndExclusive,
-    },
+    ...(normalizedTaskId ?
+      {
+        taskId:
+          normalizedTaskId,
+        workDate:
+          normalizedWorkDate,
+      }
+    : {
+        clockInAt: {
+          $lt: workDateEndExclusive,
+        },
+      }),
     clockOutAt: {
       $ne: null,
       $gte: normalizedWorkDate,
     },
-  })
+  };
+
+  return StaffAttendance.findOne(
+    attendanceFilter,
+  )
     .sort({
       clockOutAt: -1,
       clockInAt: -1,
@@ -4638,6 +4657,42 @@ function normalizeTaskProgressProofFiles(
         file.buffer.length > 0,
     ),
   );
+}
+
+function resolveTaskDayLedgerConfig({
+  task,
+  plan,
+}) {
+  const fallbackTotalUnits = Math.max(
+    0,
+    Number(
+      plan?.workloadContext
+        ?.totalWorkUnits || 0,
+    ),
+  );
+  const unitTarget =
+    resolveTaskProgressTargetPlots(task, {
+      fallbackTotalUnits,
+    });
+  return {
+    unitTarget: Math.max(
+      0,
+      Number(unitTarget || 0),
+    ),
+    unitType: resolveLedgerUnitType({
+      plan,
+    }),
+    activityTargets:
+      resolveLedgerActivityTargetsFromPlan(
+        {
+          plan,
+        },
+      ),
+    activityUnits:
+      resolveLedgerActivityUnitsFromPlan({
+        plan,
+      }),
+  };
 }
 
 function buildTaskProgressRowKey({
@@ -7343,6 +7398,22 @@ function buildTaskProgressRejectNote({
   rejectedAt,
 }) {
   return `${TASK_PROGRESS_REJECTION_NOTE_PREFIX} ${rejectedAt.toISOString()} reviewer=${actorId?.toString() || "unknown"} reason=${reason}`;
+}
+
+function stripTaskProgressRejectNotes(
+  notes,
+) {
+  return (notes || "")
+    .toString()
+    .split("\n")
+    .filter(
+      (line) =>
+        !line.includes(
+          TASK_PROGRESS_REJECTION_NOTE_PREFIX,
+        ),
+    )
+    .join("\n")
+    .trim();
 }
 
 // WHY: Timeline indicators must distinguish pending vs approved vs reviewed issues.
@@ -10553,10 +10624,14 @@ function buildTimelineRows({
         record.expectedPlots || 0,
       );
       const actualPlots = Number(
-        record.actualPlots || 0,
+        resolveTaskProgressUnitContribution(
+          record,
+        ) || 0,
       );
       const quantityAmount = Number(
-        record.quantityAmount || 0,
+        resolveTaskProgressActivityQuantity(
+          record,
+        ) || 0,
       );
       const proofCount = Array.isArray(
         record.proofs,
@@ -10564,7 +10639,11 @@ function buildTimelineRows({
         record.proofs.length
       : Math.max(
           0,
-          Number(record.proofCount || 0),
+          Number(
+            record.proofCountUploaded ||
+              record.proofCount ||
+              0,
+          ),
         );
       // WHY: Zero-output days are explicit blocked records, not implicit misses.
       let status =
@@ -10617,7 +10696,9 @@ function buildTimelineRows({
         expectedPlots,
         actualPlots,
         quantityActivityType:
-          record.quantityActivityType ||
+          resolveTaskProgressActivityType(
+            record,
+          ) ||
           PRODUCTION_QUANTITY_ACTIVITY_NONE,
         quantityAmount,
         quantityUnit:
@@ -10626,6 +10707,25 @@ function buildTimelineRows({
           ? record.proofs
           : [],
         proofCount,
+        proofCountRequired: Math.max(
+          0,
+          Number(
+            record.proofCountRequired ||
+              resolveTaskProgressProofCount(
+                actualPlots,
+              ),
+          ),
+        ),
+        proofCountUploaded: proofCount,
+        sessionStatus:
+          record.sessionStatus ||
+          "completed",
+        clockInTime:
+          record.clockInTime ||
+          null,
+        clockOutTime:
+          record.clockOutTime ||
+          null,
         status,
         delay,
         delayReason,
@@ -10663,7 +10763,9 @@ function buildStaffProgressScores({
       record.expectedPlots || 0,
     );
     const actual = Number(
-      record.actualPlots || 0,
+      resolveTaskProgressUnitContribution(
+        record,
+      ) || 0,
     );
     if (!scoreByStaff.has(staffId)) {
       scoreByStaff.set(staffId, {
@@ -10879,6 +10981,7 @@ function buildProductionDailyRollups({
   tasks,
   progressRecords,
   attendanceRecords,
+  taskDayLedgers = [],
 }) {
   const scheduledTaskCountByDay =
     new Map();
@@ -11027,6 +11130,35 @@ function buildProductionDailyRollups({
     },
   );
 
+  const ledgerByDay = new Map();
+  (
+    Array.isArray(taskDayLedgers) ?
+      taskDayLedgers
+    : []
+  ).forEach((ledger) => {
+    const dayKey = formatUtcDayKey(
+      ledger?.workDate,
+    );
+    if (!dayKey) {
+      return;
+    }
+
+    if (!ledgerByDay.has(dayKey)) {
+      ledgerByDay.set(dayKey, {
+        expectedPlots: 0,
+        actualPlots: 0,
+      });
+    }
+    const summary =
+      ledgerByDay.get(dayKey);
+    summary.expectedPlots += Number(
+      ledger?.unitTarget || 0,
+    );
+    summary.actualPlots += Number(
+      ledger?.unitCompleted || 0,
+    );
+  });
+
   progressRecords.forEach((record) => {
     const dayKey = formatUtcDayKey(
       record?.workDate,
@@ -11037,8 +11169,16 @@ function buildProductionDailyRollups({
 
     if (!progressByDay.has(dayKey)) {
       progressByDay.set(dayKey, {
-        expectedPlots: 0,
-        actualPlots: 0,
+        expectedPlots:
+          Number(
+            ledgerByDay.get(dayKey)
+              ?.expectedPlots || 0,
+          ),
+        actualPlots:
+          Number(
+            ledgerByDay.get(dayKey)
+              ?.actualPlots || 0,
+          ),
         rowsLogged: 0,
         rowsWithAttendance: 0,
         rowsMissingAttendance: 0,
@@ -11046,16 +11186,6 @@ function buildProductionDailyRollups({
     }
     const summary =
       progressByDay.get(dayKey);
-    const expectedPlots = Number(
-      record?.expectedPlots || 0,
-    );
-    const actualPlots = Number(
-      record?.actualPlots || 0,
-    );
-
-    summary.expectedPlots +=
-      expectedPlots;
-    summary.actualPlots += actualPlots;
     summary.rowsLogged += 1;
 
     const staffId =
@@ -11078,6 +11208,7 @@ function buildProductionDailyRollups({
     ...scheduledTaskCountByDay.keys(),
     ...assignedStaffByDay.keys(),
     ...attendanceStaffByDay.keys(),
+    ...ledgerByDay.keys(),
     ...progressByDay.keys(),
   ]);
   const orderedDayKeys = Array.from(
@@ -11096,8 +11227,16 @@ function buildProductionDailyRollups({
         ) || emptySet;
       const progressSummary =
         progressByDay.get(dayKey) || {
-          expectedPlots: 0,
-          actualPlots: 0,
+          expectedPlots:
+            Number(
+              ledgerByDay.get(dayKey)
+                ?.expectedPlots || 0,
+            ),
+          actualPlots:
+            Number(
+              ledgerByDay.get(dayKey)
+                ?.actualPlots || 0,
+            ),
           rowsLogged: 0,
           rowsWithAttendance: 0,
           rowsMissingAttendance: 0,
@@ -15601,30 +15740,23 @@ async function clockInStaff(req, res) {
         )
       : null;
     const requestedWorkDate =
-      canManage ?
-        normalizeWorkDateToDayStart(
-          req.body?.workDate,
-        )
-      : null;
+      normalizeWorkDateToDayStart(
+        req.body?.workDate,
+      );
     const relatedPlanId =
-      canManage ?
-        normalizeStaffIdInput(
-          req.body?.planId,
-        )
-      : "";
+      normalizeStaffIdInput(
+        req.body?.planId,
+      );
     const relatedTaskId =
-      canManage ?
-        normalizeStaffIdInput(
-          req.body?.taskId,
-        )
-      : "";
-    const auditNote = canManage ?
-        (
-          req.body?.notes
-            ?.toString()
-            .trim() || ""
-        )
-      : "";
+      normalizeStaffIdInput(
+        req.body?.taskId,
+      );
+    const auditNote =
+      (
+        req.body?.notes
+          ?.toString()
+          .trim() || ""
+      );
 
     // WHY: Managers can clock in on behalf of staff.
     const targetStaffProfileId =
@@ -15729,6 +15861,35 @@ async function clockInStaff(req, res) {
       auditAction =
         "staff_attendance_clock_in_update";
     } else {
+      const scopedOpenFilter = {
+        staffProfileId:
+          targetProfile._id,
+        clockOutAt: null,
+      };
+      if (relatedTaskId) {
+        scopedOpenFilter.taskId =
+          relatedTaskId;
+      }
+      if (auditWorkDate) {
+        scopedOpenFilter.workDate =
+          auditWorkDate;
+      }
+      if (relatedPlanId) {
+        scopedOpenFilter.planId =
+          relatedPlanId;
+      }
+      const existingScopedOpen =
+        relatedTaskId && auditWorkDate ?
+          await StaffAttendance.findOne(
+            scopedOpenFilter,
+          )
+        : null;
+      if (existingScopedOpen) {
+        attendance =
+          existingScopedOpen;
+        auditAction =
+          "staff_attendance_clock_in_resume";
+      } else {
       const existingOpen =
         await StaffAttendance.findOne({
           staffProfileId:
@@ -15747,11 +15908,40 @@ async function clockInStaff(req, res) {
         await StaffAttendance.create({
           staffProfileId:
             targetProfile._id,
+          planId:
+            relatedPlanId || null,
+          taskId:
+            relatedTaskId || null,
+          workDate:
+            auditWorkDate || null,
           clockInAt:
             resolvedClockInAt,
           clockInBy: actor._id,
           notes: auditNote,
         });
+      }
+    }
+
+    if (
+      attendance &&
+      (relatedPlanId ||
+        relatedTaskId ||
+        auditWorkDate)
+    ) {
+      attendance.planId =
+        relatedPlanId || null;
+      attendance.taskId =
+        relatedTaskId || null;
+      attendance.workDate =
+        auditWorkDate || null;
+      if (
+        auditNote &&
+        !attendance.notes
+      ) {
+        attendance.notes =
+          auditNote;
+      }
+      await attendance.save();
     }
 
     await writeAuditLog({
@@ -15893,30 +16083,23 @@ async function clockOutStaff(req, res) {
         )
       : null;
     const requestedWorkDate =
-      canManage ?
-        normalizeWorkDateToDayStart(
-          req.body?.workDate,
-        )
-      : null;
+      normalizeWorkDateToDayStart(
+        req.body?.workDate,
+      );
     const relatedPlanId =
-      canManage ?
-        normalizeStaffIdInput(
-          req.body?.planId,
-        )
-      : "";
+      normalizeStaffIdInput(
+        req.body?.planId,
+      );
     const relatedTaskId =
-      canManage ?
-        normalizeStaffIdInput(
-          req.body?.taskId,
-        )
-      : "";
-    const auditNote = canManage ?
-        (
-          req.body?.notes
-            ?.toString()
-            .trim() || ""
-        )
-      : "";
+      normalizeStaffIdInput(
+        req.body?.taskId,
+      );
+    const auditNote =
+      (
+        req.body?.notes
+          ?.toString()
+          .trim() || ""
+      );
 
     // WHY: Managers can clock out on behalf of staff.
     const targetStaffProfileId =
@@ -15967,11 +16150,24 @@ async function clockOutStaff(req, res) {
           staffProfileId:
             targetProfile._id,
         })
-      : await StaffAttendance.findOne({
-          staffProfileId:
-            targetProfile._id,
-          clockOutAt: null,
-        });
+      : await StaffAttendance.findOne(
+          relatedTaskId &&
+              requestedWorkDate ?
+            {
+              staffProfileId:
+                targetProfile._id,
+              taskId:
+                relatedTaskId,
+              workDate:
+                requestedWorkDate,
+              clockOutAt: null,
+            }
+          : {
+              staffProfileId:
+                targetProfile._id,
+              clockOutAt: null,
+            },
+        );
 
     if (!attendance) {
       return res.status(
@@ -16025,6 +16221,18 @@ async function clockOutStaff(req, res) {
       actor._id;
     attendance.durationMinutes =
       durationMinutes;
+    attendance.planId =
+      relatedPlanId ||
+      attendance.planId ||
+      null;
+    attendance.taskId =
+      relatedTaskId ||
+      attendance.taskId ||
+      null;
+    attendance.workDate =
+      auditWorkDate ||
+      attendance.workDate ||
+      null;
     await attendance.save();
 
     await writeAuditLog({
@@ -24412,6 +24620,16 @@ async function getProductionPlanDetail(
       })
         .sort({ workDate: -1 })
         .lean();
+    const taskDayLedgers =
+      await ProductionTaskDayLedger.find({
+        planId: plan._id,
+      })
+        .sort({
+          workDate: -1,
+          updatedAt: -1,
+          _id: 1,
+        })
+        .lean();
 
     const outputs =
       await ProductionOutput.find({
@@ -24529,6 +24747,7 @@ async function getProductionPlanDetail(
         tasks,
         progressRecords,
         attendanceRecords,
+        taskDayLedgers,
       });
     const attendanceImpact =
       buildAttendanceImpactKpis({
@@ -24551,6 +24770,8 @@ async function getProductionPlanDetail(
       staffProgressScores;
     let visiblePlanStaffProfiles =
       planStaffProfiles;
+    const visibleTaskDayLedgers =
+      taskDayLedgers;
     if (
       actor.role === "staff" &&
       !canViewTeamKpis
@@ -24758,6 +24979,8 @@ async function getProductionPlanDetail(
         repairedAssignedUnitTaskCount,
         progressRows:
           visibleTimelineRows.length,
+        taskDayLedgerRows:
+          visibleTaskDayLedgers.length,
         attendanceRows:
           visibleAttendanceRecords.length,
         dailyRollupDays:
@@ -24805,6 +25028,8 @@ async function getProductionPlanDetail(
         visibleAttendanceImpact,
       dailyRollups: visibleDailyRollups,
       timelineRows: visibleTimelineRows,
+      taskDayLedgers:
+        visibleTaskDayLedgers,
       attendanceRecords:
         visibleAttendanceRecords,
       staffProfiles:
@@ -26693,43 +26918,64 @@ async function logProductionTaskProgress(
       });
     }
 
-    const hasActualPlots =
+    const hasLegacyActualPlots =
       Object.prototype.hasOwnProperty.call(
         req.body || {},
         "actualPlots",
       );
-    const hasActualPlotUnits =
+    const hasLegacyActualPlotUnits =
       Object.prototype.hasOwnProperty.call(
         req.body || {},
         "actualPlotUnits",
       );
+    const hasUnitContribution =
+      Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "unitContribution",
+      );
+    const hasUnitContributionPlotUnits =
+      Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "unitContributionPlotUnits",
+      );
+    const hasActualPlots =
+      hasUnitContribution ||
+      hasLegacyActualPlots;
+    const hasActualPlotUnits =
+      hasUnitContributionPlotUnits ||
+      hasLegacyActualPlotUnits;
     const quantityActivityType =
       normalizeProductionQuantityActivityType(
-        req.body?.quantityActivityType,
+        req.body?.activityType ??
+          req.body?.quantityActivityType,
+      );
+    const hasActivityQuantity =
+      Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "activityQuantity",
+      );
+    const hasLegacyQuantityAmount =
+      Object.prototype.hasOwnProperty.call(
+        req.body || {},
+        "quantityAmount",
       );
     const quantityAmount =
       parseNonNegativeNumberInput(
-        req.body?.quantityAmount,
+        hasActivityQuantity ?
+          req.body?.activityQuantity
+        : req.body?.quantityAmount,
       );
-    const quantityUnit =
-      normalizePlantingTargetUnitInput(
-        req.body?.quantityUnit,
-      );
-    const hasQuantityTracking =
-      quantityAmount != null &&
-      quantityAmount > 0 &&
-      quantityActivityType !==
-        PRODUCTION_QUANTITY_ACTIVITY_NONE;
-    if (
-      !hasActualPlots &&
-      !hasActualPlotUnits &&
-      !hasQuantityTracking
-    ) {
+    if (quantityAmount == null) {
       return res.status(400).json({
         error:
-          PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_REQUIRED,
+          PRODUCTION_COPY.TASK_PROGRESS_ACTIVITY_QUANTITY_INVALID,
       });
     }
+    const quantityUnit =
+      normalizePlantingTargetUnitInput(
+        req.body?.activityQuantityUnit ??
+          req.body?.quantityUnit,
+      );
 
     const workDateRaw =
       req.body?.workDate
@@ -26754,24 +27000,48 @@ async function logProductionTaskProgress(
     }
 
     const resolvedProgressInput =
-      resolveActualPlotProgressInput({
-        hasActualPlots,
-        actualPlotsRaw:
-          req.body?.actualPlots,
-        hasActualPlotUnits,
-        actualPlotUnitsRaw:
-          req.body?.actualPlotUnits,
-      });
+      (
+        hasActualPlots ||
+        hasActualPlotUnits
+      ) ?
+        resolveActualPlotProgressInput({
+          hasActualPlots,
+          actualPlotsRaw:
+            hasUnitContribution ?
+              req.body?.unitContribution
+            : req.body?.actualPlots,
+          hasActualPlotUnits,
+          actualPlotUnitsRaw:
+            hasUnitContributionPlotUnits ?
+              req.body
+                ?.unitContributionPlotUnits
+            : req.body?.actualPlotUnits,
+        })
+      : {
+          ok: true,
+          actualPlots: 0,
+          actualPlotUnits: 0,
+        };
     if (!resolvedProgressInput.ok) {
       return res.status(400).json({
         error:
           PRODUCTION_COPY.TASK_PROGRESS_ACTUAL_INVALID,
       });
     }
-    const actualPlots =
+    let actualPlots =
       resolvedProgressInput.actualPlots;
-    const actualPlotUnits =
+    let actualPlotUnits =
       resolvedProgressInput.actualPlotUnits;
+    let effectiveQuantityAmount =
+      quantityAmount || 0;
+    if (
+      quantityActivityType ===
+      PRODUCTION_QUANTITY_ACTIVITY_NONE
+    ) {
+      actualPlots = 0;
+      actualPlotUnits = 0;
+      effectiveQuantityAmount = 0;
+    }
 
     const delayReason =
       normalizeTaskProgressDelayReason(
@@ -26788,7 +27058,10 @@ async function logProductionTaskProgress(
       });
     }
     if (
+      quantityActivityType !==
+        PRODUCTION_QUANTITY_ACTIVITY_NONE &&
       actualPlotUnits === 0 &&
+      effectiveQuantityAmount === 0 &&
       delayReason === "none"
     ) {
       return res.status(400).json({
@@ -26895,10 +27168,11 @@ async function logProductionTaskProgress(
       });
     }
 
-    const planWorkUnitCount = Math.max(
-      0,
-      Number(plan?.workloadContext?.totalWorkUnits || 0),
-    );
+    const ledgerConfig =
+      resolveTaskDayLedgerConfig({
+        task,
+        plan,
+      });
 
     const assignedStaffIds =
       resolveTaskAssignedStaffIds(task);
@@ -27057,29 +27331,15 @@ async function logProductionTaskProgress(
       });
     }
 
-    const completedAttendance =
-      await findCompletedAttendanceForStaffOnWorkDate({
-        staffProfileId: effectiveStaffId,
-        workDate: normalizedWorkDate,
-      });
-    if (!completedAttendance) {
-      return res.status(400).json({
-        error:
-          PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_REQUIRED,
-      });
-    }
-
+    const expectedPlots = Math.max(
+      0,
+      Number(
+        ledgerConfig.unitTarget || 0,
+      ),
+    );
     const expectedPlotUnits =
-      resolveTaskProgressTargetPlotUnits(
-        task,
-        {
-          fallbackTotalUnits:
-            planWorkUnitCount,
-        },
-      );
-    const expectedPlots =
-      convertPlotUnitsToPlots(
-        expectedPlotUnits,
+      convertPlotsToPlotUnits(
+        expectedPlots,
       ) || 0;
     const requiredProofCount =
       resolveTaskProgressProofCount(
@@ -27112,163 +27372,388 @@ async function logProductionTaskProgress(
           uploadedProofFiles.length,
       });
     }
-    const existingTaskProgressRows =
-      await TaskProgress.find({
-        taskId: task._id,
-      })
-        .select({
-          staffId: 1,
-          unitId: 1,
-          workDate: 1,
-          actualPlotUnits: 1,
-          proofs: 1,
-        })
-        .lean();
-    const currentRowKey =
-      buildTaskProgressRowKey({
-        staffId: effectiveStaffId,
-        unitId:
-          effectiveUnitId || null,
-        workDate: normalizedWorkDate,
-      });
-    let loggedUnitsAcrossTask = 0;
-    let existingSelectionUnits = 0;
-    let existingSelectionProofCount = 0;
-    let existingSelectionProofs = [];
-    existingTaskProgressRows.forEach(
-      (row) => {
-        const rowUnits = Math.max(
-          0,
-          Number(
-            row?.actualPlotUnits || 0,
-          ),
-        );
-        loggedUnitsAcrossTask += rowUnits;
-        if (
-          buildTaskProgressRowKey({
-            staffId: row?.staffId,
-            unitId: row?.unitId,
-            workDate: row?.workDate,
-          }) === currentRowKey
-        ) {
-          existingSelectionUnits +=
-            rowUnits;
-          existingSelectionProofs =
-            Array.isArray(row?.proofs) ?
-              row.proofs
-            : [];
-          existingSelectionProofCount =
-            existingSelectionProofs.length;
-        }
-      },
-    );
-    const loggedUnitsExcludingSelection =
-      Math.max(
-        0,
-        loggedUnitsAcrossTask -
-          existingSelectionUnits,
-      );
-    const maxAllowedPlotUnits =
-      Math.max(
-        0,
-        expectedPlotUnits -
-          loggedUnitsExcludingSelection,
-      );
-    if (
-      actualPlotUnits >
-      maxAllowedPlotUnits
-    ) {
-      return res.status(400).json({
-        error:
-          PRODUCTION_COPY.TASK_PROGRESS_TARGET_EXCEEDED,
-        maxAllowedPlots:
-          convertPlotUnitsToPlots(
-            maxAllowedPlotUnits,
-          ) || 0,
-        maxAllowedPlotUnits,
-        taskTargetPlots:
-          expectedPlots,
-        taskTargetPlotUnits:
-          expectedPlotUnits,
-      });
-    }
+    let progress = null;
+    let ledger = null;
+    let finalProofCount = 0;
+    let session = null;
 
-    let proofsToPersist =
-      existingSelectionProofs;
-    if (requiredProofCount === 0) {
-      proofsToPersist = [];
-    } else if (uploadedProofFiles.length > 0) {
-      proofsToPersist =
-        await uploadTaskProgressProofImages({
-          businessId,
-          taskId: task._id?.toString(),
-          staffId: effectiveStaffId,
-          workDate: normalizedWorkDate,
-          files: uploadedProofFiles,
-          uploadedBy: actor._id,
-        });
-    } else if (
-      existingSelectionProofCount !==
-      requiredProofCount
-    ) {
-      return res.status(400).json({
-        error:
-          existingSelectionProofCount > 0 ?
-            PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID
-          : PRODUCTION_COPY.TASK_PROGRESS_PROOFS_REQUIRED,
-        requiredProofCount,
-        providedProofCount:
-          existingSelectionProofCount,
-      });
-    }
-    const progress =
-      await TaskProgress.findOneAndUpdate(
-        {
-          taskId: task._id,
-          staffId: effectiveStaffId,
-          unitId:
-            effectiveUnitId || null,
-          workDate: normalizedWorkDate,
-        },
-        {
-          $set: {
-            planId: plan._id,
+    try {
+      session =
+        await mongoose.startSession();
+      await session.withTransaction(
+        async () => {
+          const activeAttendance =
+            await StaffAttendance.findOne(
+              {
+                staffProfileId:
+                  effectiveStaffId,
+                taskId: task._id,
+                workDate:
+                  normalizedWorkDate,
+                clockOutAt: null,
+              },
+            )
+              .sort({
+                clockInAt: -1,
+                _id: -1,
+              })
+              .session(session);
+          const completedAttendance =
+            activeAttendance ||
+            await StaffAttendance.findOne(
+              {
+                staffProfileId:
+                  effectiveStaffId,
+                taskId: task._id,
+                workDate:
+                  normalizedWorkDate,
+                clockOutAt: {
+                  $ne: null,
+                  $gte:
+                    normalizedWorkDate,
+                },
+              },
+            )
+              .sort({
+                clockOutAt: -1,
+                clockInAt: -1,
+              })
+              .session(session);
+
+          if (!completedAttendance) {
+            throw new Error(
+              PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_REQUIRED,
+            );
+          }
+
+          const progressQuery = {
+            taskId: task._id,
+            staffId:
+              effectiveStaffId,
             unitId:
               effectiveUnitId || null,
-            expectedPlots,
-            expectedPlotUnits,
-            actualPlots,
-            actualPlotUnits,
-            quantityActivityType:
-              hasQuantityTracking ?
-                quantityActivityType
-              : PRODUCTION_QUANTITY_ACTIVITY_NONE,
-            quantityAmount:
-              hasQuantityTracking ?
-                quantityAmount
-              : 0,
-            quantityUnit:
-              hasQuantityTracking ?
-                quantityUnit
-              : "",
-            ...(requiredProofCount === 0 ?
-              { proofs: [] }
-            : uploadedProofFiles.length > 0 ?
-              { proofs: proofsToPersist }
-            : {}),
-            delayReason,
-            notes,
-          },
-          $setOnInsert: {
-            createdBy: actor._id,
-          },
+            workDate:
+              normalizedWorkDate,
+          };
+          const existingProgress =
+            await TaskProgress.findOne(
+              progressQuery,
+            ).session(session);
+
+          const currentLedger =
+            await recomputeProductionTaskDayLedger(
+              {
+                session,
+                planId: plan._id,
+                taskId: task._id,
+                workDate:
+                  normalizedWorkDate,
+                unitTarget:
+                  ledgerConfig.unitTarget,
+                unitType:
+                  ledgerConfig.unitType,
+                activityTargets:
+                  ledgerConfig.activityTargets,
+                activityUnits:
+                  ledgerConfig.activityUnits,
+              },
+            );
+          const existingUnitContribution =
+            resolveTaskProgressUnitContribution(
+              existingProgress,
+            );
+          const maxAllowedPlots =
+            Math.max(
+              0,
+              Number(
+                currentLedger?.unitRemaining ||
+                  0,
+              ) +
+                existingUnitContribution,
+            );
+          if (
+            actualPlots >
+            maxAllowedPlots
+          ) {
+            throw Object.assign(
+              new Error(
+                PRODUCTION_COPY.TASK_PROGRESS_TARGET_EXCEEDED,
+              ),
+              {
+                statusCode: 400,
+                payload: {
+                  maxAllowedPlots,
+                  maxAllowedPlotUnits:
+                    convertPlotsToPlotUnits(
+                      maxAllowedPlots,
+                    ) || 0,
+                  taskTargetPlots:
+                    expectedPlots,
+                  taskTargetPlotUnits:
+                    expectedPlotUnits,
+                },
+              },
+            );
+          }
+
+          if (
+            quantityActivityType !==
+            PRODUCTION_QUANTITY_ACTIVITY_NONE
+          ) {
+            const rawActivityTarget =
+              currentLedger
+                ?.activityTargets?.[
+                  quantityActivityType
+                ];
+            const activityTarget =
+              rawActivityTarget == null ?
+                null
+              : Number(
+                  rawActivityTarget,
+                );
+            const hasActivityTarget =
+              Number.isFinite(
+                activityTarget,
+              ) &&
+              activityTarget >= 0;
+            const existingActivityType =
+              resolveTaskProgressActivityType(
+                existingProgress,
+              );
+            const existingActivityQuantity =
+              existingActivityType ===
+                quantityActivityType ?
+                resolveTaskProgressActivityQuantity(
+                  existingProgress,
+                )
+              : 0;
+            const maxAllowedActivityQuantity =
+              hasActivityTarget ?
+                Math.max(
+                  0,
+                  Number(
+                    currentLedger
+                      ?.activityRemaining?.[
+                        quantityActivityType
+                      ] || 0,
+                  ) +
+                    existingActivityQuantity,
+                )
+              : Number.POSITIVE_INFINITY;
+            if (
+              hasActivityTarget &&
+              effectiveQuantityAmount >
+                maxAllowedActivityQuantity
+            ) {
+              throw Object.assign(
+                new Error(
+                  PRODUCTION_COPY.TASK_PROGRESS_ACTIVITY_TARGET_EXCEEDED,
+                ),
+                {
+                  statusCode: 400,
+                  payload: {
+                    activityType:
+                      quantityActivityType,
+                    maxAllowedActivityQuantity,
+                    activityTarget,
+                  },
+                },
+              );
+            }
+          }
+
+          const existingProofs =
+            Array.isArray(
+              existingProgress?.proofs,
+            ) ?
+              existingProgress.proofs
+            : [];
+          const existingProofCount =
+            existingProofs.length;
+          let proofsToPersist =
+            existingProofs;
+          if (
+            requiredProofCount === 0
+          ) {
+            proofsToPersist = [];
+          } else if (
+            uploadedProofFiles.length > 0
+          ) {
+            proofsToPersist =
+              await uploadTaskProgressProofImages(
+                {
+                  businessId,
+                  taskId:
+                    task._id?.toString(),
+                  staffId:
+                    effectiveStaffId,
+                  workDate:
+                    normalizedWorkDate,
+                  files:
+                    uploadedProofFiles,
+                  uploadedBy:
+                    actor._id,
+                },
+              );
+          } else if (
+            existingProofCount !==
+            requiredProofCount
+          ) {
+            throw Object.assign(
+              new Error(
+                existingProofCount > 0 ?
+                  PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID
+                : PRODUCTION_COPY.TASK_PROGRESS_PROOFS_REQUIRED,
+              ),
+              {
+                statusCode: 400,
+                payload: {
+                  requiredProofCount,
+                  providedProofCount:
+                    existingProofCount,
+                },
+              },
+            );
+          }
+
+          const resolvedQuantityUnit =
+            quantityActivityType ===
+              PRODUCTION_QUANTITY_ACTIVITY_NONE ?
+              ""
+            : quantityUnit ||
+              ledgerConfig
+                ?.activityUnits?.[
+                  quantityActivityType
+                ] ||
+              "";
+          const progressDoc =
+            await TaskProgress.findOneAndUpdate(
+              progressQuery,
+              {
+                $set: {
+                  planId: plan._id,
+                  unitId:
+                    effectiveUnitId ||
+                    null,
+                  expectedPlots,
+                  expectedPlotUnits,
+                  actualPlots,
+                  actualPlotUnits,
+                  unitContribution:
+                    actualPlots,
+                  unitContributionPlotUnits:
+                    actualPlotUnits,
+                  quantityActivityType:
+                    quantityActivityType,
+                  activityType:
+                    quantityActivityType,
+                  quantityAmount:
+                    effectiveQuantityAmount,
+                  activityQuantity:
+                    effectiveQuantityAmount,
+                  quantityUnit:
+                    resolvedQuantityUnit,
+                  proofCountRequired:
+                    requiredProofCount,
+                  proofCountUploaded:
+                    proofsToPersist.length,
+                  proofs:
+                    proofsToPersist,
+                  delayReason,
+                  notes,
+                  sessionStatus:
+                    "completed",
+                  clockInTime:
+                    completedAttendance.clockInAt ||
+                    null,
+                  clockOutTime:
+                    completedAttendance.clockOutAt ||
+                    new Date(),
+                },
+                $setOnInsert: {
+                  createdBy:
+                    actor._id,
+                },
+              },
+              {
+                new: true,
+                upsert: true,
+                setDefaultsOnInsert: true,
+                session,
+              },
+            );
+
+          if (
+            activeAttendance &&
+            !activeAttendance.clockOutAt
+          ) {
+            const resolvedClockOutAt =
+              new Date();
+            activeAttendance.clockOutAt =
+              resolvedClockOutAt;
+            activeAttendance.clockOutBy =
+              actor._id;
+            activeAttendance.durationMinutes =
+              Math.max(
+                0,
+                Math.round(
+                  (
+                    resolvedClockOutAt.getTime() -
+                    new Date(
+                      activeAttendance.clockInAt ||
+                        resolvedClockOutAt,
+                    ).getTime()
+                  ) /
+                    MS_PER_MINUTE,
+                ),
+              );
+            activeAttendance.planId =
+              plan._id;
+            activeAttendance.taskId =
+              task._id;
+            activeAttendance.workDate =
+              normalizedWorkDate;
+            await activeAttendance.save({
+              session,
+            });
+            progressDoc.clockOutTime =
+              resolvedClockOutAt;
+          }
+
+          ledger =
+            await recomputeProductionTaskDayLedger(
+              {
+                session,
+                planId: plan._id,
+                taskId: task._id,
+                workDate:
+                  normalizedWorkDate,
+                unitTarget:
+                  ledgerConfig.unitTarget,
+                unitType:
+                  ledgerConfig.unitType,
+                activityTargets:
+                  ledgerConfig.activityTargets,
+                activityUnits:
+                  ledgerConfig.activityUnits,
+              },
+            );
+          progressDoc.taskDayLedgerId =
+            ledger?._id || null;
+          await progressDoc.save({
+            session,
+          });
+          progress =
+            progressDoc.toObject();
+          finalProofCount =
+            proofsToPersist.length;
         },
-        {
-          new: true,
-          upsert: true,
-          setDefaultsOnInsert: true,
-        },
-      ).lean();
+      );
+    } finally {
+      if (session) {
+        await session.endSession();
+      }
+    }
 
     debug(
       "BUSINESS CONTROLLER: logProductionTaskProgress - success",
@@ -27285,10 +27770,16 @@ async function logProductionTaskProgress(
         actualPlots,
         actualPlotUnits,
         quantityActivityType,
-        quantityAmount,
+        quantityAmount:
+          effectiveQuantityAmount,
         quantityUnit,
         expectedPlotUnits,
-        proofCount: proofsToPersist.length,
+        proofCount:
+          finalProofCount,
+        ledgerId:
+          ledger?._id || null,
+        sharedUnitRemaining:
+          ledger?.unitRemaining || 0,
       },
     );
 
@@ -27302,15 +27793,19 @@ async function logProductionTaskProgress(
       message:
         PRODUCTION_COPY.TASK_PROGRESS_CREATED,
       progress,
+      ledger,
     });
   } catch (err) {
     debug(
       "BUSINESS CONTROLLER: logProductionTaskProgress - error",
       err.message,
     );
-    return res
-      .status(400)
-      .json({ error: err.message });
+    return res.status(
+      err?.statusCode || 400,
+    ).json({
+      error: err.message,
+      ...(err?.payload || {}),
+    });
   }
 }
 
@@ -27497,6 +27992,9 @@ async function logProductionTaskProgressBatch(
           staffProfileId: {
             $in: staffIdsForLookup,
           },
+          taskId: {
+            $in: taskIdsForLookup,
+          },
           clockInAt: {
             $lt: new Date(
               normalizedWorkDate.getTime() +
@@ -27511,6 +28009,8 @@ async function logProductionTaskProgressBatch(
           .select({
             _id: 1,
             staffProfileId: 1,
+            taskId: 1,
+            workDate: 1,
             clockInAt: 1,
             clockOutAt: 1,
             durationMinutes: 1,
@@ -27521,6 +28021,8 @@ async function logProductionTaskProgressBatch(
           })
           .lean()
       : [];
+    const completedAttendanceByScopeKey =
+      new Map();
     const completedAttendanceByStaffId =
       new Map();
     completedAttendanceRows.forEach(
@@ -27529,6 +28031,26 @@ async function logProductionTaskProgressBatch(
           normalizeStaffIdInput(
             row?.staffProfileId,
           );
+        const scopedTaskId =
+          normalizeStaffIdInput(
+            row?.taskId,
+          );
+        const scopedWorkDate =
+          normalizeWorkDateToDayStart(
+            row?.workDate ||
+              row?.clockOutAt ||
+              row?.clockInAt,
+          );
+        if (
+          scopedStaffId &&
+          scopedTaskId &&
+          scopedWorkDate
+        ) {
+          completedAttendanceByScopeKey.set(
+            `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+            row,
+          );
+        }
         if (
           scopedStaffId &&
           !completedAttendanceByStaffId.has(
@@ -27886,11 +28408,15 @@ async function logProductionTaskProgressBatch(
         continue;
       }
 
-      if (
-        !completedAttendanceByStaffId.get(
+      const completedAttendance =
+        completedAttendanceByScopeKey.get(
+          `${staffId}::${taskId}::${normalizedWorkDate.toISOString()}`,
+        ) ||
+        completedAttendanceByStaffId.get(
           staffId,
-        )
-      ) {
+        ) ||
+        null;
+      if (!completedAttendance) {
         pushEntryError({
           errorCode:
             TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_REQUIRED,
@@ -27945,6 +28471,63 @@ async function logProductionTaskProgressBatch(
         resolvedProgressInput.actualPlots;
       const actualPlotUnits =
         resolvedProgressInput.actualPlotUnits;
+      const hasQuantityActivityType =
+        Object.prototype.hasOwnProperty.call(
+          entry,
+          "activityType",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          entry,
+          "quantityActivityType",
+        );
+      const quantityActivityType =
+        hasQuantityActivityType ?
+          normalizeProductionQuantityActivityType(
+            entry?.activityType ??
+              entry?.quantityActivityType,
+          )
+        : PRODUCTION_QUANTITY_ACTIVITY_NONE;
+      const hasActivityQuantity =
+        Object.prototype.hasOwnProperty.call(
+          entry,
+          "activityQuantity",
+        ) ||
+        Object.prototype.hasOwnProperty.call(
+          entry,
+          "quantityAmount",
+        );
+      const parsedActivityQuantity =
+        hasActivityQuantity ?
+          parseNonNegativeNumberInput(
+            entry?.activityQuantity ??
+              entry?.quantityAmount,
+          )
+        : 0;
+      if (
+        hasActivityQuantity &&
+        parsedActivityQuantity == null
+      ) {
+        pushEntryError({
+          errorCode:
+            TASK_PROGRESS_BATCH_ENTRY_CODE_ACTUAL_INVALID,
+          error:
+            PRODUCTION_COPY.TASK_PROGRESS_ACTIVITY_QUANTITY_INVALID,
+        });
+        continue;
+      }
+      const quantityAmount =
+        quantityActivityType ===
+            PRODUCTION_QUANTITY_ACTIVITY_NONE
+          ? 0
+          : parsedActivityQuantity || 0;
+      const quantityUnit =
+        quantityActivityType ===
+            PRODUCTION_QUANTITY_ACTIVITY_NONE
+          ? ""
+          : normalizePlantingTargetUnitInput(
+              entry?.activityQuantityUnit ??
+                entry?.quantityUnit,
+            );
 
       const delayReason =
         normalizeTaskProgressDelayReason(
@@ -28059,6 +28642,28 @@ async function logProductionTaskProgressBatch(
                 expectedPlotUnits,
                 actualPlots,
                 actualPlotUnits,
+                unitContribution:
+                  actualPlots,
+                unitContributionPlotUnits:
+                  actualPlotUnits,
+                quantityActivityType,
+                activityType:
+                  quantityActivityType,
+                quantityAmount,
+                activityQuantity:
+                  quantityAmount,
+                quantityUnit,
+                proofCountRequired: 0,
+                proofCountUploaded: 0,
+                proofs: [],
+                sessionStatus:
+                  "completed",
+                clockInTime:
+                  completedAttendance
+                    ?.clockInAt || null,
+                clockOutTime:
+                  completedAttendance
+                    ?.clockOutAt || null,
                 delayReason,
                 notes,
               },
@@ -28118,6 +28723,100 @@ async function logProductionTaskProgressBatch(
     );
 
     if (successes.length > 0) {
+      const ledgerScopes = Array.from(
+        new Set(
+          successes
+            .map((entry) => {
+              const taskId =
+                normalizeStaffIdInput(
+                  entry?.taskId,
+                );
+              const planId =
+                normalizeStaffIdInput(
+                  entry?.progress?.planId,
+                );
+              if (
+                !taskId ||
+                !planId
+              ) {
+                return "";
+              }
+              return `${taskId}::${planId}`;
+            })
+            .filter(Boolean),
+        ),
+      );
+      await Promise.all(
+        ledgerScopes.map(
+          async (scopeKey) => {
+            const [
+              scopedTaskId,
+              scopedPlanId,
+            ] = scopeKey.split(
+              "::",
+            );
+            const scopedTask =
+              taskMap.get(
+                scopedTaskId,
+              );
+            const scopedPlan =
+              planMap.get(
+                scopedPlanId,
+              );
+            if (
+              !scopedTask ||
+              !scopedPlan
+            ) {
+              return;
+            }
+            const ledgerConfig =
+              resolveTaskDayLedgerConfig(
+                {
+                  task:
+                    scopedTask,
+                  plan:
+                    scopedPlan,
+                },
+              );
+            const ledger =
+              await recomputeProductionTaskDayLedger(
+                {
+                  planId:
+                    scopedPlan._id,
+                  taskId:
+                    scopedTask._id,
+                  workDate:
+                    normalizedWorkDate,
+                  unitTarget:
+                    ledgerConfig.unitTarget,
+                  unitType:
+                    ledgerConfig.unitType,
+                  activityTargets:
+                    ledgerConfig.activityTargets,
+                  activityUnits:
+                    ledgerConfig.activityUnits,
+                },
+              );
+            if (!ledger?._id) {
+              return;
+            }
+            await TaskProgress.updateMany(
+              {
+                taskId:
+                  scopedTask._id,
+                workDate:
+                  normalizedWorkDate,
+              },
+              {
+                $set: {
+                  taskDayLedgerId:
+                    ledger._id,
+                },
+              },
+            );
+          },
+        ),
+      );
       const planIdsToRefresh = Array.from(
         new Set(
           successes
@@ -28249,6 +28948,13 @@ async function approveTaskProgress(
     const alreadyApproved =
       Boolean(progress.approvedAt) &&
       Boolean(progress.approvedBy);
+    const hadRejectedNote =
+      (
+        progress.notes
+          ?.toString() || ""
+      ).includes(
+        TASK_PROGRESS_REJECTION_NOTE_PREFIX,
+      );
     if (!alreadyApproved) {
       // WHY: Approval is production execution truth boundary for lifecycle analytics.
       logProductionLifecycleBoundary({
@@ -28273,10 +28979,68 @@ async function approveTaskProgress(
         },
       });
     }
-    if (!alreadyApproved) {
+    let ledger = null;
+    if (
+      !alreadyApproved ||
+      hadRejectedNote
+    ) {
+      if (hadRejectedNote) {
+        progress.notes =
+          stripTaskProgressRejectNotes(
+            progress.notes,
+          );
+      }
       progress.approvedBy = actor._id;
-      progress.approvedAt = new Date();
+      progress.approvedAt =
+        progress.approvedAt ||
+        new Date();
       await progress.save();
+      const task =
+        await ProductionTask.findById(
+          progress.taskId,
+        ).lean();
+      if (
+        task &&
+        progress.workDate
+      ) {
+        const ledgerConfig =
+          resolveTaskDayLedgerConfig({
+            task,
+            plan,
+          });
+        ledger =
+          await recomputeProductionTaskDayLedger(
+            {
+              planId:
+                progress.planId,
+              taskId:
+                progress.taskId,
+              workDate:
+                progress.workDate,
+              unitTarget:
+                ledgerConfig.unitTarget,
+              unitType:
+                ledgerConfig.unitType,
+              activityTargets:
+                ledgerConfig.activityTargets,
+              activityUnits:
+                ledgerConfig.activityUnits,
+            },
+          );
+        if (
+          ledger?._id &&
+          normalizeStaffIdInput(
+            progress.taskDayLedgerId,
+          ) !==
+            normalizeStaffIdInput(
+              ledger._id,
+            )
+        ) {
+          progress.taskDayLedgerId =
+            ledger._id;
+          await progress.save();
+        }
+      }
     }
 
     // UNIT-LIFECYCLE
@@ -28422,6 +29186,11 @@ async function approveTaskProgress(
       message:
         PRODUCTION_COPY.TASK_PROGRESS_APPROVED,
       progress,
+      ...(ledger ?
+        {
+          ledger,
+        }
+      : {}),
       ...(phaseUnitCompletionSync ?
         {
           phaseUnitCompletion:
@@ -28593,6 +29362,53 @@ async function rejectTaskProgress(
     progress.approvedBy = null;
     progress.approvedAt = null;
     await progress.save();
+    let ledger = null;
+    const task =
+      await ProductionTask.findById(
+        progress.taskId,
+      ).lean();
+    if (
+      task &&
+      progress.workDate
+    ) {
+      const ledgerConfig =
+        resolveTaskDayLedgerConfig({
+          task,
+          plan,
+        });
+      ledger =
+        await recomputeProductionTaskDayLedger(
+          {
+            planId:
+              progress.planId,
+            taskId:
+              progress.taskId,
+            workDate:
+              progress.workDate,
+            unitTarget:
+              ledgerConfig.unitTarget,
+            unitType:
+              ledgerConfig.unitType,
+            activityTargets:
+              ledgerConfig.activityTargets,
+            activityUnits:
+              ledgerConfig.activityUnits,
+          },
+        );
+      if (
+        ledger?._id &&
+        normalizeStaffIdInput(
+          progress.taskDayLedgerId,
+        ) !==
+          normalizeStaffIdInput(
+            ledger._id,
+          )
+      ) {
+        progress.taskDayLedgerId =
+          ledger._id;
+        await progress.save();
+      }
+    }
 
     debug(
       "BUSINESS CONTROLLER: rejectTaskProgress - success",
@@ -28615,6 +29431,11 @@ async function rejectTaskProgress(
       message:
         PRODUCTION_COPY.TASK_PROGRESS_REJECTED,
       progress,
+      ...(ledger ?
+        {
+          ledger,
+        }
+      : {}),
     });
   } catch (err) {
     debug(

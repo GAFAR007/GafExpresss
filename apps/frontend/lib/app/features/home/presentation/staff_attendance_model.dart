@@ -20,7 +20,10 @@ const String _logKpi = "buildKpis()";
 
 const String _keyId = "_id";
 const String _keyAltId = "id";
+const String _keyPlanId = "planId";
+const String _keyTaskId = "taskId";
 const String _keyStaffProfileId = "staffProfileId";
+const String _keyWorkDate = "workDate";
 const String _keyClockInAt = "clockInAt";
 const String _keyClockOutAt = "clockOutAt";
 const String _keyDurationMinutes = "durationMinutes";
@@ -37,7 +40,10 @@ const String _keyProofUploadedBy = "proofUploadedBy";
 
 class StaffAttendanceRecord {
   final String id;
+  final String? planId;
+  final String? taskId;
   final String staffProfileId;
+  final DateTime? workDate;
   final DateTime clockInAt;
   final DateTime? clockOutAt;
   final int? durationMinutes;
@@ -54,7 +60,10 @@ class StaffAttendanceRecord {
 
   const StaffAttendanceRecord({
     required this.id,
+    required this.planId,
+    required this.taskId,
     required this.staffProfileId,
+    required this.workDate,
     required this.clockInAt,
     required this.clockOutAt,
     required this.durationMinutes,
@@ -78,8 +87,11 @@ class StaffAttendanceRecord {
 
     return StaffAttendanceRecord(
       id: id,
+      planId: _parseNullableString(json[_keyPlanId]),
+      taskId: _parseNullableString(json[_keyTaskId]),
       // WHY: Always coerce ids to strings for UI keys.
       staffProfileId: (json[_keyStaffProfileId] ?? "").toString(),
+      workDate: _parseDate(json[_keyWorkDate]),
       // WHY: Fallback prevents crashes if backend sends null dates.
       clockInAt: _parseDate(json[_keyClockInAt]) ?? DateTime.now(),
       clockOutAt: _parseDate(json[_keyClockOutAt]),
@@ -129,11 +141,7 @@ class StaffAttendanceKpiSummary {
     List<StaffAttendanceRecord> records,
   ) {
     // WHY: Log KPI calculation to debug summary mismatches.
-    AppDebug.log(
-      _logTag,
-      _logKpi,
-      extra: {"count": records.length},
-    );
+    AppDebug.log(_logTag, _logKpi, extra: {"count": records.length});
 
     // WHY: Derive counts to power KPI tiles without backend summaries.
     final total = records.length;
