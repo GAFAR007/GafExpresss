@@ -18,150 +18,6 @@ const debug = require('../utils/debug');
 
 debug('Loading StaffAttendance model...');
 
-const attendanceProofSchema = new mongoose.Schema(
-  {
-    unitIndex: {
-      type: Number,
-      min: 1,
-      required: true,
-    },
-    url: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    publicId: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    filename: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    mimeType: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    type: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    sizeBytes: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    uploadedAt: {
-      type: Date,
-      default: null,
-    },
-    uploadedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-    },
-  },
-  { _id: false },
-);
-
-const clockOutAuditSchema = new mongoose.Schema(
-  {
-    workDate: {
-      type: Date,
-      default: null,
-    },
-    planId: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    taskId: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    taskTitle: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    staffProfileId: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    staffName: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    unitId: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    unitLabel: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    progressUnitLabel: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    unitsCompleted: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    unitsRemaining: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    requiredProofs: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    unitType: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    quantityActivityType: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    quantityAmount: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    quantityUnit: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    notes: {
-      type: String,
-      trim: true,
-      default: '',
-    },
-    capturedAt: {
-      type: Date,
-      default: null,
-    },
-  },
-  { _id: false },
-);
-
 const staffAttendanceSchema = new mongoose.Schema(
   {
     // WHY: Connect attendance to a staff profile.
@@ -169,6 +25,26 @@ const staffAttendanceSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'BusinessStaffProfile',
       required: true,
+      index: true,
+    },
+    // WHY: Production attendance can be scoped to one plan when clocking from the workspace.
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductionPlan',
+      default: null,
+      index: true,
+    },
+    // WHY: Production workspace sessions must be scoped to one task/day.
+    taskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductionTask',
+      default: null,
+      index: true,
+    },
+    // WHY: Work date stays stable even when manual times are adjusted later.
+    workDate: {
+      type: Date,
+      default: null,
       index: true,
     },
     // WHY: Clock-in time anchors the attendance session.
@@ -247,40 +123,18 @@ const staffAttendanceSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
-    proofs: {
-      type: [attendanceProofSchema],
-      default: [],
-    },
-    clockOutAudit: {
-      type: clockOutAuditSchema,
-      default: null,
-    },
-    sessionStatus: {
-      type: String,
-      enum: ['active', 'completed'],
-      default: 'active',
-      index: true,
-    },
-    numberOfUnitsCompleted: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    requiredProofs: {
-      type: Number,
-      min: 0,
-      default: null,
-    },
-    unitType: {
-      type: String,
-      trim: true,
-      default: '',
-    },
   },
   {
     timestamps: true,
   },
 );
+
+staffAttendanceSchema.index({
+  staffProfileId: 1,
+  taskId: 1,
+  workDate: 1,
+  clockOutAt: 1,
+});
 
 const StaffAttendance = mongoose.model(
   'StaffAttendance',
