@@ -27038,8 +27038,6 @@ async function logProductionTaskProgress(
       quantityActivityType ===
       PRODUCTION_QUANTITY_ACTIVITY_NONE
     ) {
-      actualPlots = 0;
-      actualPlotUnits = 0;
       effectiveQuantityAmount = 0;
     }
 

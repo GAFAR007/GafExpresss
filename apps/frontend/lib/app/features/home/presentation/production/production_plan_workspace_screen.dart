@@ -173,7 +173,8 @@ const String _logDialogStaffLabel = "Staff who did this work today";
 const String _logDialogDelayLabel = "Delay reason";
 const String _logDialogDelayHelper =
     "Use None when work was completed. Choose the real reason only if this staff completed 0 today.";
-const String _logDialogQuantityActivityLabel = "Farm production activity";
+const String _logDialogQuantityActivityLabel =
+    "Production activity metric (optional)";
 const String _logDialogQuantityAmountLabel = "Quantity completed today";
 const String _logDialogNotesLabel = "Daily notes";
 const String _rejectDialogTitle = "Reject task";
@@ -4304,7 +4305,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               ),
               _InfoChip(
                 label: personalActivityType == _quantityActivityNone
-                    ? "Activity: No quantity update"
+                    ? "Activity: Not tracked"
                     : "Activity: ${_formatQuantityActivityLabel(personalActivityType)}",
                 icon: Icons.agriculture_outlined,
                 backgroundColor: _workspaceSoftBlue,
@@ -5789,7 +5790,7 @@ String _formatProgressAmountWithUnit({
 }
 
 String _buildProgressWorkflowHint({required String singularUnitLabel}) {
-  return "This form closes one staff session and updates the shared task/day ledger. Unit contribution affects shared completion. Activity quantity affects the shared planted, transplanted, or harvested tracker.";
+  return "This form closes one staff session and updates the shared task/day ledger. Unit contribution always affects shared completion. Activity type is optional and only affects the shared planted, transplanted, or harvested tracker.";
 }
 
 String _buildProgressActualLabel({required String singularUnitLabel}) {
@@ -6489,13 +6490,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                     ? existingRow.activityType
                     : existingRow.quantityActivityType)
                 .trim();
-      if (existingRow != null &&
-          (existingRow.activityQuantity > 0 ||
-              existingRow.quantityAmount > 0) &&
-          existingQuantityActivityType.isNotEmpty &&
-          existingQuantityActivityType != _quantityActivityNone) {
+      if (existingRow != null && existingQuantityActivityType.isNotEmpty) {
         selectedQuantityActivityType = existingQuantityActivityType;
-        selectedQuantityAmount = existingRow.activityQuantity > 0
+        selectedQuantityAmount = existingQuantityActivityType ==
+                _quantityActivityNone
+            ? 0
+            : existingRow.activityQuantity > 0
             ? existingRow.activityQuantity
             : existingRow.quantityAmount;
       } else {
@@ -6601,7 +6601,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               (taskTargetAmount - totalLoggedAfterSave) < 0
               ? 0
               : (taskTargetAmount - totalLoggedAfterSave);
-          final shouldSkipSharedUpdates =
+          final shouldSkipActivityUpdates =
               supportsActivityTracking &&
               selectedQuantityActivityType == _quantityActivityNone;
           final requiredProofCount = requiredTaskProgressProofCount(
@@ -6613,9 +6613,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               ? selectedProofs.length == requiredProofCount
               : existingSelectionProofCount == requiredProofCount;
           final proofInstructionText = requiredProofCount == 0
-              ? shouldSkipSharedUpdates
-                    ? "No unit contribution selected, so proof uploads are optional and not required for save."
-                    : "Proof uploads are required only when a positive unit contribution is entered."
+              ? "Proof uploads are required only when a positive unit contribution is entered."
               : proofCountMatchesSelectedAmount
               ? selectedProofs.isEmpty
                     ? existingSelectionProofCount > 0 &&
@@ -7058,7 +7056,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         decoration: const InputDecoration(
                           labelText: _logDialogQuantityActivityLabel,
                           helperText:
-                              "No quantity update keeps attendance and notes only. Planted, Transplanted, and Harvested update the shared task/day activity tracker.",
+                              "Leave this on No quantity update for general work like cleaning or watering. Unit contribution still updates shared completion; planted, transplanted, and harvested also update the shared activity tracker.",
                           helperMaxLines: 3,
                         ),
                         items: _quantityActivityOptions
@@ -7080,10 +7078,6 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           setDialogState(() {
                             selectedQuantityActivityType = value;
                             selectedQuantityAmount = 0;
-                            if (value == _quantityActivityNone) {
-                              selectedActualAmount = 0;
-                              selectedProofs = [];
-                            }
                             validationError = "";
                           });
                         },
@@ -7104,7 +7098,10 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           ),
                         ),
                         child: Text(
-                          "No shared totals will change. Save will keep the personal attendance session, notes, and audit trail only.",
+                          hasSelectedActualAmount &&
+                                  selectedActualAmountValue > 0
+                              ? "No secondary activity metric will change. Save will still update the shared unit tracker for this task/day."
+                              : "No secondary activity metric is selected. Save will keep attendance, notes, and audit history only unless you add a unit contribution.",
                           style: Theme.of(context).textTheme.bodySmall
                               ?.copyWith(
                                 color: _workspaceNavy,
@@ -7114,7 +7111,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                         ),
                       ),
                     ],
-                    if (!shouldSkipSharedUpdates && assignedUnitIds.isNotEmpty)
+                    if (assignedUnitIds.isNotEmpty)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedUnitId,
                         decoration: InputDecoration(
@@ -7148,344 +7145,344 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           });
                         },
                       ),
-                    if (!shouldSkipSharedUpdates && assignedUnitIds.isNotEmpty)
+                    if (assignedUnitIds.isNotEmpty)
                       const SizedBox(height: 12),
-                    if (!shouldSkipSharedUpdates)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Theme.of(context).colorScheme.surface,
+                            Color.alphaBlend(
+                              _workspaceSoftBlue.withValues(alpha: 0.92),
                               Theme.of(context).colorScheme.surface,
-                              Color.alphaBlend(
-                                _workspaceSoftBlue.withValues(alpha: 0.92),
-                                Theme.of(context).colorScheme.surface,
+                            ),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: _workspaceBlue.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            progressActualLabel,
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  color: _workspaceBlue,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _InfoChip(
+                                label:
+                                    "$_workingOnLabel: ${dailyTaskProgressSummary.workingOnLabel}",
+                                icon: Icons.track_changes_outlined,
+                                backgroundColor: _workspaceSoftAmber,
+                                foregroundColor: _workspaceAmber,
+                                borderColor: _workspaceAmber.withValues(
+                                  alpha: 0.16,
+                                ),
+                              ),
+                              _InfoChip(
+                                label:
+                                    "$_doneTodayLabel: ${dailyTaskProgressSummary.doneTodayLabel}",
+                                icon: Icons.insights_outlined,
+                                backgroundColor: _workspaceSoftTeal,
+                                foregroundColor: _workspaceTeal,
+                                borderColor: _workspaceTeal.withValues(
+                                  alpha: 0.16,
+                                ),
+                              ),
+                              _InfoChip(
+                                label:
+                                    "$_leftTodayLabel: ${dailyTaskProgressSummary.leftTodayLabel}",
+                                icon: Icons.rule_folder_outlined,
+                                backgroundColor: _workspaceSoftBlue,
+                                foregroundColor: _workspaceBlue,
+                                borderColor: _workspaceBlue.withValues(
+                                  alpha: 0.16,
+                                ),
                               ),
                             ],
                           ),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: _workspaceBlue.withValues(alpha: 0.18),
+                          const SizedBox(height: 12),
+                          Text(
+                            "Quick pick",
+                            style: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  color: _workspaceNavy,
+                                  fontWeight: FontWeight.w800,
+                                ),
                           ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              progressActualLabel,
-                              style: Theme.of(context).textTheme.titleSmall
-                                  ?.copyWith(
-                                    color: _workspaceBlue,
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                          const SizedBox(height: 8),
+                          Text(
+                            existingSelectionAmount > 0
+                                ? "Allowed now: $editableAllowanceLabel. This staff/unit already has ${_formatProgressAmountWithUnit(amount: existingSelectionAmount, singularUnitLabel: progressUnitSingularLabel)} saved, so the picker frees that amount while you edit."
+                                : "Allowed now: $editableAllowanceLabel.",
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.35,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: progressOptions.map((amount) {
+                              final selected =
+                                  hasSelectedActualAmount &&
+                                  _sameProgressAmount(
+                                    amount,
+                                    selectedActualAmountValue,
+                                  );
+                              return ChoiceChip(
+                                label: Text(_formatProgressAmount(amount)),
+                                selected: selected,
+                                showCheckmark: false,
+                                labelStyle: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                      color: selected
+                                          ? Colors.white
+                                          : _workspaceNavy,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                selectedColor: _workspaceBlue,
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.surface,
+                                side: BorderSide(
+                                  color: selected
+                                      ? _workspaceBlue
+                                      : _workspaceBlue.withValues(
+                                          alpha: 0.18,
+                                        ),
+                                ),
+                                onSelected: (_) {
+                                  setDialogState(() {
+                                    selectedActualAmount = amount;
+                                    if (_sameProgressAmount(amount, 0)) {
+                                      selectedProofs = [];
+                                    }
+                                    validationError = "";
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
                             ),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
+                            decoration: BoxDecoration(
+                              color: hasSelectedActualAmount
+                                  ? _workspaceSoftTeal
+                                  : _workspaceSoftSlate,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color:
+                                    (hasSelectedActualAmount
+                                            ? _workspaceTeal
+                                            : _workspaceBlue)
+                                        .withValues(alpha: 0.14),
+                              ),
+                            ),
+                            child: Row(
                               children: [
-                                _InfoChip(
-                                  label:
-                                      "$_workingOnLabel: ${dailyTaskProgressSummary.workingOnLabel}",
-                                  icon: Icons.track_changes_outlined,
-                                  backgroundColor: _workspaceSoftAmber,
-                                  foregroundColor: _workspaceAmber,
-                                  borderColor: _workspaceAmber.withValues(
-                                    alpha: 0.16,
-                                  ),
+                                Icon(
+                                  hasSelectedActualAmount
+                                      ? Icons.task_alt_outlined
+                                      : Icons.pending_actions_outlined,
+                                  size: 18,
+                                  color: hasSelectedActualAmount
+                                      ? _workspaceTeal
+                                      : _workspaceBlue,
                                 ),
-                                _InfoChip(
-                                  label:
-                                      "$_doneTodayLabel: ${dailyTaskProgressSummary.doneTodayLabel}",
-                                  icon: Icons.insights_outlined,
-                                  backgroundColor: _workspaceSoftTeal,
-                                  foregroundColor: _workspaceTeal,
-                                  borderColor: _workspaceTeal.withValues(
-                                    alpha: 0.16,
-                                  ),
-                                ),
-                                _InfoChip(
-                                  label:
-                                      "$_leftTodayLabel: ${dailyTaskProgressSummary.leftTodayLabel}",
-                                  icon: Icons.rule_folder_outlined,
-                                  backgroundColor: _workspaceSoftBlue,
-                                  foregroundColor: _workspaceBlue,
-                                  borderColor: _workspaceBlue.withValues(
-                                    alpha: 0.16,
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    hasSelectedActualAmount
+                                        ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmountValue, singularUnitLabel: progressUnitSingularLabel)} for this staff."
+                                        : "Select the completed amount from the allowed values below.",
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: _workspaceNavy,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            Text(
-                              "Quick pick",
-                              style: Theme.of(context).textTheme.labelLarge
-                                  ?.copyWith(
-                                    color: _workspaceNavy,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              existingSelectionAmount > 0
-                                  ? "Allowed now: $editableAllowanceLabel. This staff/unit already has ${_formatProgressAmountWithUnit(amount: existingSelectionAmount, singularUnitLabel: progressUnitSingularLabel)} saved, so the picker frees that amount while you edit."
-                                  : "Allowed now: $editableAllowanceLabel.",
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                    height: 1.35,
-                                  ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: progressOptions.map((amount) {
-                                final selected =
-                                    hasSelectedActualAmount &&
-                                    _sameProgressAmount(
-                                      amount,
-                                      selectedActualAmountValue,
-                                    );
-                                return ChoiceChip(
-                                  label: Text(_formatProgressAmount(amount)),
-                                  selected: selected,
-                                  showCheckmark: false,
-                                  labelStyle: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(
-                                        color: selected
-                                            ? Colors.white
-                                            : _workspaceNavy,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                  selectedColor: _workspaceBlue,
-                                  backgroundColor: Theme.of(
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            actualHelperText,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
                                     context,
-                                  ).colorScheme.surface,
-                                  side: BorderSide(
-                                    color: selected
-                                        ? _workspaceBlue
-                                        : _workspaceBlue.withValues(
-                                            alpha: 0.18,
-                                          ),
-                                  ),
-                                  onSelected: (_) {
-                                    setDialogState(() {
-                                      selectedActualAmount = amount;
-                                      if (_sameProgressAmount(amount, 0)) {
-                                        selectedProofs = [];
-                                      }
-                                      validationError = "";
-                                    });
-                                  },
-                                );
-                              }).toList(),
-                            ),
-                            const SizedBox(height: 12),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: hasSelectedActualAmount
-                                    ? _workspaceSoftTeal
-                                    : _workspaceSoftSlate,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color:
-                                      (hasSelectedActualAmount
-                                              ? _workspaceTeal
-                                              : _workspaceBlue)
-                                          .withValues(alpha: 0.14),
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.4,
                                 ),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant
+                                    .withValues(alpha: 0.7),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    hasSelectedActualAmount
-                                        ? Icons.task_alt_outlined
-                                        : Icons.pending_actions_outlined,
-                                    size: 18,
-                                    color: hasSelectedActualAmount
-                                        ? _workspaceTeal
-                                        : _workspaceBlue,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      hasSelectedActualAmount
-                                          ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmountValue, singularUnitLabel: progressUnitSingularLabel)} for this staff."
-                                          : "Select the completed amount from the allowed values below.",
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: _workspaceNavy,
-                                            fontWeight: FontWeight.w600,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Proof images",
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  proofInstructionText,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                        height: 1.3,
+                                      ),
+                                ),
+                                if (selectedProofs.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: selectedProofs
+                                        .map(
+                                          (proof) => ActionChip(
+                                            avatar: const Icon(
+                                              Icons.image_outlined,
+                                              size: 18,
+                                            ),
+                                            label: Text(proof.displayLabel),
+                                            onPressed: () {
+                                              showProductionTaskProgressPickedProofPreview(
+                                                context,
+                                                proof: proof,
+                                              );
+                                            },
                                           ),
-                                    ),
+                                        )
+                                        .toList(),
                                   ),
                                 ],
-                              ),
+                              ],
                             ),
-                            const SizedBox(height: 12),
-                            Text(
-                              actualHelperText,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                    height: 1.4,
-                                  ),
-                            ),
+                          ),
+                          if (shouldShowFollowUpSuggestion) ...[
                             const SizedBox(height: 12),
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest
-                                    .withValues(alpha: 0.45),
+                                color: _workspaceSoftAmber,
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .outlineVariant
-                                      .withValues(alpha: 0.7),
+                                  color: _workspaceAmber.withValues(
+                                    alpha: 0.18,
+                                  ),
                                 ),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    "Proof images",
+                                    "Suggested follow-up",
                                     style: Theme.of(context)
                                         .textTheme
                                         .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w800),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    proofInstructionText,
-                                    style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
-                                          height: 1.3,
+                                          color: _workspaceAmber,
+                                          fontWeight: FontWeight.w800,
                                         ),
                                   ),
-                                  if (selectedProofs.isNotEmpty) ...[
-                                    const SizedBox(height: 10),
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: selectedProofs
-                                          .map(
-                                            (proof) => ActionChip(
-                                              avatar: const Icon(
-                                                Icons.image_outlined,
-                                                size: 18,
-                                              ),
-                                              label: Text(proof.displayLabel),
-                                              onPressed: () {
-                                                showProductionTaskProgressPickedProofPreview(
-                                                  context,
-                                                  proof: proof,
-                                                );
-                                              },
-                                            ),
-                                          )
-                                          .toList(),
+                                  const SizedBox(height: 6),
+                                  if (remainingAfterSave > 0)
+                                    Text(
+                                      "Give the staff a 2 hour break, then create a follow-up task for ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)} remaining.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            height: 1.4,
+                                          ),
                                     ),
-                                  ],
+                                  if (remainingAfterSave > 0 &&
+                                      quantityRemainingAfterSave > 0)
+                                    const SizedBox(height: 8),
+                                  if (!shouldSkipActivityUpdates &&
+                                      quantityRemainingAfterSave > 0)
+                                    Text(
+                                      "Create another ${_formatQuantityActivityLabel(selectedQuantityActivityType)} task for ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel left after save.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            height: 1.4,
+                                          ),
+                                    ),
                                 ],
                               ),
                             ),
-                            if (shouldShowFollowUpSuggestion) ...[
-                              const SizedBox(height: 12),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: _workspaceSoftAmber,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: _workspaceAmber.withValues(
-                                      alpha: 0.18,
-                                    ),
-                                  ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "Suggested follow-up",
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            color: _workspaceAmber,
-                                            fontWeight: FontWeight.w800,
-                                          ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    if (remainingAfterSave > 0)
-                                      Text(
-                                        "Give the staff a 2 hour break, then create a follow-up task for ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)} remaining.",
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: _workspaceNavy,
-                                              height: 1.4,
-                                            ),
-                                      ),
-                                    if (remainingAfterSave > 0 &&
-                                        quantityRemainingAfterSave > 0)
-                                      const SizedBox(height: 8),
-                                    if (quantityRemainingAfterSave > 0)
-                                      Text(
-                                        "Create another ${_formatQuantityActivityLabel(selectedQuantityActivityType)} task for ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel left after save.",
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: _workspaceNavy,
-                                              height: 1.4,
-                                            ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ],
                           ],
-                        ),
+                        ],
                       ),
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       hasSelectedActualAmount
                           ? "After save, shared unit remaining will be ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)}. Shared done today will be ${_formatProgressAmountWithUnit(amount: totalLoggedAfterSave, singularUnitLabel: progressUnitSingularLabel)}."
-                          : shouldSkipSharedUpdates
-                          ? "No quantity update selected. Shared unit and activity totals will stay unchanged."
+                          : shouldSkipActivityUpdates
+                          ? "No activity metric selected. Shared activity totals will stay unchanged unless you also pick a unit contribution."
                           : "Select a unit contribution to preview the shared unit balance after save.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     if (supportsActivityTracking &&
-                        !shouldSkipSharedUpdates) ...[
+                        !shouldSkipActivityUpdates) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<num>(
                         initialValue: selectedQuantityAmount,
@@ -7609,7 +7606,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           });
                           return;
                         }
-                        if (!shouldSkipSharedUpdates &&
+                        if (!shouldSkipActivityUpdates &&
                             selectedActualAmountValue == 0 &&
                             selectedQuantityAmount == 0 &&
                             selectedDelayReason == _delayReasonNone) {
@@ -7622,9 +7619,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           _WorkspaceLogProgressInput(
                             staffId: selectedStaffId,
                             unitId: selectedUnitId,
-                            unitContribution: shouldSkipSharedUpdates
-                                ? 0
-                                : selectedActualAmountValue,
+                            unitContribution: selectedActualAmountValue,
                             proofs: List<ProductionTaskProgressProofInput>.from(
                               selectedProofs,
                             ),
