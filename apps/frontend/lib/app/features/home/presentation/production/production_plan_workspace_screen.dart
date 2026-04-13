@@ -184,7 +184,7 @@ const String _clockOutWizardNoProofNeeded =
 const String _clockOutWizardProofPicking = "Selecting proof images...";
 const String _clockOutWizardFinishSaving = "Finishing clock-out...";
 const String _clockOutWizardActiveSessionMissing =
-    "No active production session was found for this task.";
+    "No active production session was found for this staff.";
 const String _clockOutWizardPrimaryInvalid = "Enter a valid completed amount.";
 const String _clockOutWizardPrimaryRequired =
     "Enter the completed amount before you continue.";
@@ -3647,6 +3647,13 @@ class _AgendaTaskCard extends StatelessWidget {
                       day: selectedDay,
                       taskId: task.id,
                     );
+                final activeClockOutAttendance =
+                    resolveProductionWorkspaceActiveClockOutAttendance(
+                      attendanceRecords: attendanceRecords,
+                      staffProfileId: staffId,
+                      day: selectedDay,
+                      taskId: task.id,
+                    );
                 final staffProgress = _findStaffTaskProgressRow(
                   timelineRows: rowsForDay,
                   taskId: task.id,
@@ -3665,23 +3672,42 @@ class _AgendaTaskCard extends StatelessWidget {
                       displayAttendance,
                       _toWorkDateKey(selectedDay),
                     );
-                final hasTaskClockIn = taskAttendance?.clockInAt != null;
-                final hasTaskClockOut = taskAttendance?.clockOutAt != null;
                 final hasDisplayClockIn = displayAttendance?.clockInAt != null;
                 final hasDisplayClockOut =
                     displayAttendance?.clockOutAt != null;
+                final hasLoggedProgress = staffProgress != null;
+                final canUseClockOutWizard =
+                    progressEnabledStaffIds.contains(staffId) &&
+                    activeClockOutAttendance != null &&
+                    activeClockOutAttendance.clockInAt != null &&
+                    activeClockOutAttendance.clockOutAt == null;
+                final canManageProgressFlow =
+                    progressEnabledStaffIds.contains(staffId) &&
+                    (canUseClockOutWizard ||
+                        hasDisplayClockOut ||
+                        hasLoggedProgress);
                 final quickClockOutAttendance =
-                    taskAttendance != null &&
+                    !canUseClockOutWizard &&
+                        taskAttendance != null &&
                         taskAttendance.clockInAt != null &&
                         taskAttendance.clockOutAt == null
                     ? taskAttendance
-                    : (!attendanceBelongsToCurrentTask &&
+                    : (!canUseClockOutWizard &&
+                              !attendanceBelongsToCurrentTask &&
                               displayAttendance != null &&
                               displayAttendance.clockInAt != null &&
                               displayAttendance.clockOutAt == null
                           ? displayAttendance
                           : null);
-                final hasLoggedProgress = staffProgress != null;
+                final attendanceHint = hasDisplayClockIn && !hasDisplayClockOut
+                    ? canUseClockOutWizard
+                          ? "Clock Out opens the production log. Enter completed units first, then upload proof before save closes the session."
+                          : attendanceBelongsToCurrentTask
+                          ? "Clock Out opens the daily production log and closes this task session after save."
+                          : _attendanceOpenElsewhereHint
+                    : hasDisplayClockIn && hasDisplayClockOut
+                    ? _attendanceReadyForProgressHint
+                    : _attendanceNotStartedHint;
                 final canClockOwnTaskAttendance =
                     currentActorStaffId.trim().isNotEmpty &&
                     currentActorStaffId.trim() == staffId.trim();
@@ -3719,13 +3745,12 @@ class _AgendaTaskCard extends StatelessWidget {
                             !canManageTaskAttendance &&
                             currentActorStaffId.trim().isNotEmpty &&
                             currentActorStaffId.trim() == staffId.trim(),
-                        canLogProgress:
-                            progressEnabledStaffIds.contains(staffId) &&
-                            hasTaskClockIn,
+                        canLogProgress: canManageProgressFlow,
                         attendanceLockedForProgress:
                             progressEnabledStaffIds.contains(staffId) &&
-                            !hasTaskClockIn,
+                            !canManageProgressFlow,
                         hasLoggedProgress: hasLoggedProgress,
+                        attendanceHint: attendanceHint,
                         personalUnitContribution:
                             staffProgress?.unitContribution ?? 0,
                         personalActivityType:
@@ -3758,9 +3783,7 @@ class _AgendaTaskCard extends StatelessWidget {
                             : null,
                         onQuickClockOut:
                             onLogProgressForStaff != null &&
-                                progressEnabledStaffIds.contains(staffId) &&
-                                hasTaskClockIn &&
-                                !hasTaskClockOut
+                                canUseClockOutWizard
                             ? () => onLogProgressForStaff!(staffId)
                             : onQuickClockOutForStaff != null &&
                                   (canManageTaskAttendance ||
@@ -3782,8 +3805,7 @@ class _AgendaTaskCard extends StatelessWidget {
                               ),
                         onLogProgress:
                             onLogProgressForStaff == null ||
-                                !progressEnabledStaffIds.contains(staffId) ||
-                                !hasTaskClockIn
+                                !canManageProgressFlow
                             ? null
                             : () => onLogProgressForStaff!(staffId),
                       );
@@ -4132,6 +4154,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final bool canLogProgress;
   final bool attendanceLockedForProgress;
   final bool hasLoggedProgress;
+  final String attendanceHint;
   final num personalUnitContribution;
   final String personalActivityType;
   final num personalActivityQuantity;
@@ -4159,6 +4182,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.canLogProgress,
     required this.attendanceLockedForProgress,
     required this.hasLoggedProgress,
+    required this.attendanceHint,
     required this.personalUnitContribution,
     required this.personalActivityType,
     required this.personalActivityQuantity,
@@ -4510,13 +4534,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               border: Border.all(color: actualAccent.withValues(alpha: 0.14)),
             ),
             child: Text(
-              hasClockIn && hasClockOut
-                  ? _attendanceReadyForProgressHint
-                  : hasClockIn
-                  ? attendanceBelongsToCurrentTask
-                        ? "Clock Out opens the daily production log and closes this task session after save."
-                        : _attendanceOpenElsewhereHint
-                  : _attendanceNotStartedHint,
+              attendanceHint,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: actualAccent,
                 fontWeight: FontWeight.w700,
@@ -5219,27 +5237,43 @@ ProductionAttendanceRecord? _openAttendanceForStaff({
 }
 
 @visibleForTesting
+ProductionAttendanceRecord? resolveProductionWorkspaceActiveClockOutAttendance({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime day,
+  required String taskId,
+}) {
+  return _openAttendanceForStaff(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        taskId: taskId,
+        day: day,
+      ) ??
+      _openAttendanceForStaff(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        day: day,
+      ) ??
+      _openAttendanceForStaff(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+      );
+}
+
+@visibleForTesting
 ProductionAttendanceRecord? resolveProductionWorkspaceDisplayAttendance({
   required List<ProductionAttendanceRecord> attendanceRecords,
   required String staffProfileId,
   required DateTime day,
   required String taskId,
 }) {
-  final currentTaskOpenAttendance = _openAttendanceForStaff(
-    attendanceRecords: attendanceRecords,
-    staffProfileId: staffProfileId,
-    taskId: taskId,
-    day: day,
-  );
-  final sameDayOpenAttendance = _openAttendanceForStaff(
-    attendanceRecords: attendanceRecords,
-    staffProfileId: staffProfileId,
-    day: day,
-  );
-  final openAttendanceAnywhere = _openAttendanceForStaff(
-    attendanceRecords: attendanceRecords,
-    staffProfileId: staffProfileId,
-  );
+  final activeClockOutAttendance =
+      resolveProductionWorkspaceActiveClockOutAttendance(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        day: day,
+        taskId: taskId,
+      );
   final currentTaskAttendance = _attendanceForStaffOnDay(
     attendanceRecords: attendanceRecords,
     staffProfileId: staffProfileId,
@@ -5247,9 +5281,7 @@ ProductionAttendanceRecord? resolveProductionWorkspaceDisplayAttendance({
     taskId: taskId,
   );
 
-  return currentTaskOpenAttendance ??
-      sameDayOpenAttendance ??
-      openAttendanceAnywhere ??
+  return activeClockOutAttendance ??
       currentTaskAttendance ??
       _attendanceForStaffOnDay(
         attendanceRecords: attendanceRecords,
@@ -6521,7 +6553,7 @@ Future<bool> _showWorkspaceClockOutWizard(
   required String staffId,
   required Future<void> Function(ProductionTaskLogProgressInput input) onSubmit,
 }) async {
-  final activeAttendance = _attendanceForStaffOnDay(
+  final activeAttendance = resolveProductionWorkspaceActiveClockOutAttendance(
     attendanceRecords: attendanceRecords,
     staffProfileId: staffId,
     day: workDate,

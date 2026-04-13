@@ -28056,9 +28056,6 @@ async function logProductionTaskProgressBatch(
           staffProfileId: {
             $in: staffIdsForLookup,
           },
-          taskId: {
-            $in: taskIdsForLookup,
-          },
           clockInAt: {
             $lt: new Date(
               normalizedWorkDate.getTime() +
@@ -28086,6 +28083,8 @@ async function logProductionTaskProgressBatch(
       : [];
     const activeAttendanceByScopeKey =
       new Map();
+    const activeAttendanceByStaffId =
+      new Map();
     activeAttendanceRows.forEach(
       (row) => {
         const scopedStaffId =
@@ -28101,6 +28100,17 @@ async function logProductionTaskProgressBatch(
             row?.workDate ||
               row?.clockInAt,
           );
+        if (
+          scopedStaffId &&
+          !activeAttendanceByStaffId.has(
+            scopedStaffId,
+          )
+        ) {
+          activeAttendanceByStaffId.set(
+            scopedStaffId,
+            row,
+          );
+        }
         if (
           scopedStaffId &&
           scopedTaskId &&
@@ -28543,7 +28553,11 @@ async function logProductionTaskProgressBatch(
       const activeAttendance =
         activeAttendanceByScopeKey.get(
           attendanceScopeKey,
-        ) || null;
+        ) ||
+        activeAttendanceByStaffId.get(
+          staffId,
+        ) ||
+        null;
       const attendanceRecord =
         activeAttendance ||
         completedAttendanceByScopeKey.get(

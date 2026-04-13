@@ -830,6 +830,92 @@ test(
 );
 
 test(
+  "submit reuses an open attendance session from another task before auto clock-out",
+  async () => {
+    const scenario = await seedScenario();
+    await StaffAttendance.deleteMany({
+      staffProfileId:
+        scenario.staffProfileAId,
+      workDate:
+        WORK_DATE_NORMALIZED,
+    });
+    const activeAttendance =
+      await createActiveAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: scenario.taskBId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      });
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 1,
+          delayReason: STATUS_NONE,
+          notes:
+            "submit should reuse open attendance from another task",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      1,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      0,
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        activeAttendance._id,
+      ).lean();
+    assert.ok(savedAttendance);
+    assert.ok(savedAttendance.clockOutAt);
+    assert.equal(
+      savedAttendance.taskId.toString(),
+      scenario.taskAId.toString(),
+    );
+    assert.equal(
+      new Date(
+        savedAttendance.workDate,
+      ).toISOString(),
+      WORK_DATE_NORMALIZED.toISOString(),
+    );
+
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(savedProgress);
+    assert.equal(
+      new Date(
+        savedProgress.clockOutTime,
+      ).toISOString(),
+      new Date(
+        savedAttendance.clockOutAt,
+      ).toISOString(),
+    );
+  },
+);
+
+test(
   "shared task-day ledger aggregates multiple staff submissions on the same day",
   async () => {
     const scenario = await seedScenario();

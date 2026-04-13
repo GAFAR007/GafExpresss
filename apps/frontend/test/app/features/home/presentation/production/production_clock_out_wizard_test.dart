@@ -302,6 +302,30 @@ void main() {
     },
   );
 
+  test(
+    "clock-out wizard resolves an open attendance session from another task before save",
+    () {
+      final openAttendanceFromOtherTask = _buildOpenAttendance(
+        id: "attendance-open-other-task",
+        workDate: workDate,
+        taskId: "task-other",
+        clockInAt: workDate.add(const Duration(hours: 7, minutes: 49)),
+      );
+
+      final resolvedAttendance =
+          resolveProductionWorkspaceActiveClockOutAttendance(
+            attendanceRecords: [openAttendanceFromOtherTask],
+            staffProfileId: staff.id,
+            day: workDate,
+            taskId: task.id,
+          );
+
+      expect(resolvedAttendance?.id, "attendance-open-other-task");
+      expect(resolvedAttendance?.clockInAt, isNotNull);
+      expect(resolvedAttendance?.clockOutAt, isNull);
+    },
+  );
+
   testWidgets(
     "guided clock-out reveals one step at a time and finishes with a single save action",
     (tester) async {
