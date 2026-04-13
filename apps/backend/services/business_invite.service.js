@@ -6,12 +6,13 @@
  *
  * WHY:
  * - Lets owners invite staff/tenants by email with audit trails.
+ * - Can also create a shareable link without sending email.
  * - Stores hashed tokens so raw invite tokens never hit the DB.
  *
  * HOW:
  * - Generates a random token and hashes it with SHA-256.
  * - Persists invite + expiry.
- * - Sends email via email.service.
+ * - Optionally sends email via email.service.
  */
 
 const crypto = require('crypto');
@@ -76,6 +77,7 @@ async function createInvite({
   staffRole,
   estateAssetId,
   agreementText,
+  shouldSendEmail = true,
 }) {
   if (!inviteeEmail) {
     throw new Error('Invite email is required');
@@ -125,19 +127,22 @@ async function createInvite({
     inviteId: invite._id,
     role,
     expiresAt: tokenExpiresAt,
+    sendEmail: Boolean(shouldSendEmail),
   });
 
-  await sendEmail({
-    toEmail: normalizedEmail,
-    subject: 'You have been invited to a business team',
-    text: `You have been invited to join a business team. Accept your invite: ${inviteLink}`,
-    html: `
-      <p>You have been invited to join a business team.</p>
-      ${invite.agreementText ? `<p><strong>Agreement:</strong></p><pre>${invite.agreementText}</pre>` : ''}
-      <p><a href="${inviteLink}">Accept your invite</a></p>
-      <p>This link expires in ${INVITE_TTL_DAYS} days.</p>
-    `,
-  });
+  if (shouldSendEmail) {
+    await sendEmail({
+      toEmail: normalizedEmail,
+      subject: 'You have been invited to a business team',
+      text: `You have been invited to join a business team. Accept your invite: ${inviteLink}`,
+      html: `
+        <p>You have been invited to join a business team.</p>
+        ${invite.agreementText ? `<p><strong>Agreement:</strong></p><pre>${invite.agreementText}</pre>` : ''}
+        <p><a href="${inviteLink}">Accept your invite</a></p>
+        <p>This link expires in ${INVITE_TTL_DAYS} days.</p>
+      `,
+    });
+  }
 
   return {
     invite,

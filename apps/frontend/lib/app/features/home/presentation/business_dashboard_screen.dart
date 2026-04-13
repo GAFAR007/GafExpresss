@@ -51,7 +51,10 @@ class BusinessDashboardScreen extends ConsumerWidget {
     final profileAsync = ref.watch(userProfileProvider);
     final profile = profileAsync.valueOrNull;
     final staffRole = profileAsync.valueOrNull?.staffRole ?? "";
-    final showOwnerPreorderOps = role == "business_owner";
+    final showOwnerPreorderOps = canUseBusinessOwnerEquivalentAccess(
+      role: role,
+      staffRole: staffRole,
+    );
     final showRequestQueueAction = canManageSellerRequests(
       role: role,
       staffRole: staffRole,

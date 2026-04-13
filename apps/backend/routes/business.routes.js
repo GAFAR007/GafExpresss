@@ -27,6 +27,7 @@ const {
   PERMISSION_CAPABILITIES,
 } = require("../middlewares/permissions.middleware");
 const businessController = require("../controllers/business.controller");
+const businessTenantRequestController = require("../controllers/business_tenant_request.controller");
 const {
   verifyPaystackSignature,
 } = require("../middlewares/paystackWebhook.middleware");
@@ -40,6 +41,30 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
 });
+
+function parseTaskProgressProofUploads(
+  req,
+  res,
+  next,
+) {
+  const contentType = (
+    req.headers["content-type"] || ""
+  )
+    .toString()
+    .toLowerCase();
+  if (
+    !contentType.includes(
+      "multipart/form-data",
+    )
+  ) {
+    return next();
+  }
+  return upload.array("proofs", 10)(
+    req,
+    res,
+    next,
+  );
+}
 
 /**
  * PRODUCTS
@@ -326,7 +351,14 @@ router.patch(
 router.post(
   "/invites",
   requireAuth,
-  requireRole("business_owner"),
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
   businessController.createInvite,
 );
 
@@ -729,6 +761,7 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  parseTaskProgressProofUploads,
   businessController.logProductionTaskProgress,
 );
 
@@ -842,6 +875,7 @@ router.post(
   requireAuth,
   requireAnyRole([
     "business_owner",
+    "staff",
   ]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
@@ -862,6 +896,20 @@ router.post(
     capability: PERMISSION_CAPABILITIES.APPROVE,
   }),
   businessController.setAgreementText,
+);
+
+router.post(
+  "/tenant/request-links",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.MANAGE,
+  }),
+  businessTenantRequestController.createTenantRequestLink,
 );
 
 router.get(
@@ -990,6 +1038,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
   businessController.approveTenantApplication,
 );
 
@@ -1013,6 +1065,10 @@ router.post(
     "business_owner",
     "staff",
   ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.VERIFY,
+  }),
   businessController.verifyContact,
 );
 
@@ -1022,7 +1078,14 @@ router.post(
 router.post(
   "/tenants/:tenantId/approve",
   requireAuth,
-  requireRole("business_owner"),
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  requirePermission({
+    module: PERMISSION_MODULES.TENANTS,
+    capability: PERMISSION_CAPABILITIES.APPROVE,
+  }),
   businessController.approveTenantApplication,
 );
 

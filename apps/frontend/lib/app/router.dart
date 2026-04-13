@@ -65,12 +65,14 @@ import 'package:frontend/app/features/home/presentation/paystack_checkout_screen
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
+import 'package:frontend/app/features/home/presentation/tenant_request_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_list_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_archive_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_calendar_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_assistant_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft_editor_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_insights_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_presence_stats_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
@@ -92,6 +94,8 @@ const String _routeProductionPreorderReservationsLog =
     "-> /business-production/preorder-reservations";
 const String _routeProductionInsightsLog =
     "-> /business-production/:id/insights";
+const String _routeProductionPresenceStatsLog =
+    "-> /business-production/:id/presence-stats";
 const String _routeProductionDetailLog = "-> /business-production/:id";
 const String _routeStaffDirectoryLog = "-> /business-staff-directory";
 const String _routeStaffDetailLog = "-> /business-staff/:id";
@@ -113,6 +117,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final bool isPublicProduct = path.startsWith('/product/');
       final bool isPaymentSuccess = path == '/payment-success';
       final bool isBusinessInvite = path.startsWith('/business-invite');
+      final bool isTenantRequest = path == '/tenant-request';
       final bool isTenantVerification = path == '/tenant-verification';
       final bool isTenantDashboard = path.startsWith('/tenant-dashboard');
       final bool isBuyerProtectedRoute =
@@ -121,7 +126,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           isAuthRoute ||
           isPublicProduct ||
           isPaymentSuccess ||
-          isBusinessInvite;
+          isBusinessInvite ||
+          isTenantRequest;
       final bool isBusinessProtectedRoute =
           path.startsWith('/business-dashboard') ||
           path.startsWith('/business-products') ||
@@ -354,6 +360,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           // WHY: Allow invite links to open without auth so users see instructions.
           return BusinessInviteScreen(token: token);
+        },
+      ),
+      GoRoute(
+        path: '/tenant-request',
+        builder: (context, state) {
+          final token = state.uri.queryParameters['token'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /tenant-request",
+            extra: {"hasToken": token.isNotEmpty},
+          );
+          return BusinessThemeWrapper(child: TenantRequestScreen(token: token));
         },
       ),
       GoRoute(
@@ -636,6 +654,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           return BusinessThemeWrapper(
             child: ProductionPlanInsightsScreen(planId: planId),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanPresenceStatsRoute,
+        builder: (context, state) {
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionPresenceStatsLog,
+            extra: {_productionPlanIdParam: planId},
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPresenceStatsScreen(planId: planId),
           );
         },
       ),

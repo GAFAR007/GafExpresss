@@ -13,6 +13,8 @@
 /// - Logs build, refresh, and action taps.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,10 +23,14 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
+import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 
 const String _logTag = "PRODUCTION_DETAIL";
 const String _buildMessage = "build()";
@@ -165,22 +171,29 @@ const String _batchLogHint =
 const String _batchLogValidationFix = "Fix row errors before submitting.";
 const String _batchLogValidationSelectRows =
     "Select at least one row to submit.";
-const String _batchLogActualRequired = "Enter actual plots";
+const String _batchLogActualRequired = "Enter actual amount";
 const String _batchLogActualInvalid = "Use a non-negative number";
 const String _batchLogZeroDelayRequired =
-    "Select a delay reason when actual is zero";
+    "Select a delay reason when actual amount is zero";
 const String _logProgressDialogTitle = "Log daily work";
 const String _logProgressDateLabel = "Date";
 const String _logProgressFarmerLabel = "Farmer";
 const String _logProgressUnitLabel = "Unit";
-const String _logProgressActualPlotsLabel = "Actual plots";
+const String _logProgressActualPlotsLabel = "Actual amount";
 const String _logProgressDelayReasonLabel = "Delay reason";
 const String _logProgressZeroHelperText =
     "Use this to record absence or blocked workdays";
 const String _logProgressNotesLabel = "Notes";
 const String _logProgressNotesHint = "Optional context";
+const String _logProgressActualInvalidText =
+    "Enter a valid non-negative amount";
+const String _logProgressStaffRequiredText = "Select a staff member";
+const String _logProgressUnitRequiredText = "Select a unit";
+const String _logProgressAttendanceRequiredText =
+    "Clock in before logging progress";
 const String _logProgressZeroDelayValidationText =
-    "Select a delay reason when actual plots is zero";
+    "Select a delay reason when actual amount is zero";
+const String _viewProofLabel = "View proof";
 const String _logProgressSaveLabel = "Save";
 const String _logProgressCancelLabel = "Cancel";
 const String _delayReasonNone = "none";
@@ -290,7 +303,6 @@ const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
 const String _extraProgressIdKey = "progressId";
 const String _extraErrorKey = "error";
-const String _ownerRole = "business_owner";
 const String _staffRole = "staff";
 const String _staffRoleEstateManager = "estate_manager";
 const String _staffRoleFarmManager = "farm_manager";
@@ -357,7 +369,24 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
     final profileAsync = ref.watch(userProfileProvider);
     final profileRole = profileAsync.valueOrNull?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
-    final isOwner = actorRole == _ownerRole;
+    final selfStaffRole = _resolveSelfStaffRole(
+      staffList:
+          staffAsync.valueOrNull ?? const <BusinessStaffProfileSummary>[],
+      userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+    );
+    final isOwner = canUseBusinessOwnerEquivalentAccess(
+      role: actorRole,
+      staffRole: selfStaffRole,
+    );
+    ref.listen<ProductionDraftPresenceState>(
+      productionDraftPresenceProvider(planId),
+      (previous, next) {
+        if (previous?.updatedAt == next.updatedAt) {
+          return;
+        }
+        unawaited(ref.refresh(productionPlanDetailProvider(planId).future));
+      },
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -378,7 +407,9 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             icon: const Icon(Icons.refresh),
             onPressed: () {
               AppDebug.log(_logTag, _refreshAction);
-              ref.invalidate(productionPlanDetailProvider(planId));
+              unawaited(
+                ref.refresh(productionPlanDetailProvider(planId).future),
+              );
             },
           ),
         ],
@@ -394,10 +425,6 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
           data: (detail) {
             final staffList = staffAsync.valueOrNull ?? [];
             final staffMap = _buildStaffMap(staffList);
-            final selfStaffRole = _resolveSelfStaffRole(
-              staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
-            );
             final canLogProgress = _canLogTaskProgress(
               actorRole: actorRole,
               staffRole: selfStaffRole,
@@ -705,6 +732,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
                     unitId,
                     workDate,
                     actualPlots,
+                    proofs,
                     delayReason,
                     notes,
                   ) async {
@@ -722,6 +750,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
                             staffId: staffId,
                             unitId: unitId,
                             actualPlots: actualPlots,
+                            proofs: proofs,
                             delayReason: delayReason,
                             notes: notes,
                             planId: planId,
@@ -789,6 +818,7 @@ class _PlanDetailBody extends StatefulWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -1034,6 +1064,7 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
             return _PhaseTaskSection(
               phase: phase,
               tasks: phaseTasks,
+              attendanceRecords: widget.detail.attendanceRecords,
               staffMap: widget.staffMap,
               isOwner: widget.isOwner,
               canLogProgress: widget.canLogProgress,
@@ -1264,6 +1295,51 @@ class _DetailViewModePicker extends StatelessWidget {
       }).toList(),
     );
   }
+}
+
+ProductionAttendanceRecord? _findCompletedAttendanceForStaffOnDate({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime workDate,
+}) {
+  final normalizedStaffId = staffProfileId.trim();
+  if (normalizedStaffId.isEmpty) {
+    return null;
+  }
+
+  final dayStart = DateTime(workDate.year, workDate.month, workDate.day);
+  final dayEnd = dayStart.add(const Duration(days: 1));
+  for (final record in attendanceRecords) {
+    if (record.staffProfileId.trim() != normalizedStaffId) {
+      continue;
+    }
+    final recordWorkDate = record.workDate;
+    if (recordWorkDate != null) {
+      final recordDayStart = DateTime(
+        recordWorkDate.year,
+        recordWorkDate.month,
+        recordWorkDate.day,
+      );
+      if (recordDayStart == dayStart && record.clockInAt != null) {
+        return record;
+      }
+    }
+    final clockInAt = record.clockInAt;
+    final clockOutAt = record.clockOutAt;
+    if (clockInAt == null) {
+      continue;
+    }
+    if (clockOutAt == null) {
+      if (clockInAt.isBefore(dayEnd) && !clockInAt.isBefore(dayStart)) {
+        return record;
+      }
+      continue;
+    }
+    if (clockInAt.isBefore(dayEnd) && !clockOutAt.isBefore(dayStart)) {
+      return record;
+    }
+  }
+  return null;
 }
 
 class _DetailPanel extends StatelessWidget {
@@ -3237,6 +3313,11 @@ class _TimelineTaskTable extends StatelessWidget {
                                   icon: Icons.person_outline,
                                   label: row.approvedBy,
                                 ),
+                              if (row.proofs.isNotEmpty)
+                                _InfoPill(
+                                  icon: Icons.photo_library_outlined,
+                                  label: "${row.proofCount} proof(s)",
+                                ),
                             ],
                           ),
                           if (notes.isNotEmpty) ...[
@@ -3249,6 +3330,23 @@ class _TimelineTaskTable extends StatelessWidget {
                                       context,
                                     ).colorScheme.onSurfaceVariant,
                                   ),
+                            ),
+                          ],
+                          if (row.proofs.isNotEmpty) ...[
+                            const SizedBox(height: _cardSpacing),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  showProductionTaskProgressProofBrowser(
+                                    context,
+                                    rows: rows,
+                                    initialDate: row.workDate,
+                                  );
+                                },
+                                icon: const Icon(Icons.visibility_outlined),
+                                label: const Text(_viewProofLabel),
+                              ),
                             ),
                           ],
                           if (canAction) ...[
@@ -3295,6 +3393,7 @@ class _TimelineTaskTable extends StatelessWidget {
 class _PhaseTaskSection extends StatelessWidget {
   final ProductionPhase phase;
   final List<ProductionTask> tasks;
+  final List<ProductionAttendanceRecord> attendanceRecords;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
@@ -3307,6 +3406,7 @@ class _PhaseTaskSection extends StatelessWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3317,6 +3417,7 @@ class _PhaseTaskSection extends StatelessWidget {
   const _PhaseTaskSection({
     required this.phase,
     required this.tasks,
+    required this.attendanceRecords,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
@@ -3344,6 +3445,7 @@ class _PhaseTaskSection extends StatelessWidget {
                 .map(
                   (task) => _TaskCard(
                     task: task,
+                    attendanceRecords: attendanceRecords,
                     staffMap: staffMap,
                     isOwner: isOwner,
                     canLogProgress: canLogProgress,
@@ -3362,6 +3464,7 @@ class _PhaseTaskSection extends StatelessWidget {
 
 class _TaskCard extends StatelessWidget {
   final ProductionTask task;
+  final List<ProductionAttendanceRecord> attendanceRecords;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
@@ -3374,6 +3477,7 @@ class _TaskCard extends StatelessWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3383,6 +3487,7 @@ class _TaskCard extends StatelessWidget {
 
   const _TaskCard({
     required this.task,
+    required this.attendanceRecords,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
@@ -3482,6 +3587,8 @@ class _TaskCard extends StatelessWidget {
                     assignedUnitIds: task.assignedUnitIds,
                     staffMap: staffMap,
                     planUnitLabelById: planUnitLabelById,
+                    attendanceRecords: attendanceRecords,
+                    taskTargetPlots: task.weight,
                   );
                   if (input == null) {
                     return;
@@ -3492,6 +3599,7 @@ class _TaskCard extends StatelessWidget {
                     input.unitId,
                     input.workDate,
                     input.actualPlots,
+                    input.proofs,
                     input.delayReason,
                     input.notes,
                   );
@@ -3592,6 +3700,7 @@ class _LogProgressInput {
   final String? unitId;
   final DateTime workDate;
   final num actualPlots;
+  final List<ProductionTaskProgressProofInput> proofs;
   final String delayReason;
   final String notes;
 
@@ -3600,6 +3709,7 @@ class _LogProgressInput {
     required this.unitId,
     required this.workDate,
     required this.actualPlots,
+    required this.proofs,
     required this.delayReason,
     required this.notes,
   });
@@ -4122,6 +4232,8 @@ Future<_LogProgressInput?> _showLogProgressDialog(
   required List<String> assignedUnitIds,
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required num taskTargetPlots,
 }) async {
   // WHY: Managers need a small, focused form for daily execution logging.
   DateTime selectedDate = DateTime.now();
@@ -4149,12 +4261,60 @@ Future<_LogProgressInput?> _showLogProgressDialog(
       : null;
   final actualPlotsCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
+  final attendanceRecordsSnapshot = attendanceRecords;
+  List<ProductionTaskProgressProofInput> selectedProofs = [];
 
   final result = await showDialog<_LogProgressInput>(
     context: context,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (dialogContext, setDialogState) {
+          final parsedActualPlots = num.tryParse(actualPlotsCtrl.text.trim());
+          final requiredProofCount = parsedActualPlots == null
+              ? 0
+              : requiredTaskProgressProofCount(parsedActualPlots);
+          final proofCountMatches = requiredProofCount == 0
+              ? selectedProofs.isEmpty
+              : selectedProofs.length == requiredProofCount;
+          final remainingAfterSave = parsedActualPlots == null
+              ? 0
+              : (taskTargetPlots - parsedActualPlots) < 0
+              ? 0
+              : (taskTargetPlots - parsedActualPlots);
+          final remainingAfterSaveLabel = remainingAfterSave % 1 == 0
+              ? remainingAfterSave.toStringAsFixed(0)
+              : remainingAfterSave.toStringAsFixed(1);
+          final shouldShowFollowUpSuggestion =
+              parsedActualPlots != null &&
+              parsedActualPlots > 0 &&
+              remainingAfterSave > 0;
+
+          Future<void> chooseProofs() async {
+            final picked = await pickTaskProgressProofImages();
+            if (!dialogContext.mounted || picked.isEmpty) {
+              return;
+            }
+            setDialogState(() {
+              selectedProofs = picked;
+              validationMessage = "";
+            });
+          }
+
+          final selectedAttendanceStaffId = hasMultipleAssignedStaff
+              ? selectedStaffId
+              : (normalizedAssignedStaffIds.isNotEmpty
+                    ? normalizedAssignedStaffIds.first
+                    : null);
+          final selectedAttendance = selectedAttendanceStaffId == null
+              ? null
+              : _findCompletedAttendanceForStaffOnDate(
+                  attendanceRecords: attendanceRecordsSnapshot,
+                  staffProfileId: selectedAttendanceStaffId,
+                  workDate: selectedDate,
+                );
+          final selectedAttendanceReady = selectedAttendance?.clockInAt != null;
+          final selectedAttendanceComplete =
+              selectedAttendance?.clockOutAt != null;
           return AlertDialog(
             title: const Text(_logProgressDialogTitle),
             content: SingleChildScrollView(
@@ -4188,6 +4348,17 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     decoration: const InputDecoration(
                       labelText: _logProgressActualPlotsLabel,
                     ),
+                    onChanged: (_) {
+                      setDialogState(() {
+                        validationMessage = "";
+                        if (requiredTaskProgressProofCount(
+                              num.tryParse(actualPlotsCtrl.text.trim()) ?? 0,
+                            ) ==
+                            0) {
+                          selectedProofs = [];
+                        }
+                      });
+                    },
                   ),
                   const SizedBox(height: _summaryMetaSpacing),
                   Text(
@@ -4241,6 +4412,186 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     ),
                   ],
                   const SizedBox(height: _summaryMetaSpacing),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: selectedAttendanceReady
+                          ? Theme.of(dialogContext).colorScheme.primaryContainer
+                          : Theme.of(
+                              dialogContext,
+                            ).colorScheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selectedAttendanceReady
+                            ? Theme.of(
+                                dialogContext,
+                              ).colorScheme.primary.withValues(alpha: 0.18)
+                            : Theme.of(
+                                dialogContext,
+                              ).colorScheme.tertiary.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          selectedAttendanceComplete
+                              ? Icons.verified_outlined
+                              : selectedAttendanceReady
+                              ? Icons.logout_outlined
+                              : Icons.lock_outline,
+                          size: 18,
+                          color: selectedAttendanceReady
+                              ? Theme.of(dialogContext).colorScheme.primary
+                              : Theme.of(dialogContext).colorScheme.tertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            selectedAttendanceComplete
+                                ? "Attendance complete for this staff on ${formatDateLabel(selectedDate)}."
+                                : selectedAttendanceReady
+                                ? "Clocked in for this staff on ${formatDateLabel(selectedDate)}. Submit will clock them out automatically."
+                                : _logProgressAttendanceRequiredText,
+                            style: Theme.of(dialogContext).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: selectedAttendanceReady
+                                      ? Theme.of(
+                                          dialogContext,
+                                        ).colorScheme.primary
+                                      : Theme.of(
+                                          dialogContext,
+                                        ).colorScheme.tertiary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: _summaryMetaSpacing),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(dialogContext)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.outlineVariant.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Proof images",
+                          style: Theme.of(dialogContext).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          requiredProofCount == 0
+                              ? "Enter a positive actual amount to unlock proof uploads."
+                              : proofCountMatches
+                              ? "Upload exactly $requiredProofCount proof image(s) before saving."
+                              : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s).",
+                          style: Theme.of(dialogContext).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  dialogContext,
+                                ).colorScheme.onSurfaceVariant,
+                                height: 1.3,
+                              ),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: requiredProofCount == 0
+                              ? null
+                              : chooseProofs,
+                          icon: Icon(
+                            selectedProofs.isEmpty
+                                ? Icons.add_photo_alternate_outlined
+                                : Icons.refresh_outlined,
+                          ),
+                          label: Text(
+                            selectedProofs.isEmpty
+                                ? "Add proof images"
+                                : "Replace proof images",
+                          ),
+                        ),
+                        if (selectedProofs.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: selectedProofs
+                                .map(
+                                  (proof) => ActionChip(
+                                    avatar: const Icon(
+                                      Icons.image_outlined,
+                                      size: 18,
+                                    ),
+                                    label: Text(proof.displayLabel),
+                                    onPressed: () {
+                                      showProductionTaskProgressPickedProofPreview(
+                                        dialogContext,
+                                        proof: proof,
+                                      );
+                                    },
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (shouldShowFollowUpSuggestion) ...[
+                    const SizedBox(height: _summaryMetaSpacing),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.tertiaryContainer.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.tertiary.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Suggested follow-up",
+                            style: Theme.of(dialogContext).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "Give the staff a 2 hour break, then create a follow-up task for $remainingAfterSaveLabel work unit(s) remaining.",
+                            style: Theme.of(dialogContext).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    dialogContext,
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.4,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: _summaryMetaSpacing),
                   DropdownButtonFormField<String>(
                     initialValue: selectedDelayReason,
                     decoration: const InputDecoration(
@@ -4288,46 +4639,74 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                 child: const Text(_logProgressCancelLabel),
               ),
               TextButton(
-                onPressed: () {
-                  final actualPlots = num.tryParse(actualPlotsCtrl.text.trim());
-                  if (actualPlots == null || actualPlots < 0) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (hasMultipleAssignedStaff && selectedStaffId == null) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (hasMultipleAssignedUnits && selectedUnitId == null) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (actualPlots == 0 &&
-                      selectedDelayReason == _delayReasonNone) {
-                    setDialogState(() {
-                      validationMessage = _logProgressZeroDelayValidationText;
-                    });
-                    return;
-                  }
-                  Navigator.of(dialogContext).pop(
-                    _LogProgressInput(
-                      staffId: hasMultipleAssignedStaff
-                          ? selectedStaffId
-                          : null,
-                      unitId: selectedUnitId,
-                      workDate: selectedDate,
-                      actualPlots: actualPlots,
-                      delayReason: selectedDelayReason,
-                      notes: notesCtrl.text.trim(),
-                    ),
-                  );
-                },
+                onPressed: selectedAttendanceReady
+                    ? () {
+                        final actualPlots = num.tryParse(
+                          actualPlotsCtrl.text.trim(),
+                        );
+                        if (actualPlots == null || actualPlots < 0) {
+                          setDialogState(() {
+                            validationMessage = _logProgressActualInvalidText;
+                          });
+                          return;
+                        }
+                        final requiredProofCount =
+                            requiredTaskProgressProofCount(actualPlots);
+                        if (requiredProofCount == 0 &&
+                            selectedProofs.isNotEmpty) {
+                          setDialogState(() {
+                            validationMessage =
+                                "Proof images are not allowed when actual amount is 0.";
+                          });
+                          return;
+                        }
+                        if (requiredProofCount > 0 &&
+                            selectedProofs.length != requiredProofCount) {
+                          setDialogState(() {
+                            validationMessage =
+                                "Upload exactly $requiredProofCount proof image(s).";
+                          });
+                          return;
+                        }
+                        if (hasMultipleAssignedStaff &&
+                            selectedStaffId == null) {
+                          setDialogState(() {
+                            validationMessage = _logProgressStaffRequiredText;
+                          });
+                          return;
+                        }
+                        if (hasMultipleAssignedUnits &&
+                            selectedUnitId == null) {
+                          setDialogState(() {
+                            validationMessage = _logProgressUnitRequiredText;
+                          });
+                          return;
+                        }
+                        if (actualPlots == 0 &&
+                            selectedDelayReason == _delayReasonNone) {
+                          setDialogState(() {
+                            validationMessage =
+                                _logProgressZeroDelayValidationText;
+                          });
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(
+                          _LogProgressInput(
+                            staffId: hasMultipleAssignedStaff
+                                ? selectedStaffId
+                                : null,
+                            unitId: selectedUnitId,
+                            workDate: selectedDate,
+                            actualPlots: actualPlots,
+                            proofs: List<ProductionTaskProgressProofInput>.from(
+                              selectedProofs,
+                            ),
+                            delayReason: selectedDelayReason,
+                            notes: notesCtrl.text.trim(),
+                          ),
+                        );
+                      }
+                    : null,
                 child: const Text(_logProgressSaveLabel),
               ),
             ],
@@ -4723,7 +5102,10 @@ bool _canReviewTaskProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 
@@ -4737,7 +5119,10 @@ bool _canLogTaskProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 
@@ -4752,6 +5137,12 @@ bool _canViewPlanUnits({
   required String? staffRole,
 }) {
   // WHY: Unit visibility follows operational manager permissions used for production execution.
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
   return _canLogTaskProgress(actorRole: actorRole, staffRole: staffRole);
 }
 
@@ -4761,6 +5152,12 @@ bool _canViewPlanConfidence({
 }) {
   // CONFIDENCE-SCORE
   // WHY: Confidence visibility follows manager/owner governance permissions.
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
   return _canLogTaskProgress(actorRole: actorRole, staffRole: staffRole);
 }
 

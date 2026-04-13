@@ -22,6 +22,7 @@ const String _unknownStaff = staffDirectoryUnknownStaffLabel;
 const String _roleOwner = "business_owner";
 const String _roleStaff = "staff";
 const String _roleEstateManager = "estate_manager";
+const String _roleFarmManager = "farm_manager";
 const String _roleAccountant = "accountant";
 
 Map<String, BusinessStaffProfileSummary> buildStaffMap(
@@ -125,6 +126,7 @@ bool canViewAllAttendance({
   if (actorRole == _roleOwner) return true;
   return actorRole == _roleStaff &&
       (staffRole == _roleEstateManager ||
+          staffRole == _roleFarmManager ||
           staffRole == _roleAccountant);
 }
 
@@ -132,10 +134,12 @@ bool canManageAttendance({
   required String? actorRole,
   required String? staffRole,
 }) {
-  // WHY: Only owners and estate managers can clock staff in/out.
+  // WHY: Only owners and operational managers can clock staff in/out.
   if (actorRole == null) return false;
   if (actorRole == _roleOwner) return true;
-  return actorRole == _roleStaff && staffRole == _roleEstateManager;
+  return actorRole == _roleStaff &&
+      (staffRole == _roleEstateManager ||
+          staffRole == _roleFarmManager);
 }
 
 String resolveScopeLabel(String scope) {

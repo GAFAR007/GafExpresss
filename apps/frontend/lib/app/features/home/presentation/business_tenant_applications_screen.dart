@@ -26,8 +26,11 @@ import 'package:frontend/app/features/home/presentation/business_profile_action.
 import 'package:frontend/app/features/home/presentation/business_asset_model.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_team_lookup_invite_cards.dart';
+import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_model.dart';
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart'
+    as role_access;
 import 'package:frontend/app/theme/app_theme.dart';
 
 // WHY: Centralize payment history route values for business navigation.
@@ -36,6 +39,9 @@ const String _tenantNameExtraKey = "tenantName";
 const String _viewPaymentsLabel = "View payments";
 const String _viewPaymentsAction = "view_payments";
 const double _actionSpacing = 8;
+const String _tenantInviteTitle = "Send tenant invite";
+const String _tenantInviteSubtitle =
+    "Invite by email or create a shareable tenant request link.";
 
 class BusinessTenantApplicationsScreen extends ConsumerStatefulWidget {
   final String? estateAssetId;
@@ -176,8 +182,13 @@ class _BusinessTenantApplicationsScreenState
   Widget build(BuildContext context) {
     AppDebug.log("BUSINESS_TENANTS", "build()", extra: {"page": _page});
 
+    final session = ref.watch(authSessionProvider);
     final query = _buildQuery();
     final tenantsAsync = ref.watch(businessTenantApplicationsProvider(query));
+    final canSendTenantInvites = role_access.canSendTenantInvites(
+      role: session?.user.role,
+      staffRole: session?.user.staffRole,
+    );
     final isEstateScoped =
         widget.estateAssetId != null && widget.estateAssetId!.isNotEmpty;
     final estateAnalyticsAsync = isEstateScoped
@@ -265,15 +276,23 @@ class _BusinessTenantApplicationsScreenState
                   initiallyExpanded: false,
                 ),
                 const SizedBox(height: 12),
-                // WHY: Separate invite form keeps new tenant flow obvious.
-                BusinessInviteFormCard(
-                  source: "BUSINESS_TENANTS",
-                  estateAssets: estateAssets,
-                  estateAssetsLoading: estateAssetsAsync.isLoading,
-                  isCollapsible: true,
-                  initiallyExpanded: false,
-                ),
-                const SizedBox(height: 16),
+                if (canSendTenantInvites) ...[
+                  // WHY: Separate invite form keeps new tenant flow obvious.
+                  BusinessInviteFormCard(
+                    source: "BUSINESS_TENANTS",
+                    title: _tenantInviteTitle,
+                    subtitle: _tenantInviteSubtitle,
+                    estateAssets: estateAssets,
+                    estateAssetsLoading: estateAssetsAsync.isLoading,
+                    tenantOnly: true,
+                    isCollapsible: true,
+                    initiallyExpanded: false,
+                  ),
+                  const SizedBox(height: 16),
+                ] else ...[
+                  const _TenantInviteAccessHint(),
+                  const SizedBox(height: 16),
+                ],
                 if (!isEstateScoped) ...[
                   _NoEstateScopeHint(
                     onViewEstates: () {
@@ -1072,6 +1091,39 @@ class _RecentActivityStrip extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _TenantInviteAccessHint extends StatelessWidget {
+  const _TenantInviteAccessHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, color: theme.colorScheme.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              "Tenant invites are available to business owners, shareholders, and estate managers.",
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

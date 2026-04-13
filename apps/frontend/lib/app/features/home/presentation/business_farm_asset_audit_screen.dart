@@ -32,6 +32,7 @@ import 'package:frontend/app/features/home/presentation/business_bottom_nav.dart
 import 'package:frontend/app/features/home/presentation/business_profile_action.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/theme/app_colors.dart';
 import 'package:frontend/app/theme/app_radius.dart';
 import 'package:frontend/app/theme/app_spacing.dart';
@@ -92,7 +93,10 @@ class _BusinessFarmAssetAuditScreenState
     required String actorRole,
     required String? staffRole,
   }) {
-    if (actorRole == 'business_owner') {
+    if (canUseBusinessOwnerEquivalentAccess(
+      role: actorRole,
+      staffRole: staffRole,
+    )) {
       return true;
     }
 
@@ -133,14 +137,18 @@ class _BusinessFarmAssetAuditScreenState
         return;
       }
       final previewLines = <String>[
-        ...pendingAssets.take(2).map(
-          (asset) =>
-              "Equipment: ${asset.name} by ${_actorLabel(asset.approvalRequestedBy)}",
-        ),
-        ...pendingAuditAssets.take(2).map(
-          (asset) =>
-              "Audit: ${asset.name} by ${_actorLabel(asset.farmProfile?.pendingAuditRequest?.requestedBy)}",
-        ),
+        ...pendingAssets
+            .take(2)
+            .map(
+              (asset) =>
+                  "Equipment: ${asset.name} by ${_actorLabel(asset.approvalRequestedBy)}",
+            ),
+        ...pendingAuditAssets
+            .take(2)
+            .map(
+              (asset) =>
+                  "Audit: ${asset.name} by ${_actorLabel(asset.farmProfile?.pendingAuditRequest?.requestedBy)}",
+            ),
       ];
       await showDialog<void>(
         context: context,
@@ -155,10 +163,7 @@ class _BusinessFarmAssetAuditScreenState
                   if (pendingAuditAssets.isNotEmpty)
                     "${pendingAuditAssets.length} audit request${pendingAuditAssets.length == 1 ? '' : 's'} waiting",
                 ].join(" and "),
-                if (previewLines.isNotEmpty) ...[
-                  "",
-                  ...previewLines,
-                ],
+                if (previewLines.isNotEmpty) ...["", ...previewLines],
               ].join("\n"),
             ),
             actions: [
@@ -411,10 +416,8 @@ class _BusinessFarmAssetAuditScreenState
                               Navigator.of(context).pop({
                                 "auditDate": auditDate.toIso8601String(),
                                 "status": selectedStatus,
-                                "estimatedCurrentValue": parseNgnInput(
-                                      estimatedValueCtrl.text,
-                                    ) ??
-                                    0,
+                                "estimatedCurrentValue":
+                                    parseNgnInput(estimatedValueCtrl.text) ?? 0,
                                 "note": noteCtrl.text.trim(),
                               });
                             },
@@ -921,8 +924,7 @@ class _BusinessFarmAssetAuditScreenState
       if (!mounted) {
         return;
       }
-      final isPending =
-          created.approvalStatus == 'pending_approval';
+      final isPending = created.approvalStatus == 'pending_approval';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -937,9 +939,7 @@ class _BusinessFarmAssetAuditScreenState
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Unable to submit farm equipment"),
-        ),
+        const SnackBar(content: Text("Unable to submit farm equipment")),
       );
     } finally {
       if (mounted) {
@@ -975,8 +975,7 @@ class _BusinessFarmAssetAuditScreenState
   Widget build(BuildContext context) {
     final session = ref.watch(authSessionProvider);
     final profileAsync = ref.watch(userProfileProvider);
-    final currentStaffRole =
-        profileAsync.valueOrNull?.staffRole;
+    final currentStaffRole = profileAsync.valueOrNull?.staffRole;
     final canApproveRequests = _canApproveFarmRequests(
       actorRole: session?.user.role ?? '',
       staffRole: currentStaffRole,
@@ -1280,9 +1279,7 @@ class _BusinessFarmAssetAuditScreenState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AppSectionHeader(
-            title: canApproveRequests
-                ? "Approval inbox"
-                : "Pending review",
+            title: canApproveRequests ? "Approval inbox" : "Pending review",
             subtitle: canApproveRequests
                 ? "Submitted equipment and audit requests waiting for a farm manager, asset manager, estate manager, or business owner."
                 : "Your register contains requests waiting for a farm manager, asset manager, estate manager, or business owner.",
@@ -1309,16 +1306,16 @@ class _BusinessFarmAssetAuditScreenState
             Text(
               "Latest equipment request: ${pendingAssets.first.name} by ${_actorLabel(pendingAssets.first.approvalRequestedBy)}",
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           if (pendingAuditAssets.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
               "Latest audit request: ${pendingAuditAssets.first.name} by ${_actorLabel(pendingAuditAssets.first.farmProfile?.pendingAuditRequest?.requestedBy)}",
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ],
@@ -1620,17 +1617,12 @@ class _BusinessFarmAssetAuditScreenState
                   isSaving: _isSaving,
                   onSubmitAudit: () => _openAuditRequestSheet(asset),
                   onApproveAsset: asset.approvalStatus == 'pending_approval'
-                      ? () => _approveRequest(
-                            asset,
-                            requestType: 'asset',
-                          )
+                      ? () => _approveRequest(asset, requestType: 'asset')
                       : null,
-                  onApproveAudit: asset.farmProfile?.pendingAuditRequest?.status ==
+                  onApproveAudit:
+                      asset.farmProfile?.pendingAuditRequest?.status ==
                           'pending_approval'
-                      ? () => _approveRequest(
-                            asset,
-                            requestType: 'audit',
-                          )
+                      ? () => _approveRequest(asset, requestType: 'audit')
                       : null,
                   onOpen: () {
                     _logTap("open_asset", extra: {"assetId": asset.id});
@@ -1662,8 +1654,8 @@ class _BusinessFarmAssetAuditScreenState
     final role = actor.staffRole?.trim().isNotEmpty == true
         ? formatStaffRoleLabel(actor.staffRole!, fallback: actor.actorRole)
         : actor.actorRole.trim().isNotEmpty
-            ? actor.actorRole
-            : "staff";
+        ? actor.actorRole
+        : "staff";
     final name = actor.name.trim().isNotEmpty ? actor.name.trim() : "Unknown";
     return "$name (${_prettyLabel(role)})";
   }
@@ -1963,8 +1955,7 @@ class _FarmAssetCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final farmProfile = asset.farmProfile;
     final pendingAuditRequest = farmProfile?.pendingAuditRequest;
-    final hasPendingAssetApproval =
-        asset.approvalStatus == 'pending_approval';
+    final hasPendingAssetApproval = asset.approvalStatus == 'pending_approval';
     final hasPendingAuditApproval =
         pendingAuditRequest?.status == 'pending_approval';
     final nextAuditLabel = formatDateLabel(
@@ -2061,16 +2052,16 @@ class _FarmAssetCard extends StatelessWidget {
               Text(
                 "Added by ${_displayActor(asset.approvalRequestedBy)}",
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               if (hasPendingAuditApproval) ...[
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   "Audit request by ${_displayActor(pendingAuditRequest?.requestedBy)} for ${formatDateLabel(pendingAuditRequest?.auditDate, fallback: 'pending date')} • wants ${_prettyLabel(pendingAuditRequest?.resultingStatus ?? asset.status)}",
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ] else if ((farmProfile?.lastAuditSubmittedBy?.name ?? '')
                   .trim()
@@ -2079,8 +2070,8 @@ class _FarmAssetCard extends StatelessWidget {
                 Text(
                   "Last audit by ${_displayActor(farmProfile?.lastAuditSubmittedBy)}",
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
               const SizedBox(height: AppSpacing.md),
@@ -2118,16 +2109,18 @@ class _FarmAssetCard extends StatelessWidget {
                 children: [
                   OutlinedButton.icon(
                     onPressed:
-                        (isSaving || hasPendingAssetApproval || hasPendingAuditApproval)
-                            ? null
-                            : onSubmitAudit,
+                        (isSaving ||
+                            hasPendingAssetApproval ||
+                            hasPendingAuditApproval)
+                        ? null
+                        : onSubmitAudit,
                     icon: const Icon(Icons.fact_check_outlined),
                     label: Text(
                       hasPendingAssetApproval
                           ? "Await equipment approval"
                           : hasPendingAuditApproval
-                              ? "Audit awaiting approval"
-                              : "Submit audit",
+                          ? "Audit awaiting approval"
+                          : "Submit audit",
                     ),
                   ),
                   if (canApproveRequests && onApproveAsset != null)
@@ -2159,8 +2152,8 @@ class _FarmAssetCard extends StatelessWidget {
     final role = actor.staffRole?.trim().isNotEmpty == true
         ? formatStaffRoleLabel(actor.staffRole!, fallback: actor.actorRole)
         : actor.actorRole.trim().isNotEmpty
-            ? actor.actorRole
-            : "staff";
+        ? actor.actorRole
+        : "staff";
     final name = actor.name.trim().isNotEmpty ? actor.name.trim() : "Unknown";
     return "$name (${_prettyLabel(role)})";
   }

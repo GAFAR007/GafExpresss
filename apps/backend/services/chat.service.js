@@ -809,7 +809,7 @@ async function listConversations({ userId, businessId, limit, context }) {
   const participantRowsForActor = await ChatParticipant.find({
     userId,
     isHidden: false,
-  }).select("conversationId");
+  }).select("conversationId joinedAt lastReadAt");
 
   const sellerRequestConversationIds = await loadSellerRequestConversationIds({
     userId,
@@ -824,6 +824,16 @@ async function listConversations({ userId, businessId, limit, context }) {
   if (conversationIds.length === 0) {
     return [];
   }
+
+  const actorReadStateMap = new Map();
+  participantRowsForActor.forEach((row) => {
+    if (row.conversationId) {
+      actorReadStateMap.set(row.conversationId.toString(), {
+        joinedAt: row.joinedAt || null,
+        lastReadAt: row.lastReadAt || null,
+      });
+    }
+  });
 
   const query = {
     _id: { $in: conversationIds },
@@ -840,10 +850,53 @@ async function listConversations({ userId, businessId, limit, context }) {
     .limit(limit || 50)
     .lean();
 
+  const visibleConversationIds = items.map((conversation) =>
+    conversation._id.toString(),
+  );
+  if (visibleConversationIds.length === 0) {
+    return [];
+  }
+
+  const cutoffTimestamps = [...actorReadStateMap.values()]
+    .map((state) => {
+      const rawCutoff = state.lastReadAt || state.joinedAt || null;
+      if (!rawCutoff) return null;
+      const cutoff = new Date(rawCutoff).getTime();
+      return Number.isFinite(cutoff) ? cutoff : null;
+    })
+    .filter((value) => value != null);
+  const unreadQuery = {
+    conversationId: { $in: visibleConversationIds },
+    senderUserId: { $ne: userId },
+  };
+  if (cutoffTimestamps.length > 0) {
+    unreadQuery.createdAt = {
+      $gt: new Date(Math.min(...cutoffTimestamps)),
+    };
+  }
+
+  const unreadMessageRows = await ChatMessage.find(unreadQuery)
+    .select("conversationId createdAt")
+    .lean();
+  const unreadCountMap = new Map();
+  unreadMessageRows.forEach((row) => {
+    if (!row?.conversationId) return;
+    const convoId = row.conversationId.toString();
+    const readState = actorReadStateMap.get(convoId);
+    const cutoff = readState?.lastReadAt || readState?.joinedAt || null;
+    const createdAt = row.createdAt ? new Date(row.createdAt) : null;
+    const cutoffTime = cutoff ? new Date(cutoff).getTime() : null;
+    const createdAtTime = createdAt ? createdAt.getTime() : null;
+    const isUnread =
+      cutoffTime == null || (createdAtTime != null && createdAtTime > cutoffTime);
+    if (!isUnread) return;
+    unreadCountMap.set(convoId, (unreadCountMap.get(convoId) || 0) + 1);
+  });
+
   // WHY: Load participants in bulk to avoid per-conversation queries.
   const participantRows = await ChatParticipant.find({
     conversationId: {
-      $in: conversationIds,
+      $in: visibleConversationIds,
     },
     isHidden: false,
   }).select("conversationId userId");
@@ -869,6 +922,7 @@ async function listConversations({ userId, businessId, limit, context }) {
     const participantsCount = participantIds.length;
     let displayName = "";
     let displayAvatar = "";
+    const unreadCount = unreadCountMap.get(convoId) || 0;
 
     if (conversation.type === CHAT_CONVERSATION_TYPES.DIRECT) {
       // WHY: Seller-side manager views should still surface the external buyer.
@@ -893,6 +947,7 @@ async function listConversations({ userId, businessId, limit, context }) {
       displayName,
       displayAvatar,
       participantsCount,
+      unreadCount,
     };
   });
 

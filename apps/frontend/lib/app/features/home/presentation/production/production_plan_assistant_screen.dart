@@ -13397,7 +13397,7 @@ class _ProductionPlanAssistantScreenState
   }
 
   void _onPlannedPlantingQuantityChanged(double? value) {
-    final safeValue = value == null || value <= 0 ? null : value;
+    final safeValue = value == null || value < 0 ? null : value;
     setState(() {
       _plannedPlantingQuantity = safeValue;
       _hasConfirmedWorkloadContext = false;
@@ -13434,7 +13434,7 @@ class _ProductionPlanAssistantScreenState
   }
 
   void _onEstimatedHarvestQuantityChanged(double? value) {
-    final safeValue = value == null || value <= 0 ? null : value;
+    final safeValue = value == null || value < 0 ? null : value;
     setState(() {
       _estimatedHarvestQuantity = safeValue;
       _hasConfirmedWorkloadContext = false;

@@ -48,6 +48,7 @@ const String _keyPlanId = "planId";
 const String _keyTaskId = "taskId";
 const String _keyNotes = "notes";
 const String _keyClockOutAudit = "clockOutAudit";
+const String _keyUnitIndex = "unitIndex";
 
 const String _attendancePath = "/business/staff/attendance";
 const String _clockInPath = "/business/staff/attendance/clock-in";
@@ -371,6 +372,7 @@ class StaffAttendanceApi {
     required String attendanceId,
     required List<int> bytes,
     required String filename,
+    int unitIndex = 1,
     Map<String, dynamic>? clockOutAuditPayload,
   }) async {
     // WHY: Log intent so proof uploads are traceable alongside clock-outs.
@@ -384,6 +386,7 @@ class StaffAttendanceApi {
         "attendanceId": attendanceId,
         "bytes": bytes.length,
         "filename": filename,
+        "unitIndex": unitIndex,
       },
     );
 
@@ -395,6 +398,7 @@ class StaffAttendanceApi {
       final authOptions = _authOptions(token);
       final formData = FormData.fromMap({
         _keyProof: MultipartFile.fromBytes(bytes, filename: filename),
+        _keyUnitIndex: unitIndex.toString(),
         if (clockOutAuditPayload != null)
           _keyClockOutAudit: jsonEncode(clockOutAuditPayload),
       });

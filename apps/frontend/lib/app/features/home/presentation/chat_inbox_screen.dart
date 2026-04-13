@@ -906,7 +906,10 @@ class _PresenceToggle extends StatelessWidget {
                   duration: const Duration(milliseconds: 180),
                   width: selected ? 9 : 7,
                   height: selected ? 9 : 7,
-                  decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: accent,
+                    shape: BoxShape.circle,
+                  ),
                 ),
                 const SizedBox(width: AppSpacing.xs + 1),
                 Text(
@@ -1431,18 +1434,58 @@ class _ConversationRow extends StatelessWidget {
               const SizedBox(width: AppSpacing.md),
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  timeLabel,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant.withValues(alpha: 0.58),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.04,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      timeLabel,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.58),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.04,
+                      ),
+                    ),
+                    if (conversation.unreadCount > 0) ...[
+                      const SizedBox(height: 6),
+                      _UnreadCountBadge(count: conversation.unreadCount),
+                    ],
+                  ],
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadCountBadge extends StatelessWidget {
+  final int count;
+
+  const _UnreadCountBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = count > 99 ? "99+" : "$count";
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: scheme.onPrimaryContainer,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.02,
         ),
       ),
     );
@@ -1533,6 +1576,10 @@ class _QueueRow extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (entry.conversation.unreadCount > 0) ...[
+                    const SizedBox(height: 6),
+                    _UnreadCountBadge(count: entry.conversation.unreadCount),
+                  ],
                   const SizedBox(height: AppSpacing.xs),
                   Container(
                     padding: const EdgeInsets.symmetric(

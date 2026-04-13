@@ -19,8 +19,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 const String _summaryRemainingPeriodsKey = "remainingPeriods";
 const String _summaryTermTotalPeriodsKey = "termTotalPeriods";
 const String _summaryTermPaidPeriodsKey = "termPaidPeriodsYtd";
-const String _summaryTermRemainingPeriodsKey =
-    "termRemainingPeriodsYtd";
+const String _summaryTermRemainingPeriodsKey = "termRemainingPeriodsYtd";
 const String _summaryIsFinalPaymentKey = "isFinalPayment";
 const String _summaryIsYearCompleteKey = "isYearComplete";
 const String _summaryIsOverdueKey = "isOverdue";
@@ -250,12 +249,14 @@ class TenantSummary {
       if (value is num) return value.toDouble();
       return double.tryParse(value.toString()) ?? 0;
     }
+
     int? toOptionalInt(dynamic value) {
       // WHY: Support nullable counters without throwing on missing fields.
       if (value == null) return null;
       if (value is int) return value;
       return int.tryParse(value.toString());
     }
+
     bool toBool(dynamic value) {
       // WHY: Default to false when flags are missing from legacy payloads.
       if (value == null) return false;
@@ -288,12 +289,11 @@ class TenantSummary {
               json['paymentsSummary'] as Map<String, dynamic>,
             ),
       remainingPeriods: toOptionalInt(json[_summaryRemainingPeriodsKey]),
-      termTotalPeriods:
-          toOptionalInt(json[_summaryTermTotalPeriodsKey]),
-      termPaidPeriodsYtd:
-          toOptionalInt(json[_summaryTermPaidPeriodsKey]),
-      termRemainingPeriodsYtd:
-          toOptionalInt(json[_summaryTermRemainingPeriodsKey]),
+      termTotalPeriods: toOptionalInt(json[_summaryTermTotalPeriodsKey]),
+      termPaidPeriodsYtd: toOptionalInt(json[_summaryTermPaidPeriodsKey]),
+      termRemainingPeriodsYtd: toOptionalInt(
+        json[_summaryTermRemainingPeriodsKey],
+      ),
       isFinalPayment: toBool(json[_summaryIsFinalPaymentKey]),
       isYearComplete: toBool(json[_summaryIsYearCompleteKey]),
       isOverdue: toBool(json[_summaryIsOverdueKey]),
@@ -521,6 +521,14 @@ class BusinessTenantApplication {
   final TenantSnapshot tenantSnapshot;
   final TenantUserStatus? tenantUserStatus;
   final TenantEstateSummary? estate;
+  final String requestSource;
+  final String applicantFirstName;
+  final String? applicantMiddleName;
+  final String applicantLastName;
+  final DateTime? applicantDob;
+  final String applicantNinLast4;
+  final String? identityDocumentUrl;
+  final String? requestLinkId;
   final String unitType;
   final int unitCount;
   final double rentAmount;
@@ -547,6 +555,14 @@ class BusinessTenantApplication {
     required this.tenantSnapshot,
     required this.tenantUserStatus,
     required this.estate,
+    required this.requestSource,
+    required this.applicantFirstName,
+    required this.applicantMiddleName,
+    required this.applicantLastName,
+    required this.applicantDob,
+    required this.applicantNinLast4,
+    required this.identityDocumentUrl,
+    required this.requestLinkId,
     required this.unitType,
     required this.unitCount,
     required this.rentAmount,
@@ -599,6 +615,7 @@ class BusinessTenantApplication {
         ? TenantEstateSummary.fromJson(estateMap)
         : null;
 
+    final applicantDob = _parseDate(json['applicantDob']);
     final rulesMap = json['tenantRulesSnapshot'];
     final tenantRulesSnapshot = rulesMap is Map<String, dynamic>
         ? TenantRulesSnapshot.fromJson(rulesMap)
@@ -616,6 +633,15 @@ class BusinessTenantApplication {
       tenantSnapshot: tenantSnapshot,
       tenantUserStatus: tenantUserStatus,
       estate: estate,
+      requestSource: (json['requestSource'] ?? 'tenant_verification')
+          .toString(),
+      applicantFirstName: (json['applicantFirstName'] ?? '').toString(),
+      applicantMiddleName: _optionalString(json['applicantMiddleName']),
+      applicantLastName: (json['applicantLastName'] ?? '').toString(),
+      applicantDob: applicantDob,
+      applicantNinLast4: (json['applicantNinLast4'] ?? '').toString(),
+      identityDocumentUrl: _optionalString(json['identityDocumentUrl']),
+      requestLinkId: _optionalString(json['requestLinkId']),
       unitType: (json['unitType'] ?? '').toString(),
       unitCount: _toInt(json['unitCount'], fallback: 1),
       rentAmount: _toDouble(json['rentAmount']),
@@ -653,5 +679,11 @@ class BusinessTenantApplication {
     if (value == null) return 0;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString()) ?? 0;
+  }
+
+  static String? _optionalString(dynamic value) {
+    if (value == null) return null;
+    final trimmed = value.toString().trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 }

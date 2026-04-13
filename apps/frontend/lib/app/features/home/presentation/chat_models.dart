@@ -25,6 +25,7 @@ const String _keyLastMessagePreview = "lastMessagePreview";
 const String _keyDisplayName = "displayName";
 const String _keyDisplayAvatar = "displayAvatar";
 const String _keyParticipantsCount = "participantsCount";
+const String _keyUnreadCount = "unreadCount";
 const String _keyCreatedAt = "createdAt";
 const String _keySenderUserId = "senderUserId";
 const String _keyBody = "body";
@@ -88,6 +89,7 @@ class ChatConversation {
   final String displayName;
   final String displayAvatar;
   final int participantsCount;
+  final int unreadCount;
 
   const ChatConversation({
     required this.id,
@@ -100,6 +102,7 @@ class ChatConversation {
     required this.displayName,
     required this.displayAvatar,
     required this.participantsCount,
+    required this.unreadCount,
   });
 
   factory ChatConversation.fromJson(Map<String, dynamic> json) {
@@ -108,6 +111,10 @@ class ChatConversation {
     final participantsCount = rawCount is int
         ? rawCount
         : int.tryParse(rawCount?.toString() ?? '') ?? 0;
+    final rawUnreadCount = json[_keyUnreadCount];
+    final unreadCount = rawUnreadCount is int
+        ? rawUnreadCount
+        : int.tryParse(rawUnreadCount?.toString() ?? '') ?? 0;
     return ChatConversation(
       id: (json[_keyId] ?? "").toString(),
       businessId: (json[_keyBusinessId] ?? "").toString(),
@@ -119,6 +126,7 @@ class ChatConversation {
       displayName: (json[_keyDisplayName] ?? "").toString(),
       displayAvatar: (json[_keyDisplayAvatar] ?? "").toString(),
       participantsCount: participantsCount,
+      unreadCount: unreadCount,
     );
   }
 }

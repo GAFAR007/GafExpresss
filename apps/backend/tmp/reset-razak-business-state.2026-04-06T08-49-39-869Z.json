@@ -1,0 +1,58 @@
+{
+  "shouldExecute": true,
+  "preservedUser": {
+    "id": "696b615b240d54030d1109c0",
+    "email": "razakgafar98@outlook.com",
+    "name": "Razak Gafar",
+    "companyName": "Gafar Express Ltd"
+  },
+  "preservedEstate": {
+    "id": "6973c97b4d5c7715233c8aa4",
+    "name": "Gafar's Hydroponic Farm and Resort"
+  },
+  "before": {
+    "userCount": 6,
+    "productCount": 66,
+    "assetCount": 18,
+    "staffCount": 4,
+    "tenantAppCount": 0,
+    "preservedBusinessProducts": 66,
+    "preservedBusinessAssets": 16,
+    "preservedDraftPlans": 0,
+    "totalOrders": 0,
+    "totalPayments": 0,
+    "totalChats": 0,
+    "totalPurchaseRequests": 0
+  },
+  "staffToSeed": [
+    {
+      "name": "Odey Muses Ipo",
+      "staffRole": "farmer",
+      "phone": "08028859764",
+      "email": "odey.muses.ipo@gafarhydrofarm.example"
+    },
+    {
+      "name": "Yauba Adamu",
+      "staffRole": "security",
+      "phone": "07036739876",
+      "email": "yauba.adamu@gafarhydrofarm.example"
+    },
+    {
+      "name": "Muhammad Umar Ribadu",
+      "staffRole": "security",
+      "phone": "08061417170",
+      "email": "muhammad.umar.ribadu@gafarhydrofarm.example"
+    },
+    {
+      "name": "Munirudeen Abdulrafeu",
+      "staffRole": "logistics_driver",
+      "phone": "09165495739",
+      "email": "munirudeen.abdulrafeu@gafarhydrofarm.example"
+    }
+  ],
+  "olabode": {
+    "email": "olabode.adams@olabodeestate.example",
+    "companyName": "Olabode Estate Farm",
+    "farmAssetCount": 70
+  }
+}

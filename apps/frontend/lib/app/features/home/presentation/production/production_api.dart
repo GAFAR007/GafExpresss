@@ -130,9 +130,16 @@ const String _keyStaffId = "staffId";
 const String _keyUnitId = "unitId";
 const String _keyAssignedStaffProfileIds = "assignedStaffProfileIds";
 const String _keyActualPlots = "actualPlots";
+const String _keyActualPlotUnits = "actualPlotUnits";
+const String _keyUnitContribution = "unitContribution";
+const String _keyUnitContributionPlotUnits = "unitContributionPlotUnits";
+const String _keyProofs = "proofs";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
+const String _keyActivityQuantityUnit = "activityQuantityUnit";
+const String _keyActivityType = "activityType";
+const String _keyActivityQuantity = "activityQuantity";
 const String _keyDelayReason = "delayReason";
 const String _keyNotes = "notes";
 const String _keyNote = "note";
@@ -251,6 +258,10 @@ const String _taskApproveFailureMessage = "approveTask() failed";
 const String _taskRejectStartMessage = "rejectTask() start";
 const String _taskRejectSuccessMessage = "rejectTask() success";
 const String _taskRejectFailureMessage = "rejectTask() failed";
+
+int _toCanonicalProgressUnits(num value) {
+  return (value * 1000).round();
+}
 const String _deviationVarianceStartMessage = "acceptDeviationVariance() start";
 const String _deviationVarianceSuccessMessage =
     "acceptDeviationVariance() success";
@@ -1945,9 +1956,13 @@ class ProductionApi {
     required DateTime workDate,
     String? staffId,
     String? unitId,
-    required num actualPlots,
+    num? actualPlots,
+    num? unitContribution,
+    List<ProductionTaskProgressProofInput> proofs = const [],
     String? quantityActivityType,
+    String? activityType,
     num? quantityAmount,
+    num? activityQuantity,
     String? quantityUnit,
     required String delayReason,
     required String notes,
@@ -1966,14 +1981,23 @@ class ProductionApi {
     try {
       final normalizedStaffId = staffId?.trim() ?? "";
       final normalizedUnitId = unitId?.trim() ?? "";
-      final normalizedQuantityActivityType = quantityActivityType?.trim() ?? "";
+      final normalizedQuantityActivityType =
+          (activityType ?? quantityActivityType)?.trim() ?? "";
       final normalizedQuantityUnit = quantityUnit?.trim() ?? "";
+      final normalizedUnitContribution = unitContribution ?? actualPlots ?? 0;
+      final normalizedUnitContributionPlotUnits = _toCanonicalProgressUnits(
+        normalizedUnitContribution,
+      );
+      final normalizedActivityQuantity = activityQuantity ?? quantityAmount;
       final payload = <String, dynamic>{
         _keyWorkDate: workDate.toIso8601String().split("T").first,
-        _keyActualPlots: actualPlots,
         _keyDelayReason: delayReason,
         _keyNotes: notes,
       };
+      payload[_keyUnitContribution] = normalizedUnitContribution;
+      payload[_keyActualPlots] = normalizedUnitContribution;
+      payload[_keyUnitContributionPlotUnits] = normalizedUnitContributionPlotUnits;
+      payload[_keyActualPlotUnits] = normalizedUnitContributionPlotUnits;
       if (normalizedStaffId.isNotEmpty) {
         payload[_keyStaffId] = normalizedStaffId;
       }
@@ -1981,19 +2005,50 @@ class ProductionApi {
         payload[_keyUnitId] = normalizedUnitId;
       }
       if (normalizedQuantityActivityType.isNotEmpty) {
+        payload[_keyActivityType] = normalizedQuantityActivityType;
         payload[_keyQuantityActivityType] = normalizedQuantityActivityType;
       }
-      if (quantityAmount != null) {
-        payload[_keyQuantityAmount] = quantityAmount;
+      if (normalizedActivityQuantity != null) {
+        payload[_keyActivityQuantity] = normalizedActivityQuantity;
+        payload[_keyQuantityAmount] = normalizedActivityQuantity;
       }
       if (normalizedQuantityUnit.isNotEmpty) {
         payload[_keyQuantityUnit] = normalizedQuantityUnit;
+        payload[_keyActivityQuantityUnit] = normalizedQuantityUnit;
       }
-      final resp = await _dio.post(
-        "$_tasksPath/$taskId/progress",
-        data: payload,
-        options: _authOptions(token),
-      );
+      final resp = proofs.isEmpty
+          ? await _dio.post(
+              "$_tasksPath/$taskId/progress",
+              data: payload,
+              options: _authOptions(token),
+            )
+          : await _dio.post(
+              "$_tasksPath/$taskId/progress",
+              data: () {
+                final formData = FormData();
+                for (final entry in payload.entries) {
+                  formData.fields.add(
+                    MapEntry(entry.key, entry.value.toString()),
+                  );
+                }
+                for (final proof in proofs) {
+                  formData.files.add(
+                    MapEntry(
+                      _keyProofs,
+                      MultipartFile.fromBytes(
+                        proof.bytes,
+                        filename: proof.filename,
+                      ),
+                    ),
+                  );
+                }
+                return formData;
+              }(),
+              options: Options(
+                headers: _authOptions(token).headers,
+                contentType: "multipart/form-data",
+              ),
+            );
 
       final data = resp.data as Map<String, dynamic>;
       final parsed = ProductionTaskProgressResponse.fromJson(data);

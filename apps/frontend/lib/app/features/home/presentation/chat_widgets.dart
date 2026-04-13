@@ -613,6 +613,10 @@ class ChatConversationTile extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (conversation.unreadCount > 0) ...[
+                  const SizedBox(height: 6),
+                  _UnreadCountBadge(count: conversation.unreadCount),
+                ],
                 const SizedBox(height: _kSpacingXs),
                 Container(
                   padding: const EdgeInsets.all(4),
@@ -631,6 +635,37 @@ class ChatConversationTile extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadCountBadge extends StatelessWidget {
+  final int count;
+
+  const _UnreadCountBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = count > 99 ? "99+" : "$count";
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: scheme.onPrimaryContainer,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.02,
         ),
       ),
     );

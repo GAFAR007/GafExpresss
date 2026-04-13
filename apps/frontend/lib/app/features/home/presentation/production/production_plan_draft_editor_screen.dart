@@ -14,6 +14,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -3506,6 +3507,13 @@ class _ProductionPlanDraftEditorScreenState
                             isConnected: presenceState?.isConnected ?? false,
                             isSharedRoom: planId.isNotEmpty,
                             errorMessage: presenceState?.error,
+                            planId: planId,
+                            snapshotAt: presenceState?.updatedAt,
+                            onOpenStats: planId.isEmpty
+                                ? null
+                                : () => context.push(
+                                    productionPlanPresenceStatsPath(planId),
+                                  ),
                           ),
                           const SizedBox(height: _sectionSpacing),
                           _DraftEditorSummaryCard(
@@ -4068,6 +4076,9 @@ class _DraftPresenceBanner extends StatelessWidget {
   final bool isConnected;
   final bool isSharedRoom;
   final String? errorMessage;
+  final String? planId;
+  final DateTime? snapshotAt;
+  final VoidCallback? onOpenStats;
 
   const _DraftPresenceBanner({
     required this.currentViewer,
@@ -4075,6 +4086,9 @@ class _DraftPresenceBanner extends StatelessWidget {
     required this.isConnected,
     required this.isSharedRoom,
     required this.errorMessage,
+    this.planId,
+    this.snapshotAt,
+    this.onOpenStats,
   });
 
   @override
@@ -4084,7 +4098,10 @@ class _DraftPresenceBanner extends StatelessWidget {
       currentViewer: currentViewer,
       remoteViewers: remoteViewers,
     );
+    final normalizedPlanId = (planId ?? "").trim();
+    final roomId = draftPresenceRoomIdForPlanId(normalizedPlanId);
     final viewerCount = viewers.length;
+    final canOpenStats = onOpenStats != null && roomId.isNotEmpty;
     final statusColor = isSharedRoom
         ? (isConnected ? AppColors.productionAccent : AppColors.tenantAccent)
         : theme.colorScheme.tertiary;
@@ -4096,6 +4113,17 @@ class _DraftPresenceBanner extends StatelessWidget {
     final statusBackground = statusColor.withValues(
       alpha: theme.brightness == Brightness.dark ? 0.24 : 0.12,
     );
+    final statsButton = canOpenStats
+        ? FilledButton.icon(
+            onPressed: onOpenStats,
+            icon: const Icon(Icons.bar_chart_rounded, size: 18),
+            label: const Text("Stats"),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          )
+        : null;
 
     return Container(
       width: double.infinity,
@@ -4180,7 +4208,14 @@ class _DraftPresenceBanner extends StatelessWidget {
                   children: [
                     titleBlock,
                     const SizedBox(height: 12),
-                    statusChip,
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        if (statsButton != null) statsButton,
+                        statusChip,
+                      ],
+                    ),
                   ],
                 );
               }
@@ -4190,25 +4225,98 @@ class _DraftPresenceBanner extends StatelessWidget {
                 children: [
                   Expanded(child: titleBlock),
                   const SizedBox(width: 12),
-                  statusChip,
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (statsButton != null) statsButton,
+                      statusChip,
+                    ],
+                  ),
                 ],
               );
             },
           ),
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: viewers
-                .map(
-                  (viewer) => _DraftPresenceViewerChip(
-                    viewer: viewer,
-                    isSelf:
-                        _draftPresenceViewerKey(viewer) ==
-                        _draftPresenceViewerKey(currentViewer),
+          if (roomId.isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface.withValues(
+                  alpha: theme.brightness == Brightness.dark ? 0.14 : 0.48,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.7,
                   ),
-                )
-                .toList(),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Debug room",
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    "Plan ID: $normalizedPlanId",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "Room: $roomId",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
+          StreamBuilder<DateTime>(
+            stream: Stream<DateTime>.periodic(
+              const Duration(seconds: 30),
+              (_) => DateTime.now(),
+            ),
+            initialData: DateTime.now(),
+            builder: (context, timeSnapshot) {
+              final referenceTime = timeSnapshot.data ?? DateTime.now();
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: viewers
+                        .map(
+                          (viewer) => _DraftPresenceViewerChip(
+                            viewer: viewer,
+                            isSelf:
+                                _draftPresenceViewerKey(viewer) ==
+                                _draftPresenceViewerKey(currentViewer),
+                            referenceTime: referenceTime,
+                            snapshotAt: snapshotAt,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+              );
+            },
           ),
           if ((errorMessage ?? "").trim().isNotEmpty) ...[
             const SizedBox(height: 12),
@@ -4228,8 +4336,15 @@ class _DraftPresenceBanner extends StatelessWidget {
 class _DraftPresenceViewerChip extends StatelessWidget {
   final ProductionDraftPresenceViewer viewer;
   final bool isSelf;
+  final DateTime referenceTime;
+  final DateTime? snapshotAt;
 
-  const _DraftPresenceViewerChip({required this.viewer, required this.isSelf});
+  const _DraftPresenceViewerChip({
+    required this.viewer,
+    required this.isSelf,
+    required this.referenceTime,
+    required this.snapshotAt,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4327,6 +4442,21 @@ class _DraftPresenceViewerChip extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (viewer.hasPresenceMetrics) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      viewer.presenceSummaryLabel(
+                        referenceTime: referenceTime,
+                        snapshotAt: snapshotAt,
+                      ),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -5188,6 +5318,18 @@ ProductionDraftPresenceViewer _buildCurrentPresenceViewer({
     email: trimmedProfileEmail.isNotEmpty ? trimmedProfileEmail : sessionEmail,
     accountRole: normalizedRole,
     staffRole: resolvedStaffRole,
+    enteredAt: null,
+    lastSeenAt: null,
+    leftAt: null,
+    activeSocketCount: 0,
+    currentSessionSeconds: 0,
+    durationSeconds: 0,
+    todaySeconds: 0,
+    weekSeconds: 0,
+    monthSeconds: 0,
+    yearSeconds: 0,
+    totalSeconds: 0,
+    sessionCount: 0,
   );
 }
 
