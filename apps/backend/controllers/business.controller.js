@@ -614,6 +614,14 @@ const PRODUCTION_COPY = {
     "Task progress record not found",
   TASK_PROGRESS_REVIEW_FORBIDDEN:
     "You do not have permission to review task progress",
+  TASK_PROGRESS_RESET_FORBIDDEN:
+    "You do not have permission to reset production history",
+  TASK_PROGRESS_RESET_STAFF_REQUIRED:
+    "staffId is required to reset production history",
+  TASK_PROGRESS_RESET_APPROVED_FORBIDDEN:
+    "Approved progress must be reviewed manually before resetting this production history",
+  TASK_PROGRESS_RESET_OK:
+    "Production history reset successfully",
   TASK_PROGRESS_REJECT_REASON_REQUIRED:
     "Reject reason is required",
   TASK_PROGRESS_APPROVED:
@@ -8612,6 +8620,41 @@ async function loadTaskProgressInBusinessScope({
 
   return {
     progress,
+    plan,
+  };
+}
+
+// WHY: Reset actions must stay tenant-scoped and plan-aware before deleting execution history.
+async function loadProductionTaskInBusinessScope({
+  taskId,
+  businessId,
+}) {
+  const task =
+    await ProductionTask.findById(
+      taskId,
+    ).lean();
+  if (!task) {
+    return {
+      task: null,
+      plan: null,
+    };
+  }
+
+  const plan =
+    await ProductionPlan.findOne({
+      _id: task.planId,
+      businessId,
+    }).lean();
+
+  if (!plan) {
+    return {
+      task: null,
+      plan: null,
+    };
+  }
+
+  return {
+    task,
     plan,
   };
 }
@@ -31087,6 +31130,427 @@ async function logProductionTaskProgressBatch(
 }
 
 /**
+ * POST /business/production/tasks/:taskId/reset-history
+ * Owner + estate manager: clear one staff/task/day attendance and progress so the session can restart cleanly.
+ */
+async function resetProductionTaskHistory(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: resetProductionTaskHistory - entry",
+    {
+      actorId: req.user?.sub,
+      taskId: req.params?.taskId,
+      staffId:
+        req.body?.staffId ||
+        req.body?.staffProfileId,
+      workDate:
+        req.body?.workDate || null,
+    },
+  );
+
+  let session = null;
+  try {
+    const taskId = (
+      req.params?.taskId || ""
+    )
+      .toString()
+      .trim();
+    if (
+      !taskId ||
+      !mongoose.Types.ObjectId.isValid(
+        taskId,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const requestedStaffId =
+      normalizeStaffIdInput(
+        req.body?.staffId ||
+          req.body?.staffProfileId,
+      );
+    if (!requestedStaffId) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_RESET_STAFF_REQUIRED,
+      });
+    }
+    if (
+      !mongoose.Types.ObjectId.isValid(
+        requestedStaffId,
+      )
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_STAFF_ID_INVALID,
+      });
+    }
+
+    const normalizedWorkDate =
+      normalizeWorkDateToDayStart(
+        req.body?.workDate,
+      );
+    if (!req.body?.workDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_DATE_REQUIRED,
+      });
+    }
+    if (!normalizedWorkDate) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_DATE_INVALID,
+      });
+    }
+
+    const resetNote =
+      (
+        req.body?.notes
+          ?.toString()
+          .trim() || ""
+      );
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    if (
+      !canManageAttendance({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_RESET_FORBIDDEN,
+      });
+    }
+
+    const { task, plan } =
+      await loadProductionTaskInBusinessScope(
+        {
+          taskId,
+          businessId,
+        },
+      );
+    if (!task || !plan) {
+      return res.status(404).json({
+        error:
+          PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      plan.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_RESET_FORBIDDEN,
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: requestedStaffId,
+          businessId,
+        },
+      ).lean();
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+    if (
+      plan.estateAssetId &&
+      targetProfile.estateAssetId &&
+      targetProfile.estateAssetId.toString() !==
+        plan.estateAssetId.toString()
+    ) {
+      return res.status(400).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+      });
+    }
+
+    const normalizedTaskId =
+      normalizeStaffIdInput(task._id);
+    const normalizedPlanId =
+      normalizeStaffIdInput(plan._id);
+    const resetWindowEnd =
+      new Date(
+        normalizedWorkDate.getTime() +
+          MS_PER_DAY,
+      );
+    const progressRows =
+      await TaskProgress.find({
+        taskId: task._id,
+        planId: plan._id,
+        staffId: targetProfile._id,
+        workDate:
+          normalizedWorkDate,
+      })
+        .select({
+          _id: 1,
+          approvedBy: 1,
+          approvedAt: 1,
+          taskDayLedgerId: 1,
+        })
+        .lean();
+    const approvedProgressRows =
+      progressRows.filter(
+        (row) =>
+          Boolean(row?.approvedAt) ||
+          Boolean(row?.approvedBy),
+      );
+    if (approvedProgressRows.length > 0) {
+      return res.status(409).json({
+        error:
+          PRODUCTION_COPY.TASK_PROGRESS_RESET_APPROVED_FORBIDDEN,
+        approvedProgressCount:
+          approvedProgressRows.length,
+      });
+    }
+
+    const attendanceRows =
+      await StaffAttendance.find({
+        staffProfileId:
+          targetProfile._id,
+        taskId: task._id,
+        $or: [
+          {
+            workDate:
+              normalizedWorkDate,
+          },
+          {
+            clockInAt: {
+              $gte:
+                normalizedWorkDate,
+              $lt: resetWindowEnd,
+            },
+          },
+          {
+            clockOutAt: {
+              $gte:
+                normalizedWorkDate,
+              $lt: resetWindowEnd,
+            },
+          },
+        ],
+      })
+        .select({
+          _id: 1,
+          clockInAt: 1,
+          clockOutAt: 1,
+          workDate: 1,
+          sessionStatus: 1,
+          proofStatus: 1,
+          planId: 1,
+        })
+        .lean();
+    const scopedAttendanceRows =
+      attendanceRows.filter((row) => {
+        const rowPlanId =
+          normalizeStaffIdInput(
+            row?.planId,
+          );
+        return (
+          !rowPlanId ||
+          rowPlanId === normalizedPlanId
+        );
+      });
+
+    const deletedProgressIds =
+      progressRows.map((row) =>
+        row._id.toString(),
+      );
+    const deletedAttendanceIds =
+      scopedAttendanceRows.map((row) =>
+        row._id.toString(),
+      );
+
+    session =
+      await mongoose.startSession();
+    let ledger = null;
+    await session.withTransaction(
+      async () => {
+        if (
+          deletedProgressIds.length > 0
+        ) {
+          await TaskProgress.deleteMany({
+            _id: {
+              $in: deletedProgressIds,
+            },
+          }).session(session);
+        }
+
+        if (
+          deletedAttendanceIds.length > 0
+        ) {
+          await StaffAttendance.deleteMany({
+            _id: {
+              $in: deletedAttendanceIds,
+            },
+          }).session(session);
+        }
+
+        const ledgerConfig =
+          resolveTaskDayLedgerConfig({
+            task,
+            plan,
+          });
+        ledger =
+          await recomputeProductionTaskDayLedger(
+            {
+              session,
+              planId: plan._id,
+              taskId: task._id,
+              workDate:
+                normalizedWorkDate,
+              unitTarget:
+                ledgerConfig.unitTarget,
+              unitType:
+                ledgerConfig.unitType,
+              activityTargets:
+                ledgerConfig.activityTargets,
+              activityUnits:
+                ledgerConfig.activityUnits,
+            },
+          );
+        if (ledger?._id) {
+          await TaskProgress.updateMany(
+            {
+              taskId: task._id,
+              workDate:
+                normalizedWorkDate,
+            },
+            {
+              $set: {
+                taskDayLedgerId:
+                  ledger._id,
+              },
+            },
+            {
+              session,
+            },
+          );
+        }
+      },
+    );
+
+    await writeAuditLog({
+      businessId,
+      actorId: actor._id,
+      actorRole: actor.role,
+      action:
+        "production_task_history_reset",
+      entityType:
+        "production_task",
+      entityId: task._id,
+      message:
+        "Reset production task history",
+      changes: {
+        planId: plan._id,
+        taskId:
+          normalizedTaskId,
+        staffProfileId:
+          targetProfile._id,
+        workDate:
+          normalizedWorkDate,
+        deletedProgressCount:
+          deletedProgressIds.length,
+        deletedAttendanceCount:
+          deletedAttendanceIds.length,
+        deletedProgressIds,
+        deletedAttendanceIds,
+        note:
+          resetNote || null,
+      },
+    });
+
+    await emitProductionPlanRoomSnapshot({
+      businessId,
+      planId: plan._id,
+      context:
+        "task_history_reset",
+    });
+
+    debug(
+      "BUSINESS CONTROLLER: resetProductionTaskHistory - success",
+      {
+        actorId: actor._id,
+        taskId:
+          normalizedTaskId,
+        planId:
+          normalizedPlanId,
+        staffId:
+          targetProfile._id,
+        workDate:
+          normalizedWorkDate,
+        deletedProgressCount:
+          deletedProgressIds.length,
+        deletedAttendanceCount:
+          deletedAttendanceIds.length,
+        ledgerId:
+          ledger?._id || null,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        PRODUCTION_COPY.TASK_PROGRESS_RESET_OK,
+      taskId:
+        normalizedTaskId,
+      planId:
+        normalizedPlanId,
+      staffId:
+        targetProfile._id,
+      workDate:
+        normalizedWorkDate,
+      deletedProgressCount:
+        deletedProgressIds.length,
+      deletedAttendanceCount:
+        deletedAttendanceIds.length,
+      ledger,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: resetProductionTaskHistory - error",
+      {
+        actorId: req.user?.sub,
+        taskId: req.params?.taskId,
+        reason: err.message,
+        next: "Confirm manager scope and task/day identity before retrying reset",
+      },
+    );
+    return res.status(400).json({
+      error: err.message,
+    });
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+/**
  * POST /business/production/task-progress/:id/approve
  * Owner + estate manager: verify a daily progress record.
  */
@@ -35238,6 +35702,7 @@ module.exports = {
   reconcileExpiredPreorderReservationsHandler,
   updateProductionTaskStatus,
   assignProductionTaskStaffProfiles,
+  resetProductionTaskHistory,
   logProductionTaskProgress,
   logProductionTaskProgressBatch,
   approveTaskProgress,

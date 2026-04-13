@@ -93,6 +93,14 @@ class StaffAttendanceApi {
     return value.toUtc().toIso8601String();
   }
 
+  String _toIsoDateString(DateTime value) {
+    final localValue = value.toLocal();
+    final year = localValue.year.toString().padLeft(4, "0");
+    final month = localValue.month.toString().padLeft(2, "0");
+    final day = localValue.day.toString().padLeft(2, "0");
+    return "$year-$month-$day";
+  }
+
   Map<String, dynamic> _buildClockPayload({
     String? staffProfileId,
     String? attendanceId,
@@ -117,7 +125,7 @@ class StaffAttendanceApi {
       payload[_keyClockOutAt] = _toIsoString(clockOutAt);
     }
     if (workDate != null) {
-      payload[_keyWorkDate] = _toIsoString(workDate);
+      payload[_keyWorkDate] = _toIsoDateString(workDate);
     }
     if (planId != null && planId.trim().isNotEmpty) {
       payload[_keyPlanId] = planId.trim();

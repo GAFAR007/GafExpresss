@@ -789,6 +789,16 @@ router.put(
 );
 
 router.post(
+  "/production/tasks/:taskId/reset-history",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  businessController.resetProductionTaskHistory,
+);
+
+router.post(
   "/production/tasks/progress/batch",
   requireAuth,
   requireAnyRole([

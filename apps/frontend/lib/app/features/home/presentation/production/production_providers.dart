@@ -62,6 +62,8 @@ const String _reasonStaffCapacityMissing =
     "production_staff_capacity_session_missing";
 const String _reasonTaskStatusMissing =
     "production_task_status_session_missing";
+const String _reasonTaskResetHistoryMissing =
+    "production_task_reset_history_session_missing";
 const String _reasonTaskProgressMissing =
     "production_task_progress_session_missing";
 const String _reasonTaskProgressBatchMissing =
@@ -747,6 +749,42 @@ class ProductionPlanActions {
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPortfolioConfidenceProvider);
     return task;
+  }
+
+  Future<String> resetTaskHistory({
+    required String taskId,
+    required DateTime workDate,
+    required String staffId,
+    required String planId,
+    String? notes,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskResetHistoryMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final message = await api.resetTaskHistory(
+      token: session.token,
+      taskId: taskId,
+      workDate: workDate,
+      staffId: staffId,
+      notes: notes,
+    );
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return message;
   }
 
   Future<ProductionTaskProgressRecord> logTaskProgress({

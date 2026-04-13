@@ -70,6 +70,7 @@ const String _intentPreorderReconcile =
     "reconcile expired preorder reservations";
 const String _intentTaskStatus = "update production task status";
 const String _intentTaskAssign = "assign production task staff profiles";
+const String _intentTaskResetHistory = "reset production task history";
 const String _intentTaskProgress = "log production task progress";
 const String _intentTaskProgressBatch = "batch log production task progress";
 const String _intentTaskProgressApprove = "approve production task progress";
@@ -101,6 +102,7 @@ const String _operationPreorderReservations = "listPreorderReservations";
 const String _operationPreorderReconcile = "reconcileExpiredPreorders";
 const String _operationTaskStatus = "updateTaskStatus";
 const String _operationTaskAssign = "assignTaskStaffProfiles";
+const String _operationTaskResetHistory = "resetTaskHistory";
 const String _operationTaskProgress = "logTaskProgress";
 const String _operationTaskProgressBatch = "logTaskProgressBatch";
 const String _operationTaskProgressApprove = "approveTaskProgress";
@@ -237,6 +239,9 @@ const String _taskStatusFailureMessage = "updateTaskStatus() failed";
 const String _taskAssignStartMessage = "assignTaskStaffProfiles() start";
 const String _taskAssignSuccessMessage = "assignTaskStaffProfiles() success";
 const String _taskAssignFailureMessage = "assignTaskStaffProfiles() failed";
+const String _taskResetHistoryStartMessage = "resetTaskHistory() start";
+const String _taskResetHistorySuccessMessage = "resetTaskHistory() success";
+const String _taskResetHistoryFailureMessage = "resetTaskHistory() failed";
 const String _taskProgressStartMessage = "logTaskProgress() start";
 const String _taskProgressSuccessMessage = "logTaskProgress() success";
 const String _taskProgressFailureMessage = "logTaskProgress() failed";
@@ -262,6 +267,7 @@ const String _taskRejectFailureMessage = "rejectTask() failed";
 int _toCanonicalProgressUnits(num value) {
   return (value * 1000).round();
 }
+
 const String _deviationVarianceStartMessage = "acceptDeviationVariance() start";
 const String _deviationVarianceSuccessMessage =
     "acceptDeviationVariance() success";
@@ -284,6 +290,7 @@ const String _extraReasonKey = "reason";
 const String _extraCountKey = "count";
 const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
+const String _extraStaffIdKey = "staffId";
 const String _extraProgressIdKey = "progressId";
 const String _extraFromKey = "from";
 const String _extraToKey = "to";
@@ -1947,6 +1954,80 @@ class ProductionApi {
     }
   }
 
+  Future<String> resetTaskHistory({
+    required String? token,
+    required String taskId,
+    required DateTime workDate,
+    required String staffId,
+    String? notes,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskResetHistoryStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskResetHistory,
+        _extraIntentKey: _intentTaskResetHistory,
+        _extraTaskIdKey: taskId,
+        _extraStaffIdKey: staffId,
+      },
+    );
+
+    try {
+      final payload = <String, dynamic>{
+        _keyWorkDate: workDate.toIso8601String().split("T").first,
+        _keyStaffId: staffId.trim(),
+      };
+      final normalizedNotes = notes?.trim() ?? "";
+      if (normalizedNotes.isNotEmpty) {
+        payload[_keyNotes] = normalizedNotes;
+      }
+      final resp = await _dio.post(
+        "$_tasksPath/$taskId/reset-history",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final message = (data[_keyMessage] ?? "").toString().trim();
+
+      AppDebug.log(
+        _logTag,
+        _taskResetHistorySuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskResetHistory,
+          _extraIntentKey: _intentTaskResetHistory,
+          _extraTaskIdKey: taskId,
+          _extraStaffIdKey: staffId,
+        },
+      );
+
+      return message.isNotEmpty ? message : "Production history reset.";
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskResetHistoryFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskResetHistory,
+          _extraIntentKey: _intentTaskResetHistory,
+          _extraTaskIdKey: taskId,
+          _extraStaffIdKey: staffId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
   /// ------------------------------------------------------
   /// LOG TASK PROGRESS
   /// ------------------------------------------------------
@@ -1996,7 +2077,8 @@ class ProductionApi {
       };
       payload[_keyUnitContribution] = normalizedUnitContribution;
       payload[_keyActualPlots] = normalizedUnitContribution;
-      payload[_keyUnitContributionPlotUnits] = normalizedUnitContributionPlotUnits;
+      payload[_keyUnitContributionPlotUnits] =
+          normalizedUnitContributionPlotUnits;
       payload[_keyActualPlotUnits] = normalizedUnitContributionPlotUnits;
       if (normalizedStaffId.isNotEmpty) {
         payload[_keyStaffId] = normalizedStaffId;

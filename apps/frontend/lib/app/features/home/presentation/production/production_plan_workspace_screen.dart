@@ -48,6 +48,7 @@ const String _logMonthChanged = "month_changed";
 const String _logDayChanged = "day_changed";
 const String _logAssignStaff = "assign_staff";
 const String _logTaskStatus = "task_status";
+const String _logResetHistory = "reset_history";
 const String _logProgress = "log_progress";
 const String _logApproveTask = "approve_task";
 const String _logRejectTask = "reject_task";
@@ -79,6 +80,7 @@ const String _returnToDraftConfirmLabel = "Return to draft";
 const String _todayLabel = "Today";
 const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
+const String _resetHistoryLabel = "Reset history";
 const String _removeStaffHint = "Leave everything unchecked to remove staff.";
 const String _logProgressLabel = "Log progress";
 const String _editProgressLabel = "Edit progress";
@@ -147,6 +149,10 @@ const String _taskStatusSuccess = "Task status updated.";
 const String _taskStatusFailure = "Unable to update task status.";
 const String _taskProgressSuccess = "Daily progress logged.";
 const String _taskProgressFailure = "Unable to log daily progress.";
+const String _taskResetHistorySuccess = "Production history reset.";
+const String _taskResetHistoryFailure = "Unable to reset production history.";
+const String _taskResetHistoryConfirmTitle = "Reset this staff history?";
+const String _taskResetHistoryConfirmLabel = "Reset history";
 const String _taskProgressNeedsAssignedStaff =
     "Assign staff to this task before logging daily progress.";
 const String _taskProgressAttendanceRequired =
@@ -1072,6 +1078,58 @@ class _ProductionPlanWorkspaceScreenState
                       }
                     }
 
+                    Future<void> resetTaskHistoryForStaff(
+                      String staffProfileId,
+                    ) async {
+                      final staffLabel = _resolveStaffDisplayLabel(
+                        staffProfileId,
+                        staffMap,
+                        fallbackRole: task.roleRequired,
+                      );
+                      final confirmed = await _confirmAction(
+                        title: _taskResetHistoryConfirmTitle,
+                        message:
+                            "This clears today’s clock-in, clock-out, proofs, and saved progress for $staffLabel on ${task.title}. Audit logs stay.",
+                        confirmLabel: _taskResetHistoryConfirmLabel,
+                      );
+                      if (!confirmed) {
+                        return;
+                      }
+                      AppDebug.log(
+                        _logTag,
+                        _logResetHistory,
+                        extra: {
+                          "planId": widget.planId,
+                          "taskId": task.id,
+                          "staffId": staffProfileId,
+                          "workDate": formatDateInput(selectedDay),
+                        },
+                      );
+                      try {
+                        final message = await ref
+                            .read(productionPlanActionsProvider)
+                            .resetTaskHistory(
+                              taskId: task.id,
+                              workDate: selectedDay,
+                              staffId: staffProfileId,
+                              planId: widget.planId,
+                              notes: "Reset from production workspace",
+                            );
+                        _showSnackSafe(
+                          message.trim().isNotEmpty
+                              ? message
+                              : _taskResetHistorySuccess,
+                        );
+                      } catch (error) {
+                        _showSnackSafe(
+                          _resolveProductionWorkspaceErrorMessage(
+                            error,
+                            fallback: _taskResetHistoryFailure,
+                          ),
+                        );
+                      }
+                    }
+
                     return Padding(
                       padding: const EdgeInsets.only(bottom: _cardSpacing),
                       child: _AgendaTaskCard(
@@ -1161,6 +1219,11 @@ class _ProductionPlanWorkspaceScreenState
                                   staffProfileId,
                                   existingAttendance,
                                 );
+                              }
+                            : null,
+                        onResetHistoryForStaff: canManageTaskAttendance
+                            ? (staffProfileId) async {
+                                await resetTaskHistoryForStaff(staffProfileId);
                               }
                             : null,
                         onLogProgressForStaff: progressEnabledStaffIds.isEmpty
@@ -3314,6 +3377,7 @@ class _AgendaTaskCard extends StatelessWidget {
     ProductionAttendanceRecord? attendance,
   )?
   onQuickClockOutForStaff;
+  final Future<void> Function(String staffProfileId)? onResetHistoryForStaff;
   final Future<void> Function(String staffProfileId)? onLogProgressForStaff;
   final Future<void> Function(String status)? onStatusSelected;
   final Future<void> Function()? onLogProgress;
@@ -3345,6 +3409,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.onSetAttendanceForStaff,
     required this.onQuickClockInForStaff,
     required this.onQuickClockOutForStaff,
+    required this.onResetHistoryForStaff,
     required this.onLogProgressForStaff,
     required this.onStatusSelected,
     required this.onLogProgress,
@@ -3676,6 +3741,8 @@ class _AgendaTaskCard extends StatelessWidget {
                 final hasDisplayClockOut =
                     displayAttendance?.clockOutAt != null;
                 final hasLoggedProgress = staffProgress != null;
+                final canResetHistory =
+                    taskAttendance != null || hasLoggedProgress;
                 final canUseClockOutWizard =
                     progressEnabledStaffIds.contains(staffId) &&
                     activeClockOutAttendance != null &&
@@ -3808,6 +3875,10 @@ class _AgendaTaskCard extends StatelessWidget {
                                 !canManageProgressFlow
                             ? null
                             : () => onLogProgressForStaff!(staffId),
+                        onResetHistory:
+                            onResetHistoryForStaff == null || !canResetHistory
+                            ? null
+                            : () => onResetHistoryForStaff!(staffId),
                       );
                     },
                   ),
@@ -4167,6 +4238,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final Future<void> Function()? onQuickClockOut;
   final Future<void> Function()? onSetAttendance;
   final Future<void> Function()? onLogProgress;
+  final Future<void> Function()? onResetHistory;
 
   const _AssignedStaffAttendanceRow({
     required this.staffName,
@@ -4195,6 +4267,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.onQuickClockOut,
     required this.onSetAttendance,
     required this.onLogProgress,
+    required this.onResetHistory,
   });
 
   @override
@@ -4258,6 +4331,13 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
           label: Text(
             hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
           ),
+        ),
+      if (canManageAttendance && onResetHistory != null)
+        OutlinedButton.icon(
+          onPressed: onResetHistory,
+          style: OutlinedButton.styleFrom(foregroundColor: colorScheme.error),
+          icon: const Icon(Icons.restart_alt_outlined, size: 18),
+          label: const Text(_resetHistoryLabel),
         ),
     ];
     return Container(

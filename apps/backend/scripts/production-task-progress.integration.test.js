@@ -196,6 +196,15 @@ function buildProgressApp() {
     parseTaskProgressProofUploads,
     businessController.logProductionTaskProgress,
   );
+  app.post(
+    `${ROUTE_PREFIX}/:taskId/reset-history`,
+    requireAuth,
+    requireAnyRole([
+      OWNER_ROLE,
+      "staff",
+    ]),
+    businessController.resetProductionTaskHistory,
+  );
   return app;
 }
 
@@ -432,6 +441,19 @@ async function postProgressMultipart({
     token,
     fields,
     files,
+  });
+}
+
+async function postResetTaskHistory({
+  token,
+  taskId,
+  payload,
+}) {
+  return requestJson({
+    method: "POST",
+    routePath: `${ROUTE_PREFIX}/${taskId}/reset-history`,
+    token,
+    payload,
   });
 }
 
@@ -730,6 +752,58 @@ async function seedExistingProofDraft({
     delayReason: STATUS_NONE,
     notes: "seeded proof draft",
     createdBy: ownerId,
+  });
+}
+
+async function createCompletedProgress({
+  ownerId,
+  planId,
+  taskId,
+  staffId,
+  attendanceId = null,
+  workDate = WORK_DATE_NORMALIZED,
+  actualPlots = 1,
+  proofCount = 1,
+  approved = false,
+  notes = "completed progress",
+}) {
+  return TaskProgress.create({
+    taskId,
+    planId,
+    staffId,
+    attendanceId,
+    unitId: null,
+    workDate,
+    expectedPlots: 5,
+    expectedPlotUnits: toPlotUnits(5),
+    actualPlots,
+    actualPlotUnits: toPlotUnits(actualPlots),
+    unitContribution: actualPlots,
+    unitContributionPlotUnits:
+      toPlotUnits(actualPlots),
+    quantityActivityType: "none",
+    activityType: "none",
+    quantityAmount: 0,
+    activityQuantity: 0,
+    quantityUnit: "",
+    proofCountRequired: proofCount,
+    proofCountUploaded: proofCount,
+    proofs: buildSeededProofs({
+      count: proofCount,
+      uploadedBy: ownerId,
+    }),
+    sessionStatus: "completed",
+    delayReason: STATUS_NONE,
+    notes,
+    createdBy: ownerId,
+    approvedBy:
+      approved ? ownerId : null,
+    approvedAt:
+      approved ?
+        new Date(
+          "2026-04-12T18:00:00.000Z",
+        )
+      : null,
   });
 }
 
@@ -2589,6 +2663,217 @@ test(
     assert.equal(
       ledger.unitRemaining,
       2,
+    );
+  },
+);
+
+test(
+  "reset-history clears one staff task/day attendance and progress, then recomputes the shared ledger",
+  async () => {
+    const scenario = await seedScenario();
+    const resettableAttendance =
+      await StaffAttendance.create({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: scenario.taskId,
+        // WHY: Exercise the reset fallback when attendance workDate drifted off the true work day.
+        workDate: new Date(
+          "2026-04-11T00:00:00.000Z",
+        ),
+        clockInAt: new Date(
+          "2026-04-12T08:06:00.000Z",
+        ),
+        clockOutAt: new Date(
+          "2026-04-12T20:49:00.000Z",
+        ),
+        durationMinutes: 763,
+        clockInBy: scenario.ownerId,
+        clockOutBy: scenario.ownerId,
+        notes:
+          "resettable attendance",
+        proofs: buildSeededProofs({
+          count: 1,
+          uploadedBy:
+            scenario.ownerId,
+        }),
+        requiredProofs: 1,
+        proofStatus: "complete",
+        sessionStatus: "completed",
+      });
+    const progressA =
+      await createCompletedProgress({
+        ownerId: scenario.ownerId,
+        planId: scenario.planId,
+        taskId: scenario.taskId,
+        staffId:
+          scenario.staffProfileAId,
+        attendanceId:
+          resettableAttendance._id,
+        actualPlots: 2,
+        proofCount: 1,
+        notes:
+          "reset this staff history",
+      });
+    const progressB =
+      await createCompletedProgress({
+        ownerId: scenario.ownerId,
+        planId: scenario.planId,
+        taskId: scenario.taskId,
+        staffId:
+          scenario.staffProfileBId,
+        actualPlots: 1,
+        proofCount: 1,
+        notes:
+          "keep this staff history",
+      });
+
+    const response =
+      await postResetTaskHistory({
+        token: scenario.token,
+        taskId:
+          scenario.taskId.toString(),
+        payload: {
+          staffId:
+            scenario.staffProfileAId.toString(),
+          workDate:
+            WORK_DATE_STRING,
+          notes:
+            "manager reset from workspace",
+        },
+      });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.message,
+      "Production history reset successfully",
+    );
+    assert.equal(
+      response.body.deletedProgressCount,
+      1,
+    );
+    assert.equal(
+      response.body.deletedAttendanceCount,
+      1,
+    );
+    assert.equal(
+      response.body.staffId,
+      scenario.staffProfileAId.toString(),
+    );
+    assert.equal(
+      response.body.workDate,
+      WORK_DATE_NORMALIZED.toISOString(),
+    );
+    assert.equal(
+      response.body.ledger.unitCompleted,
+      1,
+    );
+    assert.equal(
+      response.body.ledger.unitRemaining,
+      4,
+    );
+
+    const deletedProgress =
+      await TaskProgress.findById(
+        progressA._id,
+      ).lean();
+    const remainingProgress =
+      await TaskProgress.findById(
+        progressB._id,
+      ).lean();
+    const deletedAttendance =
+      await StaffAttendance.findById(
+        resettableAttendance._id,
+      ).lean();
+    const remainingLedger =
+      await ProductionTaskDayLedger.findOne({
+        taskId: scenario.taskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+
+    assert.equal(
+      deletedProgress,
+      null,
+    );
+    assert.equal(
+      deletedAttendance,
+      null,
+    );
+    assert.ok(remainingProgress);
+    assert.equal(
+      remainingProgress.staffId.toString(),
+      scenario.staffProfileBId.toString(),
+    );
+    assert.ok(remainingLedger);
+    assert.equal(
+      remainingLedger.unitCompleted,
+      1,
+    );
+    assert.equal(
+      remainingLedger.unitRemaining,
+      4,
+    );
+  },
+);
+
+test(
+  "reset-history refuses to delete approved progress rows",
+  async () => {
+    const scenario = await seedScenario();
+    await createCompletedProgress({
+      ownerId: scenario.ownerId,
+      planId: scenario.planId,
+      taskId: scenario.taskId,
+      staffId:
+        scenario.staffProfileAId,
+      actualPlots: 2,
+      proofCount: 1,
+      approved: true,
+      notes:
+        "approved progress cannot be reset automatically",
+    });
+
+    const response =
+      await postResetTaskHistory({
+        token: scenario.token,
+        taskId:
+          scenario.taskId.toString(),
+        payload: {
+          staffId:
+            scenario.staffProfileAId.toString(),
+          workDate:
+            WORK_DATE_STRING,
+        },
+      });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_CONFLICT,
+    );
+    assert.equal(
+      response.body.error,
+      "Approved progress must be reviewed manually before resetting this production history",
+    );
+    assert.equal(
+      response.body.approvedProgressCount,
+      1,
+    );
+
+    const remainingProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(remainingProgress);
+    assert.ok(
+      remainingProgress.approvedAt,
     );
   },
 );
