@@ -104,6 +104,33 @@ ProductionAttendanceRecord _buildAttendance(DateTime workDate) {
   );
 }
 
+ProductionAttendanceRecord _buildOpenAttendance({
+  required String id,
+  required DateTime workDate,
+  required String taskId,
+  required DateTime clockInAt,
+}) {
+  return ProductionAttendanceRecord(
+    id: id,
+    planId: "plan-1",
+    taskId: taskId,
+    staffProfileId: "staff-1",
+    workDate: workDate,
+    clockInAt: clockInAt,
+    clockOutAt: null,
+    durationMinutes: 0,
+    notes: "Clocked in",
+    createdAt: workDate,
+    proofUrl: null,
+    proofPublicId: null,
+    proofFilename: null,
+    proofMimeType: null,
+    proofSizeBytes: null,
+    proofUploadedAt: null,
+    proofUploadedBy: null,
+  );
+}
+
 ProductionTaskDayLedger _buildLedger(DateTime workDate) {
   return ProductionTaskDayLedger(
     id: "ledger-1",
@@ -205,11 +232,7 @@ Future<void> _pumpWizardHost(
                     context: context,
                     builder: (_) {
                       return Dialog(
-                        child: SizedBox(
-                          width: 720,
-                          height: 820,
-                          child: wizard,
-                        ),
+                        child: SizedBox(width: 720, height: 820, child: wizard),
                       );
                     },
                   );
@@ -235,6 +258,50 @@ void main() {
   final ledger = _buildLedger(workDate);
   final staff = _buildStaff();
 
+  test(
+    "workspace attendance display prefers an unresolved open session over a same-day completed row",
+    () {
+      final completedTaskAttendance = ProductionAttendanceRecord(
+        id: "attendance-complete",
+        planId: "plan-1",
+        taskId: "task-1",
+        staffProfileId: "staff-1",
+        workDate: workDate,
+        clockInAt: workDate.add(const Duration(hours: 8)),
+        clockOutAt: workDate.add(const Duration(hours: 12)),
+        durationMinutes: 240,
+        notes: "Completed shift",
+        createdAt: workDate,
+        proofUrl: null,
+        proofPublicId: null,
+        proofFilename: null,
+        proofMimeType: null,
+        proofSizeBytes: null,
+        proofUploadedAt: null,
+        proofUploadedBy: null,
+      );
+      final openAttendanceFromPreviousDay = _buildOpenAttendance(
+        id: "attendance-open",
+        workDate: workDate.subtract(const Duration(days: 1)),
+        taskId: "task-other",
+        clockInAt: workDate.subtract(const Duration(days: 1, hours: 2)),
+      );
+
+      final resolvedAttendance = resolveProductionWorkspaceDisplayAttendance(
+        attendanceRecords: [
+          completedTaskAttendance,
+          openAttendanceFromPreviousDay,
+        ],
+        staffProfileId: staff.id,
+        day: workDate,
+        taskId: task.id,
+      );
+
+      expect(resolvedAttendance?.id, "attendance-open");
+      expect(resolvedAttendance?.clockOutAt, isNull);
+    },
+  );
+
   testWidgets(
     "guided clock-out reveals one step at a time and finishes with a single save action",
     (tester) async {
@@ -257,7 +324,10 @@ void main() {
           fallbackTotalUnits: 5,
           fallbackWorkUnitLabel: "greenhouses",
           staffId: staff.id,
-          onPickProofs: () async => [_proof("proof-1.jpg"), _proof("proof-2.jpg")],
+          onPickProofs: () async => [
+            _proof("proof-1.jpg"),
+            _proof("proof-2.jpg"),
+          ],
           onSubmit: (input) async {
             submittedInput = input;
           },
@@ -291,7 +361,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text("Planted").last);
       await tester.pumpAndSettle();
-      await tester.enterText(_textFieldWithLabel(_activityQuantityLabel), "500");
+      await tester.enterText(
+        _textFieldWithLabel(_activityQuantityLabel),
+        "500",
+      );
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
@@ -301,7 +374,10 @@ void main() {
       expect(find.widgetWithText(FilledButton, "Clock out"), findsNothing);
       expect(find.widgetWithText(FilledButton, "Finish"), findsOneWidget);
 
-      await tester.enterText(_textFieldWithLabel(_notesLabel), "Seedlings moved.");
+      await tester.enterText(
+        _textFieldWithLabel(_notesLabel),
+        "Seedlings moved.",
+      );
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, "Finish"));
       await tester.pumpAndSettle();
@@ -431,7 +507,10 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
-      await tester.enterText(_textFieldWithLabel(_notesLabel), "Keep this note");
+      await tester.enterText(
+        _textFieldWithLabel(_notesLabel),
+        "Keep this note",
+      );
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, "Finish"));
       await tester.pumpAndSettle();

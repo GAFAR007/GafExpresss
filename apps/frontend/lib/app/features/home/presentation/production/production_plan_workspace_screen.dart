@@ -185,8 +185,7 @@ const String _clockOutWizardProofPicking = "Selecting proof images...";
 const String _clockOutWizardFinishSaving = "Finishing clock-out...";
 const String _clockOutWizardActiveSessionMissing =
     "No active production session was found for this task.";
-const String _clockOutWizardPrimaryInvalid =
-    "Enter a valid completed amount.";
+const String _clockOutWizardPrimaryInvalid = "Enter a valid completed amount.";
 const String _clockOutWizardPrimaryRequired =
     "Enter the completed amount before you continue.";
 const String _clockOutWizardActivityRequired =
@@ -1013,8 +1012,21 @@ class _ProductionPlanWorkspaceScreenState
                         return null;
                       }
                       try {
+                        final scopedWorkDate =
+                            (openAttendance.workDate ??
+                                    openAttendance.clockInAt)
+                                ?.toLocal() ??
+                            selectedDay;
+                        final scopedPlanId =
+                            openAttendance.planId.trim().isNotEmpty
+                            ? openAttendance.planId
+                            : widget.planId;
+                        final scopedTaskId =
+                            openAttendance.taskId.trim().isNotEmpty
+                            ? openAttendance.taskId
+                            : task.id;
                         final clockOutAt = _resolveQuickClockOutTime(
-                          workDate: selectedDay,
+                          workDate: scopedWorkDate,
                           clockInAt: clockInAt,
                         );
                         final attendanceRecord = await attendanceActions
@@ -1022,9 +1034,9 @@ class _ProductionPlanWorkspaceScreenState
                               staffProfileId: staffProfileId,
                               attendanceId: openAttendance.id,
                               clockOutAt: clockOutAt,
-                              workDate: selectedDay,
-                              planId: widget.planId,
-                              taskId: task.id,
+                              workDate: scopedWorkDate,
+                              planId: scopedPlanId,
+                              taskId: scopedTaskId,
                               notes: "Clocked out from production workspace",
                             );
                         if (!mounted || !context.mounted) {
@@ -1168,57 +1180,63 @@ class _ProductionPlanWorkspaceScreenState
                                   if (!mounted || !context.mounted) {
                                     return;
                                   }
-                                  final completed = await _showWorkspaceClockOutWizard(
-                                    context,
-                                    workDate: selectedDay,
-                                    task: task,
-                                    plan: latestDetail.plan,
-                                    timelineRows: latestDetail.timelineRows,
-                                    taskDayLedgers: latestDetail.taskDayLedgers,
-                                    attendanceRecords:
-                                        latestDetail.attendanceRecords,
-                                    staffMap: staffMap,
-                                    planUnitLabelById: planUnitLabelById,
-                                    fallbackTotalUnits:
-                                        workScopeSummary.totalUnits,
-                                    fallbackWorkUnitLabel:
-                                        workScopeSummary.singularLabel,
-                                    staffId: staffProfileId,
-                                    onSubmit: (input) async {
-                                      AppDebug.log(
-                                        _logTag,
-                                        _logProgress,
-                                        extra: {
-                                          "planId": widget.planId,
-                                          "taskId": task.id,
-                                          "staffId": input.staffId,
+                                  final completed =
+                                      await _showWorkspaceClockOutWizard(
+                                        context,
+                                        workDate: selectedDay,
+                                        task: task,
+                                        plan: latestDetail.plan,
+                                        timelineRows: latestDetail.timelineRows,
+                                        taskDayLedgers:
+                                            latestDetail.taskDayLedgers,
+                                        attendanceRecords:
+                                            latestDetail.attendanceRecords,
+                                        staffMap: staffMap,
+                                        planUnitLabelById: planUnitLabelById,
+                                        fallbackTotalUnits:
+                                            workScopeSummary.totalUnits,
+                                        fallbackWorkUnitLabel:
+                                            workScopeSummary.singularLabel,
+                                        staffId: staffProfileId,
+                                        onSubmit: (input) async {
+                                          AppDebug.log(
+                                            _logTag,
+                                            _logProgress,
+                                            extra: {
+                                              "planId": widget.planId,
+                                              "taskId": task.id,
+                                              "staffId": input.staffId,
+                                            },
+                                          );
+                                          await ref
+                                              .read(
+                                                productionPlanActionsProvider,
+                                              )
+                                              .logTaskProgress(
+                                                taskId: task.id,
+                                                workDate: selectedDay,
+                                                staffId: input.staffId,
+                                                unitId: input.unitId,
+                                                unitContribution:
+                                                    input.unitContribution,
+                                                actualPlots: input.actualPlots,
+                                                activityType:
+                                                    input.activityType,
+                                                quantityActivityType:
+                                                    input.quantityActivityType,
+                                                activityQuantity:
+                                                    input.activityQuantity,
+                                                quantityAmount:
+                                                    input.quantityAmount,
+                                                quantityUnit:
+                                                    input.quantityUnit,
+                                                proofs: input.proofs,
+                                                delayReason: input.delayReason,
+                                                notes: input.notes,
+                                                planId: widget.planId,
+                                              );
                                         },
                                       );
-                                      await ref
-                                          .read(productionPlanActionsProvider)
-                                          .logTaskProgress(
-                                            taskId: task.id,
-                                            workDate: selectedDay,
-                                            staffId: input.staffId,
-                                            unitId: input.unitId,
-                                            unitContribution:
-                                                input.unitContribution,
-                                            actualPlots: input.actualPlots,
-                                            activityType: input.activityType,
-                                            quantityActivityType:
-                                                input.quantityActivityType,
-                                            activityQuantity:
-                                                input.activityQuantity,
-                                            quantityAmount:
-                                                input.quantityAmount,
-                                            quantityUnit: input.quantityUnit,
-                                            proofs: input.proofs,
-                                            delayReason: input.delayReason,
-                                            notes: input.notes,
-                                            planId: widget.planId,
-                                          );
-                                    },
-                                  );
                                   if (completed) {
                                     _showSnackSafe(_clockOutWizardSuccess);
                                   }
@@ -3623,11 +3641,11 @@ class _AgendaTaskCard extends StatelessWidget {
                   taskId: task.id,
                 );
                 final displayAttendance =
-                    taskAttendance ??
-                    _attendanceForStaffOnDay(
+                    resolveProductionWorkspaceDisplayAttendance(
                       attendanceRecords: attendanceRecords,
                       staffProfileId: staffId,
                       day: selectedDay,
+                      taskId: task.id,
                     );
                 final staffProgress = _findStaffTaskProgressRow(
                   timelineRows: rowsForDay,
@@ -3641,6 +3659,12 @@ class _AgendaTaskCard extends StatelessWidget {
                     displayAttendance != null &&
                     taskAttendance != null &&
                     displayAttendance.id.trim() == taskAttendance.id.trim();
+                final attendanceMatchesSelectedDay =
+                    displayAttendance != null &&
+                    _attendanceMatchesWorkDay(
+                      displayAttendance,
+                      _toWorkDateKey(selectedDay),
+                    );
                 final hasTaskClockIn = taskAttendance?.clockInAt != null;
                 final hasTaskClockOut = taskAttendance?.clockOutAt != null;
                 final hasDisplayClockIn = displayAttendance?.clockInAt != null;
@@ -3677,6 +3701,9 @@ class _AgendaTaskCard extends StatelessWidget {
                         clockInValue: _formatAttendanceTimeValue(
                           clockInAt,
                           emptyLabel: _attendanceClockInUnsetLabel,
+                          referenceDay: attendanceMatchesSelectedDay
+                              ? null
+                              : selectedDay,
                         ),
                         clockOutValue: clockOutAt != null
                             ? _clockLabel(clockOutAt)
@@ -5100,12 +5127,7 @@ List<ProductionAttendanceRecord> _attendanceRowsForDay({
 }) {
   final key = _toWorkDateKey(day);
   final items = attendanceRecords.where((record) {
-    final referenceTime =
-        record.workDate ?? record.clockInAt ?? record.createdAt;
-    if (referenceTime == null) {
-      return false;
-    }
-    return _toWorkDateKey(referenceTime.toLocal()) == key;
+    return _attendanceMatchesWorkDay(record, key);
   }).toList();
   items.sort((left, right) {
     final leftValue = (left.clockInAt ?? left.createdAt ?? day).toLocal();
@@ -5133,12 +5155,7 @@ ProductionAttendanceRecord? _attendanceForStaffOnDay({
         return false;
       }
     }
-    final referenceTime =
-        record.workDate ?? record.clockInAt ?? record.createdAt;
-    if (referenceTime == null) {
-      return false;
-    }
-    return _toWorkDateKey(referenceTime.toLocal()) == key;
+    return _attendanceMatchesWorkDay(record, key);
   }).toList();
   if (items.isEmpty) {
     return null;
@@ -5149,6 +5166,96 @@ ProductionAttendanceRecord? _attendanceForStaffOnDay({
     return leftValue.compareTo(rightValue);
   });
   return items.last;
+}
+
+bool _attendanceMatchesWorkDay(
+  ProductionAttendanceRecord record,
+  String workDateKey,
+) {
+  final referenceTime = record.workDate ?? record.clockInAt ?? record.createdAt;
+  if (referenceTime == null) {
+    return false;
+  }
+  return _toWorkDateKey(referenceTime.toLocal()) == workDateKey;
+}
+
+ProductionAttendanceRecord? _openAttendanceForStaff({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  String? taskId,
+  DateTime? day,
+}) {
+  final normalizedTaskId = taskId?.trim() ?? "";
+  final dayKey = day != null ? _toWorkDateKey(day) : null;
+  final items = attendanceRecords.where((record) {
+    if (record.staffProfileId.trim() != staffProfileId.trim()) {
+      return false;
+    }
+    if (record.clockInAt == null || record.clockOutAt != null) {
+      return false;
+    }
+    if (normalizedTaskId.isNotEmpty) {
+      final recordTaskId = record.taskId.trim();
+      if (recordTaskId.isNotEmpty && recordTaskId != normalizedTaskId) {
+        return false;
+      }
+    }
+    if (dayKey != null && !_attendanceMatchesWorkDay(record, dayKey)) {
+      return false;
+    }
+    return true;
+  }).toList();
+  if (items.isEmpty) {
+    return null;
+  }
+  items.sort((left, right) {
+    final leftValue = (left.clockInAt ?? left.createdAt ?? DateTime(0))
+        .toLocal();
+    final rightValue = (right.clockInAt ?? right.createdAt ?? DateTime(0))
+        .toLocal();
+    return leftValue.compareTo(rightValue);
+  });
+  return items.last;
+}
+
+@visibleForTesting
+ProductionAttendanceRecord? resolveProductionWorkspaceDisplayAttendance({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime day,
+  required String taskId,
+}) {
+  final currentTaskOpenAttendance = _openAttendanceForStaff(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffProfileId,
+    taskId: taskId,
+    day: day,
+  );
+  final sameDayOpenAttendance = _openAttendanceForStaff(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffProfileId,
+    day: day,
+  );
+  final openAttendanceAnywhere = _openAttendanceForStaff(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffProfileId,
+  );
+  final currentTaskAttendance = _attendanceForStaffOnDay(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffProfileId,
+    day: day,
+    taskId: taskId,
+  );
+
+  return currentTaskOpenAttendance ??
+      sameDayOpenAttendance ??
+      openAttendanceAnywhere ??
+      currentTaskAttendance ??
+      _attendanceForStaffOnDay(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        day: day,
+      );
 }
 
 ProductionTaskDayLedger? _ledgerForTaskOnDay({
@@ -6271,11 +6378,16 @@ String _clockLabel(DateTime value) {
 String _formatAttendanceTimeValue(
   DateTime? value, {
   required String emptyLabel,
+  DateTime? referenceDay,
 }) {
   if (value == null) {
     return emptyLabel;
   }
-  return _clockLabel(value);
+  final localValue = value.toLocal();
+  if (referenceDay != null && !_isSameDay(localValue, referenceDay.toLocal())) {
+    return "${formatDateLabel(localValue)} • ${_clockLabel(localValue)}";
+  }
+  return _clockLabel(localValue);
 }
 
 DateTime _mergeDateAndTime(DateTime day, TimeOfDay time) {
@@ -6511,7 +6623,8 @@ class ProductionClockOutWizardSheet extends StatefulWidget {
       _WorkspaceClockOutWizardState();
 }
 
-class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet> {
+class _WorkspaceClockOutWizardState
+    extends State<ProductionClockOutWizardSheet> {
   late final TextEditingController _primaryController;
   late final TextEditingController _activityQuantityController;
   late final TextEditingController _notesController;
@@ -6534,15 +6647,15 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
       .toList();
 
   ProductionTaskDayLedger? get _taskDayLedger => _ledgerForTaskOnDay(
-        taskDayLedgers: widget.taskDayLedgers,
-        taskId: widget.task.id,
-        day: widget.workDate,
-      );
+    taskDayLedgers: widget.taskDayLedgers,
+    taskId: widget.task.id,
+    day: widget.workDate,
+  );
 
   List<ProductionTimelineRow> get _rowsForTaskOnWorkDate => _rowsForDay(
-        widget.timelineRows,
-        widget.workDate,
-      ).where((row) => row.taskId.trim() == widget.task.id.trim()).toList();
+    widget.timelineRows,
+    widget.workDate,
+  ).where((row) => row.taskId.trim() == widget.task.id.trim()).toList();
 
   ProductionTimelineRow? get _existingSelectionRow =>
       _findExistingProgressRowForSelection(
@@ -6554,26 +6667,26 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
       );
 
   _FarmQuantitySummary? get _farmQuantitySummary => _summarizeFarmQuantities(
-        plan: widget.plan,
-        timelineRows: widget.timelineRows,
-      );
+    plan: widget.plan,
+    timelineRows: widget.timelineRows,
+  );
 
   DateTime get _clockInAt => widget.activeAttendance.clockInAt!.toLocal();
 
   String get _staffLabel => _resolveStaffDisplayLabel(
-        widget.staffId,
-        widget.staffMap,
-        fallbackRole: widget.task.roleRequired,
-      );
+    widget.staffId,
+    widget.staffMap,
+    fallbackRole: widget.task.roleRequired,
+  );
 
   String get _progressUnitSingularLabel => _resolveProgressUnitSingularLabel(
-        assignedUnitIds: _assignedUnitIds,
-        planUnitLabelById: widget.planUnitLabelById,
-        selectedUnitId: _selectedUnitId,
-        fallbackWorkUnitLabel: widget.fallbackWorkUnitLabel,
-        contextText:
-            "${widget.plan.title} ${widget.plan.notes} ${widget.task.title} ${widget.task.instructions} ${widget.fallbackWorkUnitLabel}",
-      );
+    assignedUnitIds: _assignedUnitIds,
+    planUnitLabelById: widget.planUnitLabelById,
+    selectedUnitId: _selectedUnitId,
+    fallbackWorkUnitLabel: widget.fallbackWorkUnitLabel,
+    contextText:
+        "${widget.plan.title} ${widget.plan.notes} ${widget.task.title} ${widget.task.instructions} ${widget.fallbackWorkUnitLabel}",
+  );
 
   num get _taskTargetAmount =>
       _taskDayLedger?.unitTarget ??
@@ -6609,7 +6722,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     if (_primaryMaxOverride != null) {
       return _primaryMaxOverride!;
     }
-    final remainingAgainstPlan = _taskTargetAmount - _loggedAmountExcludingSelection;
+    final remainingAgainstPlan =
+        _taskTargetAmount - _loggedAmountExcludingSelection;
     return remainingAgainstPlan < 0 ? 0 : remainingAgainstPlan;
   }
 
@@ -6625,7 +6739,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
       : _existingSelectionProofCount;
 
   num get _remainingAfterSave {
-    final remaining = _taskTargetAmount - (_loggedAmountExcludingSelection + _primaryAmountValue);
+    final remaining =
+        _taskTargetAmount -
+        (_loggedAmountExcludingSelection + _primaryAmountValue);
     return remaining < 0 ? 0 : remaining;
   }
 
@@ -6635,7 +6751,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     _primaryController = TextEditingController();
     _activityQuantityController = TextEditingController();
     _notesController = TextEditingController();
-    _selectedUnitId = _assignedUnitIds.isNotEmpty ? _assignedUnitIds.first : null;
+    _selectedUnitId = _assignedUnitIds.isNotEmpty
+        ? _assignedUnitIds.first
+        : null;
     _syncFromExistingSelection();
   }
 
@@ -6657,18 +6775,20 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     final existingActivityType = existingRow == null
         ? ""
         : (existingRow.activityType.trim().isNotEmpty
-              ? existingRow.activityType
-              : existingRow.quantityActivityType)
-            .trim();
-    _selectedActivityType =
-        existingActivityType.isEmpty ? null : existingActivityType;
+                  ? existingRow.activityType
+                  : existingRow.quantityActivityType)
+              .trim();
+    _selectedActivityType = existingActivityType.isEmpty
+        ? null
+        : existingActivityType;
     final existingActivityQuantity = existingRow == null
         ? 0
         : existingRow.activityQuantity > 0
         ? existingRow.activityQuantity
         : existingRow.quantityAmount;
     _activityQuantityController.text =
-        _selectedActivityType == null || _selectedActivityType == _quantityActivityNone
+        _selectedActivityType == null ||
+            _selectedActivityType == _quantityActivityNone
         ? ""
         : _formatProgressAmount(existingActivityQuantity);
     final existingDelayReason = existingRow?.delayReason.trim() ?? "";
@@ -6765,10 +6885,11 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     if (existingRow == null) {
       return 0;
     }
-    final existingType = (existingRow.activityType.trim().isNotEmpty
-            ? existingRow.activityType
-            : existingRow.quantityActivityType)
-        .trim();
+    final existingType =
+        (existingRow.activityType.trim().isNotEmpty
+                ? existingRow.activityType
+                : existingRow.quantityActivityType)
+            .trim();
     if (existingType != activityType) {
       return 0;
     }
@@ -6787,8 +6908,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     }
     final target = _resolveQuantityTarget(activityType);
     final logged = _resolveQuantityLogged(activityType);
-    final existingSelectionQuantity =
-        _existingSelectionActivityQuantity(activityType);
+    final existingSelectionQuantity = _existingSelectionActivityQuantity(
+      activityType,
+    );
     final remaining = target - (logged - existingSelectionQuantity);
     return remaining < 0 ? 0 : remaining;
   }
@@ -6880,8 +7002,7 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     if (_proofsProvidedCount != _requiredProofCount) {
       if (showError) {
         setState(() {
-          _inlineError =
-              "Upload exactly $_requiredProofCount proof image(s).";
+          _inlineError = "Upload exactly $_requiredProofCount proof image(s).";
         });
       }
       return false;
@@ -6993,13 +7114,14 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
     final responseMap = responseData is Map<String, dynamic>
         ? responseData
         : const <String, dynamic>{};
-    final requiredProofCount = _parseWizardNumber(responseMap["requiredProofCount"]);
+    final requiredProofCount = _parseWizardNumber(
+      responseMap["requiredProofCount"],
+    );
     final maxAllowedPlots = _parseWizardNumber(responseMap["maxAllowedPlots"]);
-    final activityType = (responseMap["activityType"] ?? "")
-        .toString()
-        .trim();
-    final maxAllowedActivityQuantity =
-        _parseWizardNumber(responseMap["maxAllowedActivityQuantity"]);
+    final activityType = (responseMap["activityType"] ?? "").toString().trim();
+    final maxAllowedActivityQuantity = _parseWizardNumber(
+      responseMap["maxAllowedActivityQuantity"],
+    );
     var message = _resolveProductionWorkspaceErrorMessage(
       error,
       fallback: _taskProgressFailure,
@@ -7015,7 +7137,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
           singularUnitLabel: _progressUnitSingularLabel,
         ),
       );
-    } else if (requiredProofCount != null || message.toLowerCase().contains("proof")) {
+    } else if (requiredProofCount != null ||
+        message.toLowerCase().contains("proof")) {
       _currentStep = _WorkspaceClockOutWizardStep.proof;
       if (requiredProofCount != null) {
         message = requiredProofCount <= 0
@@ -7088,10 +7211,10 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
           unitContribution: _primaryAmountValue,
           proofs: List<ProductionTaskProgressProofInput>.from(_selectedProofs),
           activityType: selectedActivityType,
-          activityQuantity:
-              selectedActivityType == _quantityActivityNone ? 0 : _activityQuantityValue,
-          quantityUnit:
-              selectedActivityType == _quantityActivityNone
+          activityQuantity: selectedActivityType == _quantityActivityNone
+              ? 0
+              : _activityQuantityValue,
+          quantityUnit: selectedActivityType == _quantityActivityNone
               ? ""
               : _resolveQuantityUnit(selectedActivityType),
           delayReason: _selectedDelayReason,
@@ -7251,9 +7374,7 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
             spacing: 10,
             runSpacing: 10,
             children: snapshotCards
-                .map(
-                  (card) => SizedBox(width: 180, child: card),
-                )
+                .map((card) => SizedBox(width: 180, child: card))
                 .toList(),
           ),
         if (_assignedUnitIds.length > 1) ...[
@@ -7337,8 +7458,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
             color: slotFilled ? _workspaceSoftTeal : _workspaceSoftSlate,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: (slotFilled ? _workspaceTeal : _workspaceNavy)
-                  .withValues(alpha: 0.16),
+              color: (slotFilled ? _workspaceTeal : _workspaceNavy).withValues(
+                alpha: 0.16,
+              ),
             ),
           ),
           child: Column(
@@ -7415,7 +7537,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: _requiredProofCount <= 0 || _isPickingProofs ? null : _pickProofs,
+          onPressed: _requiredProofCount <= 0 || _isPickingProofs
+              ? null
+              : _pickProofs,
           icon: Icon(
             _selectedProofs.isEmpty
                 ? Icons.add_photo_alternate_outlined
@@ -7484,8 +7608,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
       if (hasActivityTarget)
         _TaskSnapshotCard(
           label: "Target",
-          value:
-              "${_formatProgressAmount(activityTarget)} $activityUnitLabel".trim(),
+          value: "${_formatProgressAmount(activityTarget)} $activityUnitLabel"
+              .trim(),
           helper: "Shared target for today",
           accentColor: _workspaceAmber,
           softColor: _workspaceSoftAmber,
@@ -7493,8 +7617,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
         ),
       _TaskSnapshotCard(
         label: "Completed",
-        value:
-            "${_formatProgressAmount(activityCompleted)} $activityUnitLabel".trim(),
+        value: "${_formatProgressAmount(activityCompleted)} $activityUnitLabel"
+            .trim(),
         helper: "Already recorded today",
         accentColor: _workspaceTeal,
         softColor: _workspaceSoftTeal,
@@ -7504,7 +7628,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
         _TaskSnapshotCard(
           label: "Remaining",
           value:
-              "${_formatProgressAmount(activityRemaining ?? 0)} $activityUnitLabel".trim(),
+              "${_formatProgressAmount(activityRemaining ?? 0)} $activityUnitLabel"
+                  .trim(),
           helper: "Available right now",
           accentColor: _workspaceBlue,
           softColor: _workspaceSoftBlue,
@@ -7615,9 +7740,7 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
               spacing: 10,
               runSpacing: 10,
               children: activityCards
-                  .map(
-                    (card) => SizedBox(width: 180, child: card),
-                  )
+                  .map((card) => SizedBox(width: 180, child: card))
                   .toList(),
             ),
           if (!hasActivityTarget) ...[
@@ -7668,7 +7791,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
             ),
             child: Text(
               hasActivityTarget
-                  ? "After save, ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} remaining will be ${_formatProgressAmount(activityRemainingAfterSave ?? 0)} $activityUnitLabel".trim()
+                  ? "After save, ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} remaining will be ${_formatProgressAmount(activityRemainingAfterSave ?? 0)} $activityUnitLabel"
+                        .trim()
                   : "This updates the shared ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} total for today.",
               style: theme.textTheme.bodySmall?.copyWith(
                 color: _workspaceBlue,
@@ -7843,24 +7967,27 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
                               icon: Icons.linear_scale_outlined,
                               backgroundColor: _workspaceSoftBlue,
                               foregroundColor: _workspaceBlue,
-                              borderColor:
-                                  _workspaceBlue.withValues(alpha: 0.14),
+                              borderColor: _workspaceBlue.withValues(
+                                alpha: 0.14,
+                              ),
                             ),
                             _InfoChip(
                               label: "Clocked in: ${_clockLabel(_clockInAt)}",
                               icon: Icons.login_outlined,
                               backgroundColor: _workspaceSoftTeal,
                               foregroundColor: _workspaceTeal,
-                              borderColor:
-                                  _workspaceTeal.withValues(alpha: 0.14),
+                              borderColor: _workspaceTeal.withValues(
+                                alpha: 0.14,
+                              ),
                             ),
                             _InfoChip(
                               label: formatDateLabel(widget.workDate),
                               icon: Icons.event_outlined,
                               backgroundColor: _workspaceSoftAmber,
                               foregroundColor: _workspaceAmber,
-                              borderColor:
-                                  _workspaceAmber.withValues(alpha: 0.14),
+                              borderColor: _workspaceAmber.withValues(
+                                alpha: 0.14,
+                              ),
                             ),
                           ],
                         ),
@@ -7868,7 +7995,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
                     ),
                   ),
                   IconButton(
-                    onPressed: _isSaving ? null : () => Navigator.of(context).pop(false),
+                    onPressed: _isSaving
+                        ? null
+                        : () => Navigator.of(context).pop(false),
                     icon: const Icon(Icons.close),
                   ),
                 ],
@@ -7877,12 +8006,7 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
             const Divider(height: 1),
             Expanded(
               child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  16,
-                  20,
-                  isCompact ? 20 : 16,
-                ),
+                padding: EdgeInsets.fromLTRB(20, 16, 20, isCompact ? 20 : 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -7924,7 +8048,10 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         FilledButton(
-                          onPressed: _isSaving || _isPickingProofs || !_isCurrentStepValid()
+                          onPressed:
+                              _isSaving ||
+                                  _isPickingProofs ||
+                                  !_isCurrentStepValid()
                               ? null
                               : _continueOrFinish,
                           child: Text(
@@ -7947,13 +8074,14 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
                                     }
                                     setState(() {
                                       _currentStep =
-                                          _WorkspaceClockOutWizardStep.values[
-                                              _currentStep.index - 1];
+                                          _WorkspaceClockOutWizardStep
+                                              .values[_currentStep.index - 1];
                                       _inlineError = "";
                                     });
                                   },
                             child: Text(
-                              _currentStep == _WorkspaceClockOutWizardStep.primary
+                              _currentStep ==
+                                      _WorkspaceClockOutWizardStep.primary
                                   ? _clockOutWizardCancelLabel
                                   : _clockOutWizardBackLabel,
                             ),
@@ -7973,9 +8101,8 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
                                     return;
                                   }
                                   setState(() {
-                                    _currentStep =
-                                        _WorkspaceClockOutWizardStep.values[
-                                            _currentStep.index - 1];
+                                    _currentStep = _WorkspaceClockOutWizardStep
+                                        .values[_currentStep.index - 1];
                                     _inlineError = "";
                                   });
                                 },
@@ -7988,7 +8115,9 @@ class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet>
                         const Spacer(),
                         FilledButton(
                           onPressed:
-                              _isSaving || _isPickingProofs || !_isCurrentStepValid()
+                              _isSaving ||
+                                  _isPickingProofs ||
+                                  !_isCurrentStepValid()
                               ? null
                               : _continueOrFinish,
                           child: Text(

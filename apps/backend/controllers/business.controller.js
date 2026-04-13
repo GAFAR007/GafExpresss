@@ -10976,6 +10976,54 @@ function resolvePlanTimelineWindow({
   };
 }
 
+function mergeAttendanceRecords({
+  primaryRecords = [],
+  supplementalRecords = [],
+}) {
+  const mergedById = new Map();
+  [...primaryRecords, ...supplementalRecords].forEach(
+    (record) => {
+      if (!record) {
+        return;
+      }
+      const recordId = normalizeStaffIdInput(
+        record?._id,
+      );
+      if (recordId) {
+        mergedById.set(
+          recordId,
+          record,
+        );
+        return;
+      }
+      mergedById.set(
+        `${mergedById.size}`,
+        record,
+      );
+    },
+  );
+
+  return Array.from(
+    mergedById.values(),
+  ).sort((left, right) => {
+    const leftClockIn =
+      parseDateInput(
+        left?.clockInAt ||
+          left?.createdAt,
+      );
+    const rightClockIn =
+      parseDateInput(
+        right?.clockInAt ||
+          right?.createdAt,
+      );
+    const leftTime =
+      leftClockIn?.getTime() || 0;
+    const rightTime =
+      rightClockIn?.getTime() || 0;
+    return leftTime - rightTime;
+  });
+}
+
 // WHY: HR-impact analytics should connect staffing attendance to production truth by day.
 function buildProductionDailyRollups({
   tasks,
@@ -24728,6 +24776,24 @@ async function getProductionPlanDetail(
           .sort({ clockInAt: 1 })
           .lean()
       : [];
+    const openAttendanceRecords =
+      planStaffIds.length > 0 ?
+        await StaffAttendance.find({
+          staffProfileId: {
+            $in: planStaffIds,
+          },
+          clockOutAt: null,
+        })
+          .sort({ clockInAt: 1 })
+          .lean()
+      : [];
+    const planDetailAttendanceRecords =
+      mergeAttendanceRecords({
+        primaryRecords:
+          attendanceRecords,
+        supplementalRecords:
+          openAttendanceRecords,
+      });
     const timelineRows =
       buildTimelineRows({
         progressRecords,
@@ -24765,7 +24831,7 @@ async function getProductionPlanDetail(
     let visibleTimelineRows =
       timelineRows;
     let visibleAttendanceRecords =
-      attendanceRecords;
+      planDetailAttendanceRecords;
     let visibleStaffProgressScores =
       staffProgressScores;
     let visiblePlanStaffProfiles =
@@ -24789,7 +24855,7 @@ async function getProductionPlanDetail(
             ) === selfStaffProfileId,
         );
       visibleAttendanceRecords =
-        attendanceRecords.filter(
+        planDetailAttendanceRecords.filter(
           (record) =>
             normalizeStaffIdInput(
               record?.staffProfileId,
