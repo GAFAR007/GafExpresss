@@ -760,6 +760,119 @@ test(
 );
 
 test(
+  "single-entry clock-out reuses an open same-day attendance from another task",
+  async () => {
+    const scenario = await seedScenario();
+    const secondaryTaskId =
+      new mongoose.Types.ObjectId();
+
+    await createTask({
+      id: secondaryTaskId,
+      planId: scenario.planId,
+      phaseId: scenario.phaseId,
+      title: "Sibling Task",
+      assignedStaffId:
+        scenario.staffProfileAId,
+      assignedStaffProfileIds: [
+        scenario.staffProfileAId,
+      ],
+      createdBy: scenario.ownerId,
+      weight: 3,
+    });
+
+    const openAttendance =
+      await createActiveAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: secondaryTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      });
+
+    await seedExistingProofDraft({
+      ownerId: scenario.ownerId,
+      planId: scenario.planId,
+      taskId: scenario.taskId,
+      staffId:
+        scenario.staffProfileAId,
+      proofCount: 4,
+    });
+
+    const response = await postProgress({
+      token: scenario.token,
+      taskId:
+        scenario.taskId.toString(),
+      payload: {
+        workDate: WORK_DATE_STRING,
+        staffId:
+          scenario.staffProfileAId.toString(),
+        activityType: "none",
+        unitContribution: 3.5,
+        activityQuantity: 0,
+        delayReason: STATUS_NONE,
+        notes: "finish current task from shared open attendance",
+      },
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.ledger.unitCompleted,
+      3.5,
+    );
+    assert.equal(
+      response.body.ledger.unitRemaining,
+      1.5,
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        openAttendance._id,
+      ).lean();
+    assert.ok(savedAttendance?.clockOutAt);
+    assert.equal(
+      savedAttendance.taskId.toString(),
+      scenario.taskId.toString(),
+    );
+    assert.equal(
+      savedAttendance.planId.toString(),
+      scenario.planId.toString(),
+    );
+
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(savedProgress);
+    assert.equal(
+      savedProgress.unitContribution,
+      3.5,
+    );
+    assert.equal(
+      savedProgress.proofCountRequired,
+      4,
+    );
+    assert.equal(
+      savedProgress.proofCountUploaded,
+      4,
+    );
+    assert.equal(
+      savedProgress.sessionStatus,
+      "completed",
+    );
+    assert.ok(savedProgress.clockInTime);
+    assert.ok(savedProgress.clockOutTime);
+  },
+);
+
+test(
   "single-entry production logging shares unit and activity totals across staff for the same day",
   async () => {
     const scenario = await seedScenario({

@@ -4303,10 +4303,81 @@ function normalizeWorkDateToDayStart(
 }
 
 // WHY: Progress logging should only accept staff who completed a full shift on the same work day.
+async function findActiveAttendanceForStaffOnWorkDate({
+  staffProfileId,
+  workDate,
+  taskId = "",
+  session = null,
+}) {
+  const normalizedStaffId = normalizeStaffIdInput(
+    staffProfileId,
+  );
+  const normalizedWorkDate =
+    normalizeWorkDateToDayStart(workDate);
+  const normalizedTaskId =
+    normalizeStaffIdInput(taskId);
+  if (
+    !normalizedStaffId ||
+    !normalizedWorkDate
+  ) {
+    return null;
+  }
+
+  const workDateEndExclusive = new Date(
+    normalizedWorkDate.getTime() + MS_PER_DAY,
+  );
+
+  const attendanceFilters = [];
+  if (normalizedTaskId) {
+    attendanceFilters.push({
+      staffProfileId:
+        normalizedStaffId,
+      taskId:
+        normalizedTaskId,
+      workDate:
+        normalizedWorkDate,
+      clockOutAt: null,
+    });
+  }
+  attendanceFilters.push({
+    staffProfileId:
+      normalizedStaffId,
+    clockInAt: {
+      $lt: workDateEndExclusive,
+    },
+    clockOutAt: null,
+  });
+
+  for (const attendanceFilter of attendanceFilters) {
+    let attendanceQuery =
+      StaffAttendance.findOne(
+        attendanceFilter,
+      ).sort({
+        clockInAt: -1,
+        _id: -1,
+      });
+    if (session) {
+      attendanceQuery =
+        attendanceQuery.session(
+          session,
+        );
+    }
+    const attendance =
+      await attendanceQuery;
+    if (attendance) {
+      return attendance;
+    }
+  }
+
+  return null;
+}
+
+// WHY: Progress logging should reuse same-day completed attendance when no open session remains.
 async function findCompletedAttendanceForStaffOnWorkDate({
   staffProfileId,
   workDate,
   taskId = "",
+  session = null,
 }) {
   const normalizedStaffId = normalizeStaffIdInput(
     staffProfileId,
@@ -4346,14 +4417,24 @@ async function findCompletedAttendanceForStaffOnWorkDate({
     },
   };
 
-  return StaffAttendance.findOne(
+  let attendanceQuery =
+    StaffAttendance.findOne(
     attendanceFilter,
   )
     .sort({
       clockOutAt: -1,
       clockInAt: -1,
-    })
-    .lean();
+    });
+  if (session) {
+    attendanceQuery =
+      attendanceQuery.session(
+        session,
+      );
+  } else {
+    attendanceQuery =
+      attendanceQuery.lean();
+  }
+  return attendanceQuery;
 }
 
 // WHY: Keep delay reasons constrained to the controlled taxonomy.
@@ -27447,42 +27528,37 @@ async function logProductionTaskProgress(
       await session.withTransaction(
         async () => {
           const activeAttendance =
-            await StaffAttendance.findOne(
+            await findActiveAttendanceForStaffOnWorkDate(
               {
                 staffProfileId:
                   effectiveStaffId,
-                taskId: task._id,
                 workDate:
                   normalizedWorkDate,
-                clockOutAt: null,
+                taskId: task._id,
+                session,
               },
-            )
-              .sort({
-                clockInAt: -1,
-                _id: -1,
-              })
-              .session(session);
+            );
           const completedAttendance =
             activeAttendance ||
-            await StaffAttendance.findOne(
+            await findCompletedAttendanceForStaffOnWorkDate(
               {
                 staffProfileId:
                   effectiveStaffId,
-                taskId: task._id,
                 workDate:
                   normalizedWorkDate,
-                clockOutAt: {
-                  $ne: null,
-                  $gte:
-                    normalizedWorkDate,
-                },
+                taskId: task._id,
+                session,
               },
-            )
-              .sort({
-                clockOutAt: -1,
-                clockInAt: -1,
-              })
-              .session(session);
+            ) ||
+            await findCompletedAttendanceForStaffOnWorkDate(
+              {
+                staffProfileId:
+                  effectiveStaffId,
+                workDate:
+                  normalizedWorkDate,
+                session,
+              },
+            );
 
           if (!completedAttendance) {
             throw new Error(
