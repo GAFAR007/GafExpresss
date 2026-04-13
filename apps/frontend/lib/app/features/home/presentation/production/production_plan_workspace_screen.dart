@@ -3763,7 +3763,7 @@ class _AgendaTaskCard extends StatelessWidget {
                             0,
                         personalQuantityUnit: staffProgress?.quantityUnit ?? "",
                         proofStatusLabel: staffProgress == null
-                            ? "No proofs yet"
+                            ? _resolveAttendanceProofStatusLabel(taskAttendance)
                             : "${staffProgress.proofCountUploaded} / ${staffProgress.proofCountRequired} proofs",
                         personalNotes: staffProgress?.notes ?? "",
                         delayReason:
@@ -5314,6 +5314,19 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
   final computedDurationMinutes = record.clockOutAt != null
       ? record.clockOutAt!.difference(record.clockInAt).inMinutes
       : 0;
+  final proofs = record.effectiveProofs
+      .map(
+        (proof) => ProductionTaskProgressProofRecord(
+          url: proof.url,
+          publicId: proof.publicId,
+          filename: proof.filename,
+          mimeType: proof.mimeType,
+          sizeBytes: proof.sizeBytes ?? 0,
+          uploadedAt: proof.uploadedAt,
+          uploadedBy: proof.uploadedBy ?? "",
+        ),
+      )
+      .toList();
   return ProductionAttendanceRecord(
     id: record.id,
     planId: record.planId ?? "",
@@ -5332,7 +5345,26 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
     proofSizeBytes: record.proofSizeBytes,
     proofUploadedAt: record.proofUploadedAt,
     proofUploadedBy: record.proofUploadedBy,
+    proofs: proofs,
+    requiredProofs: record.effectiveRequiredProofs,
+    proofStatus: record.resolvedProofStatus,
+    sessionStatus: record.resolvedSessionStatus,
   );
+}
+
+String _resolveAttendanceProofStatusLabel(
+  ProductionAttendanceRecord? attendance,
+) {
+  if (attendance == null) {
+    return "No proofs yet";
+  }
+  if (attendance.needsProof) {
+    return "Missing proof";
+  }
+  if (attendance.proofCountUploaded > 0) {
+    return "Proof complete";
+  }
+  return attendance.isOpen ? "Proof pending" : "No proofs yet";
 }
 
 List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({

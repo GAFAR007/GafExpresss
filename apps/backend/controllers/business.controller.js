@@ -27,9 +27,6 @@ const businessTenantService = require("../services/business.tenant.service");
 const tenantContactDocumentService = require("../services/tenant_contact_document.service");
 const staffAttendanceProofService = require("../services/staff_attendance_proof.service");
 const {
-  uploadTaskProgressProofImages,
-} = require("../services/production_task_progress_proof.service");
-const {
   SHARED_ACTIVITY_NONE,
   SHARED_ACTIVITY_PLANTED,
   SHARED_ACTIVITY_TRANSPLANTED,
@@ -73,6 +70,10 @@ const Payment = require("../models/Payment");
 const BusinessTenantApplication = require("../models/BusinessTenantApplication");
 const BusinessStaffProfile = require("../models/BusinessStaffProfile");
 const StaffAttendance = require("../models/StaffAttendance");
+const {
+  STAFF_ATTENDANCE_SESSION_STATUSES,
+  STAFF_ATTENDANCE_PROOF_STATUSES,
+} = require("../models/StaffAttendance");
 const StaffCompensation = require("../models/StaffCompensation");
 const ProductionPlan = require("../models/ProductionPlan");
 const ProductionPhase = require("../models/ProductionPhase");
@@ -310,10 +311,16 @@ const STAFF_COPY = {
     "Clock-in recorded successfully",
   STAFF_CLOCK_OUT_OK:
     "Clock-out recorded successfully",
+  STAFF_CLOCK_OUT_WITH_PROOF_OK:
+    "Clock-out with proof recorded successfully",
   STAFF_CLOCK_IN_OPEN:
     "Staff already has an open attendance session",
   STAFF_CLOCK_OUT_MISSING:
     "No open attendance session to close",
+  STAFF_CLOCK_IN_PENDING_PROOF:
+    "Upload the missing proof for the previous attendance session before clocking in again",
+  STAFF_PROOF_REQUIRED:
+    "Upload proof before completing clock-out",
   STAFF_FORBIDDEN:
     "You do not have permission to access staff data",
   STAFF_PROFILE_ID_REQUIRED:
@@ -585,6 +592,8 @@ const PRODUCTION_COPY = {
     "Delay reason is required when actual amount is zero",
   TASK_PROGRESS_ATTENDANCE_REQUIRED:
     "Clock in before logging progress. Clock-out is captured when you save the production log.",
+  TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED:
+    "Complete attendance proof before saving or batching production progress.",
   TASK_PROGRESS_STAFF_ID_INVALID:
     "Staff id is invalid",
   TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN:
@@ -941,10 +950,30 @@ const TASK_PROGRESS_BATCH_ENTRY_CODE_ZERO_DELAY_REQUIRED =
   "ZERO_OUTPUT_DELAY_REQUIRED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_REQUIRED =
   "ATTENDANCE_REQUIRED";
+const TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_PROOF_REQUIRED =
+  "ATTENDANCE_PROOF_REQUIRED";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_FORBIDDEN =
   "FORBIDDEN";
 const TASK_PROGRESS_BATCH_ENTRY_CODE_UNKNOWN =
   "UNKNOWN_ERROR";
+const STAFF_ATTENDANCE_SESSION_STATUS_OPEN =
+  STAFF_ATTENDANCE_SESSION_STATUSES[0] ||
+  "open";
+const STAFF_ATTENDANCE_SESSION_STATUS_PENDING_PROOF =
+  STAFF_ATTENDANCE_SESSION_STATUSES[1] ||
+  "pending_proof";
+const STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED =
+  STAFF_ATTENDANCE_SESSION_STATUSES[2] ||
+  "completed";
+const STAFF_ATTENDANCE_PROOF_STATUS_NOT_REQUIRED =
+  STAFF_ATTENDANCE_PROOF_STATUSES[0] ||
+  "not_required";
+const STAFF_ATTENDANCE_PROOF_STATUS_MISSING =
+  STAFF_ATTENDANCE_PROOF_STATUSES[1] ||
+  "missing";
+const STAFF_ATTENDANCE_PROOF_STATUS_COMPLETE =
+  STAFF_ATTENDANCE_PROOF_STATUSES[2] ||
+  "complete";
 const PRODUCTION_TASK_TIMING_MODE_ABSOLUTE =
   PRODUCTION_TASK_TIMING_MODES[0] ||
   "absolute";
@@ -4302,6 +4331,908 @@ function normalizeWorkDateToDayStart(
   );
 }
 
+function normalizeStaffAttendanceProofType(
+  mimeType,
+) {
+  const normalizedMimeType = (
+    mimeType || ""
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (
+    normalizedMimeType.startsWith(
+      "image/",
+    )
+  ) {
+    return "image";
+  }
+  if (
+    normalizedMimeType.startsWith(
+      "video/",
+    )
+  ) {
+    return "video";
+  }
+  if (normalizedMimeType) {
+    return "document";
+  }
+  return "";
+}
+
+function normalizeStaffAttendanceProofEntry(
+  proof,
+  {
+    fallbackUnitIndex = 1,
+  } = {},
+) {
+  if (
+    !proof ||
+    typeof proof !== "object"
+  ) {
+    return null;
+  }
+  const url = (
+    proof.url ||
+    proof.proofUrl ||
+    ""
+  )
+    .toString()
+    .trim();
+  const filename = (
+    proof.filename ||
+    proof.proofFilename ||
+    ""
+  )
+    .toString()
+    .trim();
+  const publicId = (
+    proof.publicId ||
+    proof.proofPublicId ||
+    ""
+  )
+    .toString()
+    .trim();
+  const mimeType = (
+    proof.mimeType ||
+    proof.proofMimeType ||
+    ""
+  )
+    .toString()
+    .trim();
+  if (
+    !url &&
+    !filename &&
+    !publicId
+  ) {
+    return null;
+  }
+
+  const normalizedUnitIndex =
+    parseNonNegativeIntegerInput(
+      proof.unitIndex,
+    );
+  const parsedSizeBytes =
+    parseNonNegativeIntegerInput(
+      proof.sizeBytes ||
+        proof.proofSizeBytes,
+    );
+
+  return {
+    unitIndex: Math.max(
+      1,
+      normalizedUnitIndex ||
+        fallbackUnitIndex,
+    ),
+    url,
+    publicId,
+    filename,
+    mimeType,
+    type:
+      (
+        proof.type || ""
+      )
+        .toString()
+        .trim() ||
+      normalizeStaffAttendanceProofType(
+        mimeType,
+      ),
+    sizeBytes:
+      parsedSizeBytes == null ?
+        null
+      : parsedSizeBytes,
+    uploadedAt:
+      parseDateInput(
+        proof.uploadedAt ||
+          proof.proofUploadedAt,
+      ) || null,
+    uploadedBy:
+      proof.uploadedBy ||
+      proof.proofUploadedBy ||
+      null,
+  };
+}
+
+function buildLegacyStaffAttendanceProof(
+  attendance,
+) {
+  if (
+    !attendance ||
+    typeof attendance !== "object"
+  ) {
+    return null;
+  }
+  return normalizeStaffAttendanceProofEntry(
+    {
+      unitIndex: 1,
+      url: attendance.proofUrl,
+      publicId:
+        attendance.proofPublicId,
+      filename:
+        attendance.proofFilename,
+      mimeType:
+        attendance.proofMimeType,
+      sizeBytes:
+        attendance.proofSizeBytes,
+      uploadedAt:
+        attendance.proofUploadedAt,
+      uploadedBy:
+        attendance.proofUploadedBy,
+      type:
+        normalizeStaffAttendanceProofType(
+          attendance.proofMimeType,
+        ),
+    },
+    {
+      fallbackUnitIndex: 1,
+    },
+  );
+}
+
+function normalizeStaffAttendanceProofs(
+  attendance,
+) {
+  const rawProofs = Array.isArray(
+    attendance?.proofs,
+  ) ?
+      attendance.proofs
+    : [];
+  const proofsByUnitIndex =
+    new Map();
+
+  rawProofs.forEach((proof, index) => {
+    const normalizedProof =
+      normalizeStaffAttendanceProofEntry(
+        proof,
+        {
+          fallbackUnitIndex:
+            index + 1,
+        },
+      );
+    if (!normalizedProof) {
+      return;
+    }
+    proofsByUnitIndex.set(
+      normalizedProof.unitIndex,
+      normalizedProof,
+    );
+  });
+
+  if (proofsByUnitIndex.size === 0) {
+    const legacyProof =
+      buildLegacyStaffAttendanceProof(
+        attendance,
+      );
+    if (legacyProof) {
+      proofsByUnitIndex.set(
+        legacyProof.unitIndex,
+        legacyProof,
+      );
+    }
+  }
+
+  return Array.from(
+    proofsByUnitIndex.values(),
+  ).sort((left, right) =>
+    left.unitIndex - right.unitIndex,
+  );
+}
+
+function mergeStaffAttendanceProofs({
+  existingProofs = [],
+  nextProofs = [],
+}) {
+  const proofsByUnitIndex =
+    new Map();
+  normalizeStaffAttendanceProofs({
+    proofs: existingProofs,
+  }).forEach((proof) => {
+    proofsByUnitIndex.set(
+      proof.unitIndex,
+      proof,
+    );
+  });
+  normalizeStaffAttendanceProofs({
+    proofs: nextProofs,
+  }).forEach((proof) => {
+    proofsByUnitIndex.set(
+      proof.unitIndex,
+      proof,
+    );
+  });
+  return Array.from(
+    proofsByUnitIndex.values(),
+  ).sort((left, right) =>
+    left.unitIndex - right.unitIndex,
+  );
+}
+
+function syncLegacyStaffAttendanceProofFields(
+  attendance,
+  proofs = [],
+) {
+  if (
+    !attendance ||
+    typeof attendance !== "object"
+  ) {
+    return attendance;
+  }
+  const [primaryProof] =
+    normalizeStaffAttendanceProofs({
+      proofs,
+    });
+  if (!primaryProof) {
+    attendance.proofUrl = "";
+    attendance.proofPublicId = "";
+    attendance.proofFilename = "";
+    attendance.proofMimeType = "";
+    attendance.proofSizeBytes = null;
+    attendance.proofUploadedAt = null;
+    attendance.proofUploadedBy = null;
+    return attendance;
+  }
+  attendance.proofUrl =
+    primaryProof.url || "";
+  attendance.proofPublicId =
+    primaryProof.publicId || "";
+  attendance.proofFilename =
+    primaryProof.filename || "";
+  attendance.proofMimeType =
+    primaryProof.mimeType || "";
+  attendance.proofSizeBytes =
+    primaryProof.sizeBytes == null ?
+      null
+    : primaryProof.sizeBytes;
+  attendance.proofUploadedAt =
+    primaryProof.uploadedAt || null;
+  attendance.proofUploadedBy =
+    primaryProof.uploadedBy || null;
+  return attendance;
+}
+
+function normalizeStaffAttendanceClockOutAudit(
+  rawValue,
+) {
+  if (rawValue == null || rawValue === "") {
+    return null;
+  }
+
+  let payload = rawValue;
+  if (typeof rawValue === "string") {
+    try {
+      payload = JSON.parse(rawValue);
+    } catch (error) {
+      return null;
+    }
+  }
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    Array.isArray(payload)
+  ) {
+    return null;
+  }
+
+  const workDate =
+    normalizeWorkDateToDayStart(
+      payload.workDate,
+    );
+  const planId =
+    mongoose.Types.ObjectId.isValid(
+      normalizeStaffIdInput(
+        payload.planId,
+      ),
+    ) ?
+      normalizeStaffIdInput(
+        payload.planId,
+      )
+    : null;
+  const taskId =
+    mongoose.Types.ObjectId.isValid(
+      normalizeStaffIdInput(
+        payload.taskId,
+      ),
+    ) ?
+      normalizeStaffIdInput(
+        payload.taskId,
+      )
+    : null;
+  const staffProfileId =
+    mongoose.Types.ObjectId.isValid(
+      normalizeStaffIdInput(
+        payload.staffProfileId,
+      ),
+    ) ?
+      normalizeStaffIdInput(
+        payload.staffProfileId,
+      )
+    : null;
+  const unitId =
+    mongoose.Types.ObjectId.isValid(
+      normalizeStaffIdInput(
+        payload.unitId,
+      ),
+    ) ?
+      normalizeStaffIdInput(
+        payload.unitId,
+      )
+    : null;
+  const requiredProofs =
+    parseNonNegativeIntegerInput(
+      payload.requiredProofs,
+    );
+  const unitsCompleted =
+    parseNonNegativeNumberInput(
+      payload.unitsCompleted,
+    );
+  const unitsRemaining =
+    parseNonNegativeNumberInput(
+      payload.unitsRemaining,
+    );
+  const quantityAmount =
+    parseNonNegativeNumberInput(
+      payload.quantityAmount,
+    );
+
+  const normalizedAudit = {
+    workDate,
+    planId,
+    taskId,
+    taskTitle:
+      (
+        payload.taskTitle || ""
+      )
+        .toString()
+        .trim(),
+    staffProfileId,
+    staffName:
+      (
+        payload.staffName || ""
+      )
+        .toString()
+        .trim(),
+    unitId,
+    unitLabel:
+      (
+        payload.unitLabel || ""
+      )
+        .toString()
+        .trim(),
+    progressUnitLabel:
+      (
+        payload.progressUnitLabel ||
+        ""
+      )
+        .toString()
+        .trim(),
+    unitsCompleted,
+    unitsRemaining,
+    requiredProofs:
+      requiredProofs == null ?
+        0
+      : requiredProofs,
+    unitType:
+      (
+        payload.unitType || ""
+      )
+        .toString()
+        .trim(),
+    quantityActivityType:
+      (
+        payload.quantityActivityType ||
+        ""
+      )
+        .toString()
+        .trim(),
+    quantityAmount,
+    quantityUnit:
+      (
+        payload.quantityUnit || ""
+      )
+        .toString()
+        .trim(),
+    notes:
+      (
+        payload.notes || ""
+      )
+        .toString()
+        .trim(),
+    capturedAt:
+      parseDateInput(
+        payload.capturedAt,
+      ) || null,
+  };
+
+  const hasMeaningfulField =
+    Boolean(
+      normalizedAudit.workDate ||
+        normalizedAudit.planId ||
+        normalizedAudit.taskId ||
+        normalizedAudit.taskTitle ||
+        normalizedAudit.staffProfileId ||
+        normalizedAudit.staffName ||
+        normalizedAudit.unitId ||
+        normalizedAudit.unitLabel ||
+        normalizedAudit.progressUnitLabel ||
+        normalizedAudit.unitsCompleted !=
+          null ||
+        normalizedAudit.unitsRemaining !=
+          null ||
+        normalizedAudit.requiredProofs >
+          0 ||
+        normalizedAudit.unitType ||
+        normalizedAudit.quantityActivityType ||
+        normalizedAudit.quantityAmount !=
+          null ||
+        normalizedAudit.quantityUnit ||
+        normalizedAudit.notes,
+    );
+
+  return hasMeaningfulField ?
+      normalizedAudit
+    : null;
+}
+
+function buildStaffAttendanceClockOutAudit({
+  attendance = null,
+  rawAudit = null,
+  workDate = null,
+  planId = null,
+  taskId = null,
+  staffProfileId = null,
+  notes = "",
+  requiredProofs = null,
+}) {
+  const existingAudit =
+    normalizeStaffAttendanceClockOutAudit(
+      attendance?.clockOutAudit,
+    );
+  const providedAudit =
+    normalizeStaffAttendanceClockOutAudit(
+      rawAudit,
+    );
+  return normalizeStaffAttendanceClockOutAudit(
+    {
+      ...existingAudit,
+      ...providedAudit,
+      workDate:
+        workDate ||
+        providedAudit?.workDate ||
+        existingAudit?.workDate ||
+        null,
+      planId:
+        planId ||
+        providedAudit?.planId ||
+        existingAudit?.planId ||
+        null,
+      taskId:
+        taskId ||
+        providedAudit?.taskId ||
+        existingAudit?.taskId ||
+        null,
+      staffProfileId:
+        staffProfileId ||
+        providedAudit?.staffProfileId ||
+        existingAudit?.staffProfileId ||
+        null,
+      notes:
+        notes ||
+        providedAudit?.notes ||
+        existingAudit?.notes ||
+        "",
+      requiredProofs:
+        parseNonNegativeIntegerInput(
+          requiredProofs,
+        ) ??
+        providedAudit?.requiredProofs ??
+        existingAudit?.requiredProofs ??
+        0,
+      capturedAt:
+        providedAudit?.capturedAt ||
+        existingAudit?.capturedAt ||
+        new Date(),
+    },
+  );
+}
+
+function resolveStaffAttendanceRequiredProofCount({
+  attendance = null,
+  clockOutAudit = null,
+  fallbackRequiredProofs = null,
+  minimumRequiredProofs = 0,
+  uploadedProofs = [],
+}) {
+  const currentRequiredProofs =
+    parseNonNegativeIntegerInput(
+      attendance?.requiredProofs,
+    ) || 0;
+  const auditRequiredProofs =
+    parseNonNegativeIntegerInput(
+      clockOutAudit?.requiredProofs,
+    ) || 0;
+  const fallbackProofs =
+    parseNonNegativeIntegerInput(
+      fallbackRequiredProofs,
+    ) || 0;
+  const minimumProofs =
+    parseNonNegativeIntegerInput(
+      minimumRequiredProofs,
+    ) || 0;
+  const uploadedProofCount =
+    normalizeStaffAttendanceProofs({
+      proofs: uploadedProofs,
+    }).length;
+
+  return Math.max(
+    0,
+    currentRequiredProofs,
+    auditRequiredProofs,
+    fallbackProofs,
+    minimumProofs,
+    uploadedProofCount,
+  );
+}
+
+function resolveStaffAttendanceCanonicalState({
+  clockOutAt = null,
+  requiredProofs = 0,
+  proofs = [],
+}) {
+  const normalizedClockOutAt =
+    parseDateInput(clockOutAt);
+  if (!normalizedClockOutAt) {
+    return {
+      proofStatus:
+        STAFF_ATTENDANCE_PROOF_STATUS_NOT_REQUIRED,
+      sessionStatus:
+        STAFF_ATTENDANCE_SESSION_STATUS_OPEN,
+    };
+  }
+
+  const normalizedRequiredProofs =
+    Math.max(
+      0,
+      parseNonNegativeIntegerInput(
+        requiredProofs,
+      ) || 0,
+    );
+  if (normalizedRequiredProofs <= 0) {
+    return {
+      proofStatus:
+        STAFF_ATTENDANCE_PROOF_STATUS_NOT_REQUIRED,
+      sessionStatus:
+        STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED,
+    };
+  }
+
+  const uploadedProofCount =
+    normalizeStaffAttendanceProofs({
+      proofs,
+    }).length;
+  if (
+    uploadedProofCount >=
+    normalizedRequiredProofs
+  ) {
+    return {
+      proofStatus:
+        STAFF_ATTENDANCE_PROOF_STATUS_COMPLETE,
+      sessionStatus:
+        STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED,
+    };
+  }
+
+  return {
+    proofStatus:
+      STAFF_ATTENDANCE_PROOF_STATUS_MISSING,
+    sessionStatus:
+      STAFF_ATTENDANCE_SESSION_STATUS_PENDING_PROOF,
+  };
+}
+
+function resolveStaffAttendanceCanonicalFields(
+  attendance,
+  {
+    proofs = undefined,
+    clockOutAudit = undefined,
+    fallbackRequiredProofs = null,
+    minimumRequiredProofs = 0,
+  } = {},
+) {
+  const normalizedProofs =
+    proofs === undefined ?
+      normalizeStaffAttendanceProofs(
+        attendance,
+      )
+    : normalizeStaffAttendanceProofs({
+        proofs,
+      });
+  const normalizedClockOutAudit =
+    clockOutAudit === undefined ?
+      normalizeStaffAttendanceClockOutAudit(
+        attendance?.clockOutAudit,
+      )
+    : normalizeStaffAttendanceClockOutAudit(
+        clockOutAudit,
+      );
+  const requiredProofs =
+    resolveStaffAttendanceRequiredProofCount(
+      {
+        attendance,
+        clockOutAudit:
+          normalizedClockOutAudit,
+        fallbackRequiredProofs,
+        minimumRequiredProofs,
+        uploadedProofs:
+          normalizedProofs,
+      },
+    );
+  const state =
+    resolveStaffAttendanceCanonicalState(
+      {
+        clockOutAt:
+          attendance?.clockOutAt,
+        requiredProofs,
+        proofs:
+          normalizedProofs,
+      },
+    );
+
+  return {
+    proofs: normalizedProofs,
+    clockOutAudit:
+      normalizedClockOutAudit,
+    requiredProofs,
+    proofStatus:
+      state.proofStatus,
+    sessionStatus:
+      state.sessionStatus,
+  };
+}
+
+function applyStaffAttendanceCanonicalFields(
+  attendance,
+  options = {},
+) {
+  const canonicalFields =
+    resolveStaffAttendanceCanonicalFields(
+      attendance,
+      options,
+    );
+  attendance.proofs =
+    canonicalFields.proofs;
+  attendance.requiredProofs =
+    canonicalFields.requiredProofs;
+  attendance.proofStatus =
+    canonicalFields.proofStatus;
+  attendance.sessionStatus =
+    canonicalFields.sessionStatus;
+  attendance.clockOutAudit =
+    canonicalFields.clockOutAudit;
+  syncLegacyStaffAttendanceProofFields(
+    attendance,
+    canonicalFields.proofs,
+  );
+  return canonicalFields;
+}
+
+function normalizeStaffAttendanceForResponse(
+  attendance,
+) {
+  if (!attendance) {
+    return attendance;
+  }
+  const normalizedAttendance =
+    typeof attendance.toObject ===
+      "function" ?
+      attendance.toObject()
+    : {
+        ...attendance,
+      };
+  const canonicalFields =
+    resolveStaffAttendanceCanonicalFields(
+      normalizedAttendance,
+    );
+  normalizedAttendance.durationMinutes =
+    resolveAttendanceDurationMinutes(
+      normalizedAttendance,
+    );
+  normalizedAttendance.proofs =
+    canonicalFields.proofs;
+  normalizedAttendance.requiredProofs =
+    canonicalFields.requiredProofs;
+  normalizedAttendance.proofStatus =
+    canonicalFields.proofStatus;
+  normalizedAttendance.sessionStatus =
+    canonicalFields.sessionStatus;
+  normalizedAttendance.clockOutAudit =
+    canonicalFields.clockOutAudit;
+  normalizedAttendance.numberOfUnitsCompleted =
+    canonicalFields.clockOutAudit
+      ?.unitsCompleted ?? null;
+  syncLegacyStaffAttendanceProofFields(
+    normalizedAttendance,
+    canonicalFields.proofs,
+  );
+  return normalizedAttendance;
+}
+
+function isPendingProofStaffAttendance(
+  attendance,
+) {
+  return (
+    normalizeStaffAttendanceForResponse(
+      attendance,
+    )?.sessionStatus ===
+    STAFF_ATTENDANCE_SESSION_STATUS_PENDING_PROOF
+  );
+}
+
+function isCompletedStaffAttendance(
+  attendance,
+) {
+  return (
+    normalizeStaffAttendanceForResponse(
+      attendance,
+    )?.sessionStatus ===
+    STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED
+  );
+}
+
+function normalizeStaffAttendanceProofFilesFromRequest(
+  req,
+) {
+  const collectedFiles = [];
+  if (req?.file) {
+    collectedFiles.push(req.file);
+  }
+  if (Array.isArray(req?.files)) {
+    collectedFiles.push(...req.files);
+  } else if (
+    req?.files &&
+    typeof req.files === "object"
+  ) {
+    Object.values(req.files).forEach(
+      (entry) => {
+        if (Array.isArray(entry)) {
+          collectedFiles.push(...entry);
+          return;
+        }
+        if (entry) {
+          collectedFiles.push(entry);
+        }
+      },
+    );
+  }
+  return collectedFiles.filter((file) =>
+    Boolean(
+      file &&
+        file.buffer &&
+        file.buffer.length > 0,
+    ),
+  );
+}
+
+async function uploadAndMergeAttendanceProofs({
+  businessId,
+  attendance,
+  actorId,
+  files = [],
+  startingUnitIndex = 1,
+}) {
+  const normalizedFiles =
+    Array.isArray(files) ?
+      files.filter((file) =>
+        Boolean(
+          file &&
+            file.buffer &&
+            file.buffer.length > 0,
+        ),
+      )
+    : [];
+  if (normalizedFiles.length === 0) {
+    return normalizeStaffAttendanceProofs(
+      attendance,
+    );
+  }
+
+  const uploadedProofs =
+    normalizedFiles.length === 1 ?
+      [
+        await staffAttendanceProofService.uploadStaffAttendanceProof(
+          {
+            businessId,
+            attendanceId:
+              attendance._id.toString(),
+            file:
+              normalizedFiles[0],
+            unitIndex:
+              startingUnitIndex,
+          },
+        ),
+      ]
+    : await staffAttendanceProofService.uploadStaffAttendanceProofs(
+        {
+          businessId,
+          attendanceId:
+            attendance._id.toString(),
+          files: normalizedFiles,
+          startingUnitIndex,
+        },
+      );
+
+  return mergeStaffAttendanceProofs({
+    existingProofs:
+      normalizeStaffAttendanceProofs(
+        attendance,
+      ),
+    nextProofs: uploadedProofs.map(
+      (proof) => ({
+        ...proof,
+        uploadedBy: actorId,
+      }),
+    ),
+  });
+}
+
+function copyAttendanceProofsToTaskProgressProofs({
+  attendance,
+  requiredProofs = null,
+}) {
+  const normalizedProofs =
+    normalizeStaffAttendanceProofs(
+      attendance,
+    );
+  const requiredProofCount =
+    parseNonNegativeIntegerInput(
+      requiredProofs,
+    );
+  const proofsToCopy =
+    requiredProofCount == null ||
+      requiredProofCount <= 0 ?
+      normalizedProofs
+    : normalizedProofs
+        .filter(
+          (proof) =>
+            proof.unitIndex <=
+            requiredProofCount,
+        )
+        .slice(0, requiredProofCount);
+  return proofsToCopy.map((proof) => ({
+    url: proof.url,
+    publicId: proof.publicId,
+    filename: proof.filename,
+    mimeType: proof.mimeType,
+    sizeBytes:
+      proof.sizeBytes == null ?
+        0
+      : proof.sizeBytes,
+    uploadedAt:
+      proof.uploadedAt || null,
+    uploadedBy:
+      proof.uploadedBy || null,
+  }));
+}
+
 // WHY: Progress logging should only accept staff who completed a full shift on the same work day.
 async function findActiveAttendanceForStaffOnWorkDate({
   staffProfileId,
@@ -4418,13 +5349,14 @@ async function findCompletedAttendanceForStaffOnWorkDate({
   };
 
   let attendanceQuery =
-    StaffAttendance.findOne(
-    attendanceFilter,
-  )
-    .sort({
-      clockOutAt: -1,
-      clockInAt: -1,
-    });
+    StaffAttendance.find(
+      attendanceFilter,
+    )
+      .sort({
+        clockOutAt: -1,
+        clockInAt: -1,
+      })
+      .limit(20);
   if (session) {
     attendanceQuery =
       attendanceQuery.session(
@@ -4434,7 +5366,138 @@ async function findCompletedAttendanceForStaffOnWorkDate({
     attendanceQuery =
       attendanceQuery.lean();
   }
-  return attendanceQuery;
+  const attendanceRecords =
+    await attendanceQuery;
+  return (
+    attendanceRecords.find(
+      (attendanceRecord) =>
+        isCompletedStaffAttendance(
+          attendanceRecord,
+        ),
+    ) || null
+  );
+}
+
+async function findPendingProofAttendanceForStaffOnWorkDate({
+  staffProfileId,
+  workDate,
+  taskId = "",
+  session = null,
+}) {
+  const normalizedStaffId = normalizeStaffIdInput(
+    staffProfileId,
+  );
+  const normalizedWorkDate =
+    normalizeWorkDateToDayStart(workDate);
+  const normalizedTaskId =
+    normalizeStaffIdInput(taskId);
+  if (
+    !normalizedStaffId ||
+    !normalizedWorkDate
+  ) {
+    return null;
+  }
+
+  const workDateEndExclusive = new Date(
+    normalizedWorkDate.getTime() + MS_PER_DAY,
+  );
+
+  const attendanceFilter = {
+    staffProfileId: normalizedStaffId,
+    ...(normalizedTaskId ?
+      {
+        taskId:
+          normalizedTaskId,
+        workDate:
+          normalizedWorkDate,
+      }
+    : {
+        clockInAt: {
+          $lt: workDateEndExclusive,
+        },
+      }),
+    clockOutAt: {
+      $ne: null,
+      $gte: normalizedWorkDate,
+    },
+  };
+
+  let attendanceQuery =
+    StaffAttendance.find(
+      attendanceFilter,
+    )
+      .sort({
+        clockOutAt: -1,
+        clockInAt: -1,
+      })
+      .limit(20);
+  if (session) {
+    attendanceQuery =
+      attendanceQuery.session(
+        session,
+      );
+  } else {
+    attendanceQuery =
+      attendanceQuery.lean();
+  }
+
+  const attendanceRecords =
+    await attendanceQuery;
+  return (
+    attendanceRecords.find(
+      (attendanceRecord) =>
+        isPendingProofStaffAttendance(
+          attendanceRecord,
+        ),
+    ) || null
+  );
+}
+
+async function findLatestPendingProofAttendanceForStaff({
+  staffProfileId,
+  session = null,
+}) {
+  const normalizedStaffId = normalizeStaffIdInput(
+    staffProfileId,
+  );
+  if (!normalizedStaffId) {
+    return null;
+  }
+
+  let attendanceQuery =
+    StaffAttendance.find({
+      staffProfileId:
+        normalizedStaffId,
+      clockOutAt: {
+        $ne: null,
+      },
+    })
+      .sort({
+        clockOutAt: -1,
+        clockInAt: -1,
+        _id: -1,
+      })
+      .limit(20);
+  if (session) {
+    attendanceQuery =
+      attendanceQuery.session(
+        session,
+      );
+  } else {
+    attendanceQuery =
+      attendanceQuery.lean();
+  }
+
+  const attendanceRecords =
+    await attendanceQuery;
+  return (
+    attendanceRecords.find(
+      (attendanceRecord) =>
+        isPendingProofStaffAttendance(
+          attendanceRecord,
+        ),
+    ) || null
+  );
 }
 
 // WHY: Keep delay reasons constrained to the controlled taxonomy.
@@ -4720,7 +5783,7 @@ function resolveTaskProgressProofCount(
     Number(actualPlots || 0),
   );
   if (!Number.isFinite(normalizedActualPlots) || normalizedActualPlots <= 0) {
-    return 0;
+    return 1;
   }
   return Math.ceil(normalizedActualPlots);
 }
@@ -10770,6 +11833,8 @@ function buildTimelineRows({
         taskId: record.taskId,
         planId: record.planId,
         staffId: record.staffId,
+        attendanceId:
+          record.attendanceId || null,
         unitId: record.unitId || null,
         taskTitle: task?.title || "",
         phaseName: phase?.name || "",
@@ -15986,10 +17051,31 @@ async function clockInStaff(req, res) {
             },
           );
       }
+      applyStaffAttendanceCanonicalFields(
+        attendance,
+      );
       await attendance.save();
       auditAction =
         "staff_attendance_clock_in_update";
     } else {
+      const existingPendingProof =
+        await findLatestPendingProofAttendanceForStaff(
+          {
+            staffProfileId:
+              targetProfile._id,
+          },
+        );
+      if (existingPendingProof) {
+        return res.status(409).json({
+          error:
+            STAFF_COPY.STAFF_CLOCK_IN_PENDING_PROOF,
+          attendance:
+            normalizeStaffAttendanceForResponse(
+              existingPendingProof,
+            ),
+        });
+      }
+
       const scopedOpenFilter = {
         staffProfileId:
           targetProfile._id,
@@ -16016,6 +17102,10 @@ async function clockInStaff(req, res) {
       if (existingScopedOpen) {
         attendance =
           existingScopedOpen;
+        applyStaffAttendanceCanonicalFields(
+          attendance,
+        );
+        await attendance.save();
         auditAction =
           "staff_attendance_clock_in_resume";
       } else {
@@ -16047,6 +17137,12 @@ async function clockInStaff(req, res) {
             resolvedClockInAt,
           clockInBy: actor._id,
           notes: auditNote,
+          proofs: [],
+          requiredProofs: 0,
+          proofStatus:
+            STAFF_ATTENDANCE_PROOF_STATUS_NOT_REQUIRED,
+          sessionStatus:
+            STAFF_ATTENDANCE_SESSION_STATUS_OPEN,
         });
       }
     }
@@ -16070,6 +17166,9 @@ async function clockInStaff(req, res) {
         attendance.notes =
           auditNote;
       }
+      applyStaffAttendanceCanonicalFields(
+        attendance,
+      );
       await attendance.save();
     }
 
@@ -16153,7 +17252,10 @@ async function clockInStaff(req, res) {
     return res.status(201).json({
       message:
         STAFF_COPY.STAFF_CLOCK_IN_OK,
-      attendance,
+      attendance:
+        normalizeStaffAttendanceForResponse(
+          attendance,
+        ),
     });
   } catch (err) {
     debug(
@@ -16228,6 +17330,10 @@ async function clockOutStaff(req, res) {
         req.body?.notes
           ?.toString()
           .trim() || ""
+      );
+    const requestedRequiredProofs =
+      parseNonNegativeIntegerInput(
+        req.body?.requiredProofs,
       );
 
     // WHY: Managers can clock out on behalf of staff.
@@ -16362,6 +17468,50 @@ async function clockOutStaff(req, res) {
       auditWorkDate ||
       attendance.workDate ||
       null;
+    if (auditNote) {
+      attendance.notes = auditNote;
+    }
+    const minimumRequiredProofs =
+      requestedRequiredProofs == null ?
+        1
+      : Math.max(
+          1,
+          requestedRequiredProofs,
+        );
+    const clockOutAudit =
+      buildStaffAttendanceClockOutAudit(
+        {
+          attendance,
+          rawAudit:
+            req.body?.clockOutAudit,
+          workDate:
+            attendance.workDate ||
+            auditWorkDate,
+          planId:
+            attendance.planId || null,
+          taskId:
+            attendance.taskId || null,
+          staffProfileId:
+            targetProfile._id,
+          notes:
+            auditNote ||
+            attendance.notes ||
+            "",
+          requiredProofs:
+            minimumRequiredProofs,
+        },
+      );
+    const canonicalFields =
+      applyStaffAttendanceCanonicalFields(
+        attendance,
+        {
+          clockOutAudit,
+          fallbackRequiredProofs:
+            minimumRequiredProofs,
+          minimumRequiredProofs:
+            minimumRequiredProofs,
+        },
+      );
     await attendance.save();
 
     await writeAuditLog({
@@ -16391,6 +17541,12 @@ async function clockOutStaff(req, res) {
           null,
         clockOutAt,
         durationMinutes,
+        requiredProofs:
+          canonicalFields.requiredProofs,
+        proofStatus:
+          canonicalFields.proofStatus,
+        sessionStatus:
+          canonicalFields.sessionStatus,
         manualEntry:
           canManage &&
           manualClockOutAt != null,
@@ -16449,7 +17605,10 @@ async function clockOutStaff(req, res) {
     return res.status(200).json({
       message:
         STAFF_COPY.STAFF_CLOCK_OUT_OK,
-      attendance,
+      attendance:
+        normalizeStaffAttendanceForResponse(
+          attendance,
+        ),
     });
   } catch (err) {
     debug(
@@ -16459,6 +17618,395 @@ async function clockOutStaff(req, res) {
     return res
       .status(400)
       .json({ error: err.message });
+  }
+}
+
+async function clockOutStaffWithProof(
+  req,
+  res,
+) {
+  debug(
+    "BUSINESS CONTROLLER: clockOutStaffWithProof - entry",
+    {
+      actorId: req.user?.sub,
+      staffProfileId:
+        req.body?.staffProfileId,
+    },
+  );
+
+  try {
+    const proofFiles =
+      normalizeStaffAttendanceProofFilesFromRequest(
+        req,
+      );
+    if (proofFiles.length === 0) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_PROOF_REQUIRED,
+      });
+    }
+
+    const { actor, businessId } =
+      await getBusinessContext(
+        req.user.sub,
+      );
+
+    const staffProfile =
+      await getStaffProfileForActor({
+        actor,
+        businessId,
+        allowMissing: true,
+      });
+
+    const canManage =
+      canManageAttendance({
+        actorRole: actor.role,
+        staffRole:
+          staffProfile?.staffRole,
+      });
+    const requestedAttendanceId =
+      canManage ?
+        normalizeStaffIdInput(
+          req.body?.attendanceId,
+        )
+      : "";
+    const manualClockOutAt =
+      canManage ?
+        parseDateInput(
+          req.body?.clockOutAt,
+        )
+      : null;
+    const requestedWorkDate =
+      normalizeWorkDateToDayStart(
+        req.body?.workDate,
+      );
+    const relatedPlanId =
+      normalizeStaffIdInput(
+        req.body?.planId,
+      );
+    const relatedTaskId =
+      normalizeStaffIdInput(
+        req.body?.taskId,
+      );
+    const auditNote =
+      (
+        req.body?.notes
+          ?.toString()
+          .trim() || ""
+      );
+    const requestedRequiredProofs =
+      parseNonNegativeIntegerInput(
+        req.body?.requiredProofs,
+      );
+    const startingUnitIndex =
+      Math.max(
+        1,
+        parseNonNegativeIntegerInput(
+          req.body?.unitIndex,
+        ) || 1,
+      );
+
+    const targetStaffProfileId =
+      canManage ?
+        req.body?.staffProfileId
+          ?.toString()
+          .trim()
+      : staffProfile?._id?.toString();
+    if (!targetStaffProfileId) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_ID_REQUIRED,
+      });
+    }
+
+    const targetProfile =
+      await BusinessStaffProfile.findOne(
+        {
+          _id: targetStaffProfileId,
+          businessId,
+        },
+      );
+    if (!targetProfile) {
+      return res.status(404).json({
+        error:
+          STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      targetProfile.estateAssetId?.toString() !==
+        actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error:
+          STAFF_COPY.STAFF_FORBIDDEN,
+      });
+    }
+
+    const attendance =
+      requestedAttendanceId ?
+        await StaffAttendance.findOne({
+          _id: requestedAttendanceId,
+          staffProfileId:
+            targetProfile._id,
+        })
+      : await StaffAttendance.findOne(
+          relatedTaskId &&
+              requestedWorkDate ?
+            {
+              staffProfileId:
+                targetProfile._id,
+              taskId:
+                relatedTaskId,
+              workDate:
+                requestedWorkDate,
+              clockOutAt: null,
+            }
+          : {
+              staffProfileId:
+                targetProfile._id,
+              clockOutAt: null,
+            },
+        );
+
+    if (!attendance) {
+      return res.status(
+        requestedAttendanceId ?
+          404
+        : 400,
+      ).json({
+        error:
+          requestedAttendanceId ?
+            "Attendance record not found"
+          : STAFF_COPY.STAFF_CLOCK_OUT_MISSING,
+      });
+    }
+
+    const clockOutAt =
+      manualClockOutAt ||
+      new Date();
+    const clockInAt =
+      parseDateInput(
+        attendance.clockInAt,
+      );
+    if (
+      !clockInAt ||
+      clockOutAt < clockInAt
+    ) {
+      return res.status(400).json({
+        error:
+          "Clock-out cannot be before clock-in",
+      });
+    }
+
+    const durationMinutes = Math.max(
+      0,
+      Math.floor(
+        (clockOutAt -
+          clockInAt) /
+          MS_PER_MINUTE,
+      ),
+    );
+    const previousClockOutAt =
+      attendance.clockOutAt || null;
+    const auditWorkDate =
+      requestedWorkDate ||
+      normalizeWorkDateToDayStart(
+        attendance.clockInAt,
+      );
+    const minimumRequiredProofs =
+      Math.max(
+        1,
+        requestedRequiredProofs || 0,
+        proofFiles.length,
+      );
+
+    attendance.clockOutAt =
+      clockOutAt;
+    attendance.clockOutBy =
+      actor._id;
+    attendance.durationMinutes =
+      durationMinutes;
+    attendance.planId =
+      relatedPlanId ||
+      attendance.planId ||
+      null;
+    attendance.taskId =
+      relatedTaskId ||
+      attendance.taskId ||
+      null;
+    attendance.workDate =
+      auditWorkDate ||
+      attendance.workDate ||
+      null;
+    if (auditNote) {
+      attendance.notes = auditNote;
+    }
+
+    const mergedProofs =
+      await uploadAndMergeAttendanceProofs(
+        {
+          businessId,
+          attendance,
+          actorId: actor._id,
+          files: proofFiles,
+          startingUnitIndex,
+        },
+      );
+    const clockOutAudit =
+      buildStaffAttendanceClockOutAudit(
+        {
+          attendance,
+          rawAudit:
+            req.body?.clockOutAudit,
+          workDate:
+            attendance.workDate ||
+            auditWorkDate,
+          planId:
+            attendance.planId || null,
+          taskId:
+            attendance.taskId || null,
+          staffProfileId:
+            targetProfile._id,
+          notes:
+            auditNote ||
+            attendance.notes ||
+            "",
+          requiredProofs:
+            minimumRequiredProofs,
+        },
+      );
+    const canonicalFields =
+      applyStaffAttendanceCanonicalFields(
+        attendance,
+        {
+          proofs: mergedProofs,
+          clockOutAudit,
+          fallbackRequiredProofs:
+            minimumRequiredProofs,
+          minimumRequiredProofs:
+            minimumRequiredProofs,
+        },
+      );
+    if (
+      canonicalFields.sessionStatus !==
+      STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED
+    ) {
+      return res.status(400).json({
+        error:
+          STAFF_COPY.STAFF_PROOF_REQUIRED,
+      });
+    }
+    await attendance.save();
+
+    await writeAuditLog({
+      businessId,
+      actorId: actor._id,
+      actorRole: actor.role,
+      action:
+        "staff_attendance_clock_out_with_proof",
+      entityType: "staff_attendance",
+      entityId: attendance._id,
+      message:
+        "Set staff clock-out with proof",
+      changes: {
+        staffProfileId:
+          targetProfile._id,
+        workDate:
+          auditWorkDate ||
+          null,
+        planId:
+          attendance.planId ||
+          null,
+        taskId:
+          attendance.taskId ||
+          null,
+        previousClockOutAt:
+          previousClockOutAt ||
+          null,
+        clockOutAt,
+        durationMinutes,
+        uploadedProofCount:
+          proofFiles.length,
+        requiredProofs:
+          canonicalFields.requiredProofs,
+        proofStatus:
+          canonicalFields.proofStatus,
+        sessionStatus:
+          canonicalFields.sessionStatus,
+        manualEntry:
+          canManage &&
+          manualClockOutAt != null,
+        note:
+          auditNote || null,
+      },
+    });
+
+    try {
+      await triggerScopedAvailabilityConfidenceRecompute(
+        {
+          businessId,
+          estateAssetId:
+            targetProfile.estateAssetId ||
+            null,
+          actorId: actor._id,
+          operation:
+            "clockOutStaffWithProof",
+        },
+      );
+    } catch (confidenceErr) {
+      debug(
+        "BUSINESS CONTROLLER: clockOutStaffWithProof - confidence recompute skipped",
+        {
+          actorId: actor._id,
+          staffProfileId:
+            targetProfile._id,
+          reason: confidenceErr.message,
+          next: "Retry confidence recompute on next availability trigger",
+        },
+      );
+    }
+
+    if (attendance.planId) {
+      await emitProductionPlanRoomSnapshot({
+        businessId,
+        planId:
+          attendance.planId,
+        context:
+          "staff_clock_out_with_proof",
+      });
+    }
+
+    debug(
+      "BUSINESS CONTROLLER: clockOutStaffWithProof - success",
+      {
+        actorId: actor._id,
+        attendanceId:
+          attendance._id,
+        staffProfileId:
+          targetProfile._id,
+        durationMinutes,
+      },
+    );
+
+    return res.status(200).json({
+      message:
+        STAFF_COPY.STAFF_CLOCK_OUT_WITH_PROOF_OK,
+      attendance:
+        normalizeStaffAttendanceForResponse(
+          attendance,
+        ),
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: clockOutStaffWithProof - error",
+      err.message,
+    );
+    return res.status(400).json({
+      error: err.message,
+    });
   }
 }
 
@@ -16472,7 +18020,10 @@ async function uploadStaffAttendanceProof(req, res) {
     {
       actorId: req.user?.sub,
       attendanceId: req.params?.attendanceId,
-      hasFile: Boolean(req.file),
+      proofFileCount:
+        normalizeStaffAttendanceProofFilesFromRequest(
+          req,
+        ).length,
     },
   );
 
@@ -16500,12 +18051,23 @@ async function uploadStaffAttendanceProof(req, res) {
       req.params?.attendanceId
         ?.toString()
         .trim();
+    const proofFiles =
+      normalizeStaffAttendanceProofFilesFromRequest(
+        req,
+      );
+    const startingUnitIndex =
+      Math.max(
+        1,
+        parseNonNegativeIntegerInput(
+          req.body?.unitIndex,
+        ) || 1,
+      );
     if (!attendanceId) {
       return res.status(400).json({
         error: "Attendance id is required",
       });
     }
-    if (!req.file) {
+    if (proofFiles.length === 0) {
       return res.status(400).json({
         error: "Proof file is required",
       });
@@ -16565,23 +18127,84 @@ async function uploadStaffAttendanceProof(req, res) {
       });
     }
 
-    const proof =
-      await staffAttendanceProofService.uploadStaffAttendanceProof(
+    const requestedRequiredProofs =
+      parseNonNegativeIntegerInput(
+        req.body?.requiredProofs,
+      );
+    const mergedProofs =
+      await uploadAndMergeAttendanceProofs(
         {
           businessId,
-          attendanceId:
-            attendance._id.toString(),
-          file: req.file,
+          attendance,
+          actorId: actor._id,
+          files: proofFiles,
+          startingUnitIndex,
         },
       );
-
-    attendance.proofUrl = proof.url;
-    attendance.proofPublicId = proof.publicId;
-    attendance.proofFilename = proof.filename;
-    attendance.proofMimeType = proof.mimeType;
-    attendance.proofSizeBytes = proof.sizeBytes;
-    attendance.proofUploadedAt = new Date();
-    attendance.proofUploadedBy = actor._id;
+    const relatedPlanId =
+      normalizeStaffIdInput(
+        req.body?.planId,
+      );
+    const relatedTaskId =
+      normalizeStaffIdInput(
+        req.body?.taskId,
+      );
+    const requestedWorkDate =
+      normalizeWorkDateToDayStart(
+        req.body?.workDate,
+      );
+    const auditNote =
+      (
+        req.body?.notes
+          ?.toString()
+          .trim() || ""
+      );
+    const clockOutAudit =
+      buildStaffAttendanceClockOutAudit(
+        {
+          attendance,
+          rawAudit:
+            req.body?.clockOutAudit,
+          workDate:
+            requestedWorkDate ||
+            attendance.workDate ||
+            null,
+          planId:
+            relatedPlanId ||
+            attendance.planId ||
+            null,
+          taskId:
+            relatedTaskId ||
+            attendance.taskId ||
+            null,
+          staffProfileId:
+            attendance.staffProfileId,
+          notes:
+            auditNote ||
+            attendance.notes ||
+            "",
+          requiredProofs:
+            requestedRequiredProofs,
+        },
+      );
+    const canonicalFields =
+      applyStaffAttendanceCanonicalFields(
+        attendance,
+        {
+          proofs: mergedProofs,
+          clockOutAudit,
+          fallbackRequiredProofs:
+            Math.max(
+              requestedRequiredProofs || 0,
+              proofFiles.length,
+              1,
+            ),
+          minimumRequiredProofs: 1,
+        },
+      );
+    if (auditNote) {
+      attendance.notes = auditNote;
+    }
     await attendance.save();
 
     await writeAuditLog({
@@ -16595,10 +18218,15 @@ async function uploadStaffAttendanceProof(req, res) {
       changes: {
         staffProfileId:
           targetProfile._id,
-        proofUrl: proof.url,
-        proofFilename: proof.filename,
-        proofMimeType: proof.mimeType,
-        proofSizeBytes: proof.sizeBytes,
+        uploadedProofCount:
+          proofFiles.length,
+        startingUnitIndex,
+        requiredProofs:
+          canonicalFields.requiredProofs,
+        proofStatus:
+          canonicalFields.proofStatus,
+        sessionStatus:
+          canonicalFields.sessionStatus,
       },
     });
 
@@ -16616,7 +18244,10 @@ async function uploadStaffAttendanceProof(req, res) {
     return res.status(200).json({
       message:
         "Staff attendance proof uploaded successfully",
-      attendance,
+      attendance:
+        normalizeStaffAttendanceForResponse(
+          attendance,
+        ),
     });
   } catch (err) {
     debug(
@@ -16752,19 +18383,24 @@ async function listStaffAttendance(
       })
         .sort({ clockInAt: -1 })
         .lean();
+    const normalizedAttendance =
+      attendance.map(
+        normalizeStaffAttendanceForResponse,
+      );
 
     debug(
       "BUSINESS CONTROLLER: listStaffAttendance - success",
       {
         actorId: actor._id,
-        count: attendance.length,
+        count: normalizedAttendance.length,
       },
     );
 
     return res.status(200).json({
       message:
         STAFF_COPY.STAFF_ATTENDANCE_OK,
-      attendance,
+      attendance:
+        normalizedAttendance,
     });
   } catch (err) {
     debug(
@@ -24874,7 +26510,9 @@ async function getProductionPlanDetail(
           attendanceRecords,
         supplementalRecords:
           openAttendanceRecords,
-      });
+      }).map(
+        normalizeStaffAttendanceForResponse,
+      );
     const timelineRows =
       buildTimelineRows({
         progressRecords,
@@ -27487,24 +29125,17 @@ async function logProductionTaskProgress(
         expectedPlots,
       ) || 0;
     const requiredProofCount =
-      resolveTaskProgressProofCount(
-        actualPlots,
+      Math.max(
+        1,
+        resolveTaskProgressProofCount(
+          actualPlots,
+        ),
       );
     const uploadedProofFiles =
       normalizeTaskProgressProofFiles(
         req.files,
       );
     if (
-      requiredProofCount === 0 &&
-      uploadedProofFiles.length > 0
-    ) {
-      return res.status(400).json({
-        error:
-          PRODUCTION_COPY.TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS,
-      });
-    }
-    if (
-      requiredProofCount > 0 &&
       uploadedProofFiles.length > 0 &&
       uploadedProofFiles.length !==
         requiredProofCount
@@ -27517,6 +29148,16 @@ async function logProductionTaskProgress(
           uploadedProofFiles.length,
       });
     }
+    const resolvedQuantityUnit =
+      quantityActivityType ===
+        PRODUCTION_QUANTITY_ACTIVITY_NONE ?
+        ""
+      : quantityUnit ||
+        ledgerConfig
+          ?.activityUnits?.[
+            quantityActivityType
+          ] ||
+        "";
     let progress = null;
     let ledger = null;
     let finalProofCount = 0;
@@ -27538,8 +29179,27 @@ async function logProductionTaskProgress(
                 session,
               },
             );
+          const pendingAttendance =
+            await findPendingProofAttendanceForStaffOnWorkDate(
+              {
+                staffProfileId:
+                  effectiveStaffId,
+                workDate:
+                  normalizedWorkDate,
+                taskId: task._id,
+                session,
+              },
+            ) ||
+            await findPendingProofAttendanceForStaffOnWorkDate(
+              {
+                staffProfileId:
+                  effectiveStaffId,
+                workDate:
+                  normalizedWorkDate,
+                session,
+              },
+            );
           const completedAttendance =
-            activeAttendance ||
             await findCompletedAttendanceForStaffOnWorkDate(
               {
                 staffProfileId:
@@ -27560,7 +29220,28 @@ async function logProductionTaskProgress(
               },
             );
 
-          if (!completedAttendance) {
+          if (
+            !activeAttendance &&
+            pendingAttendance
+          ) {
+            throw Object.assign(
+              new Error(
+                PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
+              ),
+              {
+                statusCode: 400,
+                payload: {
+                  attendanceId:
+                    pendingAttendance._id,
+                  requiredProofCount,
+                },
+              },
+            );
+          }
+          if (
+            !activeAttendance &&
+            !completedAttendance
+          ) {
             throw new Error(
               PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_REQUIRED,
             );
@@ -27579,6 +29260,21 @@ async function logProductionTaskProgress(
             await TaskProgress.findOne(
               progressQuery,
             ).session(session);
+          const existingProgressProofDrafts =
+            Array.isArray(
+              existingProgress?.proofs,
+            ) ?
+              existingProgress.proofs.map(
+                (proof, index) => ({
+                  ...proof.toObject?.() || proof,
+                  unitIndex: index + 1,
+                  type:
+                    normalizeStaffAttendanceProofType(
+                      proof?.mimeType,
+                    ),
+                }),
+              )
+            : [];
 
           const currentLedger =
             await recomputeProductionTaskDayLedger(
@@ -27701,77 +29397,306 @@ async function logProductionTaskProgress(
               );
             }
           }
-
-          const existingProofs =
-            Array.isArray(
-              existingProgress?.proofs,
-            ) ?
-              existingProgress.proofs
-            : [];
-          const existingProofCount =
-            existingProofs.length;
-          let proofsToPersist =
-            existingProofs;
-          if (
-            requiredProofCount === 0
-          ) {
-            proofsToPersist = [];
-          } else if (
-            uploadedProofFiles.length > 0
-          ) {
-            proofsToPersist =
-              await uploadTaskProgressProofImages(
+          let attendanceForProgress =
+            completedAttendance;
+          if (activeAttendance) {
+            if (
+              uploadedProofFiles.length > 0 &&
+              uploadedProofFiles.length !==
+                requiredProofCount
+            ) {
+              throw Object.assign(
+                new Error(
+                  PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
+                ),
                 {
-                  businessId,
-                  taskId:
-                    task._id?.toString(),
-                  staffId:
-                    effectiveStaffId,
-                  workDate:
-                    normalizedWorkDate,
-                  files:
-                    uploadedProofFiles,
-                  uploadedBy:
-                    actor._id,
+                  statusCode: 400,
+                  payload: {
+                    requiredProofCount,
+                    providedProofCount:
+                      uploadedProofFiles.length,
+                    attendanceId:
+                      activeAttendance._id,
+                  },
                 },
               );
+            }
+            activeAttendance.clockOutAt =
+              new Date();
+            activeAttendance.clockOutBy =
+              actor._id;
+            activeAttendance.durationMinutes =
+              Math.max(
+                0,
+                Math.round(
+                  (
+                    activeAttendance.clockOutAt.getTime() -
+                    new Date(
+                      activeAttendance.clockInAt ||
+                        activeAttendance.clockOutAt,
+                    ).getTime()
+                  ) /
+                    MS_PER_MINUTE,
+                ),
+              );
+            activeAttendance.planId =
+              plan._id;
+            activeAttendance.taskId =
+              task._id;
+            activeAttendance.workDate =
+              normalizedWorkDate;
+            activeAttendance.notes =
+              notes ||
+              activeAttendance.notes ||
+              "";
+            const activeAttendanceProofs =
+              uploadedProofFiles.length > 0 ?
+                await uploadAndMergeAttendanceProofs(
+                  {
+                    businessId,
+                    attendance:
+                      activeAttendance,
+                    actorId: actor._id,
+                    files:
+                      uploadedProofFiles,
+                    startingUnitIndex: 1,
+                  },
+                )
+              : mergeStaffAttendanceProofs(
+                  {
+                    existingProofs:
+                      normalizeStaffAttendanceProofs(
+                        activeAttendance,
+                      ),
+                    nextProofs:
+                      existingProgressProofDrafts,
+                  },
+                );
+            const activeAttendanceAudit =
+              buildStaffAttendanceClockOutAudit(
+                {
+                  attendance:
+                    activeAttendance,
+                  rawAudit: {
+                    workDate:
+                      normalizedWorkDate,
+                    planId:
+                      plan._id,
+                    taskId:
+                      task._id,
+                    staffProfileId:
+                      effectiveStaffId,
+                    unitId:
+                      effectiveUnitId ||
+                      null,
+                    unitsCompleted:
+                      actualPlots,
+                    requiredProofs:
+                      requiredProofCount,
+                    quantityActivityType,
+                    quantityAmount:
+                      effectiveQuantityAmount,
+                    quantityUnit:
+                      resolvedQuantityUnit,
+                    notes,
+                    capturedAt:
+                      new Date(),
+                  },
+                  workDate:
+                    normalizedWorkDate,
+                  planId: plan._id,
+                  taskId: task._id,
+                  staffProfileId:
+                    effectiveStaffId,
+                  notes,
+                  requiredProofs:
+                    requiredProofCount,
+                },
+              );
+            const activeAttendanceState =
+              applyStaffAttendanceCanonicalFields(
+                activeAttendance,
+                {
+                  proofs:
+                    activeAttendanceProofs,
+                  clockOutAudit:
+                    activeAttendanceAudit,
+                  fallbackRequiredProofs:
+                    requiredProofCount,
+                  minimumRequiredProofs:
+                    requiredProofCount,
+                },
+              );
+            if (
+              activeAttendanceState.sessionStatus !==
+              STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED
+            ) {
+              throw Object.assign(
+                new Error(
+                  PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
+                ),
+                {
+                  statusCode: 400,
+                  payload: {
+                    requiredProofCount,
+                    providedProofCount:
+                      activeAttendanceProofs.length,
+                    attendanceId:
+                      activeAttendance._id,
+                  },
+                },
+              );
+            }
+            await activeAttendance.save({
+              session,
+            });
+            attendanceForProgress =
+              activeAttendance;
           } else if (
-            existingProofCount !==
+            completedAttendance
+          ) {
+            const existingAttendanceProofs =
+              normalizeStaffAttendanceProofs(
+                completedAttendance,
+              );
+            const mergedAttendanceProofs =
+              uploadedProofFiles.length > 0 ?
+                await uploadAndMergeAttendanceProofs(
+                  {
+                    businessId,
+                    attendance:
+                      completedAttendance,
+                    actorId: actor._id,
+                    files:
+                      uploadedProofFiles,
+                    startingUnitIndex: 1,
+                  },
+                )
+              : existingAttendanceProofs;
+            const attendanceProofsForState =
+              existingAttendanceProofs.length > 0 ||
+                  uploadedProofFiles.length > 0 ?
+                mergedAttendanceProofs
+              : mergeStaffAttendanceProofs(
+                  {
+                    existingProofs:
+                      existingAttendanceProofs,
+                    nextProofs:
+                      existingProgressProofDrafts,
+                  },
+                );
+            const completedAttendanceAudit =
+              buildStaffAttendanceClockOutAudit(
+                {
+                  attendance:
+                    completedAttendance,
+                  rawAudit:
+                    completedAttendance.clockOutAudit,
+                  workDate:
+                    completedAttendance.workDate ||
+                    normalizedWorkDate,
+                  planId:
+                    completedAttendance.planId ||
+                    plan._id,
+                  taskId:
+                    completedAttendance.taskId ||
+                    task._id,
+                  staffProfileId:
+                    effectiveStaffId,
+                  notes:
+                    notes ||
+                    completedAttendance.notes ||
+                    "",
+                  requiredProofs:
+                    requiredProofCount,
+                },
+              );
+            const completedAttendanceState =
+              applyStaffAttendanceCanonicalFields(
+                completedAttendance,
+                {
+                  proofs:
+                    attendanceProofsForState,
+                  clockOutAudit:
+                    completedAttendanceAudit,
+                  fallbackRequiredProofs:
+                    requiredProofCount,
+                  minimumRequiredProofs:
+                    requiredProofCount,
+                },
+              );
+            if (
+              completedAttendanceState.sessionStatus !==
+                STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED ||
+              normalizeStaffAttendanceProofs(
+                completedAttendance,
+              ).length <
+                requiredProofCount
+            ) {
+              throw Object.assign(
+                new Error(
+                  PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
+                ),
+                {
+                  statusCode: 400,
+                  payload: {
+                    requiredProofCount,
+                    providedProofCount:
+                      normalizeStaffAttendanceProofs(
+                        completedAttendance,
+                      ).length,
+                    attendanceId:
+                      completedAttendance._id,
+                  },
+                },
+              );
+            }
+            await completedAttendance.save({
+              session,
+            });
+            attendanceForProgress =
+              completedAttendance;
+          }
+
+          const proofsToPersist =
+            copyAttendanceProofsToTaskProgressProofs(
+              {
+                attendance:
+                  attendanceForProgress,
+                requiredProofs:
+                  requiredProofCount,
+              },
+            );
+          if (
+            proofsToPersist.length <
             requiredProofCount
           ) {
             throw Object.assign(
               new Error(
-                existingProofCount > 0 ?
-                  PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID
-                : PRODUCTION_COPY.TASK_PROGRESS_PROOFS_REQUIRED,
+                PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
               ),
               {
                 statusCode: 400,
                 payload: {
                   requiredProofCount,
                   providedProofCount:
-                    existingProofCount,
+                    proofsToPersist.length,
+                  attendanceId:
+                    attendanceForProgress?._id ||
+                    null,
                 },
               },
             );
           }
-
-          const resolvedQuantityUnit =
-            quantityActivityType ===
-              PRODUCTION_QUANTITY_ACTIVITY_NONE ?
-              ""
-            : quantityUnit ||
-              ledgerConfig
-                ?.activityUnits?.[
-                  quantityActivityType
-                ] ||
-              "";
           const progressDoc =
             await TaskProgress.findOneAndUpdate(
               progressQuery,
               {
                 $set: {
                   planId: plan._id,
+                  attendanceId:
+                    attendanceForProgress?._id ||
+                    null,
                   unitId:
                     effectiveUnitId ||
                     null,
@@ -27804,10 +29729,12 @@ async function logProductionTaskProgress(
                   sessionStatus:
                     "completed",
                   clockInTime:
-                    completedAttendance.clockInAt ||
+                    attendanceForProgress
+                      ?.clockInAt ||
                     null,
                   clockOutTime:
-                    completedAttendance.clockOutAt ||
+                    attendanceForProgress
+                      ?.clockOutAt ||
                     new Date(),
                 },
                 $setOnInsert: {
@@ -27822,43 +29749,6 @@ async function logProductionTaskProgress(
                 session,
               },
             );
-
-          if (
-            activeAttendance &&
-            !activeAttendance.clockOutAt
-          ) {
-            const resolvedClockOutAt =
-              new Date();
-            activeAttendance.clockOutAt =
-              resolvedClockOutAt;
-            activeAttendance.clockOutBy =
-              actor._id;
-            activeAttendance.durationMinutes =
-              Math.max(
-                0,
-                Math.round(
-                  (
-                    resolvedClockOutAt.getTime() -
-                    new Date(
-                      activeAttendance.clockInAt ||
-                        resolvedClockOutAt,
-                    ).getTime()
-                  ) /
-                    MS_PER_MINUTE,
-                ),
-              );
-            activeAttendance.planId =
-              plan._id;
-            activeAttendance.taskId =
-              task._id;
-            activeAttendance.workDate =
-              normalizedWorkDate;
-            await activeAttendance.save({
-              session,
-            });
-            progressDoc.clockOutTime =
-              resolvedClockOutAt;
-          }
 
           ledger =
             await recomputeProductionTaskDayLedger(
@@ -28202,14 +30092,11 @@ async function logProductionTaskProgressBatch(
         }
       },
     );
-    const completedAttendanceRows =
+    const closedAttendanceRows =
       staffIdsForLookup.length > 0 ?
         await StaffAttendance.find({
           staffProfileId: {
             $in: staffIdsForLookup,
-          },
-          taskId: {
-            $in: taskIdsForLookup,
           },
           clockInAt: {
             $lt: new Date(
@@ -28224,12 +30111,25 @@ async function logProductionTaskProgressBatch(
         })
           .select({
             _id: 1,
+            planId: 1,
             staffProfileId: 1,
             taskId: 1,
             workDate: 1,
             clockInAt: 1,
             clockOutAt: 1,
             durationMinutes: 1,
+            proofUrl: 1,
+            proofPublicId: 1,
+            proofFilename: 1,
+            proofMimeType: 1,
+            proofSizeBytes: 1,
+            proofUploadedAt: 1,
+            proofUploadedBy: 1,
+            proofs: 1,
+            requiredProofs: 1,
+            proofStatus: 1,
+            sessionStatus: 1,
+            clockOutAudit: 1,
           })
           .sort({
             clockOutAt: -1,
@@ -28241,42 +30141,89 @@ async function logProductionTaskProgressBatch(
       new Map();
     const completedAttendanceByStaffId =
       new Map();
-    completedAttendanceRows.forEach(
+    const pendingAttendanceByScopeKey =
+      new Map();
+    const pendingAttendanceByStaffId =
+      new Map();
+    closedAttendanceRows.forEach(
       (row) => {
+        const normalizedRow =
+          normalizeStaffAttendanceForResponse(
+            row,
+          );
         const scopedStaffId =
           normalizeStaffIdInput(
-            row?.staffProfileId,
+            normalizedRow?.staffProfileId,
           );
         const scopedTaskId =
           normalizeStaffIdInput(
-            row?.taskId,
+            normalizedRow?.taskId,
           );
         const scopedWorkDate =
           normalizeWorkDateToDayStart(
-            row?.workDate ||
-              row?.clockOutAt ||
-              row?.clockInAt,
+            normalizedRow?.workDate ||
+              normalizedRow?.clockOutAt ||
+              normalizedRow?.clockInAt,
           );
         if (
-          scopedStaffId &&
-          scopedTaskId &&
-          scopedWorkDate
-        ) {
-          completedAttendanceByScopeKey.set(
-            `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
-            row,
-          );
-        }
-        if (
-          scopedStaffId &&
-          !completedAttendanceByStaffId.has(
-            scopedStaffId,
+          isCompletedStaffAttendance(
+            normalizedRow,
           )
         ) {
-          completedAttendanceByStaffId.set(
-            scopedStaffId,
-            row,
-          );
+          if (
+            scopedStaffId &&
+            scopedTaskId &&
+            scopedWorkDate &&
+            !completedAttendanceByScopeKey.has(
+              `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+            )
+          ) {
+            completedAttendanceByScopeKey.set(
+              `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+              normalizedRow,
+            );
+          }
+          if (
+            scopedStaffId &&
+            !completedAttendanceByStaffId.has(
+              scopedStaffId,
+            )
+          ) {
+            completedAttendanceByStaffId.set(
+              scopedStaffId,
+              normalizedRow,
+            );
+          }
+        }
+        if (
+          isPendingProofStaffAttendance(
+            normalizedRow,
+          )
+        ) {
+          if (
+            scopedStaffId &&
+            scopedTaskId &&
+            scopedWorkDate &&
+            !pendingAttendanceByScopeKey.has(
+              `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+            )
+          ) {
+            pendingAttendanceByScopeKey.set(
+              `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+              normalizedRow,
+            );
+          }
+          if (
+            scopedStaffId &&
+            !pendingAttendanceByStaffId.has(
+              scopedStaffId,
+            )
+          ) {
+            pendingAttendanceByStaffId.set(
+              scopedStaffId,
+              normalizedRow,
+            );
+          }
         }
       },
     );
@@ -28634,8 +30581,15 @@ async function logProductionTaskProgressBatch(
           staffId,
         ) ||
         null;
+      const pendingAttendance =
+        pendingAttendanceByScopeKey.get(
+          attendanceScopeKey,
+        ) ||
+        pendingAttendanceByStaffId.get(
+          staffId,
+        ) ||
+        null;
       const attendanceRecord =
-        activeAttendance ||
         completedAttendanceByScopeKey.get(
           attendanceScopeKey,
         ) ||
@@ -28643,6 +30597,15 @@ async function logProductionTaskProgressBatch(
           staffId,
         ) ||
         null;
+      if (activeAttendance || pendingAttendance) {
+        pushEntryError({
+          errorCode:
+            TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_PROOF_REQUIRED,
+          error:
+            PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
+        });
+        continue;
+      }
       if (!attendanceRecord) {
         pushEntryError({
           errorCode:
@@ -28849,40 +30812,33 @@ async function logProductionTaskProgressBatch(
       }
 
       try {
-        let resolvedClockOutAt =
-          attendanceRecord?.clockOutAt ||
-          null;
+        const requiredProofCount =
+          Math.max(
+            1,
+            resolveTaskProgressProofCount(
+              actualPlots,
+            ),
+          );
+        const proofsToPersist =
+          copyAttendanceProofsToTaskProgressProofs(
+            {
+              attendance:
+                attendanceRecord,
+              requiredProofs:
+                requiredProofCount,
+            },
+          );
         if (
-          activeAttendance &&
-          !activeAttendance.clockOutAt
+          proofsToPersist.length <
+          requiredProofCount
         ) {
-          resolvedClockOutAt =
-            new Date();
-          activeAttendance.clockOutAt =
-            resolvedClockOutAt;
-          activeAttendance.clockOutBy =
-            actor._id;
-          activeAttendance.durationMinutes =
-            Math.max(
-              0,
-              Math.round(
-                (
-                  resolvedClockOutAt.getTime() -
-                  new Date(
-                    activeAttendance.clockInAt ||
-                      resolvedClockOutAt,
-                  ).getTime()
-                ) /
-                  MS_PER_MINUTE,
-              ),
-            );
-          activeAttendance.planId =
-            plan._id;
-          activeAttendance.taskId =
-            task._id;
-          activeAttendance.workDate =
-            normalizedWorkDate;
-          await activeAttendance.save();
+          pushEntryError({
+            errorCode:
+              TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_PROOF_REQUIRED,
+            error:
+              PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
+          });
+          continue;
         }
         const progress =
           await TaskProgress.findOneAndUpdate(
@@ -28897,6 +30853,9 @@ async function logProductionTaskProgressBatch(
             {
               $set: {
                 planId: plan._id,
+                attendanceId:
+                  attendanceRecord?._id ||
+                  null,
                 unitId:
                   effectiveUnitId ||
                   null,
@@ -28915,16 +30874,20 @@ async function logProductionTaskProgressBatch(
                 activityQuantity:
                   quantityAmount,
                 quantityUnit,
-                proofCountRequired: 0,
-                proofCountUploaded: 0,
-                proofs: [],
+                proofCountRequired:
+                  requiredProofCount,
+                proofCountUploaded:
+                  proofsToPersist.length,
+                proofs:
+                  proofsToPersist,
                 sessionStatus:
                   "completed",
                 clockInTime:
                   attendanceRecord
                     ?.clockInAt || null,
                 clockOutTime:
-                  resolvedClockOutAt,
+                  attendanceRecord
+                    ?.clockOutAt || null,
                 delayReason,
                 notes,
               },
@@ -33244,6 +35207,7 @@ module.exports = {
   upsertStaffCompensation,
   clockInStaff,
   clockOutStaff,
+  clockOutStaffWithProof,
   uploadStaffAttendanceProof,
   listStaffAttendance,
   getStaffCapacity,

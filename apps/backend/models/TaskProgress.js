@@ -110,6 +110,13 @@ const taskProgressSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // WHY: Canonical attendance truth must be traceable from each progress row.
+    attendanceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "StaffAttendance",
+      default: null,
+      index: true,
+    },
     // WHY: Every record is a day-level fact for execution tracking.
     workDate: {
       type: Date,

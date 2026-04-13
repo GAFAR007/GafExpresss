@@ -62,6 +62,7 @@ const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
 const String _keyCapturedAt = "capturedAt";
+const String _keyProofStatus = "proofStatus";
 const String _keySessionStatus = "sessionStatus";
 const String _keyUpdatedAt = "updatedAt";
 
@@ -200,6 +201,7 @@ class StaffAttendanceRecord {
   final String? proofUploadedBy;
   final List<StaffAttendanceProof> proofs;
   final StaffAttendanceClockOutAudit? clockOutAudit;
+  final String proofStatus;
   final String sessionStatus;
   final num? numberOfUnitsCompleted;
   final int? requiredProofs;
@@ -227,6 +229,7 @@ class StaffAttendanceRecord {
     required this.proofUploadedBy,
     required this.proofs,
     required this.clockOutAudit,
+    required this.proofStatus,
     required this.sessionStatus,
     required this.numberOfUnitsCompleted,
     required this.requiredProofs,
@@ -263,7 +266,8 @@ class StaffAttendanceRecord {
       proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
       proofs: _parseProofs(json[_keyProofs]),
       clockOutAudit: _parseClockOutAudit(json[_keyClockOutAudit]),
-      sessionStatus: _parseNullableString(json[_keySessionStatus]) ?? "active",
+      proofStatus: _parseNullableString(json[_keyProofStatus]) ?? "",
+      sessionStatus: _parseNullableString(json[_keySessionStatus]) ?? "",
       numberOfUnitsCompleted: _parseNullableNum(
         json[_keyNumberOfUnitsCompleted],
       ),
@@ -273,9 +277,75 @@ class StaffAttendanceRecord {
     );
   }
 
-  // WHY: Open sessions are the ones without a clock-out time.
-  bool get isOpen =>
-      sessionStatus.trim().toLowerCase() == "active" || clockOutAt == null;
+  List<StaffAttendanceProof> get effectiveProofs {
+    if (proofs.isNotEmpty) {
+      return proofs.where((proof) => proof.isUploaded).toList();
+    }
+    final hasLegacyProof =
+        proofUrl?.trim().isNotEmpty == true &&
+        proofFilename?.trim().isNotEmpty == true;
+    if (!hasLegacyProof) {
+      return const <StaffAttendanceProof>[];
+    }
+    return <StaffAttendanceProof>[
+      StaffAttendanceProof(
+        unitIndex: 1,
+        url: proofUrl!.trim(),
+        publicId: proofPublicId?.trim() ?? "",
+        filename: proofFilename!.trim(),
+        mimeType: proofMimeType?.trim() ?? "",
+        type: _resolveProofType(proofMimeType),
+        sizeBytes: proofSizeBytes,
+        uploadedAt: proofUploadedAt,
+        uploadedBy: proofUploadedBy,
+      ),
+    ];
+  }
+
+  int get effectiveRequiredProofs {
+    final auditRequired = clockOutAudit?.requiredProofs;
+    if (auditRequired != null && auditRequired > 0) {
+      return auditRequired;
+    }
+    if (requiredProofs != null && requiredProofs! > 0) {
+      return requiredProofs!;
+    }
+    return clockOutAt == null ? 0 : 1;
+  }
+
+  String get resolvedProofStatus {
+    final normalized = proofStatus.trim().toLowerCase();
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+    if (effectiveRequiredProofs <= 0) {
+      return "not_required";
+    }
+    return effectiveProofs.length >= effectiveRequiredProofs
+        ? "complete"
+        : "missing";
+  }
+
+  String get resolvedSessionStatus {
+    final normalized = sessionStatus.trim().toLowerCase();
+    if (normalized.isNotEmpty && normalized != "active") {
+      return normalized;
+    }
+    if (clockOutAt == null) {
+      return "open";
+    }
+    return needsProof ? "pending_proof" : "completed";
+  }
+
+  bool get isOpen => resolvedSessionStatus == "open";
+
+  bool get isPendingProof => resolvedSessionStatus == "pending_proof";
+
+  bool get isCompleted => resolvedSessionStatus == "completed";
+
+  bool get needsProof =>
+      effectiveRequiredProofs > 0 &&
+      effectiveProofs.length < effectiveRequiredProofs;
 
   int? get effectiveDurationMinutes {
     // WHY: Prefer server-calculated duration for accuracy.
@@ -310,7 +380,7 @@ class StaffAttendanceKpiSummary {
 
     // WHY: Derive counts to power KPI tiles without backend summaries.
     final total = records.length;
-    final completed = records.where((r) => !r.isOpen).length;
+    final completed = records.where((r) => r.isCompleted).length;
     final open = total - completed;
     final durations = records
         .map((record) => record.effectiveDurationMinutes)
@@ -336,6 +406,20 @@ class StaffAttendanceKpiSummary {
 DateTime? _parseDate(dynamic value) {
   if (value == null) return null;
   return DateTime.tryParse(value.toString());
+}
+
+String _resolveProofType(String? mimeType) {
+  final normalizedMimeType = mimeType?.trim().toLowerCase() ?? "";
+  if (normalizedMimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/")) {
+    return "video";
+  }
+  if (normalizedMimeType.isNotEmpty) {
+    return "document";
+  }
+  return "";
 }
 
 int? _parseNullableInt(dynamic value) {

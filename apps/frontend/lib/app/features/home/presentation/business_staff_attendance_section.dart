@@ -26,6 +26,7 @@ import 'package:frontend/app/features/home/presentation/business_staff_attendanc
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_model.dart';
+import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_state.dart';
 import 'package:frontend/app/theme/app_spacing.dart';
@@ -52,8 +53,9 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
     final filters = ref.watch(staffAttendanceFiltersProvider);
     final selectedStaffId = ref.watch(staffAttendanceSelectedStaffProvider);
     final staffAsync = ref.watch(productionStaffProvider);
-    final assetsAsync =
-        ref.watch(businessAssetsProvider(staffAttendanceAssetsQuery));
+    final assetsAsync = ref.watch(
+      businessAssetsProvider(staffAttendanceAssetsQuery),
+    );
 
     // WHY: Build staff map for quick metadata lookups.
     final staffList = staffAsync.asData?.value ?? const [];
@@ -63,11 +65,11 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
       userEmail: session?.user.email,
     );
     // WHY: Resolve "self" staff profile when detail screen id is missing.
-    final selfStaffId = staffProfileId ??
-        actorSelfStaffId;
+    final selfStaffId = staffProfileId ?? actorSelfStaffId;
     // WHY: Determine permissions based on staff role + user role.
-    final selfStaffRole =
-        selfStaffId == null ? null : staffMap[selfStaffId]?.staffRole;
+    final selfStaffRole = selfStaffId == null
+        ? null
+        : staffMap[selfStaffId]?.staffRole;
     final canViewAll = canViewAllAttendance(
       actorRole: session?.user.role,
       staffRole: selfStaffRole,
@@ -76,18 +78,19 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
       actorRole: session?.user.role,
       staffRole: selfStaffRole,
     );
-    final canClockSelf = session?.user.role == "staff" &&
+    final canClockSelf =
+        session?.user.role == "staff" &&
         actorSelfStaffId != null &&
         selfStaffId != null &&
         selfStaffId == actorSelfStaffId;
     // WHY: Clamp scope to self when the actor lacks full access.
     final effectiveScope = canViewAll ? filters.scope : attendanceScopeSelf;
-    final staffIdForQuery =
-        effectiveScope == attendanceScopeSelf ? selfStaffId : null;
+    final staffIdForQuery = effectiveScope == attendanceScopeSelf
+        ? selfStaffId
+        : null;
 
     // WHY: Fetch attendance using scoped staff id when needed.
-    final attendanceAsync =
-        ref.watch(staffAttendanceProvider(staffIdForQuery));
+    final attendanceAsync = ref.watch(staffAttendanceProvider(staffIdForQuery));
     // WHY: Pre-filter records for KPI + list consistency.
     final filteredRecords = attendanceAsync.maybeWhen(
       data: (records) => filterAttendanceRecords(
@@ -137,6 +140,33 @@ class BusinessStaffAttendanceSection extends ConsumerWidget {
           attendanceAsync: attendanceAsync,
           staffAsync: staffAsync,
           filters: filters.copyWith(scope: effectiveScope),
+          onUploadProof: (record) async {
+            try {
+              await requireAttendanceProofUpload(
+                context: context,
+                ref: ref,
+                attendance: record,
+                subjectLabel: resolveStaffName(staffMap, record.staffProfileId),
+              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      record.needsProof
+                          ? "Attendance proof uploaded."
+                          : "Attendance proof updated.",
+                    ),
+                  ),
+                );
+              }
+            } catch (_) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text(staffAttendanceErrorHelper)),
+                );
+              }
+            }
+          },
           onRetry: () {
             AppDebug.log(
               staffAttendanceLogTag,

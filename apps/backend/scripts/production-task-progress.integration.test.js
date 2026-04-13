@@ -19,6 +19,7 @@ const http = require("node:http");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const express = require("express");
+const multer = require("multer");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const {
@@ -45,23 +46,35 @@ const ProductionTask = require("../models/ProductionTask");
 const ProductionTaskDayLedger = require("../models/ProductionTaskDayLedger");
 const StaffAttendance = require("../models/StaffAttendance");
 const TaskProgress = require("../models/TaskProgress");
+const staffAttendanceProofService = require("../services/staff_attendance_proof.service");
 
 const ROUTE_PREFIX =
   "/business/production/tasks";
+const ATTENDANCE_ROUTE_PREFIX =
+  "/business/staff/attendance";
 const OWNER_ROLE = "business_owner";
 const STAFF_ROLE_FARMER = "farmer";
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
+const HTTP_CONFLICT = 409;
 const STATUS_NONE = "none";
 const WORK_DATE_STRING = "2026-04-12";
 const WORK_DATE_NORMALIZED = new Date(
   "2026-04-12T00:00:00.000Z",
 );
 const PLOT_UNIT_SCALE = 1000;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 let server;
 let testDbUri = "";
 let mongoReplSet = null;
+const originalUploadStaffAttendanceProof =
+  staffAttendanceProofService.uploadStaffAttendanceProof;
+const originalUploadStaffAttendanceProofs =
+  staffAttendanceProofService.uploadStaffAttendanceProofs;
 
 const RESET_MODELS = [
   ProductionTaskDayLedger,
@@ -75,9 +88,104 @@ const RESET_MODELS = [
   User,
 ];
 
+function parseTaskProgressProofUploads(
+  req,
+  res,
+  next,
+) {
+  const contentType = (
+    req.headers["content-type"] || ""
+  )
+    .toString()
+    .toLowerCase();
+  if (
+    !contentType.includes(
+      "multipart/form-data",
+    )
+  ) {
+    return next();
+  }
+  return upload.array("proofs", 10)(
+    req,
+    res,
+    next,
+  );
+}
+
+function parseAttendanceProofUploads(
+  req,
+  res,
+  next,
+) {
+  const contentType = (
+    req.headers["content-type"] || ""
+  )
+    .toString()
+    .toLowerCase();
+  if (
+    !contentType.includes(
+      "multipart/form-data",
+    )
+  ) {
+    return next();
+  }
+  return upload.fields([
+    {
+      name: "proof",
+      maxCount: 1,
+    },
+    {
+      name: "proofs",
+      maxCount: 10,
+    },
+  ])(
+    req,
+    res,
+    next,
+  );
+}
+
 function buildProgressApp() {
   const app = express();
   app.use(express.json());
+  app.post(
+    `${ATTENDANCE_ROUTE_PREFIX}/clock-in`,
+    requireAuth,
+    requireAnyRole([
+      OWNER_ROLE,
+      "staff",
+    ]),
+    businessController.clockInStaff,
+  );
+  app.post(
+    `${ATTENDANCE_ROUTE_PREFIX}/clock-out`,
+    requireAuth,
+    requireAnyRole([
+      OWNER_ROLE,
+      "staff",
+    ]),
+    businessController.clockOutStaff,
+  );
+  app.post(
+    `${ATTENDANCE_ROUTE_PREFIX}/clock-out-with-proof`,
+    requireAuth,
+    requireAnyRole([
+      OWNER_ROLE,
+      "staff",
+    ]),
+    parseAttendanceProofUploads,
+    businessController.clockOutStaffWithProof,
+  );
+  app.post(
+    `${ATTENDANCE_ROUTE_PREFIX}/:attendanceId/proof`,
+    requireAuth,
+    requireAnyRole([
+      OWNER_ROLE,
+      "staff",
+    ]),
+    parseAttendanceProofUploads,
+    businessController.uploadStaffAttendanceProof,
+  );
   app.post(
     `${ROUTE_PREFIX}/:taskId/progress`,
     requireAuth,
@@ -85,6 +193,7 @@ function buildProgressApp() {
       OWNER_ROLE,
       "staff",
     ]),
+    parseTaskProgressProofUploads,
     businessController.logProductionTaskProgress,
   );
   return app;
@@ -131,6 +240,54 @@ function buildSeededProofs({
       uploadedBy,
     }),
   );
+}
+
+function buildUploadedProofMetadata({
+  attendanceId,
+  file,
+  unitIndex,
+}) {
+  const normalizedFilename =
+    file?.originalname ||
+    `proof-${unitIndex}.jpg`;
+  const normalizedMimeType =
+    file?.mimetype ||
+    "image/jpeg";
+  const sanitizedFilename =
+    normalizedFilename.replace(
+      /[^a-zA-Z0-9._-]+/g,
+      "-",
+    );
+  return {
+    unitIndex:
+      Math.max(
+        1,
+        Number(unitIndex || 1),
+      ),
+    url: `https://example.test/staff-attendance/${attendanceId}/${unitIndex}/${sanitizedFilename}`,
+    publicId: `staff-attendance/${attendanceId}/${unitIndex}/${sanitizedFilename}`,
+    filename: normalizedFilename,
+    mimeType: normalizedMimeType,
+    type:
+      normalizedMimeType.startsWith(
+        "image/",
+      ) ?
+        "image"
+      : "document",
+    sizeBytes:
+      file?.size ||
+      Buffer.byteLength(
+        file?.buffer || Buffer.alloc(0),
+      ),
+    uploadedAt: new Date(
+      `2026-04-12T${String(
+        Math.min(
+          Math.max(1, Number(unitIndex || 1)),
+          23,
+        ),
+      ).padStart(2, "0")}:00:00.000Z`,
+    ),
+  };
 }
 
 async function requestJson({
@@ -188,6 +345,69 @@ async function requestJson({
   });
 }
 
+async function requestMultipart({
+  method = "POST",
+  routePath,
+  token,
+  fields = {},
+  files = [],
+}) {
+  const formData = new FormData();
+  Object.entries(fields).forEach(
+    ([key, value]) => {
+      if (value == null) {
+        return;
+      }
+      formData.append(
+        key,
+        typeof value === "string" ?
+          value
+        : JSON.stringify(value),
+      );
+    },
+  );
+  files.forEach((file) => {
+    formData.append(
+      file.fieldName || "proof",
+      new Blob(
+        [
+          file.bytes ||
+            Buffer.from(
+              file.content ||
+                file.filename ||
+                "proof",
+            ),
+        ],
+        {
+          type:
+            file.contentType ||
+            "image/jpeg",
+        },
+      ),
+      file.filename || "proof.jpg",
+    );
+  });
+
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}${routePath}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    },
+  );
+  const bodyText = await response.text();
+  return {
+    statusCode: response.status,
+    body:
+      bodyText.trim().length > 0 ?
+        JSON.parse(bodyText)
+      : {},
+  };
+}
+
 async function postProgress({
   token,
   taskId,
@@ -198,6 +418,71 @@ async function postProgress({
     routePath: `${ROUTE_PREFIX}/${taskId}/progress`,
     token,
     payload,
+  });
+}
+
+async function postProgressMultipart({
+  token,
+  taskId,
+  fields,
+  files,
+}) {
+  return requestMultipart({
+    routePath: `${ROUTE_PREFIX}/${taskId}/progress`,
+    token,
+    fields,
+    files,
+  });
+}
+
+async function postClockIn({
+  token,
+  payload,
+}) {
+  return requestJson({
+    method: "POST",
+    routePath: `${ATTENDANCE_ROUTE_PREFIX}/clock-in`,
+    token,
+    payload,
+  });
+}
+
+async function postClockOut({
+  token,
+  payload,
+}) {
+  return requestJson({
+    method: "POST",
+    routePath: `${ATTENDANCE_ROUTE_PREFIX}/clock-out`,
+    token,
+    payload,
+  });
+}
+
+async function postClockOutWithProof({
+  token,
+  fields,
+  files,
+}) {
+  return requestMultipart({
+    routePath: `${ATTENDANCE_ROUTE_PREFIX}/clock-out-with-proof`,
+    token,
+    fields,
+    files,
+  });
+}
+
+async function postAttendanceProof({
+  token,
+  attendanceId,
+  fields,
+  files,
+}) {
+  return requestMultipart({
+    routePath: `${ATTENDANCE_ROUTE_PREFIX}/${attendanceId}/proof`,
+    token,
+    fields,
+    files,
   });
 }
 
@@ -403,6 +688,10 @@ async function createActiveAttendance({
     clockOutAt: null,
     clockInBy: actorId,
     notes: "active attendance for endpoint test",
+    proofs: [],
+    requiredProofs: 0,
+    proofStatus: "not_required",
+    sessionStatus: "open",
   });
 }
 
@@ -555,6 +844,36 @@ async function resetDatabase() {
 }
 
 test.before(async () => {
+  staffAttendanceProofService.uploadStaffAttendanceProof =
+    async ({
+      attendanceId,
+      file,
+      unitIndex = 1,
+    }) =>
+      buildUploadedProofMetadata({
+        attendanceId,
+        file,
+        unitIndex,
+      });
+  staffAttendanceProofService.uploadStaffAttendanceProofs =
+    async ({
+      attendanceId,
+      files,
+      startingUnitIndex = 1,
+    }) =>
+      Promise.all(
+        (files || []).map(
+          (file, index) =>
+            buildUploadedProofMetadata({
+              attendanceId,
+              file,
+              unitIndex:
+                Number(
+                  startingUnitIndex,
+                ) + index,
+            }),
+        ),
+      );
   mongoReplSet =
     await MongoMemoryReplSet.create({
       replSet: {
@@ -592,11 +911,641 @@ test.after(async () => {
     await mongoReplSet.stop();
     mongoReplSet = null;
   }
+  staffAttendanceProofService.uploadStaffAttendanceProof =
+    originalUploadStaffAttendanceProof;
+  staffAttendanceProofService.uploadStaffAttendanceProofs =
+    originalUploadStaffAttendanceProofs;
 });
 
 test.afterEach(async () => {
   await resetDatabase();
 });
+
+test(
+  "clock-out without proof leaves attendance pending_proof and blocks the next clock-in",
+  async () => {
+    const scenario = await seedScenario();
+    const clockInResponse =
+      await postClockIn({
+        token: scenario.token,
+        payload: {
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          notes:
+            "manager clocked in staff A",
+        },
+      });
+
+    assert.equal(
+      clockInResponse.statusCode,
+      201,
+    );
+    const attendanceId =
+      clockInResponse.body.attendance?._id;
+    assert.ok(attendanceId);
+
+    const clockOutResponse =
+      await postClockOut({
+        token: scenario.token,
+        payload: {
+          attendanceId,
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          requiredProofs: 1,
+          notes:
+            "clocked out without uploading proof",
+        },
+      });
+
+    assert.equal(
+      clockOutResponse.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      clockOutResponse.body.attendance?.sessionStatus,
+      "pending_proof",
+    );
+    assert.equal(
+      clockOutResponse.body.attendance?.proofStatus,
+      "missing",
+    );
+    assert.equal(
+      clockOutResponse.body.attendance?.requiredProofs,
+      1,
+    );
+    assert.equal(
+      clockOutResponse.body.attendance?.proofs
+        ?.length,
+      0,
+    );
+    assert.equal(
+      clockOutResponse.body.attendance
+        ?.clockOutAudit
+        ?.requiredProofs,
+      1,
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        attendanceId,
+      ).lean();
+    assert.ok(savedAttendance?.clockOutAt);
+    assert.equal(
+      savedAttendance?.sessionStatus,
+      "pending_proof",
+    );
+    assert.equal(
+      savedAttendance?.proofStatus,
+      "missing",
+    );
+
+    const blockedClockInResponse =
+      await postClockIn({
+        token: scenario.token,
+        payload: {
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: "2026-04-13",
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          notes:
+            "this should be blocked until proof is uploaded",
+        },
+      });
+
+    assert.equal(
+      blockedClockInResponse.statusCode,
+      HTTP_CONFLICT,
+    );
+    assert.equal(
+      blockedClockInResponse.body.error,
+      "Upload the missing proof for the previous attendance session before clocking in again",
+    );
+    assert.equal(
+      blockedClockInResponse.body.attendance
+        ?._id,
+      attendanceId,
+    );
+    assert.equal(
+      blockedClockInResponse.body.attendance
+        ?.sessionStatus,
+      "pending_proof",
+    );
+  },
+);
+
+test(
+  "clock-out-with-proof completes attendance in one request with multiple proofs",
+  async () => {
+    const scenario = await seedScenario();
+    const clockInResponse =
+      await postClockIn({
+        token: scenario.token,
+        payload: {
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          notes:
+            "manager clocked in for single-step proof test",
+        },
+      });
+    const attendanceId =
+      clockInResponse.body.attendance?._id;
+    assert.ok(attendanceId);
+
+    const clockOutWithProofResponse =
+      await postClockOutWithProof({
+        token: scenario.token,
+        fields: {
+          attendanceId,
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          requiredProofs: 2,
+          unitIndex: 1,
+          notes:
+            "clock-out completed with proof in one request",
+          clockOutAudit: {
+            workDate: WORK_DATE_STRING,
+            planId:
+              scenario.planId.toString(),
+            taskId:
+              scenario.taskId.toString(),
+            staffProfileId:
+              scenario.staffProfileAId.toString(),
+            requiredProofs: 2,
+            notes:
+              "single-step clock-out with proof",
+          },
+        },
+        files: [
+          {
+            fieldName: "proofs",
+            filename:
+              "clock-out-proof-1.jpg",
+          },
+          {
+            fieldName: "proofs",
+            filename:
+              "clock-out-proof-2.jpg",
+          },
+        ],
+      });
+
+    assert.equal(
+      clockOutWithProofResponse.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.message,
+      "Clock-out with proof recorded successfully",
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.sessionStatus,
+      "completed",
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.proofStatus,
+      "complete",
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.requiredProofs,
+      2,
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.proofs?.length,
+      2,
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.proofs?.[0]?.filename,
+      "clock-out-proof-1.jpg",
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.proofs?.[1]?.filename,
+      "clock-out-proof-2.jpg",
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.proofFilename,
+      "clock-out-proof-1.jpg",
+    );
+    assert.equal(
+      clockOutWithProofResponse.body.attendance
+        ?.clockOutAudit
+        ?.requiredProofs,
+      2,
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        attendanceId,
+      ).lean();
+    assert.ok(savedAttendance?.clockOutAt);
+    assert.equal(
+      savedAttendance?.sessionStatus,
+      "completed",
+    );
+    assert.equal(
+      savedAttendance?.proofStatus,
+      "complete",
+    );
+    assert.equal(
+      savedAttendance?.proofs?.length,
+      2,
+    );
+  },
+);
+
+test(
+  "proof uploads can accumulate multiple units and retry an existing unit",
+  async () => {
+    const scenario = await seedScenario();
+    const clockInResponse =
+      await postClockIn({
+        token: scenario.token,
+        payload: {
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+        },
+      });
+    const attendanceId =
+      clockInResponse.body.attendance?._id;
+    assert.ok(attendanceId);
+
+    const clockOutResponse =
+      await postClockOut({
+        token: scenario.token,
+        payload: {
+          attendanceId,
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          requiredProofs: 2,
+        },
+      });
+    assert.equal(
+      clockOutResponse.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      clockOutResponse.body.attendance?.sessionStatus,
+      "pending_proof",
+    );
+
+    const firstProofResponse =
+      await postAttendanceProof({
+        token: scenario.token,
+        attendanceId,
+        fields: {
+          unitIndex: 1,
+          requiredProofs: 2,
+          clockOutAudit: {
+            workDate: WORK_DATE_STRING,
+            planId:
+              scenario.planId.toString(),
+            taskId:
+              scenario.taskId.toString(),
+            staffProfileId:
+              scenario.staffProfileAId.toString(),
+            requiredProofs: 2,
+            notes:
+              "first proof upload",
+          },
+        },
+        files: [
+          {
+            fieldName: "proof",
+            filename: "unit-1.jpg",
+          },
+        ],
+      });
+
+    assert.equal(
+      firstProofResponse.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      firstProofResponse.body.attendance
+        ?.sessionStatus,
+      "pending_proof",
+    );
+    assert.equal(
+      firstProofResponse.body.attendance
+        ?.proofStatus,
+      "missing",
+    );
+    assert.equal(
+      firstProofResponse.body.attendance
+        ?.proofs?.length,
+      1,
+    );
+    assert.equal(
+      firstProofResponse.body.attendance
+        ?.proofs?.[0]?.filename,
+      "unit-1.jpg",
+    );
+
+    const secondProofResponse =
+      await postAttendanceProof({
+        token: scenario.token,
+        attendanceId,
+        fields: {
+          unitIndex: 2,
+          requiredProofs: 2,
+        },
+        files: [
+          {
+            fieldName: "proof",
+            filename:
+              "unit-2-first-pass.jpg",
+          },
+        ],
+      });
+
+    assert.equal(
+      secondProofResponse.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      secondProofResponse.body.attendance
+        ?.sessionStatus,
+      "completed",
+    );
+    assert.equal(
+      secondProofResponse.body.attendance
+        ?.proofStatus,
+      "complete",
+    );
+    assert.equal(
+      secondProofResponse.body.attendance
+        ?.proofs?.length,
+      2,
+    );
+    assert.equal(
+      secondProofResponse.body.attendance
+        ?.proofs?.[1]?.filename,
+      "unit-2-first-pass.jpg",
+    );
+
+    const retryProofResponse =
+      await postAttendanceProof({
+        token: scenario.token,
+        attendanceId,
+        fields: {
+          unitIndex: 2,
+          requiredProofs: 2,
+        },
+        files: [
+          {
+            fieldName: "proof",
+            filename:
+              "unit-2-retry.jpg",
+          },
+        ],
+      });
+
+    assert.equal(
+      retryProofResponse.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      retryProofResponse.body.attendance
+        ?.sessionStatus,
+      "completed",
+    );
+    assert.equal(
+      retryProofResponse.body.attendance
+        ?.proofs?.length,
+      2,
+    );
+    assert.equal(
+      retryProofResponse.body.attendance
+        ?.proofs?.[0]?.filename,
+      "unit-1.jpg",
+    );
+    assert.equal(
+      retryProofResponse.body.attendance
+        ?.proofs?.[1]?.filename,
+      "unit-2-retry.jpg",
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        attendanceId,
+      ).lean();
+    assert.equal(
+      savedAttendance?.proofs?.length,
+      2,
+    );
+    assert.equal(
+      savedAttendance?.proofs?.[1]
+        ?.filename,
+      "unit-2-retry.jpg",
+    );
+  },
+);
+
+test(
+  "production progress proof upload and quick clock-out-with-proof end in the same completed attendance state",
+  async () => {
+    const scenario = await seedScenario();
+    const quickClockInResponse =
+      await postClockIn({
+        token: scenario.token,
+        payload: {
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+        },
+      });
+    const quickAttendanceId =
+      quickClockInResponse.body.attendance
+        ?._id;
+    assert.ok(quickAttendanceId);
+
+    const quickClockOutResponse =
+      await postClockOutWithProof({
+        token: scenario.token,
+        fields: {
+          attendanceId:
+            quickAttendanceId,
+          staffProfileId:
+            scenario.staffProfileAId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+          requiredProofs: 1,
+        },
+        files: [
+          {
+            fieldName: "proof",
+            filename:
+              "quick-clock-out-proof.jpg",
+          },
+        ],
+      });
+
+    assert.equal(
+      quickClockOutResponse.statusCode,
+      HTTP_OK,
+    );
+
+    const wizardClockInResponse =
+      await postClockIn({
+        token: scenario.token,
+        payload: {
+          staffProfileId:
+            scenario.staffProfileBId.toString(),
+          workDate: WORK_DATE_STRING,
+          planId:
+            scenario.planId.toString(),
+          taskId:
+            scenario.taskId.toString(),
+        },
+      });
+    const wizardAttendanceId =
+      wizardClockInResponse.body.attendance
+        ?._id;
+    assert.ok(wizardAttendanceId);
+
+    const wizardProgressResponse =
+      await postProgressMultipart({
+        token: scenario.token,
+        taskId:
+          scenario.taskId.toString(),
+        fields: {
+          workDate: WORK_DATE_STRING,
+          staffId:
+            scenario.staffProfileBId.toString(),
+          activityType:
+            "transplanted",
+          unitContribution: 1,
+          activityQuantity: 250,
+          delayReason: STATUS_NONE,
+          notes:
+            "wizard save closes attendance with proof",
+        },
+        files: [
+          {
+            fieldName: "proofs",
+            filename:
+              "wizard-proof.jpg",
+          },
+        ],
+      });
+
+    assert.equal(
+      wizardProgressResponse.statusCode,
+      HTTP_OK,
+    );
+
+    const quickAttendance =
+      await StaffAttendance.findById(
+        quickAttendanceId,
+      ).lean();
+    const wizardAttendance =
+      await StaffAttendance.findById(
+        wizardAttendanceId,
+      ).lean();
+    const wizardProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskId,
+        staffId:
+          scenario.staffProfileBId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+
+    assert.ok(quickAttendance);
+    assert.ok(wizardAttendance);
+    assert.ok(wizardProgress);
+    assert.equal(
+      wizardProgress?.attendanceId?.toString(),
+      wizardAttendanceId,
+    );
+    assert.equal(
+      wizardProgress?.proofCountRequired,
+      1,
+    );
+    assert.equal(
+      wizardProgress?.proofCountUploaded,
+      1,
+    );
+    assert.equal(
+      wizardProgress?.proofs?.length,
+      1,
+    );
+    assert.equal(
+      wizardProgress?.proofs?.[0]?.filename,
+      "wizard-proof.jpg",
+    );
+
+    [
+      quickAttendance,
+      wizardAttendance,
+    ].forEach((attendance) => {
+      assert.ok(attendance.clockOutAt);
+      assert.equal(
+        attendance.sessionStatus,
+        "completed",
+      );
+      assert.equal(
+        attendance.proofStatus,
+        "complete",
+      );
+      assert.equal(
+        attendance.requiredProofs,
+        1,
+      );
+      assert.equal(
+        attendance.proofs?.length,
+        1,
+      );
+      assert.ok(attendance.clockOutAudit);
+    });
+  },
+);
 
 test(
   "positive unit contribution without proofs is rejected and leaves the shared ledger untouched",
@@ -633,7 +1582,7 @@ test(
     );
     assert.equal(
       response.body.error,
-      "Upload proof images before logging progress",
+      "Complete attendance proof before saving or batching production progress.",
     );
     assert.equal(
       await TaskProgress.countDocuments({
@@ -662,7 +1611,7 @@ test(
 );
 
 test(
-  "no quantity update closes the personal session without changing shared totals",
+  "no quantity update reuses proof-backed attendance without changing shared totals",
   async () => {
     const scenario = await seedScenario({
       plantingTargets: {
@@ -680,6 +1629,14 @@ test(
       taskId: scenario.taskId,
       workDate: WORK_DATE_STRING,
       actorId: scenario.ownerId,
+    });
+    await seedExistingProofDraft({
+      ownerId: scenario.ownerId,
+      planId: scenario.planId,
+      taskId: scenario.taskId,
+      staffId:
+        scenario.staffProfileAId,
+      proofCount: 1,
     });
 
     const response = await postProgress({
@@ -750,11 +1707,11 @@ test(
     );
     assert.equal(
       savedProgress.proofCountRequired,
-      0,
+      1,
     );
     assert.equal(
       savedProgress.proofCountUploaded,
-      0,
+      1,
     );
   },
 );

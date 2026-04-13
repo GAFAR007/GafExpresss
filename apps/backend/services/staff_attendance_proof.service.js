@@ -34,6 +34,23 @@ const SERVICE_NAME = "CLOUDINARY";
 const OPERATION_UPLOAD = "staff_attendance_proof_upload";
 const REQUEST_INTENT = "Upload staff attendance proof";
 
+function resolveProofType(mimeType) {
+  const normalizedMimeType = (mimeType || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/")) {
+    return "video";
+  }
+  if (normalizedMimeType) {
+    return "document";
+  }
+  return "";
+}
+
 function assertCloudinaryConfig() {
   const hasConfig =
     !!process.env.CLOUDINARY_CLOUD_NAME &&
@@ -63,6 +80,7 @@ async function uploadStaffAttendanceProof({
   businessId,
   attendanceId,
   file,
+  unitIndex = 1,
 }) {
   debug("STAFF ATTENDANCE PROOF: upload request", {
     businessId,
@@ -111,11 +129,14 @@ async function uploadStaffAttendanceProof({
     });
 
     return {
+      unitIndex: Math.max(1, Number(unitIndex || 1)),
       url: uploadResult.secure_url,
       publicId: uploadResult.public_id || "",
       filename: file.originalname || "",
       mimeType: file.mimetype || "",
+      type: resolveProofType(file.mimetype),
       sizeBytes: file.size || 0,
+      uploadedAt: new Date(),
     };
   } catch (error) {
     logCloudinaryFailure({
@@ -127,6 +148,30 @@ async function uploadStaffAttendanceProof({
   }
 }
 
+async function uploadStaffAttendanceProofs({
+  businessId,
+  attendanceId,
+  files,
+  startingUnitIndex = 1,
+}) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("Proof file is required");
+  }
+  const uploadedProofs = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const uploadedProof = await uploadStaffAttendanceProof({
+      businessId,
+      attendanceId,
+      file: files[index],
+      unitIndex:
+        Math.max(1, Number(startingUnitIndex || 1)) + index,
+    });
+    uploadedProofs.push(uploadedProof);
+  }
+  return uploadedProofs;
+}
+
 module.exports = {
   uploadStaffAttendanceProof,
+  uploadStaffAttendanceProofs,
 };

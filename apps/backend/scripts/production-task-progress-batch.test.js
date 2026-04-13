@@ -337,6 +337,22 @@ async function createCompletedAttendance({
   const clockOutAt = new Date(
     `${workDate}T17:00:00.000Z`,
   );
+  const proofs = Array.from(
+    { length: 10 },
+    (_, index) => ({
+      unitIndex: index + 1,
+      url: `https://example.test/attendance-proof-${index + 1}.jpg`,
+      publicId: `attendance-proof-${index + 1}`,
+      filename: `attendance-proof-${index + 1}.jpg`,
+      mimeType: "image/jpeg",
+      type: "image",
+      sizeBytes: 1024 + index,
+      uploadedAt: new Date(
+        `${workDate}T1${Math.min(index, 9)}:00:00.000Z`,
+      ),
+      uploadedBy: actorId,
+    }),
+  );
   return StaffAttendance.create({
     staffProfileId,
     planId,
@@ -350,6 +366,17 @@ async function createCompletedAttendance({
     clockInBy: actorId,
     clockOutBy: actorId,
     notes: "seeded for batch test",
+    proofs,
+    requiredProofs: proofs.length,
+    proofStatus: "complete",
+    sessionStatus: "completed",
+    proofUrl: proofs[0].url,
+    proofPublicId: proofs[0].publicId,
+    proofFilename: proofs[0].filename,
+    proofMimeType: proofs[0].mimeType,
+    proofSizeBytes: proofs[0].sizeBytes,
+    proofUploadedAt: proofs[0].uploadedAt,
+    proofUploadedBy: proofs[0].uploadedBy,
   });
 }
 
@@ -376,6 +403,39 @@ async function createActiveAttendance({
     clockInBy: actorId,
     clockOutBy: null,
     notes: "open session for batch test",
+    proofs: [],
+    requiredProofs: 0,
+    proofStatus: "not_required",
+    sessionStatus: "open",
+  });
+}
+
+async function createLegacyClosedAttendanceWithoutProof({
+  staffProfileId,
+  planId,
+  taskId,
+  workDate,
+  actorId,
+}) {
+  const clockInAt = new Date(
+    `${workDate}T08:00:00.000Z`,
+  );
+  const clockOutAt = new Date(
+    `${workDate}T17:00:00.000Z`,
+  );
+  return StaffAttendance.create({
+    staffProfileId,
+    planId,
+    taskId,
+    workDate: new Date(
+      `${workDate}T00:00:00.000Z`,
+    ),
+    clockInAt,
+    clockOutAt,
+    durationMinutes: 540,
+    clockInBy: actorId,
+    clockOutBy: actorId,
+    notes: "legacy closed attendance without proof",
   });
 }
 
@@ -734,7 +794,7 @@ test("all entries succeed and persist TaskProgress rows", async () => {
 });
 
 test(
-  "submit auto-clocks out an open attendance session",
+  "submit rejects an open attendance session until proof is completed",
   async () => {
     const scenario = await seedScenario();
     await StaffAttendance.deleteMany({
@@ -775,11 +835,15 @@ test(
     );
     assert.equal(
       response.body.summary.successCount,
-      1,
+      0,
     );
     assert.equal(
       response.body.summary.errorCount,
-      0,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "ATTENDANCE_PROOF_REQUIRED",
     );
 
     const savedAttendance =
@@ -787,18 +851,9 @@ test(
         activeAttendance._id,
       ).lean();
     assert.ok(savedAttendance);
-    assert.ok(savedAttendance.clockOutAt);
     assert.equal(
-      savedAttendance.clockOutBy.toString(),
-      scenario.ownerId.toString(),
-    );
-    assert.ok(
-      new Date(
-        savedAttendance.clockOutAt,
-      ).getTime() >=
-        new Date(
-          savedAttendance.clockInAt,
-        ).getTime(),
+      savedAttendance.clockOutAt,
+      null,
     );
 
     const savedProgress =
@@ -809,28 +864,15 @@ test(
         workDate:
           WORK_DATE_NORMALIZED,
       }).lean();
-    assert.ok(savedProgress);
     assert.equal(
-      new Date(
-        savedProgress.clockInTime,
-      ).toISOString(),
-      new Date(
-        savedAttendance.clockInAt,
-      ).toISOString(),
-    );
-    assert.equal(
-      new Date(
-        savedProgress.clockOutTime,
-      ).toISOString(),
-      new Date(
-        savedAttendance.clockOutAt,
-      ).toISOString(),
+      savedProgress,
+      null,
     );
   },
 );
 
 test(
-  "submit reuses an open attendance session from another task before auto clock-out",
+  "submit rejects an open attendance session from another task until proof is completed",
   async () => {
     const scenario = await seedScenario();
     await StaffAttendance.deleteMany({
@@ -871,11 +913,15 @@ test(
     );
     assert.equal(
       response.body.summary.successCount,
-      1,
+      0,
     );
     assert.equal(
       response.body.summary.errorCount,
-      0,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "ATTENDANCE_PROOF_REQUIRED",
     );
 
     const savedAttendance =
@@ -883,10 +929,13 @@ test(
         activeAttendance._id,
       ).lean();
     assert.ok(savedAttendance);
-    assert.ok(savedAttendance.clockOutAt);
+    assert.equal(
+      savedAttendance.clockOutAt,
+      null,
+    );
     assert.equal(
       savedAttendance.taskId.toString(),
-      scenario.taskAId.toString(),
+      scenario.taskBId.toString(),
     );
     assert.equal(
       new Date(
@@ -903,14 +952,74 @@ test(
         workDate:
           WORK_DATE_NORMALIZED,
       }).lean();
-    assert.ok(savedProgress);
     assert.equal(
-      new Date(
-        savedProgress.clockOutTime,
-      ).toISOString(),
-      new Date(
-        savedAttendance.clockOutAt,
-      ).toISOString(),
+      savedProgress,
+      null,
+    );
+  },
+);
+
+test(
+  "batch cannot reuse a proofless closed attendance record",
+  async () => {
+    const scenario = await seedScenario();
+    await StaffAttendance.deleteMany({
+      taskId: scenario.taskAId,
+      staffProfileId:
+        scenario.staffProfileAId,
+      workDate:
+        WORK_DATE_NORMALIZED,
+    });
+    await createLegacyClosedAttendanceWithoutProof({
+      staffProfileId:
+        scenario.staffProfileAId,
+      planId: scenario.planId,
+      taskId: scenario.taskAId,
+      workDate: WORK_DATE_STRING,
+      actorId: scenario.ownerId,
+    });
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes:
+            "legacy proofless attendance should not batch",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      0,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "ATTENDANCE_PROOF_REQUIRED",
+    );
+    assert.equal(
+      await TaskProgress.countDocuments({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }),
+      0,
     );
   },
 );

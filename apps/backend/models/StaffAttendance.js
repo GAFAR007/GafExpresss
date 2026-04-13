@@ -18,6 +18,162 @@ const debug = require('../utils/debug');
 
 debug('Loading StaffAttendance model...');
 
+const STAFF_ATTENDANCE_SESSION_STATUSES = [
+  'open',
+  'pending_proof',
+  'completed',
+];
+
+const STAFF_ATTENDANCE_PROOF_STATUSES = [
+  'not_required',
+  'missing',
+  'complete',
+];
+
+const staffAttendanceProofSchema = new mongoose.Schema(
+  {
+    unitIndex: {
+      type: Number,
+      min: 1,
+      default: 1,
+    },
+    url: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    publicId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    filename: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    type: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    sizeBytes: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    uploadedAt: {
+      type: Date,
+      default: null,
+    },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
+const staffAttendanceClockOutAuditSchema = new mongoose.Schema(
+  {
+    workDate: {
+      type: Date,
+      default: null,
+    },
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductionPlan',
+      default: null,
+    },
+    taskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductionTask',
+      default: null,
+    },
+    taskTitle: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    staffProfileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BusinessStaffProfile',
+      default: null,
+    },
+    staffName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    unitId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PlanUnit',
+      default: null,
+    },
+    unitLabel: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    progressUnitLabel: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    unitsCompleted: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    unitsRemaining: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    requiredProofs: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    unitType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    quantityActivityType: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    quantityAmount: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    quantityUnit: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    capturedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const staffAttendanceSchema = new mongoose.Schema(
   {
     // WHY: Connect attendance to a staff profile.
@@ -123,6 +279,37 @@ const staffAttendanceSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    // WHY: Canonical proof storage keeps attendance truth independent of task progress rows.
+    proofs: {
+      type: [staffAttendanceProofSchema],
+      default: [],
+    },
+    // WHY: Recovery and UI enforcement need a persisted proof requirement.
+    requiredProofs: {
+      type: Number,
+      min: 0,
+      default: 0,
+      index: true,
+    },
+    // WHY: A small proof status enum keeps pending-proof recovery explicit.
+    proofStatus: {
+      type: String,
+      enum: STAFF_ATTENDANCE_PROOF_STATUSES,
+      default: 'not_required',
+      index: true,
+    },
+    // WHY: Clock-out audit captures the production context that drove the proof requirement.
+    clockOutAudit: {
+      type: staffAttendanceClockOutAuditSchema,
+      default: null,
+    },
+    // WHY: Session state distinguishes open shifts from closed rows that still need proof.
+    sessionStatus: {
+      type: String,
+      enum: STAFF_ATTENDANCE_SESSION_STATUSES,
+      default: 'open',
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -142,3 +329,7 @@ const StaffAttendance = mongoose.model(
 );
 
 module.exports = StaffAttendance;
+module.exports.STAFF_ATTENDANCE_SESSION_STATUSES =
+  STAFF_ATTENDANCE_SESSION_STATUSES;
+module.exports.STAFF_ATTENDANCE_PROOF_STATUSES =
+  STAFF_ATTENDANCE_PROOF_STATUSES;

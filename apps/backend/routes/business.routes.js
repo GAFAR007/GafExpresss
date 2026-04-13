@@ -66,6 +66,39 @@ function parseTaskProgressProofUploads(
   );
 }
 
+function parseAttendanceProofUploads(
+  req,
+  res,
+  next,
+) {
+  const contentType = (
+    req.headers["content-type"] || ""
+  )
+    .toString()
+    .toLowerCase();
+  if (
+    !contentType.includes(
+      "multipart/form-data",
+    )
+  ) {
+    return next();
+  }
+  return upload.fields([
+    {
+      name: "proof",
+      maxCount: 1,
+    },
+    {
+      name: "proofs",
+      maxCount: 10,
+    },
+  ])(
+    req,
+    res,
+    next,
+  );
+}
+
 /**
  * PRODUCTS
  */
@@ -450,13 +483,24 @@ router.post(
 );
 
 router.post(
+  "/staff/attendance/clock-out-with-proof",
+  requireAuth,
+  requireAnyRole([
+    "business_owner",
+    "staff",
+  ]),
+  parseAttendanceProofUploads,
+  businessController.clockOutStaffWithProof,
+);
+
+router.post(
   "/staff/attendance/:attendanceId/proof",
   requireAuth,
   requireAnyRole([
     "business_owner",
     "staff",
   ]),
-  upload.single("proof"),
+  parseAttendanceProofUploads,
   businessController.uploadStaffAttendanceProof,
 );
 
