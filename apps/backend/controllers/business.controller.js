@@ -584,7 +584,7 @@ const PRODUCTION_COPY = {
   TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
     "Delay reason is required when actual amount is zero",
   TASK_PROGRESS_ATTENDANCE_REQUIRED:
-    "Clock in and clock out before logging progress",
+    "Clock in before logging progress. Clock-out is captured when you save the production log.",
   TASK_PROGRESS_STAFF_ID_INVALID:
     "Staff id is invalid",
   TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN:
@@ -27984,6 +27984,72 @@ async function logProductionTaskProgressBatch(
           ],
         ),
       );
+    const activeAttendanceRows =
+      staffIdsForLookup.length > 0 ?
+        await StaffAttendance.find({
+          staffProfileId: {
+            $in: staffIdsForLookup,
+          },
+          taskId: {
+            $in: taskIdsForLookup,
+          },
+          clockInAt: {
+            $lt: new Date(
+              normalizedWorkDate.getTime() +
+                MS_PER_DAY,
+            ),
+          },
+          clockOutAt: null,
+        })
+          .select({
+            _id: 1,
+            planId: 1,
+            taskId: 1,
+            workDate: 1,
+            staffProfileId: 1,
+            clockInAt: 1,
+            clockOutAt: 1,
+            durationMinutes: 1,
+            clockInBy: 1,
+            clockOutBy: 1,
+          })
+          .sort({
+            clockInAt: -1,
+            _id: -1,
+          })
+      : [];
+    const activeAttendanceByScopeKey =
+      new Map();
+    activeAttendanceRows.forEach(
+      (row) => {
+        const scopedStaffId =
+          normalizeStaffIdInput(
+            row?.staffProfileId,
+          );
+        const scopedTaskId =
+          normalizeStaffIdInput(
+            row?.taskId,
+          );
+        const scopedWorkDate =
+          normalizeWorkDateToDayStart(
+            row?.workDate ||
+              row?.clockInAt,
+          );
+        if (
+          scopedStaffId &&
+          scopedTaskId &&
+          scopedWorkDate &&
+          !activeAttendanceByScopeKey.has(
+            `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+          )
+        ) {
+          activeAttendanceByScopeKey.set(
+            `${scopedStaffId}::${scopedTaskId}::${scopedWorkDate.toISOString()}`,
+            row,
+          );
+        }
+      },
+    );
     const completedAttendanceRows =
       staffIdsForLookup.length > 0 ?
         await StaffAttendance.find({
@@ -28406,15 +28472,22 @@ async function logProductionTaskProgressBatch(
         continue;
       }
 
-      const completedAttendance =
+      const attendanceScopeKey =
+        `${staffId}::${taskId}::${normalizedWorkDate.toISOString()}`;
+      const activeAttendance =
+        activeAttendanceByScopeKey.get(
+          attendanceScopeKey,
+        ) || null;
+      const attendanceRecord =
+        activeAttendance ||
         completedAttendanceByScopeKey.get(
-          `${staffId}::${taskId}::${normalizedWorkDate.toISOString()}`,
+          attendanceScopeKey,
         ) ||
         completedAttendanceByStaffId.get(
           staffId,
         ) ||
         null;
-      if (!completedAttendance) {
+      if (!attendanceRecord) {
         pushEntryError({
           errorCode:
             TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_REQUIRED,
@@ -28620,6 +28693,41 @@ async function logProductionTaskProgressBatch(
       }
 
       try {
+        let resolvedClockOutAt =
+          attendanceRecord?.clockOutAt ||
+          null;
+        if (
+          activeAttendance &&
+          !activeAttendance.clockOutAt
+        ) {
+          resolvedClockOutAt =
+            new Date();
+          activeAttendance.clockOutAt =
+            resolvedClockOutAt;
+          activeAttendance.clockOutBy =
+            actor._id;
+          activeAttendance.durationMinutes =
+            Math.max(
+              0,
+              Math.round(
+                (
+                  resolvedClockOutAt.getTime() -
+                  new Date(
+                    activeAttendance.clockInAt ||
+                      resolvedClockOutAt,
+                  ).getTime()
+                ) /
+                  MS_PER_MINUTE,
+              ),
+            );
+          activeAttendance.planId =
+            plan._id;
+          activeAttendance.taskId =
+            task._id;
+          activeAttendance.workDate =
+            normalizedWorkDate;
+          await activeAttendance.save();
+        }
         const progress =
           await TaskProgress.findOneAndUpdate(
             {
@@ -28657,11 +28765,10 @@ async function logProductionTaskProgressBatch(
                 sessionStatus:
                   "completed",
                 clockInTime:
-                  completedAttendance
+                  attendanceRecord
                     ?.clockInAt || null,
                 clockOutTime:
-                  completedAttendance
-                    ?.clockOutAt || null,
+                  resolvedClockOutAt,
                 delayReason,
                 notes,
               },

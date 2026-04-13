@@ -21,6 +21,9 @@ const assert = require("node:assert/strict");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const {
+  MongoMemoryReplSet,
+} = require("mongodb-memory-server");
 
 // WHY: Load backend env so test DB + JWT secret match runtime expectations.
 require("dotenv").config({
@@ -41,6 +44,8 @@ const BusinessStaffProfile = require("../models/BusinessStaffProfile");
 const ProductionPlan = require("../models/ProductionPlan");
 const ProductionPhase = require("../models/ProductionPhase");
 const ProductionTask = require("../models/ProductionTask");
+const ProductionTaskDayLedger = require("../models/ProductionTaskDayLedger");
+const StaffAttendance = require("../models/StaffAttendance");
 const TaskProgress = require("../models/TaskProgress");
 const {
   HUMANE_WORKLOAD_LIMITS,
@@ -65,7 +70,10 @@ const WORK_DATE_NORMALIZED = new Date(
 let server;
 let baseUrl = "";
 let testDbUri = "";
+let mongoReplSet = null;
 const RESET_MODELS = [
+  ProductionTaskDayLedger,
+  StaffAttendance,
   TaskProgress,
   ProductionTask,
   ProductionPhase,
@@ -74,21 +82,6 @@ const RESET_MODELS = [
   BusinessAsset,
   User,
 ];
-
-function buildTestDbUri(baseUri) {
-  const uri = (baseUri || "").trim();
-  if (!uri) {
-    throw new Error(
-      "MONGO_URI is required for batch endpoint tests",
-    );
-  }
-
-  // WHY: Isolate test writes in a throwaway database to protect shared data.
-  const parsed = new URL(uri);
-  const dbName = `tpb_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
-  parsed.pathname = `/${dbName}`;
-  return parsed.toString();
-}
 
 function buildBatchApp() {
   const app = express();
@@ -299,6 +292,7 @@ async function createTask({
   phaseId,
   title,
   assignedStaffId,
+  assignedStaffProfileIds = [],
   createdBy,
   weight = 2,
 }) {
@@ -309,6 +303,12 @@ async function createTask({
     title,
     roleRequired: STAFF_ROLE_FARMER,
     assignedStaffId,
+    assignedStaffProfileIds:
+      assignedStaffProfileIds.length > 0 ?
+        assignedStaffProfileIds
+      : assignedStaffId ?
+        [assignedStaffId]
+      : [],
     weight,
     startDate: new Date(
       "2026-03-01T00:00:00.000Z",
@@ -321,6 +321,61 @@ async function createTask({
     createdBy,
     assignedBy: createdBy,
     approvalStatus: "approved",
+  });
+}
+
+async function createCompletedAttendance({
+  staffProfileId,
+  planId,
+  taskId,
+  workDate,
+  actorId,
+}) {
+  const clockInAt = new Date(
+    `${workDate}T08:00:00.000Z`,
+  );
+  const clockOutAt = new Date(
+    `${workDate}T17:00:00.000Z`,
+  );
+  return StaffAttendance.create({
+    staffProfileId,
+    planId,
+    taskId,
+    workDate: new Date(
+      `${workDate}T00:00:00.000Z`,
+    ),
+    clockInAt,
+    clockOutAt,
+    durationMinutes: 540,
+    clockInBy: actorId,
+    clockOutBy: actorId,
+    notes: "seeded for batch test",
+  });
+}
+
+async function createActiveAttendance({
+  staffProfileId,
+  planId,
+  taskId,
+  workDate,
+  actorId,
+}) {
+  const clockInAt = new Date(
+    `${workDate}T08:00:00.000Z`,
+  );
+  return StaffAttendance.create({
+    staffProfileId,
+    planId,
+    taskId,
+    workDate: new Date(
+      `${workDate}T00:00:00.000Z`,
+    ),
+    clockInAt,
+    clockOutAt: null,
+    durationMinutes: null,
+    clockInBy: actorId,
+    clockOutBy: null,
+    notes: "open session for batch test",
   });
 }
 
@@ -441,6 +496,9 @@ async function seedScenario() {
     phaseId,
     title: "Task A",
     assignedStaffId: staffProfileAId,
+    assignedStaffProfileIds: [
+      staffProfileAId,
+    ],
     createdBy: ownerId,
     weight: 5,
   });
@@ -450,6 +508,9 @@ async function seedScenario() {
     phaseId,
     title: "Task B",
     assignedStaffId: staffProfileBId,
+    assignedStaffProfileIds: [
+      staffProfileBId,
+    ],
     createdBy: ownerId,
     weight: 3,
   });
@@ -460,9 +521,40 @@ async function seedScenario() {
     title: "Task Mismatch",
     assignedStaffId:
       staffProfileMismatchId,
+    assignedStaffProfileIds: [
+      staffProfileMismatchId,
+    ],
     createdBy: ownerId,
     weight: 2,
   });
+
+  await Promise.all([
+    createCompletedAttendance({
+      staffProfileId:
+        staffProfileAId,
+      planId,
+      taskId: taskAId,
+      workDate: WORK_DATE_STRING,
+      actorId: ownerId,
+    }),
+    createCompletedAttendance({
+      staffProfileId:
+        staffProfileBId,
+      planId,
+      taskId: taskBId,
+      workDate: WORK_DATE_STRING,
+      actorId: ownerId,
+    }),
+    createCompletedAttendance({
+      staffProfileId:
+        staffProfileMismatchId,
+      planId,
+      taskId:
+        taskMismatchId,
+      workDate: WORK_DATE_STRING,
+      actorId: ownerId,
+    }),
+  ]);
 
   return {
     ownerId,
@@ -494,16 +586,23 @@ test.before(async () => {
   process.env.JWT_SECRET =
     process.env.JWT_SECRET ||
     "test_jwt_secret";
-  testDbUri = buildTestDbUri(
-    process.env.MONGO_URI,
-  );
+  mongoReplSet =
+    await MongoMemoryReplSet.create({
+      replSet: {
+        count: 1,
+        storageEngine: "wiredTiger",
+      },
+    });
+  testDbUri =
+    mongoReplSet.getUri(
+      "production_task_progress_batch_test",
+    );
   debug(
     TEST_LOG_TAG,
     "Connecting test database",
     {
-      hasMongoUri: Boolean(
-        process.env.MONGO_URI,
-      ),
+      hasMongoUri:
+        testDbUri.trim().length > 0,
     },
   );
   await mongoose.connect(testDbUri);
@@ -538,6 +637,10 @@ test.after(async () => {
   }
   await purgeTestData();
   await mongoose.disconnect();
+  if (mongoReplSet) {
+    await mongoReplSet.stop();
+    mongoReplSet = null;
+  }
   debug(
     TEST_LOG_TAG,
     "Batch test server stopped",
@@ -603,7 +706,430 @@ test("all entries succeed and persist TaskProgress rows", async () => {
     await countProgressDocs(),
     2,
   );
+  const ledgers =
+    await ProductionTaskDayLedger.find({
+      planId: scenario.planId,
+    })
+      .sort({ taskId: 1 })
+      .lean();
+  assert.equal(ledgers.length, 2);
+  const taskALedger = ledgers.find(
+    (ledger) =>
+      ledger.taskId.toString() ===
+      scenario.taskAId.toString(),
+  );
+  assert.ok(taskALedger);
+  assert.equal(
+    taskALedger.unitTarget,
+    5,
+  );
+  assert.equal(
+    taskALedger.unitCompleted,
+    2,
+  );
+  assert.equal(
+    taskALedger.unitRemaining,
+    3,
+  );
 });
+
+test(
+  "submit auto-clocks out an open attendance session",
+  async () => {
+    const scenario = await seedScenario();
+    await StaffAttendance.deleteMany({
+      taskId: scenario.taskAId,
+      staffProfileId:
+        scenario.staffProfileAId,
+      workDate:
+        WORK_DATE_NORMALIZED,
+    });
+    const activeAttendance =
+      await createActiveAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: scenario.taskAId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      });
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes: "submit should auto clock out",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      1,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      0,
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        activeAttendance._id,
+      ).lean();
+    assert.ok(savedAttendance);
+    assert.ok(savedAttendance.clockOutAt);
+    assert.equal(
+      savedAttendance.clockOutBy.toString(),
+      scenario.ownerId.toString(),
+    );
+    assert.ok(
+      new Date(
+        savedAttendance.clockOutAt,
+      ).getTime() >=
+        new Date(
+          savedAttendance.clockInAt,
+        ).getTime(),
+    );
+
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(savedProgress);
+    assert.equal(
+      new Date(
+        savedProgress.clockInTime,
+      ).toISOString(),
+      new Date(
+        savedAttendance.clockInAt,
+      ).toISOString(),
+    );
+    assert.equal(
+      new Date(
+        savedProgress.clockOutTime,
+      ).toISOString(),
+      new Date(
+        savedAttendance.clockOutAt,
+      ).toISOString(),
+    );
+  },
+);
+
+test(
+  "shared task-day ledger aggregates multiple staff submissions on the same day",
+  async () => {
+    const scenario = await seedScenario();
+    const sharedTaskId =
+      new mongoose.Types.ObjectId();
+    await createTask({
+      id: sharedTaskId,
+      planId: scenario.planId,
+      phaseId: scenario.phaseId,
+      title: "Shared Task",
+      assignedStaffId:
+        scenario.staffProfileAId,
+      assignedStaffProfileIds: [
+        scenario.staffProfileAId,
+        scenario.staffProfileBId,
+      ],
+      createdBy: scenario.ownerId,
+      weight: 5,
+    });
+    await Promise.all([
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileBId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+    ]);
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 3.5,
+          delayReason: STATUS_NONE,
+          notes: "shared worker a",
+        },
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileBId.toString(),
+          actualPlots: 1.5,
+          delayReason: STATUS_NONE,
+          notes: "shared worker b",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      2,
+    );
+    const ledger =
+      await ProductionTaskDayLedger.findOne({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(ledger);
+    assert.equal(
+      ledger.unitCompleted,
+      5,
+    );
+    assert.equal(
+      ledger.unitRemaining,
+      0,
+    );
+    const taskProgressRows =
+      await TaskProgress.find({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.equal(
+      taskProgressRows.length,
+      2,
+    );
+    assert.ok(
+      taskProgressRows.every((row) =>
+        row.taskDayLedgerId &&
+        row.taskDayLedgerId
+          .toString() ===
+          ledger._id.toString(),
+      ),
+    );
+  },
+);
+
+test(
+  "shared task-day ledger prevents oversubmission after an earlier batch entry consumes the remaining target",
+  async () => {
+    const scenario = await seedScenario();
+    const sharedTaskId =
+      new mongoose.Types.ObjectId();
+    await createTask({
+      id: sharedTaskId,
+      planId: scenario.planId,
+      phaseId: scenario.phaseId,
+      title: "Shared Cap Task",
+      assignedStaffId:
+        scenario.staffProfileAId,
+      assignedStaffProfileIds: [
+        scenario.staffProfileAId,
+        scenario.staffProfileBId,
+      ],
+      createdBy: scenario.ownerId,
+      weight: 5,
+    });
+    await Promise.all([
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileBId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+    ]);
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 4,
+          delayReason: STATUS_NONE,
+          notes: "consumed most of the shared target",
+        },
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileBId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes: "tries to exceed the shared balance",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      1,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "TARGET_EXCEEDED",
+    );
+
+    const ledger =
+      await ProductionTaskDayLedger.findOne({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(ledger);
+    assert.equal(
+      ledger.unitCompleted,
+      4,
+    );
+    assert.equal(
+      ledger.unitRemaining,
+      1,
+    );
+
+    const savedRows =
+      await TaskProgress.find({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.equal(
+      savedRows.length,
+      1,
+    );
+    assert.equal(
+      savedRows[0].staffId.toString(),
+      scenario.staffProfileAId.toString(),
+    );
+  },
+);
+
+test(
+  "next-day batch logging creates a separate ledger for the same task",
+  async () => {
+    const scenario = await seedScenario();
+    const nextDay =
+      "2026-03-11";
+    await createCompletedAttendance({
+      staffProfileId:
+        scenario.staffProfileAId,
+      planId: scenario.planId,
+      taskId: scenario.taskAId,
+      workDate: nextDay,
+      actorId: scenario.ownerId,
+    });
+
+    await postBatch({
+      token: scenario.token,
+      workDate: WORK_DATE_STRING,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes: "day one",
+        },
+      ],
+    });
+    await postBatch({
+      token: scenario.token,
+      workDate: nextDay,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 1,
+          delayReason: STATUS_NONE,
+          notes: "day two",
+        },
+      ],
+    });
+
+    const ledgers =
+      await ProductionTaskDayLedger.find({
+        taskId:
+          scenario.taskAId,
+      })
+        .sort({ workDate: 1 })
+        .lean();
+    assert.equal(
+      ledgers.length,
+      2,
+    );
+    assert.equal(
+      new Date(
+        ledgers[0].workDate,
+      ).toISOString(),
+      WORK_DATE_NORMALIZED.toISOString(),
+    );
+    assert.equal(
+      ledgers[0].unitCompleted,
+      2,
+    );
+    assert.equal(
+      new Date(
+        ledgers[1].workDate,
+      ).toISOString(),
+      new Date(
+        "2026-03-11T00:00:00.000Z",
+      ).toISOString(),
+    );
+    assert.equal(
+      ledgers[1].unitCompleted,
+      1,
+    );
+  },
+);
 
 test("mixed success + failure persists only successful entries", async () => {
   const scenario = await seedScenario();
@@ -884,7 +1410,11 @@ test("upsert updates existing row and preserves approval fields", async () => {
       workDate:
         WORK_DATE_NORMALIZED,
       expectedPlots: 2,
+      expectedPlotUnits: 2000,
       actualPlots: 1,
+      actualPlotUnits: 1000,
+      unitContribution: 1,
+      unitContributionPlotUnits: 1000,
       delayReason: STATUS_RAIN,
       notes: "initial log",
       createdBy: scenario.ownerId,

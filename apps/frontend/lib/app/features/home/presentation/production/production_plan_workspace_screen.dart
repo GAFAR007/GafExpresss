@@ -115,6 +115,8 @@ const String _attendanceNotStartedHint =
     "Use Clock in to start this shift, or Set time if you need to backfill the exact hours.";
 const String _attendanceReadyForProgressHint =
     "Time captured. Next: log progress below, then mark the task done if this assignment is complete.";
+const String _attendanceOpenElsewhereHint =
+    "Staff already has an open attendance session for this day. Close that session or set task-specific time before logging progress here.";
 const String _attendanceDialogTitle = "Set staff attendance";
 const String _attendanceDialogClockInLabel = "Clock in";
 const String _attendanceDialogClockOutLabel = "Clock out";
@@ -166,6 +168,37 @@ const String _logDialogSubmitLabel = "Submit";
 const String _logDialogUploadProofLabel = "Upload proof";
 const String _logDialogReplaceProofLabel = "Replace proof";
 const String _logDialogCancelLabel = "Cancel";
+const String _clockOutWizardTitle = "Clock out";
+const String _clockOutWizardContinueLabel = "Continue";
+const String _clockOutWizardFinishLabel = "Finish";
+const String _clockOutWizardBackLabel = "Back";
+const String _clockOutWizardCancelLabel = "Cancel";
+const String _clockOutWizardSuccess = "Clock-out completed.";
+const String _clockOutWizardStepPrimaryTitle =
+    "Step 1: How many units did you complete?";
+const String _clockOutWizardStepProofTitle = "Step 2: Upload proof";
+const String _clockOutWizardStepActivityTitle = "Step 3: Record activity";
+const String _clockOutWizardStepNotesTitle = "Step 4: Add notes";
+const String _clockOutWizardNoProofNeeded =
+    "No proof is required when no primary unit contribution is entered.";
+const String _clockOutWizardProofPicking = "Selecting proof images...";
+const String _clockOutWizardFinishSaving = "Finishing clock-out...";
+const String _clockOutWizardActiveSessionMissing =
+    "No active production session was found for this task.";
+const String _clockOutWizardPrimaryInvalid =
+    "Enter a valid completed amount.";
+const String _clockOutWizardPrimaryRequired =
+    "Enter the completed amount before you continue.";
+const String _clockOutWizardActivityRequired =
+    "Choose the activity type before you continue.";
+const String _clockOutWizardActivityQuantityInvalid =
+    "Enter a valid activity quantity.";
+const String _clockOutWizardDelayRequired =
+    "Choose a delay reason when no units or activity were completed.";
+const String _clockOutWizardStalePrimaryTemplate =
+    "Another staff member updated this task. You can enter up to %s now.";
+const String _clockOutWizardStaleActivityTemplate =
+    "Another staff member updated this activity. You can enter up to %s now.";
 const String _logDialogDelayRequired =
     "Choose a delay reason if this staff completed 0 today.";
 const String _logDialogActualInvalid = "Select a valid progress amount.";
@@ -1121,71 +1154,74 @@ class _ProductionPlanWorkspaceScreenState
                         onLogProgressForStaff: progressEnabledStaffIds.isEmpty
                             ? null
                             : (staffProfileId) async {
-                                final input = await _showWorkspaceLogDialog(
-                                  context,
-                                  workDate: selectedDay,
-                                  task: task,
-                                  plan: detail.plan,
-                                  timelineRows: detail.timelineRows,
-                                  taskDayLedgers: detail.taskDayLedgers,
-                                  staffMap: staffMap,
-                                  planUnitLabelById: planUnitLabelById,
-                                  fallbackTotalUnits:
-                                      workScopeSummary.totalUnits,
-                                  fallbackWorkUnitLabel:
-                                      workScopeSummary.singularLabel,
-                                  attendanceRecords: detail.attendanceRecords,
-                                  actorStaffId: staffProfileId,
-                                  canPickAnyAssignedStaff: false,
-                                  canManageAttendance: canManageTaskAttendance,
-                                  onSetAttendanceForStaff:
-                                      (canManageTaskAttendance ||
-                                          selfStaffId.trim().isNotEmpty)
-                                      ? setAttendanceForTaskStaff
-                                      : null,
-                                  onQuickClockInForStaff:
-                                      (canManageTaskAttendance ||
-                                          selfStaffId.trim().isNotEmpty)
-                                      ? quickClockInForTaskStaff
-                                      : null,
-                                  onQuickClockOutForStaff: null,
-                                );
-                                if (input == null) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                    "staffId": input.staffId,
-                                  },
-                                );
                                 try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .logTaskProgress(
-                                        taskId: task.id,
-                                        workDate: selectedDay,
-                                        staffId: input.staffId,
-                                        unitId: input.unitId,
-                                        unitContribution:
-                                            input.unitContribution,
-                                        actualPlots: input.actualPlots,
-                                        activityType: input.activityType,
-                                        quantityActivityType:
-                                            input.quantityActivityType,
-                                        activityQuantity:
-                                            input.activityQuantity,
-                                        quantityAmount: input.quantityAmount,
-                                        quantityUnit: input.quantityUnit,
-                                        proofs: input.proofs,
-                                        delayReason: input.delayReason,
-                                        notes: input.notes,
-                                        planId: widget.planId,
+                                  ProductionPlanDetail latestDetail = detail;
+                                  try {
+                                    latestDetail = await ref.refresh(
+                                      productionPlanDetailProvider(
+                                        widget.planId,
+                                      ).future,
+                                    );
+                                  } catch (_) {
+                                    latestDetail = detail;
+                                  }
+                                  if (!mounted || !context.mounted) {
+                                    return;
+                                  }
+                                  final completed = await _showWorkspaceClockOutWizard(
+                                    context,
+                                    workDate: selectedDay,
+                                    task: task,
+                                    plan: latestDetail.plan,
+                                    timelineRows: latestDetail.timelineRows,
+                                    taskDayLedgers: latestDetail.taskDayLedgers,
+                                    attendanceRecords:
+                                        latestDetail.attendanceRecords,
+                                    staffMap: staffMap,
+                                    planUnitLabelById: planUnitLabelById,
+                                    fallbackTotalUnits:
+                                        workScopeSummary.totalUnits,
+                                    fallbackWorkUnitLabel:
+                                        workScopeSummary.singularLabel,
+                                    staffId: staffProfileId,
+                                    onSubmit: (input) async {
+                                      AppDebug.log(
+                                        _logTag,
+                                        _logProgress,
+                                        extra: {
+                                          "planId": widget.planId,
+                                          "taskId": task.id,
+                                          "staffId": input.staffId,
+                                        },
                                       );
-                                  _showSnackSafe(_taskProgressSuccess);
+                                      await ref
+                                          .read(productionPlanActionsProvider)
+                                          .logTaskProgress(
+                                            taskId: task.id,
+                                            workDate: selectedDay,
+                                            staffId: input.staffId,
+                                            unitId: input.unitId,
+                                            unitContribution:
+                                                input.unitContribution,
+                                            actualPlots: input.actualPlots,
+                                            activityType: input.activityType,
+                                            quantityActivityType:
+                                                input.quantityActivityType,
+                                            activityQuantity:
+                                                input.activityQuantity,
+                                            quantityAmount:
+                                                input.quantityAmount,
+                                            quantityUnit: input.quantityUnit,
+                                            proofs: input.proofs,
+                                            delayReason: input.delayReason,
+                                            notes: input.notes,
+                                            planId: widget.planId,
+                                          );
+                                    },
+                                  );
+                                  if (completed) {
+                                    _showSnackSafe(_clockOutWizardSuccess);
+                                  }
                                 } catch (error) {
                                   _showSnackSafe(
                                     _resolveProductionWorkspaceErrorMessage(
@@ -3580,20 +3616,47 @@ class _AgendaTaskCard extends StatelessWidget {
           else
             Column(
               children: assignedStaffIds.map((staffId) {
-                final attendance = _attendanceForStaffOnDay(
+                final taskAttendance = _attendanceForStaffOnDay(
                   attendanceRecords: attendanceRecords,
                   staffProfileId: staffId,
                   day: selectedDay,
                   taskId: task.id,
                 );
+                final displayAttendance =
+                    taskAttendance ??
+                    _attendanceForStaffOnDay(
+                      attendanceRecords: attendanceRecords,
+                      staffProfileId: staffId,
+                      day: selectedDay,
+                    );
                 final staffProgress = _findStaffTaskProgressRow(
                   timelineRows: rowsForDay,
                   taskId: task.id,
                   workDate: selectedDay,
                   staffId: staffId,
                 );
-                final clockInAt = attendance?.clockInAt?.toLocal();
-                final clockOutAt = attendance?.clockOutAt?.toLocal();
+                final clockInAt = displayAttendance?.clockInAt?.toLocal();
+                final clockOutAt = displayAttendance?.clockOutAt?.toLocal();
+                final attendanceBelongsToCurrentTask =
+                    displayAttendance != null &&
+                    taskAttendance != null &&
+                    displayAttendance.id.trim() == taskAttendance.id.trim();
+                final hasTaskClockIn = taskAttendance?.clockInAt != null;
+                final hasTaskClockOut = taskAttendance?.clockOutAt != null;
+                final hasDisplayClockIn = displayAttendance?.clockInAt != null;
+                final hasDisplayClockOut =
+                    displayAttendance?.clockOutAt != null;
+                final quickClockOutAttendance =
+                    taskAttendance != null &&
+                        taskAttendance.clockInAt != null &&
+                        taskAttendance.clockOutAt == null
+                    ? taskAttendance
+                    : (!attendanceBelongsToCurrentTask &&
+                              displayAttendance != null &&
+                              displayAttendance.clockInAt != null &&
+                              displayAttendance.clockOutAt == null
+                          ? displayAttendance
+                          : null);
                 final hasLoggedProgress = staffProgress != null;
                 final canClockOwnTaskAttendance =
                     currentActorStaffId.trim().isNotEmpty &&
@@ -3620,8 +3683,10 @@ class _AgendaTaskCard extends StatelessWidget {
                             : (clockInAt != null
                                   ? _attendanceClockOutPendingLabel
                                   : _attendanceClockOutUnsetLabel),
-                        hasClockIn: attendance?.clockInAt != null,
-                        hasClockOut: attendance?.clockOutAt != null,
+                        hasClockIn: hasDisplayClockIn,
+                        hasClockOut: hasDisplayClockOut,
+                        attendanceBelongsToCurrentTask:
+                            attendanceBelongsToCurrentTask,
                         canManageAttendance: canManageTaskAttendance,
                         canClockSelfAttendance:
                             !canManageTaskAttendance &&
@@ -3629,10 +3694,10 @@ class _AgendaTaskCard extends StatelessWidget {
                             currentActorStaffId.trim() == staffId.trim(),
                         canLogProgress:
                             progressEnabledStaffIds.contains(staffId) &&
-                            attendance?.clockInAt != null,
+                            hasTaskClockIn,
                         attendanceLockedForProgress:
                             progressEnabledStaffIds.contains(staffId) &&
-                            attendance?.clockInAt == null,
+                            !hasTaskClockIn,
                         hasLoggedProgress: hasLoggedProgress,
                         personalUnitContribution:
                             staffProgress?.unitContribution ?? 0,
@@ -3656,29 +3721,42 @@ class _AgendaTaskCard extends StatelessWidget {
                         onQuickClockIn:
                             onQuickClockInForStaff != null &&
                                 (canManageTaskAttendance ||
-                                    canClockOwnTaskAttendance)
-                            ? () => onQuickClockInForStaff!(staffId, attendance)
+                                    canClockOwnTaskAttendance) &&
+                                !hasDisplayClockIn &&
+                                !hasDisplayClockOut
+                            ? () => onQuickClockInForStaff!(
+                                staffId,
+                                taskAttendance,
+                              )
                             : null,
                         onQuickClockOut:
                             onLogProgressForStaff != null &&
                                 progressEnabledStaffIds.contains(staffId) &&
-                                attendance?.clockInAt != null &&
-                                attendance?.clockOutAt == null
+                                hasTaskClockIn &&
+                                !hasTaskClockOut
                             ? () => onLogProgressForStaff!(staffId)
                             : onQuickClockOutForStaff != null &&
                                   (canManageTaskAttendance ||
-                                      canClockOwnTaskAttendance)
-                            ? () =>
-                                  onQuickClockOutForStaff!(staffId, attendance)
+                                      canClockOwnTaskAttendance) &&
+                                  quickClockOutAttendance != null
+                            ? () => onQuickClockOutForStaff!(
+                                staffId,
+                                quickClockOutAttendance,
+                              )
                             : null,
-                        onSetAttendance: onSetAttendanceForStaff == null
+                        onSetAttendance:
+                            onSetAttendanceForStaff == null ||
+                                (!attendanceBelongsToCurrentTask &&
+                                    displayAttendance != null)
                             ? null
-                            : () =>
-                                  onSetAttendanceForStaff!(staffId, attendance),
+                            : () => onSetAttendanceForStaff!(
+                                staffId,
+                                taskAttendance,
+                              ),
                         onLogProgress:
                             onLogProgressForStaff == null ||
                                 !progressEnabledStaffIds.contains(staffId) ||
-                                attendance?.clockInAt == null
+                                !hasTaskClockIn
                             ? null
                             : () => onLogProgressForStaff!(staffId),
                       );
@@ -3825,28 +3903,38 @@ class _InfoChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final resolvedForeground = foregroundColor ?? colorScheme.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: backgroundColor ?? colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-        border: borderColor == null ? null : Border.all(color: borderColor!),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: resolvedForeground),
-            const SizedBox(width: 6),
-          ],
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: resolvedForeground,
-              fontWeight: FontWeight.w700,
+    final maxWidth = math.min(
+      360.0,
+      math.max(140.0, MediaQuery.of(context).size.width - 64),
+    );
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: backgroundColor ?? colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(999),
+          border: borderColor == null ? null : Border.all(color: borderColor!),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: resolvedForeground),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                softWrap: true,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: resolvedForeground,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -4011,6 +4099,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final String clockOutValue;
   final bool hasClockIn;
   final bool hasClockOut;
+  final bool attendanceBelongsToCurrentTask;
   final bool canManageAttendance;
   final bool canClockSelfAttendance;
   final bool canLogProgress;
@@ -4037,6 +4126,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.clockOutValue,
     required this.hasClockIn,
     required this.hasClockOut,
+    required this.attendanceBelongsToCurrentTask,
     required this.canManageAttendance,
     required this.canClockSelfAttendance,
     required this.canLogProgress,
@@ -4396,7 +4486,9 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               hasClockIn && hasClockOut
                   ? _attendanceReadyForProgressHint
                   : hasClockIn
-                  ? "Clock Out opens the daily production log and closes this task session after save."
+                  ? attendanceBelongsToCurrentTask
+                        ? "Clock Out opens the daily production log and closes this task session after save."
+                        : _attendanceOpenElsewhereHint
                   : _attendanceNotStartedHint,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: actualAccent,
@@ -4633,7 +4725,7 @@ class _TimelineLogRow extends StatelessWidget {
   }
 }
 
-class _WorkspaceLogProgressInput {
+class ProductionTaskLogProgressInput {
   final String? staffId;
   final String? unitId;
   final num unitContribution;
@@ -4644,7 +4736,7 @@ class _WorkspaceLogProgressInput {
   final String delayReason;
   final String notes;
 
-  const _WorkspaceLogProgressInput({
+  const ProductionTaskLogProgressInput({
     required this.staffId,
     required this.unitId,
     required this.unitContribution,
@@ -6300,7 +6392,1632 @@ Future<List<String>?> _showTaskAssignmentDialog(
   );
 }
 
-Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
+enum _WorkspaceClockOutWizardStep { primary, proof, activity, notes }
+
+Future<bool> _showWorkspaceClockOutWizard(
+  BuildContext context, {
+  required DateTime workDate,
+  required ProductionTask task,
+  required ProductionPlan plan,
+  required List<ProductionTimelineRow> timelineRows,
+  required List<ProductionTaskDayLedger> taskDayLedgers,
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required Map<String, BusinessStaffProfileSummary> staffMap,
+  required Map<String, String> planUnitLabelById,
+  required int fallbackTotalUnits,
+  required String fallbackWorkUnitLabel,
+  required String staffId,
+  required Future<void> Function(ProductionTaskLogProgressInput input) onSubmit,
+}) async {
+  final activeAttendance = _attendanceForStaffOnDay(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffId,
+    day: workDate,
+    taskId: task.id,
+  );
+  if (activeAttendance == null ||
+      activeAttendance.clockInAt == null ||
+      activeAttendance.clockOutAt != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(_clockOutWizardActiveSessionMissing)),
+    );
+    return false;
+  }
+
+  final mediaQuery = MediaQuery.of(context);
+  final isCompact = mediaQuery.size.width < 720;
+  final wizard = ProductionClockOutWizardSheet(
+    workDate: workDate,
+    task: task,
+    plan: plan,
+    timelineRows: timelineRows,
+    taskDayLedgers: taskDayLedgers,
+    attendanceRecords: attendanceRecords,
+    activeAttendance: activeAttendance,
+    staffMap: staffMap,
+    planUnitLabelById: planUnitLabelById,
+    fallbackTotalUnits: fallbackTotalUnits,
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    staffId: staffId,
+    onSubmit: onSubmit,
+  );
+
+  if (isCompact) {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return FractionallySizedBox(heightFactor: 0.96, child: wizard);
+      },
+    );
+    return result ?? false;
+  }
+
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      return Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          width: math.min(mediaQuery.size.width * 0.9, 760),
+          height: math.min(mediaQuery.size.height * 0.9, 820),
+          child: wizard,
+        ),
+      );
+    },
+  );
+  return result ?? false;
+}
+
+class ProductionClockOutWizardSheet extends StatefulWidget {
+  final DateTime workDate;
+  final ProductionTask task;
+  final ProductionPlan plan;
+  final List<ProductionTimelineRow> timelineRows;
+  final List<ProductionTaskDayLedger> taskDayLedgers;
+  final List<ProductionAttendanceRecord> attendanceRecords;
+  final ProductionAttendanceRecord activeAttendance;
+  final Map<String, BusinessStaffProfileSummary> staffMap;
+  final Map<String, String> planUnitLabelById;
+  final int fallbackTotalUnits;
+  final String fallbackWorkUnitLabel;
+  final String staffId;
+  final Future<void> Function(ProductionTaskLogProgressInput input) onSubmit;
+  final Future<List<ProductionTaskProgressProofInput>> Function()? onPickProofs;
+
+  const ProductionClockOutWizardSheet({
+    super.key,
+    required this.workDate,
+    required this.task,
+    required this.plan,
+    required this.timelineRows,
+    required this.taskDayLedgers,
+    required this.attendanceRecords,
+    required this.activeAttendance,
+    required this.staffMap,
+    required this.planUnitLabelById,
+    required this.fallbackTotalUnits,
+    required this.fallbackWorkUnitLabel,
+    required this.staffId,
+    required this.onSubmit,
+    this.onPickProofs,
+  });
+
+  @override
+  State<ProductionClockOutWizardSheet> createState() =>
+      _WorkspaceClockOutWizardState();
+}
+
+class _WorkspaceClockOutWizardState extends State<ProductionClockOutWizardSheet> {
+  late final TextEditingController _primaryController;
+  late final TextEditingController _activityQuantityController;
+  late final TextEditingController _notesController;
+  late String? _selectedUnitId;
+  String? _selectedActivityType;
+  String _selectedDelayReason = _delayReasonNone;
+  List<ProductionTaskProgressProofInput> _selectedProofs =
+      <ProductionTaskProgressProofInput>[];
+  _WorkspaceClockOutWizardStep _currentStep =
+      _WorkspaceClockOutWizardStep.primary;
+  String _inlineError = "";
+  bool _isSaving = false;
+  bool _isPickingProofs = false;
+  num? _primaryMaxOverride;
+  final Map<String, num> _activityMaxOverrides = <String, num>{};
+
+  List<String> get _assignedUnitIds => widget.task.assignedUnitIds
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList();
+
+  ProductionTaskDayLedger? get _taskDayLedger => _ledgerForTaskOnDay(
+        taskDayLedgers: widget.taskDayLedgers,
+        taskId: widget.task.id,
+        day: widget.workDate,
+      );
+
+  List<ProductionTimelineRow> get _rowsForTaskOnWorkDate => _rowsForDay(
+        widget.timelineRows,
+        widget.workDate,
+      ).where((row) => row.taskId.trim() == widget.task.id.trim()).toList();
+
+  ProductionTimelineRow? get _existingSelectionRow =>
+      _findExistingProgressRowForSelection(
+        timelineRows: widget.timelineRows,
+        taskId: widget.task.id,
+        workDate: widget.workDate,
+        staffId: widget.staffId,
+        unitId: _selectedUnitId,
+      );
+
+  _FarmQuantitySummary? get _farmQuantitySummary => _summarizeFarmQuantities(
+        plan: widget.plan,
+        timelineRows: widget.timelineRows,
+      );
+
+  DateTime get _clockInAt => widget.activeAttendance.clockInAt!.toLocal();
+
+  String get _staffLabel => _resolveStaffDisplayLabel(
+        widget.staffId,
+        widget.staffMap,
+        fallbackRole: widget.task.roleRequired,
+      );
+
+  String get _progressUnitSingularLabel => _resolveProgressUnitSingularLabel(
+        assignedUnitIds: _assignedUnitIds,
+        planUnitLabelById: widget.planUnitLabelById,
+        selectedUnitId: _selectedUnitId,
+        fallbackWorkUnitLabel: widget.fallbackWorkUnitLabel,
+        contextText:
+            "${widget.plan.title} ${widget.plan.notes} ${widget.task.title} ${widget.task.instructions} ${widget.fallbackWorkUnitLabel}",
+      );
+
+  num get _taskTargetAmount =>
+      _taskDayLedger?.unitTarget ??
+      _resolveTaskProgressTargetAmount(
+        task: widget.task,
+        assignedUnitIds: _assignedUnitIds,
+        fallbackTotalUnits: widget.fallbackTotalUnits,
+      );
+
+  num get _existingSelectionAmount =>
+      _existingSelectionRow?.unitContribution ??
+      _existingSelectionRow?.actualPlots ??
+      0;
+
+  int get _existingSelectionProofCount {
+    final existingRow = _existingSelectionRow;
+    if (existingRow == null) {
+      return 0;
+    }
+    return existingRow.proofCountUploaded > 0
+        ? existingRow.proofCountUploaded
+        : existingRow.proofCount;
+  }
+
+  num get _sharedCompletedBeforeEdit =>
+      _taskDayLedger?.unitCompleted ??
+      _rowsForTaskOnWorkDate.fold<num>(0, (sum, row) => sum + row.actualPlots);
+
+  num get _loggedAmountExcludingSelection =>
+      _sharedCompletedBeforeEdit - _existingSelectionAmount;
+
+  num get _maxPrimaryAmount {
+    if (_primaryMaxOverride != null) {
+      return _primaryMaxOverride!;
+    }
+    final remainingAgainstPlan = _taskTargetAmount - _loggedAmountExcludingSelection;
+    return remainingAgainstPlan < 0 ? 0 : remainingAgainstPlan;
+  }
+
+  num? get _primaryAmount => _parseWizardNumber(_primaryController.text);
+
+  num get _primaryAmountValue => _primaryAmount ?? 0;
+
+  int get _requiredProofCount =>
+      requiredTaskProgressProofCount(_primaryAmountValue);
+
+  int get _proofsProvidedCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.length
+      : _existingSelectionProofCount;
+
+  num get _remainingAfterSave {
+    final remaining = _taskTargetAmount - (_loggedAmountExcludingSelection + _primaryAmountValue);
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _primaryController = TextEditingController();
+    _activityQuantityController = TextEditingController();
+    _notesController = TextEditingController();
+    _selectedUnitId = _assignedUnitIds.isNotEmpty ? _assignedUnitIds.first : null;
+    _syncFromExistingSelection();
+  }
+
+  @override
+  void dispose() {
+    _primaryController.dispose();
+    _activityQuantityController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  void _syncFromExistingSelection() {
+    final existingRow = _existingSelectionRow;
+    final existingContribution =
+        existingRow?.unitContribution ?? existingRow?.actualPlots;
+    _primaryController.text = existingContribution == null
+        ? ""
+        : _formatProgressAmount(existingContribution);
+    final existingActivityType = existingRow == null
+        ? ""
+        : (existingRow.activityType.trim().isNotEmpty
+              ? existingRow.activityType
+              : existingRow.quantityActivityType)
+            .trim();
+    _selectedActivityType =
+        existingActivityType.isEmpty ? null : existingActivityType;
+    final existingActivityQuantity = existingRow == null
+        ? 0
+        : existingRow.activityQuantity > 0
+        ? existingRow.activityQuantity
+        : existingRow.quantityAmount;
+    _activityQuantityController.text =
+        _selectedActivityType == null || _selectedActivityType == _quantityActivityNone
+        ? ""
+        : _formatProgressAmount(existingActivityQuantity);
+    final existingDelayReason = existingRow?.delayReason.trim() ?? "";
+    _selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
+        ? existingDelayReason
+        : _delayReasonNone;
+    _notesController.text = existingRow?.notes ?? "";
+    _selectedProofs = <ProductionTaskProgressProofInput>[];
+    _primaryMaxOverride = null;
+    _activityMaxOverrides.clear();
+    _inlineError = "";
+  }
+
+  num _resolveQuantityTarget(String activityType) {
+    final sharedTarget = _taskDayLedger?.activityTargets.valueFor(activityType);
+    if (sharedTarget != null) {
+      return sharedTarget;
+    }
+    final plantingTargets = widget.plan.plantingTargets;
+    if (plantingTargets == null) {
+      return 0;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return plantingTargets.plannedPlantingQuantity;
+      case _quantityActivityHarvest:
+        return plantingTargets.estimatedHarvestQuantity;
+      default:
+        return 0;
+    }
+  }
+
+  bool _hasQuantityTarget(String activityType) {
+    if (_taskDayLedger?.activityTargets.valueFor(activityType) != null) {
+      return true;
+    }
+    final plantingTargets = widget.plan.plantingTargets;
+    if (plantingTargets == null) {
+      return false;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return true;
+      case _quantityActivityHarvest:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  num _resolveQuantityLogged(String activityType) {
+    if (_taskDayLedger != null) {
+      return _taskDayLedger!.activityCompleted.valueFor(activityType);
+    }
+    final farmQuantitySummary = _farmQuantitySummary;
+    if (farmQuantitySummary == null) {
+      return 0;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+        return farmQuantitySummary.plantingLogged;
+      case _quantityActivityTransplant:
+        return farmQuantitySummary.transplantLogged;
+      case _quantityActivityHarvest:
+        return farmQuantitySummary.harvestLogged;
+      default:
+        return 0;
+    }
+  }
+
+  String _resolveQuantityUnit(String activityType) {
+    if (_taskDayLedger != null) {
+      final sharedUnit = _taskDayLedger!.activityUnits.valueFor(activityType);
+      if (sharedUnit.trim().isNotEmpty) {
+        return sharedUnit;
+      }
+    }
+    final farmQuantitySummary = _farmQuantitySummary;
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return farmQuantitySummary?.plantingUnit ?? "";
+      case _quantityActivityHarvest:
+        return farmQuantitySummary?.harvestUnit ?? "";
+      default:
+        return "";
+    }
+  }
+
+  num _existingSelectionActivityQuantity(String activityType) {
+    final existingRow = _existingSelectionRow;
+    if (existingRow == null) {
+      return 0;
+    }
+    final existingType = (existingRow.activityType.trim().isNotEmpty
+            ? existingRow.activityType
+            : existingRow.quantityActivityType)
+        .trim();
+    if (existingType != activityType) {
+      return 0;
+    }
+    return existingRow.activityQuantity > 0
+        ? existingRow.activityQuantity
+        : existingRow.quantityAmount;
+  }
+
+  num? _maxActivityAmountFor(String activityType) {
+    if (!_hasQuantityTarget(activityType)) {
+      return null;
+    }
+    final override = _activityMaxOverrides[activityType];
+    if (override != null) {
+      return override;
+    }
+    final target = _resolveQuantityTarget(activityType);
+    final logged = _resolveQuantityLogged(activityType);
+    final existingSelectionQuantity =
+        _existingSelectionActivityQuantity(activityType);
+    final remaining = target - (logged - existingSelectionQuantity);
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  num? get _activityQuantity =>
+      _parseWizardNumber(_activityQuantityController.text);
+
+  num get _activityQuantityValue => _activityQuantity ?? 0;
+
+  bool get _delayReasonRequired {
+    final selectedActivityType = _selectedActivityType;
+    return selectedActivityType != null &&
+        selectedActivityType != _quantityActivityNone &&
+        _primaryAmountValue <= 0 &&
+        _activityQuantityValue <= 0;
+  }
+
+  bool _validatePrimary({required bool showError}) {
+    if (_assignedUnitIds.length > 1 &&
+        (_selectedUnitId == null || _selectedUnitId!.trim().isEmpty)) {
+      if (showError) {
+        setState(() {
+          _inlineError = "Choose the work area before you continue.";
+        });
+      }
+      return false;
+    }
+    if (_primaryController.text.trim().isEmpty) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardPrimaryRequired;
+        });
+      }
+      return false;
+    }
+    final parsedAmount = _primaryAmount;
+    if (parsedAmount == null || parsedAmount < 0) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardPrimaryInvalid;
+        });
+      }
+      return false;
+    }
+    if (parsedAmount > _maxPrimaryAmount) {
+      if (showError) {
+        final allowanceLabel = _formatProgressAmountWithUnit(
+          amount: _maxPrimaryAmount,
+          singularUnitLabel: _progressUnitSingularLabel,
+        );
+        setState(() {
+          _inlineError = _clockOutWizardStalePrimaryTemplate.replaceFirst(
+            "%s",
+            allowanceLabel,
+          );
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  bool _validateProof({required bool showError}) {
+    if (_isPickingProofs) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardProofPicking;
+        });
+      }
+      return false;
+    }
+    if (_requiredProofCount == 0) {
+      if (_selectedProofs.isNotEmpty) {
+        if (showError) {
+          setState(() {
+            _inlineError =
+                "Proof images are not allowed when the completed amount is 0.";
+          });
+        }
+        return false;
+      }
+      return true;
+    }
+    if (_proofsProvidedCount != _requiredProofCount) {
+      if (showError) {
+        setState(() {
+          _inlineError =
+              "Upload exactly $_requiredProofCount proof image(s).";
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  bool _validateActivity({required bool showError}) {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null || selectedActivityType.trim().isEmpty) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardActivityRequired;
+        });
+      }
+      return false;
+    }
+    if (selectedActivityType == _quantityActivityNone) {
+      return true;
+    }
+    final parsedQuantity = _activityQuantity;
+    if (parsedQuantity == null || parsedQuantity < 0) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardActivityQuantityInvalid;
+        });
+      }
+      return false;
+    }
+    final maxAllowedQuantity = _maxActivityAmountFor(selectedActivityType);
+    if (maxAllowedQuantity != null && parsedQuantity > maxAllowedQuantity) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardStaleActivityTemplate.replaceFirst(
+            "%s",
+            "${_formatProgressAmount(maxAllowedQuantity)} ${_resolveQuantityUnit(selectedActivityType)}"
+                .trim(),
+          );
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  bool _validateNotes({required bool showError}) {
+    if (_delayReasonRequired && _selectedDelayReason == _delayReasonNone) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardDelayRequired;
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  Future<void> _pickProofs() async {
+    setState(() {
+      _isPickingProofs = true;
+      _inlineError = "";
+    });
+    try {
+      final pickProofs = widget.onPickProofs ?? pickTaskProgressProofImages;
+      final picked = await pickProofs();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedProofs = picked;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _inlineError = _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: "Unable to upload proof right now. Try again.",
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingProofs = false;
+        });
+      }
+    }
+  }
+
+  void _handleSubmitError(Object error) {
+    final dioError = error is DioException ? error : null;
+    final responseData = dioError?.response?.data;
+    final responseMap = responseData is Map<String, dynamic>
+        ? responseData
+        : const <String, dynamic>{};
+    final requiredProofCount = _parseWizardNumber(responseMap["requiredProofCount"]);
+    final maxAllowedPlots = _parseWizardNumber(responseMap["maxAllowedPlots"]);
+    final activityType = (responseMap["activityType"] ?? "")
+        .toString()
+        .trim();
+    final maxAllowedActivityQuantity =
+        _parseWizardNumber(responseMap["maxAllowedActivityQuantity"]);
+    var message = _resolveProductionWorkspaceErrorMessage(
+      error,
+      fallback: _taskProgressFailure,
+    );
+
+    if (maxAllowedPlots != null) {
+      _primaryMaxOverride = maxAllowedPlots;
+      _currentStep = _WorkspaceClockOutWizardStep.primary;
+      message = _clockOutWizardStalePrimaryTemplate.replaceFirst(
+        "%s",
+        _formatProgressAmountWithUnit(
+          amount: maxAllowedPlots,
+          singularUnitLabel: _progressUnitSingularLabel,
+        ),
+      );
+    } else if (requiredProofCount != null || message.toLowerCase().contains("proof")) {
+      _currentStep = _WorkspaceClockOutWizardStep.proof;
+      if (requiredProofCount != null) {
+        message = requiredProofCount <= 0
+            ? _clockOutWizardNoProofNeeded
+            : "Upload exactly ${requiredProofCount.toInt()} proof image(s).";
+      }
+    } else if (activityType.isNotEmpty && maxAllowedActivityQuantity != null) {
+      _activityMaxOverrides[activityType] = maxAllowedActivityQuantity;
+      _selectedActivityType = activityType;
+      _currentStep = _WorkspaceClockOutWizardStep.activity;
+      message = _clockOutWizardStaleActivityTemplate.replaceFirst(
+        "%s",
+        "${_formatProgressAmount(maxAllowedActivityQuantity)} ${_resolveQuantityUnit(activityType)}"
+            .trim(),
+      );
+    } else if (message.contains(_clockOutWizardDelayRequired) ||
+        message.contains(_logDialogDelayRequired)) {
+      _currentStep = _WorkspaceClockOutWizardStep.notes;
+      message = _clockOutWizardDelayRequired;
+    }
+
+    setState(() {
+      _isSaving = false;
+      _inlineError = message;
+    });
+  }
+
+  Future<void> _continueOrFinish() async {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        if (_validatePrimary(showError: true)) {
+          setState(() {
+            _currentStep = _WorkspaceClockOutWizardStep.proof;
+            _inlineError = "";
+          });
+        }
+        return;
+      case _WorkspaceClockOutWizardStep.proof:
+        if (_validateProof(showError: true)) {
+          setState(() {
+            _currentStep = _WorkspaceClockOutWizardStep.activity;
+            _inlineError = "";
+          });
+        }
+        return;
+      case _WorkspaceClockOutWizardStep.activity:
+        if (_validateActivity(showError: true)) {
+          setState(() {
+            _currentStep = _WorkspaceClockOutWizardStep.notes;
+            _inlineError = "";
+          });
+        }
+        return;
+      case _WorkspaceClockOutWizardStep.notes:
+        if (!_validatePrimary(showError: true) ||
+            !_validateProof(showError: true) ||
+            !_validateActivity(showError: true) ||
+            !_validateNotes(showError: true)) {
+          return;
+        }
+        setState(() {
+          _isSaving = true;
+          _inlineError = "";
+        });
+        final selectedActivityType =
+            _selectedActivityType ?? _quantityActivityNone;
+        final input = ProductionTaskLogProgressInput(
+          staffId: widget.staffId,
+          unitId: _selectedUnitId,
+          unitContribution: _primaryAmountValue,
+          proofs: List<ProductionTaskProgressProofInput>.from(_selectedProofs),
+          activityType: selectedActivityType,
+          activityQuantity:
+              selectedActivityType == _quantityActivityNone ? 0 : _activityQuantityValue,
+          quantityUnit:
+              selectedActivityType == _quantityActivityNone
+              ? ""
+              : _resolveQuantityUnit(selectedActivityType),
+          delayReason: _selectedDelayReason,
+          notes: _notesController.text.trim(),
+        );
+        try {
+          await widget.onSubmit(input);
+          if (!mounted) {
+            return;
+          }
+          Navigator.of(context).pop(true);
+        } catch (error) {
+          if (!mounted) {
+            return;
+          }
+          _handleSubmitError(error);
+        }
+    }
+  }
+
+  Widget _buildCompletedSummaries(ThemeData theme) {
+    final summaries = <Widget>[];
+    if (_currentStep.index > _WorkspaceClockOutWizardStep.primary.index &&
+        _primaryController.text.trim().isNotEmpty) {
+      summaries.add(
+        _InfoChip(
+          label:
+              "Units completed: ${_formatProgressAmountWithUnit(amount: _primaryAmountValue, singularUnitLabel: _progressUnitSingularLabel)}",
+          icon: Icons.task_alt_outlined,
+          backgroundColor: _workspaceSoftTeal,
+          foregroundColor: _workspaceTeal,
+          borderColor: _workspaceTeal.withValues(alpha: 0.14),
+        ),
+      );
+    }
+    if (_currentStep.index > _WorkspaceClockOutWizardStep.proof.index) {
+      summaries.add(
+        _InfoChip(
+          label: _requiredProofCount == 0
+              ? "Proofs: none required"
+              : "Proofs: $_proofsProvidedCount/$_requiredProofCount",
+          icon: Icons.photo_library_outlined,
+          backgroundColor: _workspaceSoftBerry,
+          foregroundColor: _workspaceBerry,
+          borderColor: _workspaceBerry.withValues(alpha: 0.14),
+        ),
+      );
+    }
+    if (_currentStep.index > _WorkspaceClockOutWizardStep.activity.index &&
+        _selectedActivityType != null) {
+      final activityType = _selectedActivityType!;
+      summaries.add(
+        _InfoChip(
+          label: activityType == _quantityActivityNone
+              ? "Activity: No quantity update"
+              : "Activity: ${_formatQuantityActivityLabel(activityType)}, ${_formatProgressAmount(_activityQuantityValue)} ${_resolveQuantityUnit(activityType)}"
+                    .trim(),
+          icon: Icons.agriculture_outlined,
+          backgroundColor: _workspaceSoftBlue,
+          foregroundColor: _workspaceBlue,
+          borderColor: _workspaceBlue.withValues(alpha: 0.14),
+        ),
+      );
+    }
+
+    if (summaries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(spacing: 8, runSpacing: 8, children: summaries),
+    );
+  }
+
+  Widget _buildPrimaryStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final isCompact = MediaQuery.of(context).size.width < 720;
+    final maxAllowedLabel = _formatProgressAmountWithUnit(
+      amount: _maxPrimaryAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final plannedLabel = _formatProgressAmountWithUnit(
+      amount: _taskTargetAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final completedLabel = _formatProgressAmountWithUnit(
+      amount: _loggedAmountExcludingSelection + _existingSelectionAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final remainingLabel = _formatProgressAmountWithUnit(
+      amount: _maxPrimaryAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final afterSaveLabel = _formatProgressAmountWithUnit(
+      amount: _remainingAfterSave,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final snapshotCards = <Widget>[
+      _TaskSnapshotCard(
+        label: "Planned",
+        value: plannedLabel,
+        helper: "Task target for today",
+        accentColor: _workspaceAmber,
+        softColor: _workspaceSoftAmber,
+        icon: Icons.event_note_outlined,
+      ),
+      _TaskSnapshotCard(
+        label: "Completed",
+        value: completedLabel,
+        helper: "Already saved today",
+        accentColor: _workspaceTeal,
+        softColor: _workspaceSoftTeal,
+        icon: Icons.insights_outlined,
+      ),
+      _TaskSnapshotCard(
+        label: "Remaining",
+        value: remainingLabel,
+        helper: "Available right now",
+        accentColor: _workspaceBlue,
+        softColor: _workspaceSoftBlue,
+        icon: Icons.track_changes_outlined,
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepPrimaryTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspaceNavy,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "This updates today’s shared task progress.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (isCompact)
+          Column(
+            children: snapshotCards
+                .map(
+                  (card) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: SizedBox(width: double.infinity, child: card),
+                  ),
+                )
+                .toList(),
+          )
+        else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: snapshotCards
+                .map(
+                  (card) => SizedBox(width: 180, child: card),
+                )
+                .toList(),
+          ),
+        if (_assignedUnitIds.length > 1) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _selectedUnitId,
+            decoration: const InputDecoration(
+              labelText: "Work area",
+              helperText: "Choose the area this staff finished work on.",
+            ),
+            items: _assignedUnitIds
+                .map(
+                  (unitId) => DropdownMenuItem<String>(
+                    value: unitId,
+                    child: Text(widget.planUnitLabelById[unitId] ?? unitId),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) {
+                return;
+              }
+              setState(() {
+                _selectedUnitId = value;
+                _syncFromExistingSelection();
+              });
+            },
+          ),
+        ],
+        const SizedBox(height: 12),
+        TextField(
+          controller: _primaryController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: "Units completed now",
+            helperText: "You can enter up to $maxAllowedLabel.",
+            helperMaxLines: 2,
+          ),
+          onChanged: (_) {
+            setState(() {
+              _inlineError = "";
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _workspaceSoftBlue,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _workspaceBlue.withValues(alpha: 0.16)),
+          ),
+          child: Text(
+            "After save, shared remaining will be $afterSaveLabel.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: _workspaceBlue,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProofSlots() {
+    if (_requiredProofCount <= 0) {
+      return const SizedBox.shrink();
+    }
+    final completedSlots = _proofsProvidedCount;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: List<Widget>.generate(_requiredProofCount, (index) {
+        final slotFilled = index < completedSlots;
+        return Container(
+          width: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            color: slotFilled ? _workspaceSoftTeal : _workspaceSoftSlate,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: (slotFilled ? _workspaceTeal : _workspaceNavy)
+                  .withValues(alpha: 0.16),
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(
+                slotFilled ? Icons.check_circle_outline : Icons.image_outlined,
+                size: 20,
+                color: slotFilled ? _workspaceTeal : _workspaceNavy,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Proof ${index + 1}",
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: _workspaceNavy,
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildProofStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final proofStatusText = _requiredProofCount <= 0
+        ? _clockOutWizardNoProofNeeded
+        : _selectedProofs.isNotEmpty
+        ? "${_selectedProofs.length} of $_requiredProofCount uploaded"
+        : _existingSelectionProofCount == _requiredProofCount &&
+              _existingSelectionProofCount > 0
+        ? "Saved proof complete"
+        : "$_proofsProvidedCount of $_requiredProofCount uploaded";
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepProofTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspaceNavy,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _requiredProofCount <= 0
+              ? _clockOutWizardNoProofNeeded
+              : "$_requiredProofCount proof${_requiredProofCount == 1 ? "" : "s"} required",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildProofSlots(),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _workspaceSoftSlate,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _workspaceNavy.withValues(alpha: 0.12)),
+          ),
+          child: Text(
+            proofStatusText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: _workspaceNavy,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _requiredProofCount <= 0 || _isPickingProofs ? null : _pickProofs,
+          icon: Icon(
+            _selectedProofs.isEmpty
+                ? Icons.add_photo_alternate_outlined
+                : Icons.refresh_outlined,
+          ),
+          label: Text(
+            _selectedProofs.isEmpty
+                ? _logDialogUploadProofLabel
+                : _logDialogReplaceProofLabel,
+          ),
+        ),
+        if (_selectedProofs.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _selectedProofs
+                .map(
+                  (proof) => ActionChip(
+                    avatar: const Icon(Icons.image_outlined, size: 18),
+                    label: Text(proof.displayLabel),
+                    onPressed: () {
+                      showProductionTaskProgressPickedProofPreview(
+                        context,
+                        proof: proof,
+                      );
+                    },
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildActivityStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final isCompact = MediaQuery.of(context).size.width < 720;
+    final selectedActivityType = _selectedActivityType;
+    final hasActivitySelection =
+        selectedActivityType != null && selectedActivityType.trim().isNotEmpty;
+    final showActivityQuantity =
+        hasActivitySelection && selectedActivityType != _quantityActivityNone;
+    final hasActivityTarget = hasActivitySelection
+        ? _hasQuantityTarget(selectedActivityType)
+        : false;
+    final activityTarget = hasActivitySelection
+        ? _resolveQuantityTarget(selectedActivityType)
+        : 0;
+    final activityCompleted = hasActivitySelection
+        ? _resolveQuantityLogged(selectedActivityType)
+        : 0;
+    final activityRemaining = hasActivitySelection
+        ? _maxActivityAmountFor(selectedActivityType)
+        : null;
+    final activityUnitLabel = hasActivitySelection
+        ? _resolveQuantityUnit(selectedActivityType)
+        : "";
+    final activityRemainingAfterSave = showActivityQuantity
+        ? (activityRemaining == null
+              ? null
+              : math.max(0, activityRemaining - _activityQuantityValue))
+        : activityRemaining;
+    final activityCards = <Widget>[
+      if (hasActivityTarget)
+        _TaskSnapshotCard(
+          label: "Target",
+          value:
+              "${_formatProgressAmount(activityTarget)} $activityUnitLabel".trim(),
+          helper: "Shared target for today",
+          accentColor: _workspaceAmber,
+          softColor: _workspaceSoftAmber,
+          icon: Icons.flag_outlined,
+        ),
+      _TaskSnapshotCard(
+        label: "Completed",
+        value:
+            "${_formatProgressAmount(activityCompleted)} $activityUnitLabel".trim(),
+        helper: "Already recorded today",
+        accentColor: _workspaceTeal,
+        softColor: _workspaceSoftTeal,
+        icon: Icons.bar_chart_outlined,
+      ),
+      if (hasActivityTarget)
+        _TaskSnapshotCard(
+          label: "Remaining",
+          value:
+              "${_formatProgressAmount(activityRemaining ?? 0)} $activityUnitLabel".trim(),
+          helper: "Available right now",
+          accentColor: _workspaceBlue,
+          softColor: _workspaceSoftBlue,
+          icon: Icons.insights_outlined,
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepActivityTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspaceNavy,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "Choose the production activity for this session.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String?>(
+          initialValue: _selectedActivityType,
+          decoration: const InputDecoration(labelText: "Activity"),
+          items: const [
+            DropdownMenuItem<String?>(
+              value: null,
+              child: Text("Select activity"),
+            ),
+            DropdownMenuItem<String?>(
+              value: _quantityActivityNone,
+              child: Text("No quantity update"),
+            ),
+            DropdownMenuItem<String?>(
+              value: _quantityActivityPlanting,
+              child: Text("Planted"),
+            ),
+            DropdownMenuItem<String?>(
+              value: _quantityActivityTransplant,
+              child: Text("Transplanted"),
+            ),
+            DropdownMenuItem<String?>(
+              value: _quantityActivityHarvest,
+              child: Text("Harvested"),
+            ),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _selectedActivityType = value;
+              _activityQuantityController.text =
+                  value == null || value == _quantityActivityNone ? "" : "0";
+              _inlineError = "";
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        if (!hasActivitySelection)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _workspaceSoftSlate,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(
+              _clockOutWizardActivityRequired,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspaceNavy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        if (selectedActivityType == _quantityActivityNone)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _workspaceSoftSlate,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _workspaceNavy.withValues(alpha: 0.12)),
+            ),
+            child: Text(
+              "No production quantity will be added.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspaceNavy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        if (showActivityQuantity) ...[
+          if (isCompact)
+            Column(
+              children: activityCards
+                  .map(
+                    (card) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: SizedBox(width: double.infinity, child: card),
+                    ),
+                  )
+                  .toList(),
+            )
+          else
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: activityCards
+                  .map(
+                    (card) => SizedBox(width: 180, child: card),
+                  )
+                  .toList(),
+            ),
+          if (!hasActivityTarget) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _workspaceSoftSlate,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _workspaceNavy.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Text(
+                "No shared target is set for this activity today. You can still record the quantity.",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: _workspaceNavy,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            controller: _activityQuantityController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: "Activity quantity",
+              helperText: hasActivityTarget
+                  ? "This updates the shared activity total for today."
+                  : "This records today’s production activity quantity.",
+            ),
+            onChanged: (_) {
+              setState(() {
+                _inlineError = "";
+              });
+            },
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _workspaceSoftBlue,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _workspaceBlue.withValues(alpha: 0.16)),
+            ),
+            child: Text(
+              hasActivityTarget
+                  ? "After save, ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} remaining will be ${_formatProgressAmount(activityRemainingAfterSave ?? 0)} $activityUnitLabel".trim()
+                  : "This updates the shared ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} total for today.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspaceBlue,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildNotesStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final needsDelayReason = _delayReasonRequired;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepNotesTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspaceNavy,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          needsDelayReason
+              ? "Choose why no primary units were completed, then add any useful note."
+              : "Add a delay reason or note if you need one.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: _selectedDelayReason,
+          decoration: InputDecoration(
+            labelText: "Delay reason",
+            helperText: needsDelayReason
+                ? "Delay reason is required when units completed now is 0."
+                : "Optional unless no primary units were completed.",
+          ),
+          items: _delayReasonOptions
+              .map(
+                (value) => DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(_formatDelayReason(value)),
+                ),
+              )
+              .toList(),
+          onChanged: (value) {
+            if (value == null) {
+              return;
+            }
+            setState(() {
+              _selectedDelayReason = value;
+              _inlineError = "";
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _notesController,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: _logDialogNotesLabel,
+            hintText: "Add any useful detail for today.",
+          ),
+          onChanged: (_) {
+            if (_inlineError.isNotEmpty) {
+              setState(() {
+                _inlineError = "";
+              });
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCurrentStep(BuildContext context) {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        return _buildPrimaryStep(context);
+      case _WorkspaceClockOutWizardStep.proof:
+        return _buildProofStep(context);
+      case _WorkspaceClockOutWizardStep.activity:
+        return _buildActivityStep(context);
+      case _WorkspaceClockOutWizardStep.notes:
+        return _buildNotesStep(context);
+    }
+  }
+
+  String _currentStepLabel() {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        return "Step 1 of 4";
+      case _WorkspaceClockOutWizardStep.proof:
+        return "Step 2 of 4";
+      case _WorkspaceClockOutWizardStep.activity:
+        return "Step 3 of 4";
+      case _WorkspaceClockOutWizardStep.notes:
+        return "Step 4 of 4";
+    }
+  }
+
+  String _primaryActionLabel() {
+    return _currentStep == _WorkspaceClockOutWizardStep.notes
+        ? _clockOutWizardFinishLabel
+        : _clockOutWizardContinueLabel;
+  }
+
+  bool _isCurrentStepValid() {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        return _validatePrimary(showError: false);
+      case _WorkspaceClockOutWizardStep.proof:
+        return _validateProof(showError: false);
+      case _WorkspaceClockOutWizardStep.activity:
+        return _validateActivity(showError: false);
+      case _WorkspaceClockOutWizardStep.notes:
+        return _validateNotes(showError: false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isCompact = MediaQuery.of(context).size.width < 720;
+
+    return Material(
+      color: colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _clockOutWizardTitle,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: _workspaceNavy,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "${widget.task.title} • $_staffLabel",
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _InfoChip(
+                              label: _currentStepLabel(),
+                              icon: Icons.linear_scale_outlined,
+                              backgroundColor: _workspaceSoftBlue,
+                              foregroundColor: _workspaceBlue,
+                              borderColor:
+                                  _workspaceBlue.withValues(alpha: 0.14),
+                            ),
+                            _InfoChip(
+                              label: "Clocked in: ${_clockLabel(_clockInAt)}",
+                              icon: Icons.login_outlined,
+                              backgroundColor: _workspaceSoftTeal,
+                              foregroundColor: _workspaceTeal,
+                              borderColor:
+                                  _workspaceTeal.withValues(alpha: 0.14),
+                            ),
+                            _InfoChip(
+                              label: formatDateLabel(widget.workDate),
+                              icon: Icons.event_outlined,
+                              backgroundColor: _workspaceSoftAmber,
+                              foregroundColor: _workspaceAmber,
+                              borderColor:
+                                  _workspaceAmber.withValues(alpha: 0.14),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _isSaving ? null : () => Navigator.of(context).pop(false),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  20,
+                  isCompact ? 20 : 16,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildCompletedSummaries(theme),
+                    _buildCurrentStep(context),
+                    if (_inlineError.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          _inlineError,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onErrorContainer,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                14,
+                20,
+                math.max(20, MediaQuery.of(context).padding.bottom + 12),
+              ),
+              child: isCompact
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton(
+                          onPressed: _isSaving || _isPickingProofs || !_isCurrentStepValid()
+                              ? null
+                              : _continueOrFinish,
+                          child: Text(
+                            _isSaving
+                                ? _clockOutWizardFinishSaving
+                                : _primaryActionLabel(),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _isSaving
+                                ? null
+                                : () {
+                                    if (_currentStep ==
+                                        _WorkspaceClockOutWizardStep.primary) {
+                                      Navigator.of(context).pop(false);
+                                      return;
+                                    }
+                                    setState(() {
+                                      _currentStep =
+                                          _WorkspaceClockOutWizardStep.values[
+                                              _currentStep.index - 1];
+                                      _inlineError = "";
+                                    });
+                                  },
+                            child: Text(
+                              _currentStep == _WorkspaceClockOutWizardStep.primary
+                                  ? _clockOutWizardCancelLabel
+                                  : _clockOutWizardBackLabel,
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        TextButton(
+                          onPressed: _isSaving
+                              ? null
+                              : () {
+                                  if (_currentStep ==
+                                      _WorkspaceClockOutWizardStep.primary) {
+                                    Navigator.of(context).pop(false);
+                                    return;
+                                  }
+                                  setState(() {
+                                    _currentStep =
+                                        _WorkspaceClockOutWizardStep.values[
+                                            _currentStep.index - 1];
+                                    _inlineError = "";
+                                  });
+                                },
+                          child: Text(
+                            _currentStep == _WorkspaceClockOutWizardStep.primary
+                                ? _clockOutWizardCancelLabel
+                                : _clockOutWizardBackLabel,
+                          ),
+                        ),
+                        const Spacer(),
+                        FilledButton(
+                          onPressed:
+                              _isSaving || _isPickingProofs || !_isCurrentStepValid()
+                              ? null
+                              : _continueOrFinish,
+                          child: Text(
+                            _isSaving
+                                ? _clockOutWizardFinishSaving
+                                : _primaryActionLabel(),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+num? _parseWizardNumber(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is num) {
+    return value;
+  }
+  return num.tryParse(value.toString().trim());
+}
+
+Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
   BuildContext context, {
   required DateTime workDate,
   required ProductionTask task,
@@ -6492,8 +8209,8 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                 .trim();
       if (existingRow != null && existingQuantityActivityType.isNotEmpty) {
         selectedQuantityActivityType = existingQuantityActivityType;
-        selectedQuantityAmount = existingQuantityActivityType ==
-                _quantityActivityNone
+        selectedQuantityAmount =
+            existingQuantityActivityType == _quantityActivityNone
             ? 0
             : existingRow.activityQuantity > 0
             ? existingRow.activityQuantity
@@ -6513,7 +8230,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
     workDate,
   ).where((row) => row.taskId.trim() == task.id.trim()).toList();
 
-  final result = await showDialog<_WorkspaceLogProgressInput>(
+  final result = await showDialog<ProductionTaskLogProgressInput>(
     context: context,
     builder: (dialogContext) {
       return StatefulBuilder(
@@ -7145,8 +8862,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           });
                         },
                       ),
-                    if (assignedUnitIds.isNotEmpty)
-                      const SizedBox(height: 12),
+                    if (assignedUnitIds.isNotEmpty) const SizedBox(height: 12),
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
@@ -7268,9 +8984,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                 side: BorderSide(
                                   color: selected
                                       ? _workspaceBlue
-                                      : _workspaceBlue.withValues(
-                                          alpha: 0.18,
-                                        ),
+                                      : _workspaceBlue.withValues(alpha: 0.18),
                                 ),
                                 onSelected: (_) {
                                   setDialogState(() {
@@ -7321,9 +9035,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                     hasSelectedActualAmount
                                         ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmountValue, singularUnitLabel: progressUnitSingularLabel)} for this staff."
                                         : "Select the completed amount from the allowed values below.",
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
+                                    style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
                                           color: _workspaceNavy,
                                           fontWeight: FontWeight.w600,
@@ -7366,9 +9078,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                               children: [
                                 Text(
                                   "Proof images",
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
+                                  style: Theme.of(context).textTheme.titleSmall
                                       ?.copyWith(fontWeight: FontWeight.w800),
                                 ),
                                 const SizedBox(height: 6),
@@ -7616,7 +9326,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           return;
                         }
                         Navigator.of(dialogContext).pop(
-                          _WorkspaceLogProgressInput(
+                          ProductionTaskLogProgressInput(
                             staffId: selectedStaffId,
                             unitId: selectedUnitId,
                             unitContribution: selectedActualAmountValue,

@@ -190,7 +190,7 @@ const String _logProgressActualInvalidText =
 const String _logProgressStaffRequiredText = "Select a staff member";
 const String _logProgressUnitRequiredText = "Select a unit";
 const String _logProgressAttendanceRequiredText =
-    "Clock in and clock out before logging progress";
+    "Clock in before logging progress";
 const String _logProgressZeroDelayValidationText =
     "Select a delay reason when actual amount is zero";
 const String _viewProofLabel = "View proof";
@@ -1313,9 +1313,26 @@ ProductionAttendanceRecord? _findCompletedAttendanceForStaffOnDate({
     if (record.staffProfileId.trim() != normalizedStaffId) {
       continue;
     }
+    final recordWorkDate = record.workDate;
+    if (recordWorkDate != null) {
+      final recordDayStart = DateTime(
+        recordWorkDate.year,
+        recordWorkDate.month,
+        recordWorkDate.day,
+      );
+      if (recordDayStart == dayStart && record.clockInAt != null) {
+        return record;
+      }
+    }
     final clockInAt = record.clockInAt;
     final clockOutAt = record.clockOutAt;
-    if (clockInAt == null || clockOutAt == null) {
+    if (clockInAt == null) {
+      continue;
+    }
+    if (clockOutAt == null) {
+      if (clockInAt.isBefore(dayEnd) && !clockInAt.isBefore(dayStart)) {
+        return record;
+      }
       continue;
     }
     if (clockInAt.isBefore(dayEnd) && !clockOutAt.isBefore(dayStart)) {
@@ -4295,8 +4312,8 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                   staffProfileId: selectedAttendanceStaffId,
                   workDate: selectedDate,
                 );
+          final selectedAttendanceReady = selectedAttendance?.clockInAt != null;
           final selectedAttendanceComplete =
-              selectedAttendance?.clockInAt != null &&
               selectedAttendance?.clockOutAt != null;
           return AlertDialog(
             title: const Text(_logProgressDialogTitle),
@@ -4399,14 +4416,14 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: selectedAttendanceComplete
+                      color: selectedAttendanceReady
                           ? Theme.of(dialogContext).colorScheme.primaryContainer
                           : Theme.of(
                               dialogContext,
                             ).colorScheme.tertiaryContainer,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: selectedAttendanceComplete
+                        color: selectedAttendanceReady
                             ? Theme.of(
                                 dialogContext,
                               ).colorScheme.primary.withValues(alpha: 0.18)
@@ -4421,9 +4438,11 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                         Icon(
                           selectedAttendanceComplete
                               ? Icons.verified_outlined
+                              : selectedAttendanceReady
+                              ? Icons.logout_outlined
                               : Icons.lock_outline,
                           size: 18,
-                          color: selectedAttendanceComplete
+                          color: selectedAttendanceReady
                               ? Theme.of(dialogContext).colorScheme.primary
                               : Theme.of(dialogContext).colorScheme.tertiary,
                         ),
@@ -4432,10 +4451,12 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           child: Text(
                             selectedAttendanceComplete
                                 ? "Attendance complete for this staff on ${formatDateLabel(selectedDate)}."
+                                : selectedAttendanceReady
+                                ? "Clocked in for this staff on ${formatDateLabel(selectedDate)}. Submit will clock them out automatically."
                                 : _logProgressAttendanceRequiredText,
                             style: Theme.of(dialogContext).textTheme.bodySmall
                                 ?.copyWith(
-                                  color: selectedAttendanceComplete
+                                  color: selectedAttendanceReady
                                       ? Theme.of(
                                           dialogContext,
                                         ).colorScheme.primary
@@ -4618,7 +4639,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                 child: const Text(_logProgressCancelLabel),
               ),
               TextButton(
-                onPressed: selectedAttendanceComplete
+                onPressed: selectedAttendanceReady
                     ? () {
                         final actualPlots = num.tryParse(
                           actualPlotsCtrl.text.trim(),
