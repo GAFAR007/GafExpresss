@@ -262,7 +262,7 @@ Future<void> showProductionTaskProgressSavedProofPreview(
     return;
   }
 
-  if (_isImageProof(proof)) {
+  if (_isImageProof(proof) || _looksLikeImageUrl(url)) {
     await _showImagePreviewDialog(
       context,
       title: title,
@@ -439,6 +439,20 @@ bool _isImageProof(ProductionTaskProgressProofRecord proof) {
       filename.endsWith(".heic");
 }
 
+bool _looksLikeImageUrl(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return normalized.contains(".png") ||
+      normalized.contains(".jpg") ||
+      normalized.contains(".jpeg") ||
+      normalized.contains(".gif") ||
+      normalized.contains(".webp") ||
+      normalized.contains(".bmp") ||
+      normalized.contains(".heic");
+}
+
 void _showProofMessage(BuildContext context, String message) {
   ScaffoldMessenger.of(
     context,
@@ -568,22 +582,12 @@ class _ProofRowCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               for (final entry in proofs.asMap().entries)
-                TextButton.icon(
-                  onPressed: entry.value.url.trim().isEmpty
+                _ProofAssetTile(
+                  proof: entry.value,
+                  index: entry.key,
+                  onTap: entry.value.url.trim().isEmpty
                       ? null
                       : () => onOpenProof(entry.value, entry.key),
-                  icon: Icon(
-                    _isImageProof(entry.value)
-                        ? Icons.visibility_outlined
-                        : Icons.attach_file_outlined,
-                  ),
-                  label: Text(
-                    entry.value.filename.trim().isNotEmpty
-                        ? entry.value.filename.trim()
-                        : (_isImageProof(entry.value)
-                              ? "$_browserOpenLabel ${entry.key + 1}"
-                              : "$_previewDocumentLabel ${entry.key + 1}"),
-                  ),
                 ),
             ],
           ),
@@ -591,6 +595,128 @@ class _ProofRowCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ProofAssetTile extends StatelessWidget {
+  final ProductionTaskProgressProofRecord proof;
+  final int index;
+  final VoidCallback? onTap;
+
+  const _ProofAssetTile({
+    required this.proof,
+    required this.index,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final url = proof.url.trim();
+    final title = proof.filename.trim().isNotEmpty
+        ? proof.filename.trim()
+        : "Proof ${index + 1}";
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 148,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: double.infinity,
+                height: 92,
+                child: Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return _ProofAssetFallback(
+                      label: _looksLikeImageUrl(url)
+                          ? "Preview unavailable"
+                          : _previewDocumentLabel,
+                    );
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _buildAssetTileSubtitle(proof, url: url),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProofAssetFallback extends StatelessWidget {
+  final String label;
+
+  const _ProofAssetFallback({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.insert_drive_file_outlined, color: theme.colorScheme.primary),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _buildAssetTileSubtitle(
+  ProductionTaskProgressProofRecord proof, {
+  required String url,
+}) {
+  final parts = <String>[];
+  if (proof.sizeBytes > 0) {
+    parts.add(_formatProofSize(proof.sizeBytes));
+  }
+  if (parts.isNotEmpty) {
+    return parts.join(" • ");
+  }
+  if (_isImageProof(proof) || _looksLikeImageUrl(url)) {
+    return "Tap to preview";
+  }
+  return "Tap to open";
 }
 
 Widget _miniInfoChip(
