@@ -3750,6 +3750,12 @@ class _AgendaTaskCard extends StatelessWidget {
                 final hasDisplayClockOut =
                     displayAttendance?.clockOutAt != null;
                 final hasLoggedProgress = staffProgress != null;
+                final visibleProofs = _resolveWorkspaceVisibleProofs(
+                  progress: staffProgress,
+                  attendance:
+                      taskAttendance ??
+                      (attendanceBelongsToCurrentTask ? displayAttendance : null),
+                );
                 final canResetHistory =
                     taskAttendance != null || hasLoggedProgress;
                 final canUseClockOutWizard =
@@ -3838,6 +3844,7 @@ class _AgendaTaskCard extends StatelessWidget {
                             staffProgress?.quantityAmount ??
                             0,
                         personalQuantityUnit: staffProgress?.quantityUnit ?? "",
+                        visibleProofs: visibleProofs,
                         proofStatusLabel: staffProgress == null
                             ? _resolveAttendanceProofStatusLabel(taskAttendance)
                             : "${staffProgress.proofCountUploaded} / ${staffProgress.proofCountRequired} proofs",
@@ -3888,6 +3895,16 @@ class _AgendaTaskCard extends StatelessWidget {
                             onResetHistoryForStaff == null || !canResetHistory
                             ? null
                             : () => onResetHistoryForStaff!(staffId),
+                        onOpenProof: visibleProofs.isEmpty
+                            ? null
+                            : (proof, index) =>
+                                  showProductionTaskProgressSavedProofPreview(
+                                    context,
+                                    title: proof.filename.trim().isNotEmpty
+                                        ? proof.filename.trim()
+                                        : "Proof ${index + 1}",
+                                    proof: proof,
+                                  ),
                       );
                     },
                   ),
@@ -4239,6 +4256,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final String personalActivityType;
   final num personalActivityQuantity;
   final String personalQuantityUnit;
+  final List<ProductionTaskProgressProofRecord> visibleProofs;
   final String proofStatusLabel;
   final String personalNotes;
   final String delayReason;
@@ -4248,6 +4266,8 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final Future<void> Function()? onSetAttendance;
   final Future<void> Function()? onLogProgress;
   final Future<void> Function()? onResetHistory;
+  final Future<void> Function(ProductionTaskProgressProofRecord proof, int index)?
+  onOpenProof;
 
   const _AssignedStaffAttendanceRow({
     required this.staffName,
@@ -4268,6 +4288,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.personalActivityType,
     required this.personalActivityQuantity,
     required this.personalQuantityUnit,
+    required this.visibleProofs,
     required this.proofStatusLabel,
     required this.personalNotes,
     required this.delayReason,
@@ -4277,6 +4298,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.onSetAttendance,
     required this.onLogProgress,
     required this.onResetHistory,
+    required this.onOpenProof,
   });
 
   @override
@@ -4570,6 +4592,31 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 ),
             ],
           ),
+          if (visibleProofs.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              "Proofs",
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: _workspaceNavy,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final entry in visibleProofs.asMap().entries)
+                  _WorkspaceProofTile(
+                    proof: entry.value,
+                    index: entry.key,
+                    onTap: onOpenProof == null
+                        ? null
+                        : () => onOpenProof!(entry.value, entry.key),
+                  ),
+              ],
+            ),
+          ],
           if (personalNotes.trim().isNotEmpty) ...[
             const SizedBox(height: 10),
             Text(
@@ -4632,6 +4679,122 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceProofTile extends StatelessWidget {
+  final ProductionTaskProgressProofRecord proof;
+  final int index;
+  final VoidCallback? onTap;
+
+  const _WorkspaceProofTile({
+    required this.proof,
+    required this.index,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final filename = proof.filename.trim().isNotEmpty
+        ? proof.filename.trim()
+        : "Proof ${index + 1}";
+    final isImage = _isWorkspaceImageProof(proof);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 138,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.58,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: double.infinity,
+                height: 88,
+                child: isImage
+                    ? Image.network(
+                        proof.url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _WorkspaceProofTileFallback(
+                            icon: Icons.broken_image_outlined,
+                            label: "Preview unavailable",
+                          );
+                        },
+                      )
+                    : const _WorkspaceProofTileFallback(
+                        icon: Icons.insert_drive_file_outlined,
+                        label: "Open file",
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              filename,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspaceNavy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _workspaceProofSubtitle(proof),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceProofTileFallback extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _WorkspaceProofTileFallback({
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainer,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: _workspaceBlue),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5454,6 +5617,82 @@ String _resolveAttendanceProofStatusLabel(
     return "Proof complete";
   }
   return attendance.isOpen ? "Proof pending" : "No proofs yet";
+}
+
+List<ProductionTaskProgressProofRecord> _resolveWorkspaceVisibleProofs({
+  required ProductionTimelineRow? progress,
+  required ProductionAttendanceRecord? attendance,
+}) {
+  final byKey = <String, ProductionTaskProgressProofRecord>{};
+  void addAll(List<ProductionTaskProgressProofRecord> proofs) {
+    for (final proof in proofs) {
+      final key = _workspaceProofKey(proof);
+      if (key.isEmpty) {
+        continue;
+      }
+      byKey[key] = proof;
+    }
+  }
+
+  addAll(attendance?.effectiveProofs ?? const <ProductionTaskProgressProofRecord>[]);
+  addAll(progress?.proofs ?? const <ProductionTaskProgressProofRecord>[]);
+  return byKey.values.toList();
+}
+
+String _workspaceProofKey(ProductionTaskProgressProofRecord proof) {
+  final publicId = proof.publicId.trim();
+  if (publicId.isNotEmpty) {
+    return publicId;
+  }
+  final url = proof.url.trim();
+  if (url.isNotEmpty) {
+    return url;
+  }
+  return proof.filename.trim();
+}
+
+bool _isWorkspaceImageProof(ProductionTaskProgressProofRecord proof) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType.startsWith("image/")) {
+    return true;
+  }
+  final filename = proof.filename.trim().toLowerCase();
+  return filename.endsWith(".png") ||
+      filename.endsWith(".jpg") ||
+      filename.endsWith(".jpeg") ||
+      filename.endsWith(".gif") ||
+      filename.endsWith(".webp") ||
+      filename.endsWith(".bmp") ||
+      filename.endsWith(".heic");
+}
+
+String _workspaceProofSubtitle(ProductionTaskProgressProofRecord proof) {
+  final parts = <String>[];
+  if (proof.sizeBytes > 0) {
+    parts.add(_formatWorkspaceProofSize(proof.sizeBytes));
+  }
+  if (proof.uploadedAt != null) {
+    parts.add(formatDateLabel(proof.uploadedAt));
+  }
+  if (parts.isEmpty) {
+    return _isWorkspaceImageProof(proof) ? "Tap to preview" : "Tap to open";
+  }
+  return parts.join(" • ");
+}
+
+String _formatWorkspaceProofSize(int sizeBytes) {
+  if (sizeBytes <= 0) {
+    return "0 B";
+  }
+  if (sizeBytes < 1024) {
+    return "$sizeBytes B";
+  }
+  if (sizeBytes < 1024 * 1024) {
+    final kb = sizeBytes / 1024;
+    return "${kb.toStringAsFixed(kb >= 10 ? 0 : 1)} KB";
+  }
+  final mb = sizeBytes / (1024 * 1024);
+  return "${mb.toStringAsFixed(mb >= 10 ? 0 : 1)} MB";
 }
 
 List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({

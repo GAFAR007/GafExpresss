@@ -15,6 +15,7 @@ library;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
@@ -32,6 +33,9 @@ const String _previewMissingLabel = "Proof image is unavailable.";
 const String _previewSizeLabel = "Size";
 const String _previewDateLabel = "Date";
 const String _previewByLabel = "By";
+const String _previewDocumentLabel = "Open file";
+const String _previewOpenFail = "Unable to open proof file.";
+const String _previewMissingUrl = "Proof file link is unavailable.";
 
 Future<void> showProductionTaskProgressPickedProofPreview(
   BuildContext context, {
@@ -226,7 +230,7 @@ Future<void> showProductionTaskProgressProofBrowser(
                                     final title = proof.filename.isNotEmpty
                                         ? proof.filename
                                         : "$_browserOpenLabel ${proofIndex + 1}";
-                                    _showNetworkProofPreview(
+                                    showProductionTaskProgressSavedProofPreview(
                                       dialogContext,
                                       title: title,
                                       proof: proof,
@@ -247,28 +251,45 @@ Future<void> showProductionTaskProgressProofBrowser(
   );
 }
 
-Future<void> _showNetworkProofPreview(
+Future<void> showProductionTaskProgressSavedProofPreview(
   BuildContext context, {
   required String title,
   required ProductionTaskProgressProofRecord proof,
 }) async {
   final url = proof.url.trim();
   if (url.isEmpty) {
+    _showProofMessage(context, _previewMissingUrl);
     return;
   }
 
-  await _showImagePreviewDialog(
-    context,
-    title: title,
-    subtitle: _buildNetworkProofSubtitle(proof),
-    image: Image.network(
-      url,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) {
-        return const Center(child: Text(_previewMissingLabel));
-      },
-    ),
-  );
+  if (_isImageProof(proof)) {
+    await _showImagePreviewDialog(
+      context,
+      title: title,
+      subtitle: _buildNetworkProofSubtitle(proof),
+      image: Image.network(
+        url,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          return const Center(child: Text(_previewMissingLabel));
+        },
+      ),
+    );
+    return;
+  }
+
+  final uri = Uri.tryParse(url);
+  if (uri == null) {
+    _showProofMessage(context, _previewOpenFail);
+    return;
+  }
+  final opened = await launchUrl(uri, mode: LaunchMode.platformDefault);
+  if (!context.mounted) {
+    return;
+  }
+  if (!opened) {
+    _showProofMessage(context, _previewOpenFail);
+  }
 }
 
 String _buildNetworkProofSubtitle(ProductionTaskProgressProofRecord proof) {
@@ -403,6 +424,27 @@ bool _looksLikeObjectId(String value) {
   return RegExp(r"^[a-f0-9]{24}$", caseSensitive: false).hasMatch(normalized);
 }
 
+bool _isImageProof(ProductionTaskProgressProofRecord proof) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType.startsWith("image/")) {
+    return true;
+  }
+  final filename = proof.filename.trim().toLowerCase();
+  return filename.endsWith(".png") ||
+      filename.endsWith(".jpg") ||
+      filename.endsWith(".jpeg") ||
+      filename.endsWith(".gif") ||
+      filename.endsWith(".webp") ||
+      filename.endsWith(".bmp") ||
+      filename.endsWith(".heic");
+}
+
+void _showProofMessage(BuildContext context, String message) {
+  ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
+}
+
 String _proofRowTitle(ProductionTimelineRow row) {
   final taskTitle = row.taskTitle.trim();
   if (taskTitle.isNotEmpty) {
@@ -530,11 +572,17 @@ class _ProofRowCard extends StatelessWidget {
                   onPressed: entry.value.url.trim().isEmpty
                       ? null
                       : () => onOpenProof(entry.value, entry.key),
-                  icon: const Icon(Icons.visibility_outlined),
+                  icon: Icon(
+                    _isImageProof(entry.value)
+                        ? Icons.visibility_outlined
+                        : Icons.attach_file_outlined,
+                  ),
                   label: Text(
                     entry.value.filename.trim().isNotEmpty
                         ? entry.value.filename.trim()
-                        : "$_browserOpenLabel ${entry.key + 1}",
+                        : (_isImageProof(entry.value)
+                              ? "$_browserOpenLabel ${entry.key + 1}"
+                              : "$_previewDocumentLabel ${entry.key + 1}"),
                   ),
                 ),
             ],
