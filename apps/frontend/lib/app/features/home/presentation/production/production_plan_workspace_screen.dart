@@ -401,7 +401,8 @@ class _ProductionPlanWorkspaceScreenState
     final staffAsync = ref.watch(productionStaffProvider);
     final session = ref.watch(authSessionProvider);
     final profileAsync = ref.watch(userProfileProvider);
-    final profileRole = profileAsync.valueOrNull?.role ?? "";
+    final profile = profileAsync.valueOrNull;
+    final profileRole = profile?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
     final presenceState = ref.watch(
       productionDraftPresenceProvider(widget.planId),
@@ -475,13 +476,26 @@ class _ProductionPlanWorkspaceScreenState
               ...detail.staffProfiles,
             ];
             final staffMap = _buildStaffMap(staffList);
+            final currentUserId = profile?.id.trim();
+            final currentUserEmail = profile?.email.trim();
+            final resolvedUserId =
+                currentUserId != null && currentUserId.isNotEmpty
+                ? currentUserId
+                : (session?.user.id ?? "").trim();
+            final resolvedUserEmail =
+                currentUserEmail != null && currentUserEmail.isNotEmpty
+                ? currentUserEmail
+                : (session?.user.email ?? "").trim();
             final selfStaffRole = _resolveSelfStaffRole(
               staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+              userId: resolvedUserId,
+              userEmail: resolvedUserEmail,
+              fallbackStaffRole: profile?.staffRole ?? session?.user.staffRole,
             );
             final selfStaffId = _resolveSelfStaffId(
               staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+              userId: resolvedUserId,
+              userEmail: resolvedUserEmail,
             );
             final canManageCalendar = _canManageCalendar(
               actorRole: actorRole,
@@ -541,21 +555,15 @@ class _ProductionPlanWorkspaceScreenState
                 productAsync?.valueOrNull?.name.trim().isNotEmpty == true
                 ? productAsync!.valueOrNull!.name.trim()
                 : inferredProductName;
-            final currentUserId = profileAsync.valueOrNull?.id.trim();
             final currentUserName = profileAsync.valueOrNull?.name.trim();
-            final currentUserEmail = profileAsync.valueOrNull?.email.trim();
             final currentAccountRole = profileRole.trim();
             final currentViewer = ProductionDraftPresenceViewer(
-              userId: (currentUserId != null && currentUserId.isNotEmpty)
-                  ? currentUserId
-                  : (session?.user.id ?? "").trim(),
+              userId: resolvedUserId,
               displayName:
                   (currentUserName != null && currentUserName.isNotEmpty)
                   ? currentUserName
                   : (session?.user.name ?? "").trim(),
-              email: (currentUserEmail != null && currentUserEmail.isNotEmpty)
-                  ? currentUserEmail
-                  : (session?.user.email ?? "").trim(),
+              email: resolvedUserEmail,
               accountRole: currentAccountRole.isNotEmpty
                   ? currentAccountRole
                   : (session?.user.role ?? "").trim(),
@@ -5551,10 +5559,20 @@ Map<String, BusinessStaffProfileSummary> _buildStaffMap(
   return map;
 }
 
-String? _resolveSelfStaffRole({
+BusinessStaffProfileSummary? _resolveSelfStaffProfile({
   required List<BusinessStaffProfileSummary> staffList,
+  required String? userId,
   required String? userEmail,
 }) {
+  final normalizedUserId = (userId ?? "").trim();
+  if (normalizedUserId.isNotEmpty) {
+    for (final profile in staffList) {
+      final profileUserId = profile.userId.trim();
+      if (profileUserId.isNotEmpty && profileUserId == normalizedUserId) {
+        return profile;
+      }
+    }
+  }
   if (userEmail == null) {
     return null;
   }
@@ -5565,30 +5583,45 @@ String? _resolveSelfStaffRole({
   for (final profile in staffList) {
     final profileEmail = (profile.userEmail ?? "").toLowerCase().trim();
     if (profileEmail.isNotEmpty && profileEmail == normalizedEmail) {
-      return profile.staffRole;
+      return profile;
     }
+  }
+  return null;
+}
+
+String? _resolveSelfStaffRole({
+  required List<BusinessStaffProfileSummary> staffList,
+  required String? userId,
+  required String? userEmail,
+  required String? fallbackStaffRole,
+}) {
+  final profile = _resolveSelfStaffProfile(
+    staffList: staffList,
+    userId: userId,
+    userEmail: userEmail,
+  );
+  final resolvedRole = profile?.staffRole.trim() ?? "";
+  if (resolvedRole.isNotEmpty) {
+    return resolvedRole;
+  }
+  final fallbackRole = fallbackStaffRole?.trim() ?? "";
+  if (fallbackRole.isNotEmpty) {
+    return fallbackRole;
   }
   return null;
 }
 
 String _resolveSelfStaffId({
   required List<BusinessStaffProfileSummary> staffList,
+  required String? userId,
   required String? userEmail,
 }) {
-  if (userEmail == null) {
-    return "";
-  }
-  final normalizedEmail = userEmail.toLowerCase().trim();
-  if (normalizedEmail.isEmpty) {
-    return "";
-  }
-  for (final profile in staffList) {
-    final profileEmail = (profile.userEmail ?? "").toLowerCase().trim();
-    if (profileEmail.isNotEmpty && profileEmail == normalizedEmail) {
-      return profile.id.trim();
-    }
-  }
-  return "";
+  final profile = _resolveSelfStaffProfile(
+    staffList: staffList,
+    userId: userId,
+    userEmail: userEmail,
+  );
+  return profile?.id.trim() ?? "";
 }
 
 bool _canReviewProgress({
