@@ -170,6 +170,13 @@ const String _keyProofMimeType = "proofMimeType";
 const String _keyProofSizeBytes = "proofSizeBytes";
 const String _keyProofUploadedAt = "proofUploadedAt";
 const String _keyProofUploadedBy = "proofUploadedBy";
+const String _keyUrl = "url";
+const String _keyPublicId = "publicId";
+const String _keyFilename = "filename";
+const String _keyMimeType = "mimeType";
+const String _keySizeBytes = "sizeBytes";
+const String _keyUploadedAt = "uploadedAt";
+const String _keyUploadedBy = "uploadedBy";
 const String _keyRequiredProofs = "requiredProofs";
 const String _keyPreorderEnabled = "preorderEnabled";
 const String _keyPreorderCapQuantity = "preorderCapQuantity";
@@ -2657,13 +2664,25 @@ class ProductionTaskProgressProofRecord {
     Map<String, dynamic> json,
   ) {
     return ProductionTaskProgressProofRecord(
-      url: _parseNullableString(json[_keyProofUrl]) ?? "",
-      publicId: _parseNullableString(json[_keyProofPublicId]) ?? "",
-      filename: _parseNullableString(json[_keyProofFilename]) ?? "",
-      mimeType: _parseNullableString(json[_keyProofMimeType]) ?? "",
-      sizeBytes: _parseNullableNum(json[_keyProofSizeBytes])?.toInt() ?? 0,
-      uploadedAt: _parseDate(json[_keyProofUploadedAt]),
-      uploadedBy: _parseNullableString(json[_keyProofUploadedBy]) ?? "",
+      url:
+          _parseNullableString(json[_keyProofUrl] ?? json[_keyUrl]) ?? "",
+      publicId:
+          _parseNullableString(json[_keyProofPublicId] ?? json[_keyPublicId]) ??
+          "",
+      filename:
+          _parseNullableString(json[_keyProofFilename] ?? json[_keyFilename]) ??
+          "",
+      mimeType:
+          _parseNullableString(json[_keyProofMimeType] ?? json[_keyMimeType]) ??
+          "",
+      sizeBytes:
+          _parseNullableNum(json[_keyProofSizeBytes] ?? json[_keySizeBytes])
+              ?.toInt() ??
+          0,
+      uploadedAt: _parseDate(json[_keyProofUploadedAt] ?? json[_keyUploadedAt]),
+      uploadedBy:
+          _parseNullableString(json[_keyProofUploadedBy] ?? json[_keyUploadedBy]) ??
+          "",
     );
   }
 
