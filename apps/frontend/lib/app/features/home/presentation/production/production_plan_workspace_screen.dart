@@ -1229,7 +1229,8 @@ class _ProductionPlanWorkspaceScreenState
                                 );
                               }
                             : null,
-                        onResetHistoryForStaff: canManageTaskAttendance
+                        onResetHistoryForStaff:
+                            (canManageTaskAttendance || canManageCalendar)
                             ? (staffProfileId) async {
                                 await resetTaskHistoryForStaff(staffProfileId);
                               }
@@ -4340,7 +4341,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
             hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
           ),
         ),
-      if (canManageAttendance && onResetHistory != null)
+      if (onResetHistory != null)
         OutlinedButton.icon(
           onPressed: onResetHistory,
           style: OutlinedButton.styleFrom(foregroundColor: colorScheme.error),
