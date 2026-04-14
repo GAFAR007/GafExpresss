@@ -5634,10 +5634,14 @@ bool _canReviewProgress({
   )) {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == staffRoleEstateManager ||
-          staffRole == staffRoleFarmManager ||
-          staffRole == staffRoleAssetManager);
+  return _matchesWorkspaceStaffRole(
+    staffRole,
+    const {
+      staffRoleEstateManager,
+      staffRoleFarmManager,
+      staffRoleAssetManager,
+    },
+  );
 }
 
 bool _canManageTaskAttendance({
@@ -5650,9 +5654,10 @@ bool _canManageTaskAttendance({
   )) {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == staffRoleEstateManager ||
-          staffRole == staffRoleFarmManager);
+  return _matchesWorkspaceStaffRole(
+    staffRole,
+    const {staffRoleEstateManager, staffRoleFarmManager},
+  );
 }
 
 bool _canManageCalendar({
@@ -5665,10 +5670,14 @@ bool _canManageCalendar({
   )) {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == staffRoleEstateManager ||
-          staffRole == staffRoleFarmManager ||
-          staffRole == staffRoleAssetManager);
+  return _matchesWorkspaceStaffRole(
+    staffRole,
+    const {
+      staffRoleEstateManager,
+      staffRoleFarmManager,
+      staffRoleAssetManager,
+    },
+  );
 }
 
 bool _canManagePlanLifecycle({
@@ -5681,7 +5690,19 @@ bool _canManagePlanLifecycle({
   )) {
     return true;
   }
-  return actorRole == "staff" && staffRole == staffRoleEstateManager;
+  return _matchesWorkspaceStaffRole(
+    staffRole,
+    const {staffRoleEstateManager},
+  );
+}
+
+bool _matchesWorkspaceStaffRole(String? staffRole, Set<String> allowedRoles) {
+  final normalizedRole = (staffRole ?? "")
+      .trim()
+      .toLowerCase()
+      .replaceAll("-", "_")
+      .replaceAll(" ", "_");
+  return normalizedRole.isNotEmpty && allowedRoles.contains(normalizedRole);
 }
 
 String _resolveProductionWorkspaceErrorMessage(
