@@ -355,6 +355,14 @@ const PRODUCTION_COPY = {
   SCHEDULE_POLICY_ESTATE_NOT_FOUND: "Estate asset not found",
   STAFF_CAPACITY_LOADED: "Staff capacity loaded",
   TASK_ASSIGNMENT_UPDATED: "Task assignment updated successfully",
+  TASK_CREATED: "Production task created successfully",
+  TASK_CREATE_PLAN_ID_REQUIRED: "Production plan id is required",
+  TASK_CREATE_PHASE_ID_REQUIRED: "Production phase id is required",
+  TASK_CREATE_PHASE_ID_INVALID: "Production phase id is invalid",
+  TASK_CREATE_PHASE_NOT_FOUND: "Production phase not found",
+  TASK_CREATE_TITLE_REQUIRED: "Task title is required",
+  TASK_CREATE_PLAN_STATUS_INVALID:
+    "Only active, paused, or draft production plans can accept new tasks",
   TASK_ASSIGNMENT_TASK_ID_REQUIRED: "Task id is required",
   TASK_ASSIGNMENT_TASK_ID_INVALID: "Task id is invalid",
   TASK_ASSIGNMENT_STAFF_IDS_REQUIRED:
@@ -18392,6 +18400,274 @@ async function reconcileExpiredPreorderReservationsHandler(req, res) {
 }
 
 /**
+ * POST /business/production/plans/:planId/tasks
+ * Owner + operational managers: create an ad-hoc task on a plan day.
+ */
+async function createProductionPlanTask(req, res) {
+  debug("BUSINESS CONTROLLER: createProductionPlanTask - entry", {
+    actorId: req.user?.sub,
+    planId: req.params?.planId,
+    phaseId: req.body?.phaseId,
+    title: req.body?.title,
+  });
+
+  try {
+    const planId = normalizeStaffIdInput(req.params?.planId);
+    if (!planId) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_CREATE_PLAN_ID_REQUIRED,
+      });
+    }
+    if (!mongoose.Types.ObjectId.isValid(planId)) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.PLAN_ID_REQUIRED,
+      });
+    }
+
+    const phaseId = normalizeStaffIdInput(req.body?.phaseId);
+    if (!phaseId) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_CREATE_PHASE_ID_REQUIRED,
+      });
+    }
+    if (!mongoose.Types.ObjectId.isValid(phaseId)) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_CREATE_PHASE_ID_INVALID,
+      });
+    }
+
+    const title = req.body?.title?.toString().trim() || "";
+    if (!title) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_CREATE_TITLE_REQUIRED,
+      });
+    }
+
+    const startDate = parseDateInput(req.body?.startDate);
+    const dueDate = parseDateInput(req.body?.dueDate);
+    if (!startDate || !dueDate || dueDate <= startDate) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_SCHEDULE_INVALID,
+      });
+    }
+
+    const roleRequired = normalizeStaffIdInput(req.body?.roleRequired)
+      .toLowerCase()
+      .trim();
+    if (!roleRequired || !STAFF_ROLE_VALUES.includes(roleRequired)) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.STAFF_ROLE_REQUIRED,
+      });
+    }
+
+    const assignedStaffProfileIds = Array.from(
+      new Set(
+        (Array.isArray(req.body?.assignedStaffProfileIds)
+          ? req.body.assignedStaffProfileIds
+          : []
+        )
+          .map((value) => normalizeStaffIdInput(value))
+          .filter(Boolean),
+      ),
+    );
+    if (
+      assignedStaffProfileIds.some(
+        (staffId) => !mongoose.Types.ObjectId.isValid(staffId),
+      )
+    ) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_ASSIGNMENT_STAFF_ID_INVALID,
+      });
+    }
+
+    const { actor, businessId } = await getBusinessContext(req.user.sub);
+    const staffProfile = await getStaffProfileForActor({
+      actor,
+      businessId,
+      allowMissing: true,
+    });
+    if (
+      !canAssignProductionTasks({
+        actorRole: actor.role,
+        staffRole: staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error: PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const plan = await ProductionPlan.findOne({
+      _id: planId,
+      businessId,
+    }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error: PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+    if (
+      ![
+        PRODUCTION_STATUS_DRAFT,
+        PRODUCTION_STATUS_ACTIVE,
+        PRODUCTION_STATUS_PAUSED,
+      ].includes((plan.status || "").toString().trim().toLowerCase())
+    ) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_CREATE_PLAN_STATUS_INVALID,
+      });
+    }
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      plan.estateAssetId?.toString() !== actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error: PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const phase = await ProductionPhase.findOne({
+      _id: phaseId,
+      planId: plan._id,
+    }).lean();
+    if (!phase) {
+      return res.status(404).json({
+        error: PRODUCTION_COPY.TASK_CREATE_PHASE_NOT_FOUND,
+      });
+    }
+
+    const startDay = normalizeWorkDateToDayStart(startDate);
+    const dueDay = normalizeWorkDateToDayStart(dueDate);
+    const planStartDay = normalizeWorkDateToDayStart(plan.startDate);
+    const planEndDay = normalizeWorkDateToDayStart(plan.endDate);
+    const phaseStartDay = normalizeWorkDateToDayStart(phase.startDate);
+    const phaseEndDay = normalizeWorkDateToDayStart(phase.endDate);
+
+    if (startDay < planStartDay || dueDay > planEndDay) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_SCHEDULE_OUTSIDE_PLAN,
+      });
+    }
+    if (startDay < phaseStartDay || dueDay > phaseEndDay) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_SCHEDULE_OUTSIDE_PLAN,
+      });
+    }
+
+    let matchingProfiles = [];
+    if (assignedStaffProfileIds.length > 0) {
+      matchingProfiles = await BusinessStaffProfile.find({
+        _id: {
+          $in: assignedStaffProfileIds,
+        },
+        businessId,
+        status: STAFF_STATUS_ACTIVE,
+      }).lean();
+      if (matchingProfiles.length !== assignedStaffProfileIds.length) {
+        return res.status(400).json({
+          error: PRODUCTION_COPY.TASK_ASSIGNMENT_STAFF_PROFILE_NOT_FOUND,
+        });
+      }
+
+      for (const profile of matchingProfiles) {
+        const assignmentError = getProductionTaskAssignmentValidationError({
+          taskRoleRequired: roleRequired,
+          assignedProfile: profile,
+          estateAssetId: plan.estateAssetId,
+          invalidRoleError: PRODUCTION_COPY.TASK_ASSIGNMENT_ROLE_MISMATCH,
+          scopeError: PRODUCTION_COPY.TASK_PROGRESS_STAFF_SCOPE_INVALID,
+        });
+        if (assignmentError) {
+          return res.status(400).json({
+            error: assignmentError,
+          });
+        }
+      }
+    }
+
+    const normalizedHeadcount = Math.max(
+      normalizeDraftTaskHeadcount(req.body?.requiredHeadcount),
+      assignedStaffProfileIds.length,
+      1,
+    );
+    const normalizedWeight = Number.isFinite(Number(req.body?.weight))
+      ? Math.max(1, Math.floor(Number(req.body.weight)))
+      : 1;
+    const taskType =
+      normalizePersistedProductionTaskType(req.body?.taskType) || "event";
+    const instructions = req.body?.instructions?.toString().trim() || "";
+
+    const latestTask = await ProductionTask.findOne({
+      planId: plan._id,
+    })
+      .sort({
+        manualSortOrder: -1,
+        createdAt: -1,
+        _id: -1,
+      })
+      .select({
+        manualSortOrder: 1,
+      })
+      .lean();
+
+    const now = new Date();
+    const task = await ProductionTask.create({
+      planId: plan._id,
+      phaseId: phase._id,
+      title,
+      roleRequired,
+      assignedStaffId: assignedStaffProfileIds[0] || null,
+      assignedStaffProfileIds,
+      assignedUnitIds: [],
+      requiredHeadcount: normalizedHeadcount,
+      taskType,
+      sourceTemplateKey: "",
+      recurrenceGroupKey: "",
+      occurrenceIndex: 0,
+      weight: normalizedWeight,
+      manualSortOrder:
+        normalizeTaskManualSortOrder(latestTask?.manualSortOrder, 0) + 1,
+      startDate,
+      dueDate,
+      status: PRODUCTION_TASK_STATUS_PENDING,
+      instructions,
+      dependencies: [],
+      createdBy: actor._id,
+      // WHY: Operational managers need same-day follow-up tasks to be usable immediately.
+      approvalStatus: PRODUCTION_TASK_APPROVAL_APPROVED,
+      assignedBy: actor._id,
+      reviewedBy: actor._id,
+      reviewedAt: now,
+      rejectionReason: "",
+    });
+
+    debug("BUSINESS CONTROLLER: createProductionPlanTask - success", {
+      actorId: actor._id,
+      planId: plan._id,
+      phaseId: phase._id,
+      taskId: task._id,
+      assignedCount: assignedStaffProfileIds.length,
+      weight: normalizedWeight,
+    });
+
+    return res.status(201).json({
+      message: PRODUCTION_COPY.TASK_CREATED,
+      task,
+    });
+  } catch (err) {
+    debug("BUSINESS CONTROLLER: createProductionPlanTask - error", {
+      actorId: req.user?.sub,
+      planId: req.params?.planId,
+      reason: err.message,
+    });
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/**
  * PATCH /business/production/tasks/:id/status
  * Staff: update task status (own tasks only).
  */
@@ -23406,6 +23682,7 @@ module.exports = {
   releasePreorderReservation,
   confirmPreorderReservation,
   reconcileExpiredPreorderReservationsHandler,
+  createProductionPlanTask,
   updateProductionTaskStatus,
   assignProductionTaskStaffProfiles,
   resetProductionTaskHistory,

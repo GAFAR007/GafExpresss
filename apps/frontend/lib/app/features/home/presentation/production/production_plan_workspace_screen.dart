@@ -47,6 +47,7 @@ const String _logBuild = "build()";
 const String _logMonthChanged = "month_changed";
 const String _logDayChanged = "day_changed";
 const String _logAssignStaff = "assign_staff";
+const String _logCreateTask = "create_task";
 const String _logTaskStatus = "task_status";
 const String _logResetHistory = "reset_history";
 const String _logProgress = "log_progress";
@@ -80,6 +81,7 @@ const String _returnToDraftConfirmLabel = "Return to draft";
 const String _todayLabel = "Today";
 const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
+const String _addTaskLabel = "New task";
 const String _resetHistoryLabel = "Reset history";
 const String _removeStaffHint = "Leave everything unchecked to remove staff.";
 const String _logProgressLabel = "Log progress";
@@ -146,6 +148,8 @@ const String _dayQuantityTransplantLabel = "Transplant";
 const String _dayQuantityHarvestLabel = "Harvest";
 const String _taskAssignmentSuccess = "Staff assignment updated.";
 const String _taskAssignmentFailure = "Unable to update task staff.";
+const String _taskCreateSuccess = "Task created.";
+const String _taskCreateFailure = "Unable to create task.";
 const String _taskStatusSuccess = "Task status updated.";
 const String _taskStatusFailure = "Unable to update task status.";
 const String _taskProgressSuccess = "Daily progress logged.";
@@ -218,6 +222,19 @@ const String _logDialogQuantityActivityLabel =
 const String _logDialogQuantityAmountLabel = "Quantity completed today";
 const String _logDialogNotesLabel = "Daily notes";
 const String _rejectDialogTitle = "Reject task";
+const String _taskCreateDialogTitle = "Create same-day task";
+const String _taskCreateDialogSubmitLabel = "Create task";
+const String _taskCreateDialogCancelLabel = "Cancel";
+const String _taskCreateTitleLabel = "Task title";
+const String _taskCreatePhaseLabel = "Phase";
+const String _taskCreateRoleLabel = "Role";
+const String _taskCreateExpectedLabel = "Expected amount for this task";
+const String _taskCreateHeadcountLabel = "Required headcount";
+const String _taskCreateStaffLabel = "Assign staff now";
+const String _taskCreateNotesLabel = "Task notes";
+const String _taskCreateOutsidePlanMessage =
+    "Pick a day inside the plan schedule before creating a task.";
+const String _taskCreateTitleRequired = "Task title is required.";
 const String _rejectDialogHint = "Add a short reason";
 const String _rejectProgressDialogTitle = "Mark progress for review";
 const String _viewProofLabel = "View proof";
@@ -595,6 +612,97 @@ class _ProductionPlanWorkspaceScreenState
               });
             }
 
+            final planStartDay = _normalizeToLocalDay(
+              detail.plan.startDate ?? selectedDay,
+            );
+            final planEndDay = _normalizeToLocalDay(
+              detail.plan.endDate ?? selectedDay,
+            );
+            final selectedDayOnly = _normalizeToLocalDay(selectedDay);
+            final canCreateTaskForSelectedDay =
+                !selectedDayOnly.isBefore(planStartDay) &&
+                !selectedDayOnly.isAfter(planEndDay);
+            final phasesForSelectedDay = detail.phases.where((phase) {
+              final phaseStart = _normalizeToLocalDay(
+                phase.startDate ?? detail.plan.startDate ?? selectedDay,
+              );
+              final phaseEnd = _normalizeToLocalDay(
+                phase.endDate ?? detail.plan.endDate ?? selectedDay,
+              );
+              return !selectedDayOnly.isBefore(phaseStart) &&
+                  !selectedDayOnly.isAfter(phaseEnd);
+            }).toList();
+
+            Future<void> createTaskForSelectedDay() async {
+              if (!canCreateTaskForSelectedDay) {
+                _showSnackSafe(_taskCreateOutsidePlanMessage);
+                return;
+              }
+              final dialogPhases = phasesForSelectedDay.isNotEmpty
+                  ? phasesForSelectedDay
+                  : detail.phases;
+              if (dialogPhases.isEmpty) {
+                _showSnackSafe(_taskCreateFailure);
+                return;
+              }
+              final input = await _showCreateWorkspaceTaskDialog(
+                context,
+                selectedDay: selectedDay,
+                phases: dialogPhases,
+                staffList: staffList,
+                workScopeSummary: workScopeSummary,
+                initialPhaseId: tasksForDay.isNotEmpty
+                    ? tasksForDay.first.phaseId
+                    : dialogPhases.first.id,
+                initialRoleRequired: tasksForDay.isNotEmpty
+                    ? tasksForDay.first.roleRequired
+                    : "",
+              );
+              if (input == null) {
+                return;
+              }
+
+              AppDebug.log(
+                _logTag,
+                _logCreateTask,
+                extra: {
+                  "planId": widget.planId,
+                  "phaseId": input.phaseId,
+                  "title": input.title,
+                  "assignedCount": input.assignedStaffProfileIds.length,
+                },
+              );
+
+              try {
+                await ref
+                    .read(productionPlanActionsProvider)
+                    .createTask(
+                      planId: widget.planId,
+                      payload: {
+                        "phaseId": input.phaseId,
+                        "title": input.title,
+                        "roleRequired": input.roleRequired,
+                        "requiredHeadcount": input.requiredHeadcount,
+                        "weight": input.weight,
+                        "assignedStaffProfileIds":
+                            input.assignedStaffProfileIds,
+                        "instructions": input.instructions,
+                        "startDate": input.startDate.toUtc().toIso8601String(),
+                        "dueDate": input.dueDate.toUtc().toIso8601String(),
+                        "taskType": "event",
+                      },
+                    );
+                _showSnackSafe(_taskCreateSuccess);
+              } catch (error) {
+                _showSnackSafe(
+                  _resolveProductionWorkspaceErrorMessage(
+                    error,
+                    fallback: _taskCreateFailure,
+                  ),
+                );
+              }
+            }
+
             return ListView(
               padding: const EdgeInsets.all(_pagePadding),
               children: [
@@ -829,6 +937,17 @@ class _ProductionPlanWorkspaceScreenState
                   },
                 ),
                 const SizedBox(height: _cardSpacing),
+                if (canManageCalendar) ...[
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.tonalIcon(
+                      onPressed: createTaskForSelectedDay,
+                      icon: const Icon(Icons.add_task_outlined),
+                      label: const Text(_addTaskLabel),
+                    ),
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                ],
                 _SelectedDayMetricsRow(
                   plan: detail.plan,
                   selectedDay: selectedDay,
@@ -5132,6 +5251,30 @@ class ProductionTaskLogProgressInput {
   num get quantityAmount => activityQuantity;
 }
 
+class _CreateWorkspaceTaskInput {
+  final String phaseId;
+  final String title;
+  final String roleRequired;
+  final int requiredHeadcount;
+  final int weight;
+  final List<String> assignedStaffProfileIds;
+  final String instructions;
+  final DateTime startDate;
+  final DateTime dueDate;
+
+  const _CreateWorkspaceTaskInput({
+    required this.phaseId,
+    required this.title,
+    required this.roleRequired,
+    required this.requiredHeadcount,
+    required this.weight,
+    required this.assignedStaffProfileIds,
+    required this.instructions,
+    required this.startDate,
+    required this.dueDate,
+  });
+}
+
 class _FarmQuantitySummary {
   final String plantingUnit;
   final String harvestUnit;
@@ -6849,6 +6992,23 @@ List<BusinessStaffProfileSummary> _staffCandidatesForTask({
   return activeStaff;
 }
 
+List<BusinessStaffProfileSummary> _staffCandidatesForRole({
+  required String roleRequired,
+  required List<BusinessStaffProfileSummary> staffList,
+}) {
+  final normalizedRole = _normalizeRole(roleRequired);
+  final activeStaff = staffList
+      .where((staff) => staff.status.trim().toLowerCase() != "terminated")
+      .toList();
+  final matching = activeStaff
+      .where((staff) => _normalizeRole(staff.staffRole) == normalizedRole)
+      .toList();
+  if (matching.isNotEmpty) {
+    return matching;
+  }
+  return activeStaff;
+}
+
 String? _staffListLabel(BusinessStaffProfileSummary? staff) {
   if (staff == null) {
     return null;
@@ -6866,6 +7026,278 @@ String? _staffListLabel(BusinessStaffProfileSummary? staff) {
     return phone;
   }
   return staff.id;
+}
+
+DateTime _normalizeToLocalDay(DateTime value) {
+  final local = value.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+DateTime _buildWorkspaceTaskStartDate(DateTime day) {
+  final localDay = _normalizeToLocalDay(day);
+  return DateTime(localDay.year, localDay.month, localDay.day, 8);
+}
+
+DateTime _buildWorkspaceTaskDueDate(DateTime day) {
+  final localDay = _normalizeToLocalDay(day);
+  return DateTime(localDay.year, localDay.month, localDay.day, 17);
+}
+
+Future<_CreateWorkspaceTaskInput?> _showCreateWorkspaceTaskDialog(
+  BuildContext context, {
+  required DateTime selectedDay,
+  required List<ProductionPhase> phases,
+  required List<BusinessStaffProfileSummary> staffList,
+  required _WorkspaceWorkScopeSummary workScopeSummary,
+  String? initialPhaseId,
+  String? initialRoleRequired,
+}) async {
+  if (phases.isEmpty) {
+    return null;
+  }
+
+  final sortedPhases = [...phases]
+    ..sort((left, right) => left.order.compareTo(right.order));
+  final activeStaff = staffList
+      .where((staff) => staff.status.trim().toLowerCase() != "terminated")
+      .toList();
+  final normalizedInitialRole = _normalizeRole(initialRoleRequired ?? "");
+  final roleOptions = <String>{
+    for (final staff in activeStaff)
+      if (staff.staffRole.trim().isNotEmpty) _normalizeRole(staff.staffRole),
+    if (normalizedInitialRole.isNotEmpty) normalizedInitialRole,
+    "farmer",
+  }.toList()..sort();
+
+  final titleController = TextEditingController();
+  final weightController = TextEditingController(text: "1");
+  final headcountController = TextEditingController(text: "1");
+  final notesController = TextEditingController();
+
+  final result = await showDialog<_CreateWorkspaceTaskInput>(
+    context: context,
+    builder: (dialogContext) {
+      var selectedPhaseId =
+          sortedPhases.any((phase) => phase.id == initialPhaseId)
+          ? initialPhaseId!.trim()
+          : sortedPhases.first.id;
+      var selectedRole = roleOptions.contains(normalizedInitialRole)
+          ? normalizedInitialRole
+          : roleOptions.first;
+      final selectedStaffIds = <String>{};
+      var validationError = "";
+
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          final staffCandidates = _staffCandidatesForRole(
+            roleRequired: selectedRole,
+            staffList: activeStaff,
+          );
+
+          return AlertDialog(
+            title: const Text(_taskCreateDialogTitle),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Create a separate task for ${_formatCalendarDate(selectedDay)}. This does not require anyone to clock in first. Attendance only starts when staff actually begin that task.",
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedPhaseId,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreatePhaseLabel,
+                      ),
+                      items: sortedPhases
+                          .map(
+                            (phase) => DropdownMenuItem<String>(
+                              value: phase.id,
+                              child: Text(phase.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return;
+                        }
+                        setDialogState(() {
+                          selectedPhaseId = value.trim();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateTitleLabel,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedRole,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateRoleLabel,
+                      ),
+                      items: roleOptions
+                          .map(
+                            (role) => DropdownMenuItem<String>(
+                              value: role,
+                              child: Text(
+                                formatStaffRoleLabel(role, fallback: role),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return;
+                        }
+                        setDialogState(() {
+                          selectedRole = value.trim();
+                          final allowedIds = _staffCandidatesForRole(
+                            roleRequired: selectedRole,
+                            staffList: activeStaff,
+                          ).map((staff) => staff.id).toSet();
+                          selectedStaffIds.removeWhere(
+                            (staffId) => !allowedIds.contains(staffId),
+                          );
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: weightController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText:
+                            "$_taskCreateExpectedLabel (${workScopeSummary.pluralLabel})",
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: headcountController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateHeadcountLabel,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: notesController,
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateNotesLabel,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _taskCreateStaffLabel,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (staffCandidates.isEmpty)
+                      Text(
+                        _staffDialogEmptyLabel,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                    else
+                      ...staffCandidates.map((staff) {
+                        final checked = selectedStaffIds.contains(staff.id);
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: checked,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              if (value == true) {
+                                selectedStaffIds.add(staff.id);
+                              } else {
+                                selectedStaffIds.remove(staff.id);
+                              }
+                            });
+                          },
+                          title: Text(_staffListLabel(staff) ?? staff.id),
+                          subtitle: Text(
+                            formatStaffRoleLabel(
+                              staff.staffRole,
+                              fallback: staff.staffRole,
+                            ),
+                          ),
+                        );
+                      }),
+                    if (validationError.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        validationError,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(_taskCreateDialogCancelLabel),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final title = titleController.text.trim();
+                  if (title.isEmpty) {
+                    setDialogState(() {
+                      validationError = _taskCreateTitleRequired;
+                    });
+                    return;
+                  }
+
+                  final parsedWeight =
+                      int.tryParse(weightController.text.trim()) ?? 1;
+                  final parsedHeadcount =
+                      int.tryParse(headcountController.text.trim()) ?? 1;
+
+                  Navigator.of(dialogContext).pop(
+                    _CreateWorkspaceTaskInput(
+                      phaseId: selectedPhaseId,
+                      title: title,
+                      roleRequired: selectedRole,
+                      requiredHeadcount: math.max(
+                        1,
+                        math.max(parsedHeadcount, selectedStaffIds.length),
+                      ),
+                      weight: math.max(1, parsedWeight),
+                      assignedStaffProfileIds: selectedStaffIds.toList(),
+                      instructions: notesController.text.trim(),
+                      startDate: _buildWorkspaceTaskStartDate(selectedDay),
+                      dueDate: _buildWorkspaceTaskDueDate(selectedDay),
+                    ),
+                  );
+                },
+                child: const Text(_taskCreateDialogSubmitLabel),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  titleController.dispose();
+  weightController.dispose();
+  headcountController.dispose();
+  notesController.dispose();
+  return result;
 }
 
 String _formatTaskWindow({

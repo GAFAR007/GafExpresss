@@ -663,6 +663,36 @@ class ProductionPlanActions {
     return updated;
   }
 
+  Future<ProductionTask> createTask({
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskStatusMissing,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final task = await api.createTask(
+      token: session.token,
+      planId: planId,
+      payload: payload,
+    );
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return task;
+  }
+
   Future<ProductionTask> updateTaskStatus({
     required String taskId,
     required String status,

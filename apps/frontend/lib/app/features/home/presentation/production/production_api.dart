@@ -68,6 +68,7 @@ const String _intentPlanPreorder = "update production preorder state";
 const String _intentPreorderReservations = "list preorder reservations";
 const String _intentPreorderReconcile =
     "reconcile expired preorder reservations";
+const String _intentTaskCreate = "create production task";
 const String _intentTaskStatus = "update production task status";
 const String _intentTaskAssign = "assign production task staff profiles";
 const String _intentTaskResetHistory = "reset production task history";
@@ -100,6 +101,7 @@ const String _operationStaffCapacity = "fetchStaffCapacity";
 const String _operationPlanPreorder = "updatePlanPreorder";
 const String _operationPreorderReservations = "listPreorderReservations";
 const String _operationPreorderReconcile = "reconcileExpiredPreorders";
+const String _operationTaskCreate = "createTask";
 const String _operationTaskStatus = "updateTaskStatus";
 const String _operationTaskAssign = "assignTaskStaffProfiles";
 const String _operationTaskResetHistory = "resetTaskHistory";
@@ -151,6 +153,8 @@ const String _keyTaskAdjustments = "taskAdjustments";
 const String _keySummary = "summary";
 const String _keyMessage = "message";
 const String _keyPlan = "plan";
+const String _keyPhaseId = "phaseId";
+const String _keyTitle = "title";
 const String _keyProductId = "productId";
 const String _keyStartDate = "startDate";
 const String _keyEndDate = "endDate";
@@ -234,6 +238,9 @@ const String _preorderReconcileSuccessMessage =
     "reconcileExpiredPreorders() success";
 const String _preorderReconcileFailureMessage =
     "reconcileExpiredPreorders() failed";
+const String _taskCreateStartMessage = "createTask() start";
+const String _taskCreateSuccessMessage = "createTask() success";
+const String _taskCreateFailureMessage = "createTask() failed";
 const String _taskStatusStartMessage = "updateTaskStatus() start";
 const String _taskStatusSuccessMessage = "updateTaskStatus() success";
 const String _taskStatusFailureMessage = "updateTaskStatus() failed";
@@ -1826,6 +1833,74 @@ class ProductionApi {
         );
       }
 
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
+  /// CREATE TASK
+  /// ------------------------------------------------------
+  Future<ProductionTask> createTask({
+    required String? token,
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskCreateStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskCreate,
+        _extraIntentKey: _intentTaskCreate,
+        _extraPlanIdKey: planId,
+        _keyPhaseId: payload[_keyPhaseId]?.toString() ?? "",
+        _keyTitle: payload[_keyTitle]?.toString() ?? "",
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_plansPath/$planId/tasks",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final taskMap = (data[_keyTask] ?? {}) as Map<String, dynamic>;
+      final task = ProductionTask.fromJson(taskMap);
+
+      AppDebug.log(
+        _logTag,
+        _taskCreateSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskCreate,
+          _extraIntentKey: _intentTaskCreate,
+          _extraPlanIdKey: planId,
+          _extraTaskIdKey: task.id,
+        },
+      );
+
+      return task;
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskCreateFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskCreate,
+          _extraIntentKey: _intentTaskCreate,
+          _extraPlanIdKey: planId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
       rethrow;
     }
   }

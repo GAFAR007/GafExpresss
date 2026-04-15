@@ -46,6 +46,7 @@ const ROUTE_PREFIX = "/business/production/tasks";
 const ATTENDANCE_ROUTE_PREFIX = "/business/staff/attendance";
 const OWNER_ROLE = "business_owner";
 const STAFF_ROLE_FARMER = "farmer";
+const STAFF_ROLE_ESTATE_MANAGER = "estate_manager";
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_CONFLICT = 409;
@@ -111,6 +112,12 @@ function buildProgressApp() {
   const app = express();
   app.use(express.json());
   app.post(
+    "/business/production/plans/:planId/tasks",
+    requireAuth,
+    requireAnyRole([OWNER_ROLE, "staff"]),
+    businessController.createProductionPlanTask,
+  );
+  app.post(
     `${ATTENDANCE_ROUTE_PREFIX}/clock-in`,
     requireAuth,
     requireAnyRole([OWNER_ROLE, "staff"]),
@@ -152,18 +159,22 @@ function buildProgressApp() {
   return app;
 }
 
-function issueOwnerToken(ownerId) {
+function issueToken(userId, role = OWNER_ROLE) {
   const secret = process.env.JWT_SECRET || "test_jwt_secret";
   return jwt.sign(
     {
-      sub: ownerId.toString(),
-      role: OWNER_ROLE,
+      sub: userId.toString(),
+      role,
     },
     secret,
     {
       expiresIn: "1h",
     },
   );
+}
+
+function issueOwnerToken(ownerId) {
+  return issueToken(ownerId, OWNER_ROLE);
 }
 
 function toPlotUnits(plots) {
@@ -415,13 +426,19 @@ async function createEstateAsset({ id, businessId, createdBy, name }) {
   });
 }
 
-async function createStaffProfile({ id, userId, businessId, estateAssetId }) {
+async function createStaffProfile({
+  id,
+  userId,
+  businessId,
+  estateAssetId,
+  staffRole = STAFF_ROLE_FARMER,
+}) {
   return BusinessStaffProfile.create({
     _id: id,
     userId,
     businessId,
     estateAssetId,
-    staffRole: STAFF_ROLE_FARMER,
+    staffRole,
     employeeCode: `EMP-${id.toString().slice(-6)}`,
     employmentStatus: "active",
     hireDate: new Date("2026-01-01T00:00:00.000Z"),
@@ -1519,6 +1536,60 @@ test("createNewEntry appends a second count for the same staff and day without o
   assert.equal(progressRows[0].unitContribution, 2);
   assert.equal(progressRows[1].entryIndex, 2);
   assert.equal(progressRows[1].unitContribution, 1);
+});
+
+test("estate manager can create a same-day ad-hoc task without any attendance session", async () => {
+  const scenario = await seedScenario();
+  const managerUserId = new mongoose.Types.ObjectId();
+  const managerProfileId = new mongoose.Types.ObjectId();
+
+  await createUser({
+    id: managerUserId,
+    businessId: scenario.businessId,
+    role: "staff",
+    email: `estate_manager_${managerUserId.toString().slice(-6)}@test.local`,
+  });
+  await createStaffProfile({
+    id: managerProfileId,
+    userId: managerUserId,
+    businessId: scenario.businessId,
+    estateAssetId: scenario.estateAId,
+    staffRole: STAFF_ROLE_ESTATE_MANAGER,
+  });
+
+  const response = await requestJson({
+    method: "POST",
+    routePath: `/business/production/plans/${scenario.planId.toString()}/tasks`,
+    token: issueToken(managerUserId, "staff"),
+    payload: {
+      phaseId: scenario.phaseId.toString(),
+      title: "Urgent irrigation follow-up",
+      roleRequired: STAFF_ROLE_FARMER,
+      assignedStaffProfileIds: [scenario.staffProfileAId.toString()],
+      requiredHeadcount: 1,
+      weight: 2,
+      instructions: "Create a separate same-day task for irrigation.",
+      startDate: `${WORK_DATE_STRING}T09:00:00.000Z`,
+      dueDate: `${WORK_DATE_STRING}T11:00:00.000Z`,
+    },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.task.title, "Urgent irrigation follow-up");
+  assert.equal(response.body.task.phaseId, scenario.phaseId.toString());
+  assert.equal(response.body.task.roleRequired, STAFF_ROLE_FARMER);
+  assert.deepEqual(response.body.task.assignedStaffProfileIds, [
+    scenario.staffProfileAId.toString(),
+  ]);
+  assert.equal(response.body.task.weight, 2);
+  assert.equal(response.body.task.approvalStatus, "approved");
+
+  const persistedTask = await ProductionTask.findById(
+    response.body.task._id,
+  ).lean();
+  assert.ok(persistedTask);
+  assert.equal(persistedTask.createdBy.toString(), managerUserId.toString());
+  assert.equal(persistedTask.assignedBy.toString(), managerUserId.toString());
 });
 
 test("fresh backend validation blocks activity oversubmission against the shared remaining target", async () => {

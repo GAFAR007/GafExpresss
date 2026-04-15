@@ -14,9 +14,7 @@
 const express = require("express");
 const debug = require("../utils/debug");
 const multer = require("multer");
-const {
-  requireAuth,
-} = require("../middlewares/auth.middleware");
+const { requireAuth } = require("../middlewares/auth.middleware");
 const {
   requireAnyRole,
   requireRole,
@@ -42,45 +40,21 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
 });
 
-function parseTaskProgressProofUploads(
-  req,
-  res,
-  next,
-) {
-  const contentType = (
-    req.headers["content-type"] || ""
-  )
+function parseTaskProgressProofUploads(req, res, next) {
+  const contentType = (req.headers["content-type"] || "")
     .toString()
     .toLowerCase();
-  if (
-    !contentType.includes(
-      "multipart/form-data",
-    )
-  ) {
+  if (!contentType.includes("multipart/form-data")) {
     return next();
   }
-  return upload.array("proofs", 10)(
-    req,
-    res,
-    next,
-  );
+  return upload.array("proofs", 10)(req, res, next);
 }
 
-function parseAttendanceProofUploads(
-  req,
-  res,
-  next,
-) {
-  const contentType = (
-    req.headers["content-type"] || ""
-  )
+function parseAttendanceProofUploads(req, res, next) {
+  const contentType = (req.headers["content-type"] || "")
     .toString()
     .toLowerCase();
-  if (
-    !contentType.includes(
-      "multipart/form-data",
-    )
-  ) {
+  if (!contentType.includes("multipart/form-data")) {
     return next();
   }
   return upload.fields([
@@ -92,11 +66,7 @@ function parseAttendanceProofUploads(
       name: "proofs",
       maxCount: 10,
     },
-  ])(
-    req,
-    res,
-    next,
-  );
+  ])(req, res, next);
 }
 
 /**
@@ -106,10 +76,7 @@ function parseAttendanceProofUploads(
 router.post(
   "/products",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -121,10 +88,7 @@ router.post(
 router.post(
   "/products/ai-draft",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -135,10 +99,7 @@ router.post(
 router.get(
   "/products",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -149,10 +110,7 @@ router.get(
 router.get(
   "/products/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -163,10 +121,7 @@ router.get(
 router.patch(
   "/products/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -177,10 +132,7 @@ router.patch(
 router.patch(
   "/products/:id/restore",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -191,10 +143,7 @@ router.patch(
 router.post(
   "/products/:id/image",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -206,10 +155,7 @@ router.post(
 router.delete(
   "/products/:id/image",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -220,10 +166,7 @@ router.delete(
 router.delete(
   "/products/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -237,20 +180,14 @@ router.delete(
 router.get(
   "/orders",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getOrders,
 );
 
 router.patch(
   "/orders/:id/status",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.updateOrderStatus,
 );
 
@@ -260,10 +197,7 @@ router.patch(
 router.post(
   "/assets",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -274,20 +208,14 @@ router.post(
 router.post(
   "/assets/farm-audit/submissions",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.submitFarmAsset,
 );
 
 router.get(
   "/assets",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -298,10 +226,7 @@ router.get(
 router.get(
   "/assets/farm-audit",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -312,30 +237,21 @@ router.get(
 router.post(
   "/assets/:id/farm-audit-requests",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.submitFarmAssetAudit,
 );
 
 router.post(
   "/assets/:id/farm-usage-requests",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.submitFarmToolUsageRequest,
 );
 
 router.post(
   "/assets/:id/farm-approval",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.APPROVE,
@@ -346,10 +262,7 @@ router.post(
 router.patch(
   "/assets/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -360,10 +273,7 @@ router.patch(
 router.delete(
   "/assets/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.ASSETS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -384,10 +294,7 @@ router.patch(
 router.post(
   "/invites",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -395,11 +302,7 @@ router.post(
   businessController.createInvite,
 );
 
-router.post(
-  "/invites/accept",
-  requireAuth,
-  businessController.acceptInvite,
-);
+router.post("/invites/accept", requireAuth, businessController.acceptInvite);
 
 /**
  * STAFF MANAGEMENT (OWNER + STAFF)
@@ -407,40 +310,28 @@ router.post(
 router.get(
   "/staff",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listStaffProfiles,
 );
 
 router.get(
   "/staff/capacity",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getStaffCapacity,
 );
 
 router.get(
   "/staff/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getStaffProfile,
 );
 
 router.get(
   "/staff/:id/compensation",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.PAYROLL,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -451,10 +342,7 @@ router.get(
 router.patch(
   "/staff/:id/compensation",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.PAYROLL,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -465,30 +353,21 @@ router.patch(
 router.post(
   "/staff/attendance/clock-in",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.clockInStaff,
 );
 
 router.post(
   "/staff/attendance/clock-out",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.clockOutStaff,
 );
 
 router.post(
   "/staff/attendance/clock-out-with-proof",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   parseAttendanceProofUploads,
   businessController.clockOutStaffWithProof,
 );
@@ -496,10 +375,7 @@ router.post(
 router.post(
   "/staff/attendance/:attendanceId/proof",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   parseAttendanceProofUploads,
   businessController.uploadStaffAttendanceProof,
 );
@@ -507,10 +383,7 @@ router.post(
 router.get(
   "/staff/attendance",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listStaffAttendance,
 );
 
@@ -520,160 +393,112 @@ router.get(
 router.post(
   "/production/plans/assistant-turn",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.productionPlanAssistantTurnHandler,
 );
 
 router.post(
   "/production/plans/ai-draft",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.generateProductionPlanDraftHandler,
 );
 
 router.get(
   "/production/schedule-policy",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getProductionSchedulePolicy,
 );
 
 router.put(
   "/production/schedule-policy",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.updateProductionSchedulePolicy,
 );
 
 router.post(
   "/production/plans",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.createProductionPlan,
 );
 
 router.get(
   "/production/plans/crop-search",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.searchProductionAssistantCatalogHandler,
 );
 
 router.get(
   "/production/plans/crop-lifecycle",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.previewProductionAssistantCropLifecycleHandler,
 );
 
 router.get(
   "/production/plans",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listProductionPlans,
 );
 
 router.put(
   "/production/plans/:id/draft",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.updateProductionPlanDraft,
 );
 
 router.patch(
   "/production/plans/:id/status",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.updateProductionPlanStatus,
 );
 
 router.delete(
   "/production/plans/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.deleteProductionPlan,
 );
 
 router.get(
   "/production/calendar",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listProductionCalendar,
 );
 
 router.get(
   "/production/confidence/portfolio",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getProductionPortfolioConfidence,
 );
 
 router.get(
   "/production/plans/:planId/confidence",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getProductionPlanConfidence,
 );
 
 router.get(
   "/production/plans/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getProductionPlanDetail,
 );
 
 router.get(
   "/production/plans/:planId/units",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listProductionPlanUnits,
 );
 
@@ -681,10 +506,7 @@ router.get(
 router.get(
   "/production/plans/:planId/deviation-alerts",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listProductionPlanDeviationAlerts,
 );
 
@@ -692,10 +514,7 @@ router.get(
 router.post(
   "/production/plans/:planId/deviation-alerts/:alertId/accept-variance",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.acceptProductionPlanDeviationVariance,
 );
 
@@ -703,118 +522,91 @@ router.post(
 router.post(
   "/production/plans/:planId/deviation-alerts/:alertId/replan-unit",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.replanProductionPlanDeviationUnit,
 );
 
 router.patch(
   "/production/plans/:id/preorder",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.updateProductionPlanPreorder,
 );
 
 router.post(
   "/production/plans/:planId/preorder/reserve",
   requireAuth,
-  requireAnyRole([
-    "customer",
-    "business_owner",
-  ]),
+  requireAnyRole(["customer", "business_owner"]),
   businessController.reserveProductionPlanPreorder,
 );
 
 router.get(
   "/preorder/reservations",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-  ]),
+  requireAnyRole(["business_owner"]),
   businessController.listPreorderReservations,
 );
 
 router.post(
   "/preorder/reservations/:id/release",
   requireAuth,
-  requireAnyRole([
-    "customer",
-    "business_owner",
-  ]),
+  requireAnyRole(["customer", "business_owner"]),
   businessController.releasePreorderReservation,
 );
 
 router.post(
   "/preorder/reservations/:id/confirm",
   requireAuth,
-  requireAnyRole([
-    "customer",
-    "business_owner",
-  ]),
+  requireAnyRole(["customer", "business_owner"]),
   businessController.confirmPreorderReservation,
 );
 
 router.post(
   "/preorder/reservations/reconcile-expired",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-  ]),
+  requireAnyRole(["business_owner"]),
   businessController.reconcileExpiredPreorderReservationsHandler,
 );
 
 router.patch(
   "/production/tasks/:id/status",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.updateProductionTaskStatus,
+);
+
+router.post(
+  "/production/plans/:planId/tasks",
+  requireAuth,
+  requireAnyRole(["business_owner", "staff"]),
+  businessController.createProductionPlanTask,
 );
 
 router.put(
   "/production/tasks/:taskId/assign",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.assignProductionTaskStaffProfiles,
 );
 
 router.post(
   "/production/tasks/:taskId/reset-history",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.resetProductionTaskHistory,
 );
 
 router.post(
   "/production/tasks/progress/batch",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.logProductionTaskProgressBatch,
 );
 
 router.post(
   "/production/tasks/:taskId/progress",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   parseTaskProgressProofUploads,
   businessController.logProductionTaskProgress,
 );
@@ -822,60 +614,42 @@ router.post(
 router.post(
   "/production/task-progress/:id/approve",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.approveTaskProgress,
 );
 
 router.post(
   "/production/task-progress/:id/reject",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.rejectTaskProgress,
 );
 
 router.post(
   "/production/tasks/:id/approve",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.approveProductionTask,
 );
 
 router.post(
   "/production/tasks/:id/reject",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.rejectProductionTask,
 );
 
 router.post(
   "/production/outputs",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.createProductionOutput,
 );
 
 router.get(
   "/production/outputs",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.listProductionOutputs,
 );
 
@@ -885,10 +659,7 @@ router.get(
 router.get(
   "/tenant/applications",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -899,10 +670,7 @@ router.get(
 router.get(
   "/tenant/applications/:id",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -913,10 +681,7 @@ router.get(
 router.post(
   "/tenant/applications/:id/verify-contact",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.VERIFY,
@@ -927,10 +692,7 @@ router.post(
 router.post(
   "/tenant/applications/:id/approve-agreement",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.APPROVE,
@@ -941,10 +703,7 @@ router.post(
 router.post(
   "/tenant/applications/:id/agreement",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.APPROVE,
@@ -955,10 +714,7 @@ router.post(
 router.post(
   "/tenant/request-links",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.MANAGE,
@@ -1012,10 +768,7 @@ router.get(
 router.get(
   "/tenant/:tenantId/payments",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.PAYMENTS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -1043,10 +796,7 @@ router.get(
 router.get(
   "/analytics/summary",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.REPORTS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -1057,10 +807,7 @@ router.get(
 router.get(
   "/analytics/events",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.REPORTS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -1071,10 +818,7 @@ router.get(
 router.get(
   "/analytics/estate/:estateAssetId",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.REPORTS,
     capability: PERMISSION_CAPABILITIES.VIEW,
@@ -1088,10 +832,7 @@ router.get(
 router.post(
   "/tenant/applications/:id/approve",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.APPROVE,
@@ -1115,10 +856,7 @@ router.post(
 router.post(
   "/tenants/:tenantId/verify-contact",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.VERIFY,
@@ -1132,10 +870,7 @@ router.post(
 router.post(
   "/tenants/:tenantId/approve",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   requirePermission({
     module: PERMISSION_MODULES.TENANTS,
     capability: PERMISSION_CAPABILITIES.APPROVE,
@@ -1169,10 +904,7 @@ router.post(
 router.get(
   "/tenants",
   requireAuth,
-  requireAnyRole([
-    "business_owner",
-    "staff",
-  ]),
+  requireAnyRole(["business_owner", "staff"]),
   businessController.getTenants,
 );
 
