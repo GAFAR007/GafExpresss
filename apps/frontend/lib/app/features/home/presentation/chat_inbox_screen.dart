@@ -1055,12 +1055,9 @@ class _PresenceToggle extends StatelessWidget {
     final scheme = theme.colorScheme;
     final isDark = _isDarkScheme(scheme);
     final onlineAccent = AppColors.success;
-    final offlineAccent = Colors.white.withValues(alpha: 0.78);
-    final selectedFill = _blendTone(
-      Colors.black,
-      scheme.primary,
-      alpha: isDark ? 0.08 : 0.12,
-    );
+    final offlineAccent = isDark
+        ? Colors.white.withValues(alpha: 0.82)
+        : scheme.primary.withValues(alpha: 0.78);
 
     Widget buildChoice({
       required bool selected,
@@ -1078,21 +1075,30 @@ class _PresenceToggle extends StatelessWidget {
             curve: Curves.easeOutCubic,
             height: 34,
             decoration: BoxDecoration(
-              color: selected ? selectedFill : Colors.transparent,
+              color: selected
+                  ? (isDark
+                        ? Colors.white.withValues(alpha: 0.16)
+                        : Colors.white)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected
+                    ? Colors.white.withValues(alpha: isDark ? 0.22 : 0.72)
+                    : Colors.white.withValues(alpha: isDark ? 0.18 : 0.34),
+              ),
               boxShadow: selected
                   ? [
                       BoxShadow(
                         color: scheme.shadow.withValues(
-                          alpha: isDark ? 0.14 : 0.08,
+                          alpha: isDark ? 0.14 : 0.06,
                         ),
-                        blurRadius: 12,
-                        offset: const Offset(0, 6),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
                       ),
                     ]
                   : null,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm + 1),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1110,8 +1116,8 @@ class _PresenceToggle extends StatelessWidget {
                   label,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: selected
-                        ? Colors.white
-                        : Colors.white.withValues(alpha: 0.88),
+                        ? (isDark ? Colors.white : scheme.primary)
+                        : Colors.white.withValues(alpha: 0.92),
                     fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                     letterSpacing: -0.08,
                   ),
@@ -1124,34 +1130,24 @@ class _PresenceToggle extends StatelessWidget {
     }
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
-      child: Container(
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.16),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.3),
+      constraints: const BoxConstraints(minWidth: 148, maxWidth: 194),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          buildChoice(
+            selected: isOnline,
+            label: _ChatInboxCopy.onlineLabel,
+            accent: onlineAccent,
+            onTap: () => onChanged(true),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            buildChoice(
-              selected: isOnline,
-              label: _ChatInboxCopy.onlineLabel,
-              accent: onlineAccent,
-              onTap: () => onChanged(true),
-            ),
-            const SizedBox(width: AppSpacing.xxs + 1),
-            buildChoice(
-              selected: !isOnline,
-              label: _ChatInboxCopy.offlineLabel,
-              accent: offlineAccent,
-              onTap: () => onChanged(false),
-            ),
-          ],
-        ),
+          const SizedBox(width: AppSpacing.xxs + 1),
+          buildChoice(
+            selected: !isOnline,
+            label: _ChatInboxCopy.offlineLabel,
+            accent: offlineAccent,
+            onTap: () => onChanged(false),
+          ),
+        ],
       ),
     );
   }
@@ -1195,21 +1191,24 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
               height: 34,
               decoration: BoxDecoration(
                 color: selected
-                    ? _blendTone(
-                        Colors.black,
-                        scheme.primary,
-                        alpha: isDark ? 0.08 : 0.1,
-                      )
+                    ? (isDark
+                          ? Colors.white.withValues(alpha: 0.16)
+                          : Colors.white)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: selected
+                      ? Colors.white.withValues(alpha: isDark ? 0.22 : 0.72)
+                      : Colors.white.withValues(alpha: isDark ? 0.18 : 0.34),
+                ),
                 boxShadow: selected
                     ? [
                         BoxShadow(
                           color: scheme.shadow.withValues(
-                            alpha: isDark ? 0.14 : 0.08,
+                            alpha: isDark ? 0.14 : 0.06,
                           ),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
+                          blurRadius: 10,
+                          offset: const Offset(0, 5),
                         ),
                       ]
                     : null,
@@ -1219,7 +1218,7 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
                 icon,
                 size: 17,
                 color: selected
-                    ? Colors.white
+                    ? (isDark ? Colors.white : scheme.primary)
                     : Colors.white.withValues(alpha: 0.84),
               ),
             ),
@@ -1228,31 +1227,21 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.16),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.28),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        buildModeChip(
+          value: AppThemeMode.classic,
+          semanticLabel: "Classic theme",
+          icon: Icons.wb_sunny_outlined,
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          buildModeChip(
-            value: AppThemeMode.classic,
-            semanticLabel: "Classic theme",
-            icon: Icons.wb_sunny_outlined,
-          ),
-          const SizedBox(width: 2),
-          buildModeChip(
-            value: AppThemeMode.dark,
-            semanticLabel: "Dark theme",
-            icon: Icons.dark_mode_outlined,
-          ),
-        ],
-      ),
+        const SizedBox(width: 4),
+        buildModeChip(
+          value: AppThemeMode.dark,
+          semanticLabel: "Dark theme",
+          icon: Icons.dark_mode_outlined,
+        ),
+      ],
     );
   }
 }
@@ -1343,40 +1332,32 @@ class _InboxTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _InboxTabButton(
-              label: _ChatInboxCopy.directLabel,
-              selected: filter == _ChatInboxFilter.direct,
-              onTap: () => onChanged(_ChatInboxFilter.direct),
-            ),
+    return Row(
+      children: [
+        Expanded(
+          child: _InboxTabButton(
+            label: _ChatInboxCopy.directLabel,
+            selected: filter == _ChatInboxFilter.direct,
+            onTap: () => onChanged(_ChatInboxFilter.direct),
           ),
-          const SizedBox(width: AppSpacing.xxs + 1),
-          Expanded(
-            child: _InboxTabButton(
-              label: _ChatInboxCopy.groupLabel,
-              selected: filter == _ChatInboxFilter.group,
-              onTap: () => onChanged(_ChatInboxFilter.group),
-            ),
+        ),
+        const SizedBox(width: AppSpacing.xs + 1),
+        Expanded(
+          child: _InboxTabButton(
+            label: _ChatInboxCopy.groupLabel,
+            selected: filter == _ChatInboxFilter.group,
+            onTap: () => onChanged(_ChatInboxFilter.group),
           ),
-          const SizedBox(width: AppSpacing.xxs + 1),
-          Expanded(
-            child: _InboxTabButton(
-              label: _ChatInboxCopy.queueLabel,
-              selected: filter == _ChatInboxFilter.queue,
-              onTap: () => onChanged(_ChatInboxFilter.queue),
-            ),
+        ),
+        const SizedBox(width: AppSpacing.xs + 1),
+        Expanded(
+          child: _InboxTabButton(
+            label: _ChatInboxCopy.queueLabel,
+            selected: filter == _ChatInboxFilter.queue,
+            onTap: () => onChanged(_ChatInboxFilter.queue),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1405,27 +1386,29 @@ class _InboxTabButton extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
+        height: 40,
         padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xs + 2,
-          vertical: AppSpacing.sm,
+          horizontal: AppSpacing.xs + 1,
+          vertical: AppSpacing.sm - 1,
         ),
         decoration: BoxDecoration(
           color: selected
-              ? _blendTone(
-                  Colors.black,
-                  scheme.primary,
-                  alpha: isDark ? 0.08 : 0.12,
-                )
+              ? (isDark ? Colors.white.withValues(alpha: 0.16) : Colors.white)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected
+                ? Colors.white.withValues(alpha: isDark ? 0.22 : 0.72)
+                : Colors.white.withValues(alpha: isDark ? 0.18 : 0.32),
+          ),
           boxShadow: selected
               ? [
                   BoxShadow(
                     color: scheme.shadow.withValues(
-                      alpha: isDark ? 0.14 : 0.08,
+                      alpha: isDark ? 0.14 : 0.06,
                     ),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
                   ),
                 ]
               : null,
@@ -1435,7 +1418,7 @@ class _InboxTabButton extends StatelessWidget {
           label,
           style: theme.textTheme.labelLarge?.copyWith(
             color: selected
-                ? Colors.white
+                ? (isDark ? Colors.white : scheme.primary)
                 : Colors.white.withValues(alpha: 0.86),
             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
             letterSpacing: -0.15,
