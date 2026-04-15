@@ -48,18 +48,12 @@ const String _logThemeChange = "theme_change";
 
 const double _kInboxMaxWidth = 760;
 const double _kAvatarSize = 44;
-const Color _kInboxHeroTop = Color(0xFFFFDABF);
-const Color _kInboxHeroMiddle = Color(0xFFD4E3FF);
-const Color _kInboxHeroBottom = Color(0xFFD8F2E1);
-const Color _kInboxHeroPeach = Color(0xFFFFBB8A);
-const Color _kInboxHeroBlue = Color(0xFFA8C4FF);
-const Color _kInboxHeroMint = Color(0xFF9EDAB2);
-const Color _kInboxHeroDarkTop = Color(0xFF2A2131);
-const Color _kInboxHeroDarkMiddle = Color(0xFF1B3761);
-const Color _kInboxHeroDarkBottom = Color(0xFF18392E);
-const Color _kInboxHeroDarkPeach = Color(0xFF9A624C);
-const Color _kInboxHeroDarkBlue = Color(0xFF4569A8);
-const Color _kInboxHeroDarkMint = Color(0xFF2F6A55);
+const Color _kInboxHeroTop = Color(0xFFBFD3FF);
+const Color _kInboxHeroMiddle = Color(0xFFD7E4FF);
+const Color _kInboxHeroBottom = Color(0xFFEAF1FF);
+const Color _kInboxHeroDarkTop = Color(0xFF12264D);
+const Color _kInboxHeroDarkMiddle = Color(0xFF1A3565);
+const Color _kInboxHeroDarkBottom = Color(0xFF24467E);
 const Color _kInboxHeroGlass = Color(0xFFFDFEFF);
 
 class _ChatInboxCopy {
@@ -276,8 +270,11 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
         : null;
 
     final scheme = Theme.of(context).colorScheme;
+    final isDark = _isDarkScheme(scheme);
     return Scaffold(
-      backgroundColor: scheme.surfaceContainerLowest,
+      backgroundColor: isDark
+          ? scheme.surfaceContainerLowest
+          : _kInboxHeroGlass,
       floatingActionButton: canCreate
           ? _InboxFab(
               onPressed: () => _openNewChat(context),
@@ -520,6 +517,13 @@ class _InboxBackdrop extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isDark = _isDarkScheme(scheme);
 
+    if (!isDark) {
+      return const DecoratedBox(
+        decoration: BoxDecoration(color: _kInboxHeroGlass),
+        child: SizedBox.expand(),
+      );
+    }
+
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -649,44 +653,28 @@ class _InboxHeroSection extends StatelessWidget {
     final topColor = isDark ? _kInboxHeroDarkTop : _kInboxHeroTop;
     final middleColor = isDark ? _kInboxHeroDarkMiddle : _kInboxHeroMiddle;
     final bottomColor = isDark ? _kInboxHeroDarkBottom : _kInboxHeroBottom;
-    final peachColor = isDark ? _kInboxHeroDarkPeach : _kInboxHeroPeach;
-    final blueColor = isDark ? _kInboxHeroDarkBlue : _kInboxHeroBlue;
-    final mintColor = isDark ? _kInboxHeroDarkMint : _kInboxHeroMint;
 
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
           colors: [topColor, middleColor, bottomColor],
-          stops: const [0, 0.52, 1],
+          stops: const [0, 0.58, 1],
         ),
         borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: isDark ? 0.18 : 0.05),
+            blurRadius: isDark ? 24 : 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: ClipRRect(
         borderRadius: radius,
         child: Stack(
           children: [
-            Positioned(
-              top: -88,
-              right: -54,
-              child: _BackdropBloom(size: 238, color: peachColor),
-            ),
-            Positioned(
-              top: 66,
-              right: 8,
-              child: _BackdropBloom(size: 210, color: blueColor),
-            ),
-            Positioned(
-              left: -72,
-              bottom: 26,
-              child: _BackdropBloom(size: 220, color: mintColor),
-            ),
-            Positioned(
-              top: 12,
-              left: -24,
-              child: _BackdropBloom(size: 132, color: peachColor),
-            ),
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
