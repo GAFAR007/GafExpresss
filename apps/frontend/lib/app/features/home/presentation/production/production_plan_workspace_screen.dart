@@ -84,6 +84,7 @@ const String _resetHistoryLabel = "Reset history";
 const String _removeStaffHint = "Leave everything unchecked to remove staff.";
 const String _logProgressLabel = "Log progress";
 const String _editProgressLabel = "Edit progress";
+const String _newCountLabel = "New count";
 const String _taskApproveLabel = "Approve task";
 const String _taskRejectLabel = "Reject task";
 const String _progressApproveLabel = "Approve log";
@@ -148,6 +149,7 @@ const String _taskAssignmentFailure = "Unable to update task staff.";
 const String _taskStatusSuccess = "Task status updated.";
 const String _taskStatusFailure = "Unable to update task status.";
 const String _taskProgressSuccess = "Daily progress logged.";
+const String _newCountSuccess = "New count saved.";
 const String _taskProgressFailure = "Unable to log daily progress.";
 const String _taskResetHistorySuccess = "Production history reset.";
 const String _taskResetHistoryFailure = "Unable to reset production history.";
@@ -1138,6 +1140,143 @@ class _ProductionPlanWorkspaceScreenState
                       }
                     }
 
+                    Future<void> submitProgressInput(
+                      ProductionTaskLogProgressInput input,
+                    ) async {
+                      await ref
+                          .read(productionPlanActionsProvider)
+                          .logTaskProgress(
+                            taskId: task.id,
+                            workDate: selectedDay,
+                            staffId: input.staffId,
+                            unitId: input.unitId,
+                            createNewEntry: input.createNewEntry,
+                            unitContribution: input.unitContribution,
+                            actualPlots: input.actualPlots,
+                            activityType: input.activityType,
+                            quantityActivityType: input.quantityActivityType,
+                            activityQuantity: input.activityQuantity,
+                            quantityAmount: input.quantityAmount,
+                            quantityUnit: input.quantityUnit,
+                            proofs: input.proofs,
+                            delayReason: input.delayReason,
+                            notes: input.notes,
+                            planId: widget.planId,
+                          );
+                    }
+
+                    Future<ProductionPlanDetail> loadLatestDetail() async {
+                      try {
+                        return await ref.refresh(
+                          productionPlanDetailProvider(widget.planId).future,
+                        );
+                      } catch (_) {
+                        return detail;
+                      }
+                    }
+
+                    Future<void> openLogProgressFlowForStaff(
+                      String staffProfileId, {
+                      required bool createNewEntry,
+                    }) async {
+                      try {
+                        final latestDetail = await loadLatestDetail();
+                        if (!mounted || !context.mounted) {
+                          return;
+                        }
+                        final latestActiveAttendance =
+                            resolveProductionWorkspaceActiveClockOutAttendance(
+                              attendanceRecords: latestDetail.attendanceRecords,
+                              staffProfileId: staffProfileId,
+                              day: selectedDay,
+                              taskId: task.id,
+                            );
+                        if (!createNewEntry &&
+                            latestActiveAttendance != null &&
+                            latestActiveAttendance.clockInAt != null &&
+                            latestActiveAttendance.clockOutAt == null) {
+                          final completed = await _showWorkspaceClockOutWizard(
+                            context,
+                            workDate: selectedDay,
+                            task: task,
+                            plan: latestDetail.plan,
+                            timelineRows: latestDetail.timelineRows,
+                            taskDayLedgers: latestDetail.taskDayLedgers,
+                            attendanceRecords: latestDetail.attendanceRecords,
+                            staffMap: staffMap,
+                            planUnitLabelById: planUnitLabelById,
+                            fallbackTotalUnits: workScopeSummary.totalUnits,
+                            fallbackWorkUnitLabel:
+                                workScopeSummary.singularLabel,
+                            staffId: staffProfileId,
+                            onSubmit: submitProgressInput,
+                          );
+                          if (completed) {
+                            _showSnackSafe(_clockOutWizardSuccess);
+                          }
+                          return;
+                        }
+                        final input = await _showWorkspaceLogDialog(
+                          context,
+                          workDate: selectedDay,
+                          task: task,
+                          plan: latestDetail.plan,
+                          timelineRows: latestDetail.timelineRows,
+                          taskDayLedgers: latestDetail.taskDayLedgers,
+                          staffMap: staffMap,
+                          planUnitLabelById: planUnitLabelById,
+                          fallbackTotalUnits: workScopeSummary.totalUnits,
+                          fallbackWorkUnitLabel: workScopeSummary.singularLabel,
+                          attendanceRecords: latestDetail.attendanceRecords,
+                          actorStaffId: selfStaffId.trim().isEmpty
+                              ? null
+                              : selfStaffId,
+                          canPickAnyAssignedStaff: canManageCalendar,
+                          canManageAttendance: canManageTaskAttendance,
+                          onSetAttendanceForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? setAttendanceForTaskStaff
+                              : null,
+                          onQuickClockInForStaff:
+                              canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty
+                              ? quickClockInForTaskStaff
+                              : null,
+                          onQuickClockOutForStaff: null,
+                          initialStaffId: staffProfileId,
+                          lockSelectedStaff: true,
+                          createNewEntry: createNewEntry,
+                        );
+                        if (input == null) {
+                          return;
+                        }
+                        AppDebug.log(
+                          _logTag,
+                          _logProgress,
+                          extra: {
+                            "planId": widget.planId,
+                            "taskId": task.id,
+                            "staffId": input.staffId,
+                            "createNewEntry": input.createNewEntry,
+                          },
+                        );
+                        await submitProgressInput(input);
+                        _showSnackSafe(
+                          input.createNewEntry
+                              ? _newCountSuccess
+                              : _taskProgressSuccess,
+                        );
+                      } catch (error) {
+                        _showSnackSafe(
+                          _resolveProductionWorkspaceErrorMessage(
+                            error,
+                            fallback: _taskProgressFailure,
+                          ),
+                        );
+                      }
+                    }
+
                     return Padding(
                       padding: const EdgeInsets.only(bottom: _cardSpacing),
                       child: _AgendaTaskCard(
@@ -1238,88 +1377,19 @@ class _ProductionPlanWorkspaceScreenState
                         onLogProgressForStaff: progressEnabledStaffIds.isEmpty
                             ? null
                             : (staffProfileId) async {
-                                try {
-                                  ProductionPlanDetail latestDetail = detail;
-                                  try {
-                                    latestDetail = await ref.refresh(
-                                      productionPlanDetailProvider(
-                                        widget.planId,
-                                      ).future,
-                                    );
-                                  } catch (_) {
-                                    latestDetail = detail;
-                                  }
-                                  if (!mounted || !context.mounted) {
-                                    return;
-                                  }
-                                  final completed =
-                                      await _showWorkspaceClockOutWizard(
-                                        context,
-                                        workDate: selectedDay,
-                                        task: task,
-                                        plan: latestDetail.plan,
-                                        timelineRows: latestDetail.timelineRows,
-                                        taskDayLedgers:
-                                            latestDetail.taskDayLedgers,
-                                        attendanceRecords:
-                                            latestDetail.attendanceRecords,
-                                        staffMap: staffMap,
-                                        planUnitLabelById: planUnitLabelById,
-                                        fallbackTotalUnits:
-                                            workScopeSummary.totalUnits,
-                                        fallbackWorkUnitLabel:
-                                            workScopeSummary.singularLabel,
-                                        staffId: staffProfileId,
-                                        onSubmit: (input) async {
-                                          AppDebug.log(
-                                            _logTag,
-                                            _logProgress,
-                                            extra: {
-                                              "planId": widget.planId,
-                                              "taskId": task.id,
-                                              "staffId": input.staffId,
-                                            },
-                                          );
-                                          await ref
-                                              .read(
-                                                productionPlanActionsProvider,
-                                              )
-                                              .logTaskProgress(
-                                                taskId: task.id,
-                                                workDate: selectedDay,
-                                                staffId: input.staffId,
-                                                unitId: input.unitId,
-                                                unitContribution:
-                                                    input.unitContribution,
-                                                actualPlots: input.actualPlots,
-                                                activityType:
-                                                    input.activityType,
-                                                quantityActivityType:
-                                                    input.quantityActivityType,
-                                                activityQuantity:
-                                                    input.activityQuantity,
-                                                quantityAmount:
-                                                    input.quantityAmount,
-                                                quantityUnit:
-                                                    input.quantityUnit,
-                                                proofs: input.proofs,
-                                                delayReason: input.delayReason,
-                                                notes: input.notes,
-                                                planId: widget.planId,
-                                              );
-                                        },
-                                      );
-                                  if (completed) {
-                                    _showSnackSafe(_clockOutWizardSuccess);
-                                  }
-                                } catch (error) {
-                                  _showSnackSafe(
-                                    _resolveProductionWorkspaceErrorMessage(
-                                      error,
-                                      fallback: _taskProgressFailure,
-                                    ),
-                                  );
-                                }
+                                await openLogProgressFlowForStaff(
+                                  staffProfileId,
+                                  createNewEntry: false,
+                                );
+                              },
+                        onAddProgressCountForStaff:
+                            progressEnabledStaffIds.isEmpty
+                            ? null
+                            : (staffProfileId) async {
+                                await openLogProgressFlowForStaff(
+                                  staffProfileId,
+                                  createNewEntry: true,
+                                );
                               },
                         onStatusSelected: canManageCalendar
                             ? (status) async {
@@ -1381,6 +1451,7 @@ class _ProductionPlanWorkspaceScreenState
                                       ? quickClockInForTaskStaff
                                       : null,
                                   onQuickClockOutForStaff: null,
+                                  createNewEntry: false,
                                 );
                                 if (input == null) {
                                   return;
@@ -1394,28 +1465,7 @@ class _ProductionPlanWorkspaceScreenState
                                   },
                                 );
                                 try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .logTaskProgress(
-                                        taskId: task.id,
-                                        workDate: selectedDay,
-                                        staffId: input.staffId,
-                                        unitId: input.unitId,
-                                        unitContribution:
-                                            input.unitContribution,
-                                        actualPlots: input.actualPlots,
-                                        activityType: input.activityType,
-                                        quantityActivityType:
-                                            input.quantityActivityType,
-                                        activityQuantity:
-                                            input.activityQuantity,
-                                        quantityAmount: input.quantityAmount,
-                                        quantityUnit: input.quantityUnit,
-                                        proofs: input.proofs,
-                                        delayReason: input.delayReason,
-                                        notes: input.notes,
-                                        planId: widget.planId,
-                                      );
+                                  await submitProgressInput(input);
                                   _showSnackSafe(_taskProgressSuccess);
                                 } catch (error) {
                                   _showSnackSafe(
@@ -3388,6 +3438,8 @@ class _AgendaTaskCard extends StatelessWidget {
   onQuickClockOutForStaff;
   final Future<void> Function(String staffProfileId)? onResetHistoryForStaff;
   final Future<void> Function(String staffProfileId)? onLogProgressForStaff;
+  final Future<void> Function(String staffProfileId)?
+  onAddProgressCountForStaff;
   final Future<void> Function(String status)? onStatusSelected;
   final Future<void> Function()? onLogProgress;
   final Future<void> Function()? onApproveTask;
@@ -3420,6 +3472,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.onQuickClockOutForStaff,
     required this.onResetHistoryForStaff,
     required this.onLogProgressForStaff,
+    required this.onAddProgressCountForStaff,
     required this.onStatusSelected,
     required this.onLogProgress,
     required this.onApproveTask,
@@ -3728,6 +3781,12 @@ class _AgendaTaskCard extends StatelessWidget {
                       day: selectedDay,
                       taskId: task.id,
                     );
+                final staffProgressRows = rowsForDay.where((row) {
+                  return row.taskId.trim() == task.id.trim() &&
+                      row.staffId.trim() == staffId.trim() &&
+                      _toWorkDateKey(row.workDate) ==
+                          _toWorkDateKey(selectedDay);
+                }).toList();
                 final staffProgress = _findStaffTaskProgressRow(
                   timelineRows: rowsForDay,
                   taskId: task.id,
@@ -3746,15 +3805,21 @@ class _AgendaTaskCard extends StatelessWidget {
                       displayAttendance,
                       _toWorkDateKey(selectedDay),
                     );
+                final totalStaffUnitContribution = staffProgressRows.fold<num>(
+                  0,
+                  (sum, row) => sum + row.unitContribution,
+                );
                 final hasDisplayClockIn = displayAttendance?.clockInAt != null;
                 final hasDisplayClockOut =
                     displayAttendance?.clockOutAt != null;
-                final hasLoggedProgress = staffProgress != null;
+                final hasLoggedProgress = staffProgressRows.isNotEmpty;
                 final visibleProofs = _resolveWorkspaceVisibleProofs(
                   progress: staffProgress,
                   attendance:
                       taskAttendance ??
-                      (attendanceBelongsToCurrentTask ? displayAttendance : null),
+                      (attendanceBelongsToCurrentTask
+                          ? displayAttendance
+                          : null),
                 );
                 final canResetHistory =
                     taskAttendance != null || hasLoggedProgress;
@@ -3833,8 +3898,7 @@ class _AgendaTaskCard extends StatelessWidget {
                             !canManageProgressFlow,
                         hasLoggedProgress: hasLoggedProgress,
                         attendanceHint: attendanceHint,
-                        personalUnitContribution:
-                            staffProgress?.unitContribution ?? 0,
+                        personalUnitContribution: totalStaffUnitContribution,
                         personalActivityType:
                             staffProgress?.activityType ??
                             staffProgress?.quantityActivityType ??
@@ -3891,6 +3955,12 @@ class _AgendaTaskCard extends StatelessWidget {
                                 !canManageProgressFlow
                             ? null
                             : () => onLogProgressForStaff!(staffId),
+                        onAddProgressCount:
+                            onAddProgressCountForStaff == null ||
+                                !canManageProgressFlow ||
+                                !hasLoggedProgress
+                            ? null
+                            : () => onAddProgressCountForStaff!(staffId),
                         onResetHistory:
                             onResetHistoryForStaff == null || !canResetHistory
                             ? null
@@ -4265,8 +4335,12 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   final Future<void> Function()? onQuickClockOut;
   final Future<void> Function()? onSetAttendance;
   final Future<void> Function()? onLogProgress;
+  final Future<void> Function()? onAddProgressCount;
   final Future<void> Function()? onResetHistory;
-  final Future<void> Function(ProductionTaskProgressProofRecord proof, int index)?
+  final Future<void> Function(
+    ProductionTaskProgressProofRecord proof,
+    int index,
+  )?
   onOpenProof;
 
   const _AssignedStaffAttendanceRow({
@@ -4297,6 +4371,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.onQuickClockOut,
     required this.onSetAttendance,
     required this.onLogProgress,
+    required this.onAddProgressCount,
     required this.onResetHistory,
     required this.onOpenProof,
   });
@@ -4362,6 +4437,12 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
           label: Text(
             hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
           ),
+        ),
+      if (canLogProgress && hasLoggedProgress && onAddProgressCount != null)
+        OutlinedButton.icon(
+          onPressed: onAddProgressCount,
+          icon: const Icon(Icons.post_add_outlined, size: 18),
+          label: const Text(_newCountLabel),
         ),
       if (onResetHistory != null)
         OutlinedButton.icon(
@@ -4771,10 +4852,7 @@ class _WorkspaceProofTileFallback extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _WorkspaceProofTileFallback({
-    required this.icon,
-    required this.label,
-  });
+  const _WorkspaceProofTileFallback({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -5025,6 +5103,7 @@ class _TimelineLogRow extends StatelessWidget {
 class ProductionTaskLogProgressInput {
   final String? staffId;
   final String? unitId;
+  final bool createNewEntry;
   final num unitContribution;
   final List<ProductionTaskProgressProofInput> proofs;
   final String activityType;
@@ -5036,6 +5115,7 @@ class ProductionTaskLogProgressInput {
   const ProductionTaskLogProgressInput({
     required this.staffId,
     required this.unitId,
+    this.createNewEntry = false,
     required this.unitContribution,
     required this.proofs,
     required this.activityType,
@@ -5634,7 +5714,9 @@ List<ProductionTaskProgressProofRecord> _resolveWorkspaceVisibleProofs({
     }
   }
 
-  addAll(attendance?.effectiveProofs ?? const <ProductionTaskProgressProofRecord>[]);
+  addAll(
+    attendance?.effectiveProofs ?? const <ProductionTaskProgressProofRecord>[],
+  );
   addAll(progress?.proofs ?? const <ProductionTaskProgressProofRecord>[]);
   return byKey.values.toList();
 }
@@ -5874,14 +5956,11 @@ bool _canReviewProgress({
   )) {
     return true;
   }
-  return _matchesWorkspaceStaffRole(
-    staffRole,
-    const {
-      staffRoleEstateManager,
-      staffRoleFarmManager,
-      staffRoleAssetManager,
-    },
-  );
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+    staffRoleAssetManager,
+  });
 }
 
 bool _canManageTaskAttendance({
@@ -5894,10 +5973,10 @@ bool _canManageTaskAttendance({
   )) {
     return true;
   }
-  return _matchesWorkspaceStaffRole(
-    staffRole,
-    const {staffRoleEstateManager, staffRoleFarmManager},
-  );
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+  });
 }
 
 bool _canManageCalendar({
@@ -5910,14 +5989,11 @@ bool _canManageCalendar({
   )) {
     return true;
   }
-  return _matchesWorkspaceStaffRole(
-    staffRole,
-    const {
-      staffRoleEstateManager,
-      staffRoleFarmManager,
-      staffRoleAssetManager,
-    },
-  );
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+    staffRoleAssetManager,
+  });
 }
 
 bool _canManagePlanLifecycle({
@@ -5930,10 +6006,7 @@ bool _canManagePlanLifecycle({
   )) {
     return true;
   }
-  return _matchesWorkspaceStaffRole(
-    staffRole,
-    const {staffRoleEstateManager},
-  );
+  return _matchesWorkspaceStaffRole(staffRole, const {staffRoleEstateManager});
 }
 
 bool _matchesWorkspaceStaffRole(String? staffRole, Set<String> allowedRoles) {
@@ -6647,6 +6720,17 @@ List<num> _buildQuantityAmountOptions({required num maxAmount}) {
   return ordered;
 }
 
+int _compareProgressRowsByNewest(
+  ProductionTimelineRow left,
+  ProductionTimelineRow right,
+) {
+  final entryIndexComparison = right.entryIndex.compareTo(left.entryIndex);
+  if (entryIndexComparison != 0) {
+    return entryIndexComparison;
+  }
+  return right.id.compareTo(left.id);
+}
+
 ProductionTimelineRow? _findExistingProgressRowForSelection({
   required List<ProductionTimelineRow> timelineRows,
   required String taskId,
@@ -6667,7 +6751,7 @@ ProductionTimelineRow? _findExistingProgressRowForSelection({
   if (matches.isEmpty) {
     return null;
   }
-  matches.sort((left, right) => left.id.compareTo(right.id));
+  matches.sort(_compareProgressRowsByNewest);
   return matches.first;
 }
 
@@ -6688,8 +6772,8 @@ ProductionTimelineRow? _findStaffTaskProgressRow({
   if (matches.isEmpty) {
     return null;
   }
-  matches.sort((left, right) => left.id.compareTo(right.id));
-  return matches.last;
+  matches.sort(_compareProgressRowsByNewest);
+  return matches.first;
 }
 
 String _buildProgressCountHelperText({
@@ -8599,6 +8683,9 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
   String? actorStaffId,
   required bool canPickAnyAssignedStaff,
   required bool canManageAttendance,
+  String? initialStaffId,
+  bool lockSelectedStaff = false,
+  bool createNewEntry = false,
   Future<ProductionAttendanceRecord?> Function(
     String staffProfileId,
     ProductionAttendanceRecord? existingAttendance,
@@ -8627,10 +8714,16 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
       .where((value) => value.isNotEmpty)
       .toList();
   final normalizedActorStaffId = actorStaffId?.trim() ?? "";
+  final normalizedInitialStaffId = initialStaffId?.trim() ?? "";
+  final effectiveCanPickAnyAssignedStaff =
+      canPickAnyAssignedStaff && !lockSelectedStaff;
   String? selectedStaffId =
-      !canPickAnyAssignedStaff &&
-          normalizedActorStaffId.isNotEmpty &&
-          assignedStaffIds.contains(normalizedActorStaffId)
+      normalizedInitialStaffId.isNotEmpty &&
+          assignedStaffIds.contains(normalizedInitialStaffId)
+      ? normalizedInitialStaffId
+      : !effectiveCanPickAnyAssignedStaff &&
+            normalizedActorStaffId.isNotEmpty &&
+            assignedStaffIds.contains(normalizedActorStaffId)
       ? normalizedActorStaffId
       : (assignedStaffIds.isNotEmpty ? assignedStaffIds.first : null);
   String? selectedUnitId = assignedUnitIds.isNotEmpty
@@ -8760,33 +8853,45 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
       staffId: selectedStaffId,
       unitId: selectedUnitId,
     );
-    selectedActualAmount =
-        existingRow?.unitContribution ?? existingRow?.actualPlots;
-    final existingDelayReason = existingRow?.delayReason.trim() ?? "";
-    selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
-        ? existingDelayReason
-        : _delayReasonNone;
-    notesController.text = existingRow?.notes ?? "";
-    if (supportsActivityTracking) {
-      final existingQuantityActivityType = existingRow == null
-          ? ""
-          : (existingRow.activityType.trim().isNotEmpty
-                    ? existingRow.activityType
-                    : existingRow.quantityActivityType)
-                .trim();
-      if (existingRow != null && existingQuantityActivityType.isNotEmpty) {
-        selectedQuantityActivityType = existingQuantityActivityType;
-        selectedQuantityAmount =
-            existingQuantityActivityType == _quantityActivityNone
-            ? 0
-            : existingRow.activityQuantity > 0
-            ? existingRow.activityQuantity
-            : existingRow.quantityAmount;
-      } else {
+    if (createNewEntry) {
+      selectedActualAmount = null;
+      selectedDelayReason = _delayReasonNone;
+      notesController.text = "";
+      if (supportsActivityTracking) {
         if (!preserveSelectedQuantityActivity) {
           selectedQuantityActivityType = suggestedQuantityActivityType;
         }
         selectedQuantityAmount = 0;
+      }
+    } else {
+      selectedActualAmount =
+          existingRow?.unitContribution ?? existingRow?.actualPlots;
+      final existingDelayReason = existingRow?.delayReason.trim() ?? "";
+      selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
+          ? existingDelayReason
+          : _delayReasonNone;
+      notesController.text = existingRow?.notes ?? "";
+      if (supportsActivityTracking) {
+        final existingQuantityActivityType = existingRow == null
+            ? ""
+            : (existingRow.activityType.trim().isNotEmpty
+                      ? existingRow.activityType
+                      : existingRow.quantityActivityType)
+                  .trim();
+        if (existingRow != null && existingQuantityActivityType.isNotEmpty) {
+          selectedQuantityActivityType = existingQuantityActivityType;
+          selectedQuantityAmount =
+              existingQuantityActivityType == _quantityActivityNone
+              ? 0
+              : existingRow.activityQuantity > 0
+              ? existingRow.activityQuantity
+              : existingRow.quantityAmount;
+        } else {
+          if (!preserveSelectedQuantityActivity) {
+            selectedQuantityActivityType = suggestedQuantityActivityType;
+          }
+          selectedQuantityAmount = 0;
+        }
       }
     }
   }
@@ -8809,11 +8914,13 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
             staffId: selectedStaffId,
             unitId: selectedUnitId,
           );
-          final existingSelectionAmount =
-              existingSelectionRow?.unitContribution ??
-              existingSelectionRow?.actualPlots ??
-              0;
-          final existingSelectionProofCount = existingSelectionRow == null
+          final existingSelectionAmount = createNewEntry
+              ? 0
+              : (existingSelectionRow?.unitContribution ??
+                    existingSelectionRow?.actualPlots ??
+                    0);
+          final existingSelectionProofCount =
+              createNewEntry || existingSelectionRow == null
               ? 0
               : (existingSelectionRow.proofCountUploaded > 0
                     ? existingSelectionRow.proofCountUploaded
@@ -8910,6 +9017,7 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
               selectedProofs.isNotEmpty || existingSelectionProofCount > 0
               ? _logDialogReplaceProofLabel
               : _logDialogUploadProofLabel;
+          final dialogTitle = createNewEntry ? _newCountLabel : _logDialogTitle;
           final selectedAttendance = resolveDialogAttendance(selectedStaffId);
           final selectedClockInAt = selectedAttendance?.clockInAt?.toLocal();
           final selectedClockOutAt = selectedAttendance?.clockOutAt?.toLocal();
@@ -8976,7 +9084,8 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
           }
 
           final existingSelectionQuantityAmount =
-              existingSelectionRow != null &&
+              !createNewEntry &&
+                  existingSelectionRow != null &&
                   ((existingSelectionRow.activityType.trim().isNotEmpty
                               ? existingSelectionRow.activityType
                               : existingSelectionRow.quantityActivityType)
@@ -9025,7 +9134,7 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
               horizontal: 16,
               vertical: 24,
             ),
-            title: const Text(_logDialogTitle),
+            title: Text(dialogTitle),
             content: SizedBox(
               width: math.min(MediaQuery.of(context).size.width * 0.92, 720),
               child: SingleChildScrollView(
@@ -9050,7 +9159,8 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                       ),
                     ),
                     const SizedBox(height: 12),
-                    if (assignedStaffIds.isNotEmpty && canPickAnyAssignedStaff)
+                    if (assignedStaffIds.isNotEmpty &&
+                        effectiveCanPickAnyAssignedStaff)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedStaffId,
                         decoration: const InputDecoration(
@@ -9083,9 +9193,11 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                           });
                         },
                       ),
-                    if (assignedStaffIds.isNotEmpty && canPickAnyAssignedStaff)
+                    if (assignedStaffIds.isNotEmpty &&
+                        effectiveCanPickAnyAssignedStaff)
                       const SizedBox(height: 12),
-                    if (assignedStaffIds.isNotEmpty && !canPickAnyAssignedStaff)
+                    if (assignedStaffIds.isNotEmpty &&
+                        !effectiveCanPickAnyAssignedStaff)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Text(
@@ -9509,7 +9621,7 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            existingSelectionAmount > 0
+                            !createNewEntry && existingSelectionAmount > 0
                                 ? "Allowed now: $editableAllowanceLabel. This staff/unit already has ${_formatProgressAmountWithUnit(amount: existingSelectionAmount, singularUnitLabel: progressUnitSingularLabel)} saved, so the picker frees that amount while you edit."
                                 : "Allowed now: $editableAllowanceLabel.",
                             style: Theme.of(context).textTheme.bodySmall
@@ -9896,6 +10008,7 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                           ProductionTaskLogProgressInput(
                             staffId: selectedStaffId,
                             unitId: selectedUnitId,
+                            createNewEntry: createNewEntry,
                             unitContribution: selectedActualAmountValue,
                             proofs: List<ProductionTaskProgressProofInput>.from(
                               selectedProofs,

@@ -135,6 +135,7 @@ const String _keyActualPlots = "actualPlots";
 const String _keyActualPlotUnits = "actualPlotUnits";
 const String _keyUnitContribution = "unitContribution";
 const String _keyUnitContributionPlotUnits = "unitContributionPlotUnits";
+const String _keyCreateNewEntry = "createNewEntry";
 const String _keyProofs = "proofs";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
@@ -2037,6 +2038,7 @@ class ProductionApi {
     required DateTime workDate,
     String? staffId,
     String? unitId,
+    bool createNewEntry = false,
     num? actualPlots,
     num? unitContribution,
     List<ProductionTaskProgressProofInput> proofs = const [],
@@ -2075,6 +2077,9 @@ class ProductionApi {
         _keyDelayReason: delayReason,
         _keyNotes: notes,
       };
+      if (createNewEntry) {
+        payload[_keyCreateNewEntry] = true;
+      }
       payload[_keyUnitContribution] = normalizedUnitContribution;
       payload[_keyActualPlots] = normalizedUnitContribution;
       payload[_keyUnitContributionPlotUnits] =

@@ -13,6 +13,8 @@
 /// - Logs parsing for traceability (safe fields only).
 library;
 
+import 'dart:math' as math;
+
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 
@@ -230,6 +232,7 @@ const String _keyFarmerName = "farmerName";
 const String _keyAttendanceId = "attendanceId";
 const String _keyExpectedPlots = "expectedPlots";
 const String _keyActualPlots = "actualPlots";
+const String _keyProgressEntryIndex = "entryIndex";
 const String _keyUnitTarget = "unitTarget";
 const String _keyUnitCompleted = "unitCompleted";
 const String _keyUnitRemaining = "unitRemaining";
@@ -2664,8 +2667,7 @@ class ProductionTaskProgressProofRecord {
     Map<String, dynamic> json,
   ) {
     return ProductionTaskProgressProofRecord(
-      url:
-          _parseNullableString(json[_keyProofUrl] ?? json[_keyUrl]) ?? "",
+      url: _parseNullableString(json[_keyProofUrl] ?? json[_keyUrl]) ?? "",
       publicId:
           _parseNullableString(json[_keyProofPublicId] ?? json[_keyPublicId]) ??
           "",
@@ -2676,12 +2678,15 @@ class ProductionTaskProgressProofRecord {
           _parseNullableString(json[_keyProofMimeType] ?? json[_keyMimeType]) ??
           "",
       sizeBytes:
-          _parseNullableNum(json[_keyProofSizeBytes] ?? json[_keySizeBytes])
-              ?.toInt() ??
+          _parseNullableNum(
+            json[_keyProofSizeBytes] ?? json[_keySizeBytes],
+          )?.toInt() ??
           0,
       uploadedAt: _parseDate(json[_keyProofUploadedAt] ?? json[_keyUploadedAt]),
       uploadedBy:
-          _parseNullableString(json[_keyProofUploadedBy] ?? json[_keyUploadedBy]) ??
+          _parseNullableString(
+            json[_keyProofUploadedBy] ?? json[_keyUploadedBy],
+          ) ??
           "",
     );
   }
@@ -2694,6 +2699,7 @@ class ProductionTimelineRow {
   final DateTime? workDate;
   final String taskId;
   final String planId;
+  final int entryIndex;
   final String staffId;
   final String attendanceId;
   final String unitId;
@@ -2729,6 +2735,7 @@ class ProductionTimelineRow {
     required this.workDate,
     required this.taskId,
     required this.planId,
+    this.entryIndex = 1,
     required this.staffId,
     this.attendanceId = "",
     required this.unitId,
@@ -2777,6 +2784,7 @@ class ProductionTimelineRow {
       workDate: _parseDate(json[_keyWorkDate]),
       taskId: _parseString(json[_keyTaskId]),
       planId: _parseString(json[_keyPlanId]),
+      entryIndex: math.max(1, _parseInt(json[_keyProgressEntryIndex])),
       staffId: _parseString(json[_keyStaffId]),
       attendanceId: _parseString(json[_keyAttendanceId]),
       unitId: _parseString(json[_keyUnitId]),
@@ -2862,6 +2870,7 @@ class ProductionTaskProgressRecord {
   final String id;
   final String taskId;
   final String planId;
+  final int entryIndex;
   final String staffId;
   final String attendanceId;
   final String unitId;
@@ -2892,6 +2901,7 @@ class ProductionTaskProgressRecord {
     required this.id,
     required this.taskId,
     required this.planId,
+    this.entryIndex = 1,
     required this.staffId,
     this.attendanceId = "",
     required this.unitId,
@@ -2931,6 +2941,7 @@ class ProductionTaskProgressRecord {
       id: _parseId(json),
       taskId: _parseString(json[_keyTaskId]),
       planId: _parseString(json[_keyPlanId]),
+      entryIndex: math.max(1, _parseInt(json[_keyProgressEntryIndex])),
       staffId: _parseString(json[_keyStaffId]),
       attendanceId: _parseString(json[_keyAttendanceId]),
       unitId: _parseString(json[_keyUnitId]),

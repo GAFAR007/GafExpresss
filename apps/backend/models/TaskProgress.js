@@ -31,51 +31,47 @@ const PRODUCTION_QUANTITY_ACTIVITY_TYPES = [
   "harvest",
 ];
 
-const PRODUCTION_TASK_PROGRESS_SESSION_STATUSES = [
-  "active",
-  "completed",
-];
+const PRODUCTION_TASK_PROGRESS_SESSION_STATUSES = ["active", "completed"];
 
-const taskProgressProofSchema =
-  new mongoose.Schema(
-    {
-      url: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      publicId: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      filename: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      mimeType: {
-        type: String,
-        trim: true,
-        default: "",
-      },
-      sizeBytes: {
-        type: Number,
-        min: 0,
-        default: 0,
-      },
-      uploadedAt: {
-        type: Date,
-        default: null,
-      },
-      uploadedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        default: null,
-      },
+const taskProgressProofSchema = new mongoose.Schema(
+  {
+    url: {
+      type: String,
+      trim: true,
+      default: "",
     },
-    { _id: false },
-  );
+    publicId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    filename: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    sizeBytes: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    uploadedAt: {
+      type: Date,
+      default: null,
+    },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+  },
+  { _id: false },
+);
 
 debug("Loading TaskProgress model...");
 
@@ -121,6 +117,13 @@ const taskProgressSchema = new mongoose.Schema(
     workDate: {
       type: Date,
       required: true,
+      index: true,
+    },
+    // WHY: Multiple counts on the same staff/unit/day need a stable append slot.
+    entryIndex: {
+      type: Number,
+      min: 1,
+      default: 1,
       index: true,
     },
     // WHY: Expected plots are copied at log-time to preserve audit history.
@@ -265,27 +268,24 @@ const taskProgressSchema = new mongoose.Schema(
 );
 
 // UNIT-LIFECYCLE
-// WHY: Prevent duplicate daily records for the same task/staff/day/unit while allowing multi-unit logging.
+// WHY: Prevent duplicate appended rows for the same task/staff/day/unit/entry slot.
 taskProgressSchema.index(
   {
     taskId: 1,
     staffId: 1,
     workDate: 1,
     unitId: 1,
+    entryIndex: 1,
   },
   { unique: true },
 );
 
-const TaskProgress = mongoose.model(
-  "TaskProgress",
-  taskProgressSchema,
-);
+const TaskProgress = mongoose.model("TaskProgress", taskProgressSchema);
 
 module.exports = TaskProgress;
 module.exports.PRODUCTION_TASK_PROGRESS_DELAY_REASONS =
   PRODUCTION_TASK_PROGRESS_DELAY_REASONS;
-module.exports.PLOT_UNIT_SCALE =
-  PLOT_UNIT_SCALE;
+module.exports.PLOT_UNIT_SCALE = PLOT_UNIT_SCALE;
 module.exports.PRODUCTION_QUANTITY_ACTIVITY_TYPES =
   PRODUCTION_QUANTITY_ACTIVITY_TYPES;
 module.exports.PRODUCTION_TASK_PROGRESS_SESSION_STATUSES =
