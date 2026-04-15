@@ -47,7 +47,7 @@ const String _logPresenceChange = "presence_change";
 const String _logThemeChange = "theme_change";
 
 const double _kInboxMaxWidth = 760;
-const double _kAvatarSize = 48;
+const double _kAvatarSize = 44;
 const Color _kInboxHeroTop = Color(0xFF1E3F86);
 const Color _kInboxHeroMiddle = Color(0xFF3158AB);
 const Color _kInboxHeroBottom = Color(0xFF4E76D0);
@@ -451,7 +451,7 @@ class _ChatInboxContent extends StatelessWidget {
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
                 ),
-                padding: const EdgeInsets.only(bottom: AppSpacing.section),
+                padding: const EdgeInsets.only(bottom: AppSpacing.xxxl + 4),
                 children: [
                   _InboxHeroSection(
                     isOnline: isOnline,
@@ -467,7 +467,7 @@ class _ChatInboxContent extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.lg,
-                      AppSpacing.lg,
+                      AppSpacing.md,
                       AppSpacing.lg,
                       0,
                     ),
@@ -479,7 +479,7 @@ class _ChatInboxContent extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.lg,
-                      AppSpacing.sm,
+                      AppSpacing.xs + 2,
                       AppSpacing.lg,
                       0,
                     ),
@@ -597,8 +597,8 @@ class _InboxSectionHeader extends StatelessWidget {
         ),
         Container(
           padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.xs + 2,
+            horizontal: AppSpacing.sm + 2,
+            vertical: AppSpacing.xs + 1,
           ),
           decoration: BoxDecoration(
             color: _blendTone(
@@ -764,6 +764,9 @@ class _InboxHeroSection extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isDark = _isDarkScheme(scheme);
     final topInset = MediaQuery.of(context).viewPadding.top;
+    final horizontalPadding = isWide ? AppSpacing.lg : AppSpacing.md;
+    final topPadding = topInset + (isWide ? AppSpacing.md : AppSpacing.sm + 2);
+    final bottomPadding = isWide ? AppSpacing.lg : AppSpacing.md;
     const radius = BorderRadius.only(
       bottomLeft: Radius.circular(34),
       bottomRight: Radius.circular(34),
@@ -830,10 +833,10 @@ class _InboxHeroSection extends StatelessWidget {
             ),
             Padding(
               padding: EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                topInset + AppSpacing.md,
-                AppSpacing.lg,
-                AppSpacing.lg,
+                horizontalPadding,
+                topPadding,
+                horizontalPadding,
+                bottomPadding,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -845,7 +848,7 @@ class _InboxHeroSection extends StatelessWidget {
                     onPresenceChanged: onPresenceChanged,
                     onThemeChanged: onThemeChanged,
                   ),
-                  const SizedBox(height: AppSpacing.lg),
+                  SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
                   if (isWide)
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -880,7 +883,7 @@ class _InboxHeroSection extends StatelessWidget {
                         onSearchChanged('');
                       },
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.xs + 2),
                     _InboxTabBar(filter: filter, onChanged: onFilterChange),
                   ],
                 ],
@@ -919,7 +922,7 @@ class _InboxHeader extends StatelessWidget {
           style:
               (isWide
                       ? theme.textTheme.displaySmall
-                      : theme.textTheme.headlineLarge)
+                      : theme.textTheme.headlineMedium)
                   ?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
@@ -927,13 +930,13 @@ class _InboxHeader extends StatelessWidget {
                     height: 0.94,
                   ),
         ),
-        const SizedBox(height: AppSpacing.xs),
+        const SizedBox(height: AppSpacing.xxs + 1),
         Text(
           "Your active conversations and request queue in one place.",
-          style: theme.textTheme.bodyMedium?.copyWith(
+          style: theme.textTheme.bodySmall?.copyWith(
             color: Colors.white.withValues(alpha: 0.84),
             fontWeight: FontWeight.w500,
-            height: 1.28,
+            height: 1.18,
           ),
         ),
       ],
@@ -981,19 +984,12 @@ class _InboxHeader extends StatelessWidget {
             _ProfileActionButton(onPressed: onOpenProfile),
           ],
         ),
-        const SizedBox(height: AppSpacing.md),
-        Row(
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
           children: [
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: _PresenceToggle(
-                  isOnline: isOnline,
-                  onChanged: onPresenceChanged,
-                ),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
+            _PresenceToggle(isOnline: isOnline, onChanged: onPresenceChanged),
             _ThemeModeMiniToggle(onChanged: onThemeChanged),
           ],
         ),
@@ -1018,8 +1014,8 @@ class _ProfileActionButton extends StatelessWidget {
         overlayColor: _interactiveOverlay(scheme),
         borderRadius: BorderRadius.circular(AppRadius.pill),
         child: Ink(
-          width: 44,
-          height: 44,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.12)
@@ -1080,10 +1076,10 @@ class _PresenceToggle extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
-            height: 38,
+            height: 34,
             decoration: BoxDecoration(
               color: selected ? selectedFill : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               boxShadow: selected
                   ? [
                       BoxShadow(
@@ -1096,7 +1092,7 @@ class _PresenceToggle extends StatelessWidget {
                     ]
                   : null,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm + 2),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1128,12 +1124,12 @@ class _PresenceToggle extends StatelessWidget {
     }
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 168, maxWidth: 224),
+      constraints: const BoxConstraints(minWidth: 152, maxWidth: 196),
       child: Container(
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.16),
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.3),
           ),
@@ -1147,7 +1143,7 @@ class _PresenceToggle extends StatelessWidget {
               accent: onlineAccent,
               onTap: () => onChanged(true),
             ),
-            const SizedBox(width: AppSpacing.xs),
+            const SizedBox(width: AppSpacing.xxs + 1),
             buildChoice(
               selected: !isOnline,
               label: _ChatInboxCopy.offlineLabel,
@@ -1195,8 +1191,8 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,
-              width: 38,
-              height: 38,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: selected
                     ? _blendTone(
@@ -1205,7 +1201,7 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
                         alpha: isDark ? 0.08 : 0.1,
                       )
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 boxShadow: selected
                     ? [
                         BoxShadow(
@@ -1233,10 +1229,10 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.16),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.28),
         ),
@@ -1281,7 +1277,7 @@ class _InboxSearchBar extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: isDark ? 0.12 : 0.97),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.68),
         ),
@@ -1313,8 +1309,8 @@ class _InboxSearchBar extends StatelessWidget {
             size: 18,
           ),
           prefixIconConstraints: const BoxConstraints(
-            minWidth: 42,
-            minHeight: 42,
+            minWidth: 40,
+            minHeight: 40,
           ),
           suffixIcon: controller.text.trim().isEmpty
               ? null
@@ -1330,8 +1326,8 @@ class _InboxSearchBar extends StatelessWidget {
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md + 2,
-            vertical: AppSpacing.md + 2,
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm + 1,
           ),
         ),
       ),
@@ -1348,10 +1344,10 @@ class _InboxTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(AppSpacing.xs),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
       ),
       child: Row(
@@ -1363,7 +1359,7 @@ class _InboxTabBar extends StatelessWidget {
               onTap: () => onChanged(_ChatInboxFilter.direct),
             ),
           ),
-          const SizedBox(width: AppSpacing.xs),
+          const SizedBox(width: AppSpacing.xxs + 1),
           Expanded(
             child: _InboxTabButton(
               label: _ChatInboxCopy.groupLabel,
@@ -1371,7 +1367,7 @@ class _InboxTabBar extends StatelessWidget {
               onTap: () => onChanged(_ChatInboxFilter.group),
             ),
           ),
-          const SizedBox(width: AppSpacing.xs),
+          const SizedBox(width: AppSpacing.xxs + 1),
           Expanded(
             child: _InboxTabButton(
               label: _ChatInboxCopy.queueLabel,
@@ -1410,8 +1406,8 @@ class _InboxTabButton extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.sm + 2,
+          horizontal: AppSpacing.xs + 2,
+          vertical: AppSpacing.sm,
         ),
         decoration: BoxDecoration(
           color: selected
@@ -1421,7 +1417,7 @@ class _InboxTabButton extends StatelessWidget {
                   alpha: isDark ? 0.08 : 0.12,
                 )
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           boxShadow: selected
               ? [
                   BoxShadow(
@@ -1565,10 +1561,7 @@ class _InboxListSurface extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-          child: Column(children: children),
-        ),
+        child: Column(children: children),
       ),
     );
   }
@@ -1601,7 +1594,7 @@ class _ConversationRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         overlayColor: _interactiveOverlay(scheme),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         child: Ink(
           decoration: BoxDecoration(
             color: hasUnread
@@ -1611,7 +1604,7 @@ class _ConversationRow extends StatelessWidget {
                     alpha: isDark ? 0.14 : 0.045,
                   )
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: hasUnread
                   ? scheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
@@ -1621,7 +1614,7 @@ class _ConversationRow extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md + 2,
-              vertical: AppSpacing.md + 2,
+              vertical: AppSpacing.md,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1738,7 +1731,7 @@ class _UnreadCountBadge extends StatelessWidget {
     final label = count > 99 ? "99+" : "$count";
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: scheme.primary.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -1787,7 +1780,7 @@ class _QueueRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         overlayColor: _interactiveOverlay(scheme),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
         child: Ink(
           decoration: BoxDecoration(
             color: hasUnread
@@ -1797,7 +1790,7 @@ class _QueueRow extends StatelessWidget {
                     alpha: isDark ? 0.14 : 0.045,
                   )
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: hasUnread
                   ? scheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
@@ -1807,7 +1800,7 @@ class _QueueRow extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md + 2,
-              vertical: AppSpacing.md + 2,
+              vertical: AppSpacing.md,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
