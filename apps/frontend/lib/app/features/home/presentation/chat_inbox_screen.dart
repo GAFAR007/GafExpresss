@@ -47,13 +47,13 @@ const String _logPresenceChange = "presence_change";
 const String _logThemeChange = "theme_change";
 
 const double _kInboxMaxWidth = 760;
-const double _kAvatarSize = 44;
-const Color _kInboxHeroTop = Color(0xFFBFD3FF);
-const Color _kInboxHeroMiddle = Color(0xFFD7E4FF);
-const Color _kInboxHeroBottom = Color(0xFFEAF1FF);
-const Color _kInboxHeroDarkTop = Color(0xFF12264D);
-const Color _kInboxHeroDarkMiddle = Color(0xFF1A3565);
-const Color _kInboxHeroDarkBottom = Color(0xFF24467E);
+const double _kAvatarSize = 48;
+const Color _kInboxHeroTop = Color(0xFF1E3F86);
+const Color _kInboxHeroMiddle = Color(0xFF3158AB);
+const Color _kInboxHeroBottom = Color(0xFF4E76D0);
+const Color _kInboxHeroDarkTop = Color(0xFF0D1932);
+const Color _kInboxHeroDarkMiddle = Color(0xFF16305C);
+const Color _kInboxHeroDarkBottom = Color(0xFF22467E);
 const Color _kInboxHeroGlass = Color(0xFFFDFEFF);
 
 class _ChatInboxCopy {
@@ -428,6 +428,14 @@ class _ChatInboxContent extends StatelessWidget {
       _sortConversations(_filterByType(conversations, _ChatInboxFilter.group)),
       searchController.text,
     );
+    final sectionTitle = _sectionTitle(filter);
+    final sectionCountLabel = _sectionCountLabel(
+      filter: filter,
+      directChats: directChats,
+      groupChats: groupChats,
+      queueAsync: queueAsync,
+      query: searchController.text,
+    );
 
     return SafeArea(
       top: false,
@@ -436,58 +444,76 @@ class _ChatInboxContent extends StatelessWidget {
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: _kInboxMaxWidth),
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            padding: const EdgeInsets.only(bottom: AppSpacing.section),
-            children: [
-              _InboxHeroSection(
-                isOnline: isOnline,
-                filter: filter,
-                controller: searchController,
-                onOpenProfile: onOpenProfile,
-                onPresenceChanged: onPresenceChanged,
-                onThemeChanged: onThemeChanged,
-                onFilterChange: onFilterChange,
-                onSearchChanged: onSearchChanged,
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                  0,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 640;
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
                 ),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
-                  child: switch (filter) {
-                    _ChatInboxFilter.direct => _ConversationSection(
-                      key: const ValueKey("direct"),
-                      conversations: directChats,
-                      emptyTitle: _ChatInboxCopy.directEmptyTitle,
-                      emptySubtitle: _ChatInboxCopy.directEmptySubtitle,
-                      onTap: onConversationTap,
+                padding: const EdgeInsets.only(bottom: AppSpacing.section),
+                children: [
+                  _InboxHeroSection(
+                    isOnline: isOnline,
+                    filter: filter,
+                    isWide: isWide,
+                    controller: searchController,
+                    onOpenProfile: onOpenProfile,
+                    onPresenceChanged: onPresenceChanged,
+                    onThemeChanged: onThemeChanged,
+                    onFilterChange: onFilterChange,
+                    onSearchChanged: onSearchChanged,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.lg,
+                      AppSpacing.lg,
+                      0,
                     ),
-                    _ChatInboxFilter.group => _ConversationSection(
-                      key: const ValueKey("group"),
-                      conversations: groupChats,
-                      emptyTitle: _ChatInboxCopy.groupEmptyTitle,
-                      emptySubtitle: _ChatInboxCopy.groupEmptySubtitle,
-                      onTap: onConversationTap,
+                    child: _InboxSectionHeader(
+                      title: sectionTitle,
+                      countLabel: sectionCountLabel,
                     ),
-                    _ChatInboxFilter.queue => _QueueSection(
-                      key: const ValueKey("queue"),
-                      queueAsync: queueAsync,
-                      query: searchController.text,
-                      onTap: onConversationTap,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.sm,
+                      AppSpacing.lg,
+                      0,
                     ),
-                  },
-                ),
-              ),
-            ],
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      child: switch (filter) {
+                        _ChatInboxFilter.direct => _ConversationSection(
+                          key: const ValueKey("direct"),
+                          conversations: directChats,
+                          emptyTitle: _ChatInboxCopy.directEmptyTitle,
+                          emptySubtitle: _ChatInboxCopy.directEmptySubtitle,
+                          onTap: onConversationTap,
+                        ),
+                        _ChatInboxFilter.group => _ConversationSection(
+                          key: const ValueKey("group"),
+                          conversations: groupChats,
+                          emptyTitle: _ChatInboxCopy.groupEmptyTitle,
+                          emptySubtitle: _ChatInboxCopy.groupEmptySubtitle,
+                          onTap: onConversationTap,
+                        ),
+                        _ChatInboxFilter.queue => _QueueSection(
+                          key: const ValueKey("queue"),
+                          queueAsync: queueAsync,
+                          query: searchController.text,
+                          onTap: onConversationTap,
+                        ),
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -506,6 +532,96 @@ class _ChatInboxContent extends StatelessWidget {
       }
       return type != "group";
     }).toList();
+  }
+
+  String _sectionTitle(_ChatInboxFilter currentFilter) {
+    return switch (currentFilter) {
+      _ChatInboxFilter.direct => "Direct chats",
+      _ChatInboxFilter.group => "Group chats",
+      _ChatInboxFilter.queue => "Request queue",
+    };
+  }
+
+  String _sectionCountLabel({
+    required _ChatInboxFilter filter,
+    required List<ChatConversation> directChats,
+    required List<ChatConversation> groupChats,
+    required AsyncValue<List<_QueueConversationEntry>>? queueAsync,
+    required String query,
+  }) {
+    if (filter == _ChatInboxFilter.queue) {
+      return queueAsync?.when(
+            data: (entries) {
+              final count = _applyQueueSearch(entries, query).length;
+              return count == 1 ? "1 request" : "$count requests";
+            },
+            loading: () => "Syncing",
+            error: (error, _) => "Unavailable",
+          ) ??
+          "0 requests";
+    }
+
+    final count = switch (filter) {
+      _ChatInboxFilter.direct => directChats.length,
+      _ChatInboxFilter.group => groupChats.length,
+      _ChatInboxFilter.queue => 0,
+    };
+    final label = count == 1 ? "chat" : "chats";
+    return "$count $label";
+  }
+}
+
+class _InboxSectionHeader extends StatelessWidget {
+  final String title;
+  final String countLabel;
+
+  const _InboxSectionHeader({required this.title, required this.countLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: scheme.onSurface,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.35,
+            ),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.xs + 2,
+          ),
+          decoration: BoxDecoration(
+            color: _blendTone(
+              scheme.primary,
+              scheme.surface,
+              alpha: isDark ? 0.18 : 0.08,
+            ),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(
+              color: scheme.primary.withValues(alpha: isDark ? 0.18 : 0.14),
+            ),
+          ),
+          child: Text(
+            countLabel,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: scheme.primary,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.1,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -623,6 +739,7 @@ class _BackdropBloom extends StatelessWidget {
 class _InboxHeroSection extends StatelessWidget {
   final bool isOnline;
   final _ChatInboxFilter filter;
+  final bool isWide;
   final TextEditingController controller;
   final VoidCallback onOpenProfile;
   final ValueChanged<bool> onPresenceChanged;
@@ -633,6 +750,7 @@ class _InboxHeroSection extends StatelessWidget {
   const _InboxHeroSection({
     required this.isOnline,
     required this.filter,
+    required this.isWide,
     required this.controller,
     required this.onOpenProfile,
     required this.onPresenceChanged,
@@ -660,7 +778,7 @@ class _InboxHeroSection extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [topColor, middleColor, bottomColor],
-          stops: const [0, 0.58, 1],
+          stops: const [0, 0.5, 1],
         ),
         borderRadius: radius,
         boxShadow: [
@@ -675,16 +793,36 @@ class _InboxHeroSection extends StatelessWidget {
         borderRadius: radius,
         child: Stack(
           children: [
+            Positioned(
+              top: -72,
+              right: -40,
+              child: _BackdropBloom(
+                size: isWide ? 240 : 210,
+                color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.2),
+              ),
+            ),
+            Positioned(
+              left: -60,
+              bottom: -96,
+              child: _BackdropBloom(
+                size: isWide ? 250 : 220,
+                color: _blendTone(
+                  Colors.white,
+                  scheme.primary,
+                  alpha: isDark ? 0.18 : 0.24,
+                ),
+              ),
+            ),
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                     colors: [
-                      Colors.white.withValues(alpha: isDark ? 0.03 : 0.12),
+                      Colors.white.withValues(alpha: isDark ? 0.06 : 0.1),
                       Colors.white.withValues(alpha: isDark ? 0.01 : 0.02),
-                      Colors.white.withValues(alpha: isDark ? 0.02 : 0.07),
+                      Colors.black.withValues(alpha: isDark ? 0.04 : 0.06),
                     ],
                   ),
                 ),
@@ -695,28 +833,56 @@ class _InboxHeroSection extends StatelessWidget {
                 AppSpacing.lg,
                 topInset + AppSpacing.md,
                 AppSpacing.lg,
-                AppSpacing.md,
+                AppSpacing.lg,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _InboxHeader(
                     isOnline: isOnline,
+                    isWide: isWide,
                     onOpenProfile: onOpenProfile,
                     onPresenceChanged: onPresenceChanged,
                     onThemeChanged: onThemeChanged,
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  _InboxSearchBar(
-                    controller: controller,
-                    onChanged: onSearchChanged,
-                    onClear: () {
-                      controller.clear();
-                      onSearchChanged('');
-                    },
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  _InboxTabBar(filter: filter, onChanged: onFilterChange),
+                  if (isWide)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: _InboxSearchBar(
+                            controller: controller,
+                            onChanged: onSearchChanged,
+                            onClear: () {
+                              controller.clear();
+                              onSearchChanged('');
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Expanded(
+                          flex: 4,
+                          child: _InboxTabBar(
+                            filter: filter,
+                            onChanged: onFilterChange,
+                          ),
+                        ),
+                      ],
+                    )
+                  else ...[
+                    _InboxSearchBar(
+                      controller: controller,
+                      onChanged: onSearchChanged,
+                      onClear: () {
+                        controller.clear();
+                        onSearchChanged('');
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _InboxTabBar(filter: filter, onChanged: onFilterChange),
+                  ],
                 ],
               ),
             ),
@@ -729,12 +895,14 @@ class _InboxHeroSection extends StatelessWidget {
 
 class _InboxHeader extends StatelessWidget {
   final bool isOnline;
+  final bool isWide;
   final VoidCallback onOpenProfile;
   final ValueChanged<bool> onPresenceChanged;
   final ValueChanged<AppThemeMode> onThemeChanged;
 
   const _InboxHeader({
     required this.isOnline,
+    required this.isWide,
     required this.onOpenProfile,
     required this.onPresenceChanged,
     required this.onThemeChanged,
@@ -743,49 +911,89 @@ class _InboxHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final titleBlock = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _ChatInboxCopy.title,
+          style:
+              (isWide
+                      ? theme.textTheme.displaySmall
+                      : theme.textTheme.headlineLarge)
+                  ?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: isWide ? -1.2 : -0.9,
+                    height: 0.94,
+                  ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          "Your active conversations and request queue in one place.",
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: Colors.white.withValues(alpha: 0.84),
+            fontWeight: FontWeight.w500,
+            height: 1.28,
+          ),
+        ),
+      ],
+    );
+
+    if (isWide) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: titleBlock),
+          const SizedBox(width: AppSpacing.lg),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 296),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _ThemeModeMiniToggle(onChanged: onThemeChanged),
+                    const SizedBox(width: AppSpacing.sm),
+                    _ProfileActionButton(onPressed: onOpenProfile),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _PresenceToggle(
+                  isOnline: isOnline,
+                  onChanged: onPresenceChanged,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _ChatInboxCopy.title,
-                    style: theme.textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -1.2,
-                      height: 0.9,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xxs + 1),
-                  Text(
-                    "Your active conversations and request queue in one place.",
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      height: 1.24,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            Expanded(child: titleBlock),
             const SizedBox(width: AppSpacing.sm),
             _ProfileActionButton(onPressed: onOpenProfile),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.xs,
+        Row(
           children: [
-            _PresenceToggle(isOnline: isOnline, onChanged: onPresenceChanged),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _PresenceToggle(
+                  isOnline: isOnline,
+                  onChanged: onPresenceChanged,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
             _ThemeModeMiniToggle(onChanged: onThemeChanged),
           ],
         ),
@@ -802,6 +1010,7 @@ class _ProfileActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = _isDarkScheme(scheme);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -809,31 +1018,28 @@ class _ProfileActionButton extends StatelessWidget {
         overlayColor: _interactiveOverlay(scheme),
         borderRadius: BorderRadius.circular(AppRadius.pill),
         child: Ink(
-          width: 42,
-          height: 42,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
-            color: Color.alphaBlend(
-              scheme.surface.withValues(alpha: 0.84),
-              _kInboxHeroGlass.withValues(alpha: 0.3),
-            ),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.white.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(AppRadius.pill),
             border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.4),
+              color: Colors.white.withValues(alpha: isDark ? 0.18 : 0.72),
             ),
             boxShadow: [
               BoxShadow(
-                color: scheme.shadow.withValues(
-                  alpha: _isDarkScheme(scheme) ? 0.12 : 0.05,
-                ),
-                blurRadius: _isDarkScheme(scheme) ? 14 : 10,
-                offset: const Offset(0, 6),
+                color: scheme.shadow.withValues(alpha: isDark ? 0.16 : 0.08),
+                blurRadius: isDark ? 18 : 14,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
           child: Icon(
             Icons.person_outline_rounded,
             size: 18,
-            color: scheme.primary,
+            color: isDark ? Colors.white : scheme.primary,
           ),
         ),
       ),
@@ -851,8 +1057,14 @@ class _PresenceToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
     final onlineAccent = AppColors.success;
-    final offlineAccent = scheme.onSurfaceVariant.withValues(alpha: 0.56);
+    final offlineAccent = Colors.white.withValues(alpha: 0.78);
+    final selectedFill = _blendTone(
+      Colors.black,
+      scheme.primary,
+      alpha: isDark ? 0.08 : 0.12,
+    );
 
     Widget buildChoice({
       required bool selected,
@@ -868,25 +1080,23 @@ class _PresenceToggle extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
-            height: 36,
+            height: 38,
             decoration: BoxDecoration(
-              color: selected
-                  ? scheme.surface.withValues(alpha: 0.92)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
+              color: selected ? selectedFill : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
               boxShadow: selected
                   ? [
                       BoxShadow(
                         color: scheme.shadow.withValues(
-                          alpha: _isDarkScheme(scheme) ? 0.08 : 0.025,
+                          alpha: isDark ? 0.14 : 0.08,
                         ),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
                       ),
                     ]
                   : null,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm + 1),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm + 2),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -904,8 +1114,8 @@ class _PresenceToggle extends StatelessWidget {
                   label,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: selected
-                        ? scheme.onSurface
-                        : scheme.onSurfaceVariant.withValues(alpha: 0.68),
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.88),
                     fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                     letterSpacing: -0.08,
                   ),
@@ -917,30 +1127,35 @@ class _PresenceToggle extends StatelessWidget {
       );
     }
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 180),
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          buildChoice(
-            selected: isOnline,
-            label: _ChatInboxCopy.onlineLabel,
-            accent: onlineAccent,
-            onTap: () => onChanged(true),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 168, maxWidth: 224),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.16),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.3),
           ),
-          buildChoice(
-            selected: !isOnline,
-            label: _ChatInboxCopy.offlineLabel,
-            accent: offlineAccent,
-            onTap: () => onChanged(false),
-          ),
-        ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            buildChoice(
+              selected: isOnline,
+              label: _ChatInboxCopy.onlineLabel,
+              accent: onlineAccent,
+              onTap: () => onChanged(true),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            buildChoice(
+              selected: !isOnline,
+              label: _ChatInboxCopy.offlineLabel,
+              accent: offlineAccent,
+              onTap: () => onChanged(false),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -955,6 +1170,7 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
     final mode = ref.watch(appThemeModeProvider);
     final activeMode = mode == AppThemeMode.classic
         ? AppThemeMode.classic
@@ -979,26 +1195,25 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,
-              width: 34,
-              height: 34,
+              width: 38,
+              height: 38,
               decoration: BoxDecoration(
                 color: selected
-                    ? scheme.surface.withValues(alpha: 0.92)
+                    ? _blendTone(
+                        Colors.black,
+                        scheme.primary,
+                        alpha: isDark ? 0.08 : 0.1,
+                      )
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppRadius.pill),
-                border: Border.all(
-                  color: selected
-                      ? scheme.outlineVariant.withValues(alpha: 0.3)
-                      : Colors.transparent,
-                ),
+                borderRadius: BorderRadius.circular(16),
                 boxShadow: selected
                     ? [
                         BoxShadow(
                           color: scheme.shadow.withValues(
-                            alpha: _isDarkScheme(scheme) ? 0.08 : 0.022,
+                            alpha: isDark ? 0.14 : 0.08,
                           ),
-                          blurRadius: 6,
-                          offset: const Offset(0, 3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
                         ),
                       ]
                     : null,
@@ -1008,8 +1223,8 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
                 icon,
                 size: 17,
                 color: selected
-                    ? scheme.primary
-                    : scheme.onSurfaceVariant.withValues(alpha: 0.82),
+                    ? Colors.white
+                    : Colors.white.withValues(alpha: 0.84),
               ),
             ),
           ),
@@ -1018,11 +1233,13 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
+        color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.16),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.28),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1059,18 +1276,19 @@ class _InboxSearchBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
 
     return Container(
       decoration: BoxDecoration(
-        color: _kInboxHeroGlass.withValues(alpha: 0.56),
-        borderRadius: BorderRadius.circular(AppRadius.xxl),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.58)),
+        color: Colors.white.withValues(alpha: isDark ? 0.12 : 0.97),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.68),
+        ),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(
-              alpha: _isDarkScheme(scheme) ? 0.14 : 0.08,
-            ),
-            blurRadius: _isDarkScheme(scheme) ? 18 : 18,
+            color: scheme.shadow.withValues(alpha: isDark ? 0.14 : 0.08),
+            blurRadius: isDark ? 18 : 16,
             offset: const Offset(0, 10),
           ),
         ],
@@ -1091,7 +1309,7 @@ class _InboxSearchBar extends StatelessWidget {
           ),
           prefixIcon: Icon(
             Icons.search_rounded,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
+            color: scheme.primary.withValues(alpha: 0.92),
             size: 18,
           ),
           prefixIconConstraints: const BoxConstraints(
@@ -1113,7 +1331,7 @@ class _InboxSearchBar extends StatelessWidget {
           focusedBorder: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md + 2,
-            vertical: AppSpacing.md + 1,
+            vertical: AppSpacing.md + 2,
           ),
         ),
       ),
@@ -1133,28 +1351,33 @@ class _InboxTabBar extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.xs),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(AppRadius.xl),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.start,
         children: [
-          _InboxTabButton(
-            label: _ChatInboxCopy.directLabel,
-            selected: filter == _ChatInboxFilter.direct,
-            onTap: () => onChanged(_ChatInboxFilter.direct),
+          Expanded(
+            child: _InboxTabButton(
+              label: _ChatInboxCopy.directLabel,
+              selected: filter == _ChatInboxFilter.direct,
+              onTap: () => onChanged(_ChatInboxFilter.direct),
+            ),
           ),
-          const SizedBox(width: AppSpacing.lg),
-          _InboxTabButton(
-            label: _ChatInboxCopy.groupLabel,
-            selected: filter == _ChatInboxFilter.group,
-            onTap: () => onChanged(_ChatInboxFilter.group),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: _InboxTabButton(
+              label: _ChatInboxCopy.groupLabel,
+              selected: filter == _ChatInboxFilter.group,
+              onTap: () => onChanged(_ChatInboxFilter.group),
+            ),
           ),
-          const SizedBox(width: AppSpacing.lg),
-          _InboxTabButton(
-            label: _ChatInboxCopy.queueLabel,
-            selected: filter == _ChatInboxFilter.queue,
-            onTap: () => onChanged(_ChatInboxFilter.queue),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: _InboxTabButton(
+              label: _ChatInboxCopy.queueLabel,
+              selected: filter == _ChatInboxFilter.queue,
+              onTap: () => onChanged(_ChatInboxFilter.queue),
+            ),
           ),
         ],
       ),
@@ -1177,41 +1400,47 @@ class _InboxTabButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
 
     return InkWell(
       onTap: onTap,
       overlayColor: _interactiveOverlay(scheme),
-      borderRadius: BorderRadius.circular(AppRadius.lg),
+      borderRadius: BorderRadius.circular(16),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md + 1,
-          vertical: AppSpacing.sm + 1,
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.sm + 2,
         ),
         decoration: BoxDecoration(
           color: selected
-              ? _kInboxHeroGlass.withValues(alpha: 0.7)
+              ? _blendTone(
+                  Colors.black,
+                  scheme.primary,
+                  alpha: isDark ? 0.08 : 0.12,
+                )
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: selected
               ? [
                   BoxShadow(
                     color: scheme.shadow.withValues(
-                      alpha: _isDarkScheme(scheme) ? 0.08 : 0.035,
+                      alpha: isDark ? 0.14 : 0.08,
                     ),
-                    blurRadius: 10,
+                    blurRadius: 12,
                     offset: const Offset(0, 6),
                   ),
                 ]
               : null,
         ),
+        alignment: Alignment.center,
         child: Text(
           label,
           style: theme.textTheme.labelLarge?.copyWith(
             color: selected
-                ? scheme.onSurface
-                : scheme.onSurfaceVariant.withValues(alpha: 0.64),
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.86),
             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
             letterSpacing: -0.15,
           ),
@@ -1314,32 +1543,32 @@ class _InboxListSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final radius = BorderRadius.circular(AppRadius.xxl);
+    final isDark = _isDarkScheme(scheme);
+    final radius = BorderRadius.circular(28);
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _blendTone(
-          scheme.primary,
-          scheme.surface,
-          alpha: _isDarkScheme(scheme) ? 0.045 : 0.012,
-        ),
+        color: isDark
+            ? _blendTone(scheme.primary, scheme.surface, alpha: 0.055)
+            : Colors.white,
         borderRadius: radius,
         border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.22),
+          color: scheme.outlineVariant.withValues(alpha: isDark ? 0.22 : 0.38),
         ),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(
-              alpha: _isDarkScheme(scheme) ? 0.14 : 0.04,
-            ),
-            blurRadius: _isDarkScheme(scheme) ? 18 : 14,
-            offset: const Offset(0, 10),
+            color: scheme.shadow.withValues(alpha: isDark ? 0.16 : 0.06),
+            blurRadius: isDark ? 20 : 18,
+            offset: const Offset(0, 12),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: Column(children: children),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+          child: Column(children: children),
+        ),
       ),
     );
   }
@@ -1355,6 +1584,8 @@ class _ConversationRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
+    final hasUnread = conversation.unreadCount > 0;
     final title = _conversationTitle(conversation);
     final subtitle = conversation.lastMessagePreview.trim().isNotEmpty
         ? conversation.lastMessagePreview.trim()
@@ -1366,82 +1597,128 @@ class _ConversationRow extends StatelessWidget {
     final avatarUrl = conversation.displayAvatar.trim();
 
     return Material(
-      color: scheme.surface.withValues(alpha: 0.72),
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         overlayColor: _interactiveOverlay(scheme),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md + 2,
-            vertical: AppSpacing.md,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: hasUnread
+                ? _blendTone(
+                    scheme.primary,
+                    scheme.surface,
+                    alpha: isDark ? 0.14 : 0.045,
+                  )
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: hasUnread
+                  ? scheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
+                  : Colors.transparent,
+            ),
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ConversationAvatar(
-                title: title,
-                avatarUrl: avatarUrl,
-                accent: accent,
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Padding(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md + 2,
+              vertical: AppSpacing.md + 2,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ConversationAvatar(
+                  title: title,
+                  avatarUrl: avatarUrl,
+                  accent: accent,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: hasUnread
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                            color: scheme.onSurface,
+                            letterSpacing: -0.15,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: AppSpacing.xxs + 2),
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant.withValues(
+                              alpha: hasUnread ? 0.9 : 0.76,
+                            ),
+                            fontWeight: hasUnread
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            fontSize: 13.2,
+                            height: 1.16,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Padding(
                   padding: const EdgeInsets.only(top: 1),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: scheme.onSurface,
-                          letterSpacing: -0.15,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.xxs + 2,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: AppSpacing.xxs + 1),
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant.withValues(
-                            alpha: 0.76,
+                        decoration: BoxDecoration(
+                          color: _blendTone(
+                            scheme.primary,
+                            scheme.surface,
+                            alpha: hasUnread
+                                ? (isDark ? 0.18 : 0.09)
+                                : (isDark ? 0.12 : 0.04),
                           ),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 13.2,
-                          height: 1.16,
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          border: Border.all(
+                            color: scheme.primary.withValues(
+                              alpha: hasUnread ? 0.16 : 0.08,
+                            ),
+                          ),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        child: Text(
+                          timeLabel,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: hasUnread
+                                ? scheme.primary
+                                : scheme.onSurfaceVariant.withValues(
+                                    alpha: 0.68,
+                                  ),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.02,
+                          ),
+                        ),
                       ),
+                      if (hasUnread) ...[
+                        const SizedBox(height: AppSpacing.xs + 1),
+                        _UnreadCountBadge(count: conversation.unreadCount),
+                      ],
                     ],
                   ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      timeLabel,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant.withValues(alpha: 0.58),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.04,
-                      ),
-                    ),
-                    if (conversation.unreadCount > 0) ...[
-                      const SizedBox(height: 6),
-                      _UnreadCountBadge(count: conversation.unreadCount),
-                    ],
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1461,16 +1738,22 @@ class _UnreadCountBadge extends StatelessWidget {
     final label = count > 99 ? "99+" : "$count";
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.96),
+        color: scheme.primary.withValues(alpha: 0.94),
         borderRadius: BorderRadius.circular(AppRadius.pill),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.primary.withValues(alpha: 0.18),
+            blurRadius: 10,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Text(
         label,
         style: theme.textTheme.labelSmall?.copyWith(
-          color: scheme.onPrimaryContainer,
+          color: scheme.onPrimary,
           fontSize: 11,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.02,
@@ -1490,6 +1773,8 @@ class _QueueRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
+    final hasUnread = entry.conversation.unreadCount > 0;
     final request = entry.request;
     final title = _queueTitle(entry);
     final subtitle = _queueSubtitle(request);
@@ -1498,102 +1783,149 @@ class _QueueRow extends StatelessWidget {
     final timeLabel = _formatInboxTime(entry.sortTime);
 
     return Material(
-      color: scheme.surface.withValues(alpha: 0.72),
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         overlayColor: _interactiveOverlay(scheme),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md + 2,
-            vertical: AppSpacing.md,
+        borderRadius: BorderRadius.circular(22),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: hasUnread
+                ? _blendTone(
+                    scheme.primary,
+                    scheme.surface,
+                    alpha: isDark ? 0.14 : 0.045,
+                  )
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: hasUnread
+                  ? scheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
+                  : Colors.transparent,
+            ),
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ConversationAvatar(
-                title: title,
-                avatarUrl: entry.conversation.displayAvatar.trim(),
-                accent: accent,
-                icon: Icons.inventory_2_outlined,
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 1),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: scheme.onSurface,
-                          letterSpacing: -0.15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: AppSpacing.xxs + 1),
-                      Text(
-                        subtitle,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant.withValues(
-                            alpha: 0.76,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md + 2,
+              vertical: AppSpacing.md + 2,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ConversationAvatar(
+                  title: title,
+                  avatarUrl: entry.conversation.displayAvatar.trim(),
+                  accent: accent,
+                  icon: Icons.inventory_2_outlined,
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: hasUnread
+                                ? FontWeight.w800
+                                : FontWeight.w700,
+                            color: scheme.onSurface,
+                            letterSpacing: -0.15,
                           ),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 13,
-                          height: 1.16,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                        const SizedBox(height: AppSpacing.xxs + 2),
+                        Text(
+                          subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant.withValues(
+                              alpha: hasUnread ? 0.9 : 0.76,
+                            ),
+                            fontWeight: hasUnread
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            fontSize: 13,
+                            height: 1.16,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    timeLabel,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.58),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                const SizedBox(width: AppSpacing.md),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: AppSpacing.xxs + 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _blendTone(
+                          scheme.primary,
+                          scheme.surface,
+                          alpha: hasUnread
+                              ? (isDark ? 0.18 : 0.09)
+                              : (isDark ? 0.12 : 0.04),
+                        ),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: scheme.primary.withValues(
+                            alpha: hasUnread ? 0.16 : 0.08,
+                          ),
+                        ),
+                      ),
+                      child: Text(
+                        timeLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: hasUnread
+                              ? scheme.primary
+                              : scheme.onSurfaceVariant.withValues(alpha: 0.68),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.02,
+                        ),
+                      ),
                     ),
-                  ),
-                  if (entry.conversation.unreadCount > 0) ...[
-                    const SizedBox(height: 6),
-                    _UnreadCountBadge(count: entry.conversation.unreadCount),
+                    if (hasUnread) ...[
+                      const SizedBox(height: AppSpacing.xs + 1),
+                      _UnreadCountBadge(count: entry.conversation.unreadCount),
+                    ],
+                    const SizedBox(height: AppSpacing.xs + 1),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: AppSpacing.xxs + 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Color.alphaBlend(
+                          accent.withValues(alpha: isDark ? 0.16 : 0.1),
+                          scheme.surface,
+                        ),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.16),
+                        ),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.08,
+                        ),
+                      ),
+                    ),
                   ],
-                  const SizedBox(height: AppSpacing.xs),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm - 1,
-                      vertical: AppSpacing.xxs + 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Color.alphaBlend(
-                        accent.withValues(alpha: 0.09),
-                        scheme.surface,
-                      ),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(color: accent.withValues(alpha: 0.12)),
-                    ),
-                    child: Text(
-                      statusLabel,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: accent,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.08,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1619,6 +1951,7 @@ class _ConversationAvatar extends StatelessWidget {
     final theme = Theme.of(context);
     final hasAvatar = avatarUrl.isNotEmpty;
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
     return Container(
       width: _kAvatarSize,
       height: _kAvatarSize,
@@ -1637,14 +1970,17 @@ class _ConversationAvatar extends StatelessWidget {
         image: hasAvatar
             ? DecorationImage(image: NetworkImage(avatarUrl), fit: BoxFit.cover)
             : null,
-        border: Border.all(color: scheme.surface.withValues(alpha: 0.82)),
+        border: Border.all(
+          color: isDark
+              ? scheme.surface.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.94),
+          width: 1.6,
+        ),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(
-              alpha: _isDarkScheme(scheme) ? 0.18 : 0.06,
-            ),
-            blurRadius: _isDarkScheme(scheme) ? 12 : 8,
-            offset: const Offset(0, 4),
+            color: scheme.shadow.withValues(alpha: isDark ? 0.18 : 0.08),
+            blurRadius: isDark ? 12 : 10,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -1673,9 +2009,9 @@ class _InboxDivider extends StatelessWidget {
     return Divider(
       height: 1,
       thickness: 1,
-      indent: AppSpacing.md + 2 + _kAvatarSize + AppSpacing.md,
-      endIndent: AppSpacing.md,
-      color: scheme.outlineVariant.withValues(alpha: 0.18),
+      indent: AppSpacing.md + 8 + _kAvatarSize + AppSpacing.md,
+      endIndent: AppSpacing.md + 8,
+      color: scheme.outlineVariant.withValues(alpha: 0.22),
     );
   }
 }
@@ -1690,25 +2026,22 @@ class _InboxEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xxxl),
       decoration: BoxDecoration(
-        color: _blendTone(
-          scheme.primary,
-          scheme.surface,
-          alpha: _isDarkScheme(scheme) ? 0.04 : 0.012,
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.xxl),
+        color: isDark
+            ? _blendTone(scheme.primary, scheme.surface, alpha: 0.055)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.28),
+          color: scheme.outlineVariant.withValues(alpha: isDark ? 0.28 : 0.38),
         ),
         boxShadow: [
           BoxShadow(
-            color: scheme.shadow.withValues(
-              alpha: _isDarkScheme(scheme) ? 0.14 : 0.04,
-            ),
-            blurRadius: _isDarkScheme(scheme) ? 16 : 12,
-            offset: const Offset(0, 8),
+            color: scheme.shadow.withValues(alpha: isDark ? 0.14 : 0.06),
+            blurRadius: isDark ? 18 : 16,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
@@ -1716,14 +2049,15 @@ class _InboxEmptyState extends StatelessWidget {
         children: [
           Icon(
             Icons.chat_bubble_outline_rounded,
-            color: scheme.onSurfaceVariant,
-            size: 28,
+            color: scheme.primary,
+            size: 30,
           ),
           const SizedBox(height: AppSpacing.md),
           Text(
             title,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
             ),
             textAlign: TextAlign.center,
           ),
@@ -1731,7 +2065,7 @@ class _InboxEmptyState extends StatelessWidget {
           Text(
             subtitle,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.84),
             ),
             textAlign: TextAlign.center,
           ),
@@ -1748,26 +2082,45 @@ class _InboxLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xxxl),
       decoration: BoxDecoration(
-        color: _blendTone(
-          Theme.of(context).colorScheme.primary,
-          Theme.of(context).colorScheme.surface,
-          alpha: _isDarkScheme(Theme.of(context).colorScheme) ? 0.04 : 0.012,
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.xxl),
+        color: isDark
+            ? _blendTone(scheme.primary, scheme.surface, alpha: 0.055)
+            : Colors.white,
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: Theme.of(
-            context,
-          ).colorScheme.outlineVariant.withValues(alpha: 0.28),
+          color: scheme.outlineVariant.withValues(alpha: isDark ? 0.28 : 0.38),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: isDark ? 0.14 : 0.06),
+            blurRadius: isDark ? 18 : 16,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          const CircularProgressIndicator(),
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.6,
+              color: scheme.primary,
+            ),
+          ),
           const SizedBox(height: AppSpacing.md),
-          Text(label),
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -1783,14 +2136,13 @@ class _InboxFab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = _isDarkScheme(scheme);
     return Container(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: scheme.primary.withValues(
-              alpha: _isDarkScheme(scheme) ? 0.24 : 0.18,
-            ),
+            color: scheme.primary.withValues(alpha: isDark ? 0.24 : 0.2),
             blurRadius: _isDarkScheme(scheme) ? 26 : 20,
             offset: const Offset(0, 12),
           ),
@@ -1809,11 +2161,9 @@ class _InboxFab extends StatelessWidget {
         backgroundColor: scheme.primary,
         foregroundColor: scheme.onPrimary,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
           side: BorderSide(
-            color: scheme.surface.withValues(
-              alpha: _isDarkScheme(scheme) ? 0.08 : 0.88,
-            ),
+            color: scheme.surface.withValues(alpha: isDark ? 0.08 : 0.92),
           ),
         ),
         onPressed: onPressed,
