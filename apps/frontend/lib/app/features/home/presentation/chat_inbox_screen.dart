@@ -1043,14 +1043,14 @@ class _ProfileActionButton extends StatelessWidget {
   }
 }
 
-enum _HeroPillTone { light, dark }
+enum _HeroPillStyle { softBlue, softLight, dark }
 
 class _HeroControlPill extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool selected;
   final bool bubbleLeading;
-  final _HeroPillTone selectedTone;
+  final _HeroPillStyle styleVariant;
   final Color activeIconColor;
   final VoidCallback onTap;
   final double width;
@@ -1060,7 +1060,7 @@ class _HeroControlPill extends StatelessWidget {
     required this.icon,
     required this.selected,
     required this.bubbleLeading,
-    required this.selectedTone,
+    required this.styleVariant,
     required this.activeIconColor,
     required this.onTap,
     required this.width,
@@ -1071,34 +1071,59 @@ class _HeroControlPill extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = _isDarkScheme(scheme);
-    final backgroundColor = selected
-        ? switch (selectedTone) {
-            _HeroPillTone.light => Colors.white,
-            _HeroPillTone.dark => const Color(0xFF070B14),
-          }
-        : Colors.white.withValues(alpha: isDark ? 0.12 : 0.14);
-    final borderColor = selected
-        ? Colors.white.withValues(alpha: isDark ? 0.24 : 0.72)
-        : Colors.white.withValues(alpha: isDark ? 0.18 : 0.3);
-    final textColor = selected
-        ? switch (selectedTone) {
-            _HeroPillTone.light => const Color(0xFF121A2C),
-            _HeroPillTone.dark => Colors.white,
-          }
-        : Colors.white.withValues(alpha: 0.92);
-    final bubbleColor = selected
-        ? switch (selectedTone) {
-            _HeroPillTone.light => _blendTone(
-              scheme.primary,
-              Colors.white,
-              alpha: isDark ? 0.14 : 0.08,
-            ),
-            _HeroPillTone.dark => Colors.white,
-          }
-        : Colors.white.withValues(alpha: isDark ? 0.12 : 0.2);
+    final backgroundColor = switch (styleVariant) {
+      _HeroPillStyle.softBlue => const Color(
+        0xFF516898,
+      ).withValues(alpha: selected ? 0.98 : 0.74),
+      _HeroPillStyle.softLight => Colors.white.withValues(
+        alpha: selected ? 0.96 : 0.84,
+      ),
+      _HeroPillStyle.dark => const Color(
+        0xFF070B14,
+      ).withValues(alpha: selected ? 0.98 : 0.9),
+    };
+    final borderColor = switch (styleVariant) {
+      _HeroPillStyle.softBlue => Colors.white.withValues(
+        alpha: selected ? 0.22 : 0.14,
+      ),
+      _HeroPillStyle.softLight => Colors.black.withValues(
+        alpha: selected ? 0.06 : 0.04,
+      ),
+      _HeroPillStyle.dark => Colors.white.withValues(
+        alpha: selected ? 0.12 : 0.07,
+      ),
+    };
+    final textColor = switch (styleVariant) {
+      _HeroPillStyle.softBlue => Colors.white.withValues(
+        alpha: selected ? 0.98 : 0.8,
+      ),
+      _HeroPillStyle.softLight => const Color(
+        0xFF121A2C,
+      ).withValues(alpha: selected ? 1 : 0.82),
+      _HeroPillStyle.dark => Colors.white.withValues(
+        alpha: selected ? 0.98 : 0.8,
+      ),
+    };
+    final bubbleColor = switch (styleVariant) {
+      _HeroPillStyle.softBlue => Colors.white.withValues(
+        alpha: selected ? 0.14 : 0.08,
+      ),
+      _HeroPillStyle.softLight => _blendTone(
+        scheme.primary,
+        Colors.white,
+        alpha: isDark ? 0.18 : 0.1,
+      ),
+      _HeroPillStyle.dark => Colors.white.withValues(alpha: 0.98),
+    };
     final iconColor = selected
         ? activeIconColor
-        : Colors.white.withValues(alpha: 0.9);
+        : switch (styleVariant) {
+            _HeroPillStyle.softLight => const Color(
+              0xFF121A2C,
+            ).withValues(alpha: 0.76),
+            _HeroPillStyle.softBlue ||
+            _HeroPillStyle.dark => Colors.white.withValues(alpha: 0.74),
+          };
 
     final bubble = Container(
       width: 34,
@@ -1107,11 +1132,17 @@ class _HeroControlPill extends StatelessWidget {
         color: bubbleColor,
         shape: BoxShape.circle,
         border: Border.all(
-          color: selected
-              ? Colors.black.withValues(
-                  alpha: selectedTone == _HeroPillTone.dark ? 0.06 : 0.04,
-                )
-              : Colors.white.withValues(alpha: isDark ? 0.14 : 0.2),
+          color: switch (styleVariant) {
+            _HeroPillStyle.softLight => Colors.black.withValues(
+              alpha: selected ? 0.06 : 0.03,
+            ),
+            _HeroPillStyle.softBlue => Colors.white.withValues(
+              alpha: selected ? 0.18 : 0.08,
+            ),
+            _HeroPillStyle.dark => Colors.black.withValues(
+              alpha: selected ? 0.08 : 0.04,
+            ),
+          },
         ),
       ),
       alignment: Alignment.center,
@@ -1142,8 +1173,8 @@ class _HeroControlPill extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
           width: width,
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
+          height: 46,
+          padding: const EdgeInsets.symmetric(horizontal: 5),
           decoration: BoxDecoration(
             color: backgroundColor,
             borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -1152,10 +1183,10 @@ class _HeroControlPill extends StatelessWidget {
                 ? [
                     BoxShadow(
                       color: scheme.shadow.withValues(
-                        alpha: isDark ? 0.16 : 0.07,
+                        alpha: isDark ? 0.16 : 0.08,
                       ),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
+                      blurRadius: 10,
+                      offset: const Offset(0, 5),
                     ),
                   ]
                 : null,
@@ -1181,6 +1212,21 @@ class _HeroControlPill extends StatelessWidget {
   }
 }
 
+class _HeroControlPair extends StatelessWidget {
+  final Widget leading;
+  final Widget trailing;
+
+  const _HeroControlPair({required this.leading, required this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [leading, const SizedBox(width: 6), trailing],
+    );
+  }
+}
+
 class _PresenceToggle extends StatelessWidget {
   final bool isOnline;
   final ValueChanged<bool> onChanged;
@@ -1194,31 +1240,27 @@ class _PresenceToggle extends StatelessWidget {
 
     return ConstrainedBox(
       constraints: const BoxConstraints(minWidth: 224, maxWidth: 238),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _HeroControlPill(
-            label: _ChatInboxCopy.onlineLabel,
-            icon: Icons.circle_rounded,
-            selected: isOnline,
-            bubbleLeading: false,
-            selectedTone: _HeroPillTone.light,
-            activeIconColor: AppColors.success,
-            width: 112,
-            onTap: () => onChanged(true),
-          ),
-          const SizedBox(width: AppSpacing.xs + 1),
-          _HeroControlPill(
-            label: _ChatInboxCopy.offlineLabel,
-            icon: Icons.circle_rounded,
-            selected: !isOnline,
-            bubbleLeading: true,
-            selectedTone: _HeroPillTone.dark,
-            activeIconColor: isDark ? const Color(0xFF070B14) : scheme.primary,
-            width: 112,
-            onTap: () => onChanged(false),
-          ),
-        ],
+      child: _HeroControlPair(
+        leading: _HeroControlPill(
+          label: _ChatInboxCopy.onlineLabel,
+          icon: Icons.circle_rounded,
+          selected: isOnline,
+          bubbleLeading: false,
+          styleVariant: _HeroPillStyle.softBlue,
+          activeIconColor: AppColors.success,
+          width: 112,
+          onTap: () => onChanged(true),
+        ),
+        trailing: _HeroControlPill(
+          label: _ChatInboxCopy.offlineLabel,
+          icon: Icons.circle_rounded,
+          selected: !isOnline,
+          bubbleLeading: true,
+          styleVariant: _HeroPillStyle.dark,
+          activeIconColor: isDark ? const Color(0xFF070B14) : scheme.primary,
+          width: 112,
+          onTap: () => onChanged(false),
+        ),
       ),
     );
   }
@@ -1238,35 +1280,31 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
         ? AppThemeMode.classic
         : AppThemeMode.dark;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _HeroControlPill(
-          label: "Day mode",
-          icon: Icons.wb_sunny_outlined,
-          selected: activeMode == AppThemeMode.classic,
-          bubbleLeading: false,
-          selectedTone: _HeroPillTone.light,
-          activeIconColor: isDark ? Colors.white : const Color(0xFF121A2C),
-          width: 120,
-          onTap: activeMode == AppThemeMode.classic
-              ? () {}
-              : () => onChanged(AppThemeMode.classic),
-        ),
-        const SizedBox(width: AppSpacing.xs + 1),
-        _HeroControlPill(
-          label: "Night mode",
-          icon: Icons.dark_mode_outlined,
-          selected: activeMode == AppThemeMode.dark,
-          bubbleLeading: true,
-          selectedTone: _HeroPillTone.dark,
-          activeIconColor: isDark ? const Color(0xFF070B14) : scheme.primary,
-          width: 120,
-          onTap: activeMode == AppThemeMode.dark
-              ? () {}
-              : () => onChanged(AppThemeMode.dark),
-        ),
-      ],
+    return _HeroControlPair(
+      leading: _HeroControlPill(
+        label: "Day mode",
+        icon: Icons.wb_sunny_outlined,
+        selected: activeMode == AppThemeMode.classic,
+        bubbleLeading: false,
+        styleVariant: _HeroPillStyle.softLight,
+        activeIconColor: const Color(0xFF121A2C),
+        width: 124,
+        onTap: activeMode == AppThemeMode.classic
+            ? () {}
+            : () => onChanged(AppThemeMode.classic),
+      ),
+      trailing: _HeroControlPill(
+        label: "Night mode",
+        icon: Icons.dark_mode_outlined,
+        selected: activeMode == AppThemeMode.dark,
+        bubbleLeading: true,
+        styleVariant: _HeroPillStyle.dark,
+        activeIconColor: isDark ? const Color(0xFF070B14) : scheme.primary,
+        width: 124,
+        onTap: activeMode == AppThemeMode.dark
+            ? () {}
+            : () => onChanged(AppThemeMode.dark),
+      ),
     );
   }
 }
