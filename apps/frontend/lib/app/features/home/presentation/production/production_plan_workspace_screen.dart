@@ -48,6 +48,7 @@ const String _logMonthChanged = "month_changed";
 const String _logDayChanged = "day_changed";
 const String _logAssignStaff = "assign_staff";
 const String _logCreateTask = "create_task";
+const String _logDeleteTask = "delete_task";
 const String _logTaskStatus = "task_status";
 const String _logResetHistory = "reset_history";
 const String _logProgress = "log_progress";
@@ -82,6 +83,7 @@ const String _todayLabel = "Today";
 const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
 const String _addTaskLabel = "New task";
+const String _taskDeleteLabel = "Delete task";
 const String _resetHistoryLabel = "Reset history";
 const String _removeStaffHint = "Leave everything unchecked to remove staff.";
 const String _logProgressLabel = "Log progress";
@@ -150,6 +152,12 @@ const String _taskAssignmentSuccess = "Staff assignment updated.";
 const String _taskAssignmentFailure = "Unable to update task staff.";
 const String _taskCreateSuccess = "Task created.";
 const String _taskCreateFailure = "Unable to create task.";
+const String _taskDeleteSuccess = "Task deleted.";
+const String _taskDeleteFailure = "Unable to delete task.";
+const String _taskDeleteConfirmTitle = "Delete this task?";
+const String _taskDeleteConfirmMessage =
+    "This removes the task and deletes linked progress logs, attendance records, and shared day totals for this task.";
+const String _taskDeleteConfirmLabel = "Delete task";
 const String _taskStatusSuccess = "Task status updated.";
 const String _taskStatusFailure = "Unable to update task status.";
 const String _taskProgressSuccess = "Daily progress logged.";
@@ -1454,6 +1462,46 @@ class _ProductionPlanWorkspaceScreenState
                                   _showSnackSafe(_taskAssignmentSuccess);
                                 } catch (_) {
                                   _showSnackSafe(_taskAssignmentFailure);
+                                }
+                              }
+                            : null,
+                        onDeleteTask: canManageCalendar
+                            ? () async {
+                                final confirmed = await _confirmAction(
+                                  title: _taskDeleteConfirmTitle,
+                                  message: _taskDeleteConfirmMessage,
+                                  confirmLabel: _taskDeleteConfirmLabel,
+                                );
+                                if (!confirmed) {
+                                  return;
+                                }
+                                AppDebug.log(
+                                  _logTag,
+                                  _logDeleteTask,
+                                  extra: {
+                                    "planId": widget.planId,
+                                    "taskId": task.id,
+                                  },
+                                );
+                                try {
+                                  final message = await ref
+                                      .read(productionPlanActionsProvider)
+                                      .deleteTask(
+                                        taskId: task.id,
+                                        planId: widget.planId,
+                                      );
+                                  _showSnackSafe(
+                                    message.trim().isNotEmpty
+                                        ? message
+                                        : _taskDeleteSuccess,
+                                  );
+                                } catch (error) {
+                                  _showSnackSafe(
+                                    _resolveProductionWorkspaceErrorMessage(
+                                      error,
+                                      fallback: _taskDeleteFailure,
+                                    ),
+                                  );
                                 }
                               }
                             : null,
@@ -3540,6 +3588,7 @@ class _AgendaTaskCard extends StatelessWidget {
   final bool isOwner;
   final Set<String> progressEnabledStaffIds;
   final Future<void> Function()? onManageStaff;
+  final Future<void> Function()? onDeleteTask;
   final Future<void> Function(
     String staffProfileId,
     ProductionAttendanceRecord? attendance,
@@ -3586,6 +3635,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.isOwner,
     required this.progressEnabledStaffIds,
     required this.onManageStaff,
+    required this.onDeleteTask,
     required this.onSetAttendanceForStaff,
     required this.onQuickClockInForStaff,
     required this.onQuickClockOutForStaff,
@@ -4151,6 +4201,15 @@ class _AgendaTaskCard extends StatelessWidget {
                     icon: const Icon(Icons.flag_outlined),
                     label: Text(formatProductionStatusLabel(task.status)),
                   ),
+                ),
+              if (onDeleteTask != null)
+                TextButton.icon(
+                  onPressed: onDeleteTask,
+                  style: TextButton.styleFrom(
+                    foregroundColor: colorScheme.error,
+                  ),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text(_taskDeleteLabel),
                 ),
               if (isOwner && task.approvalStatus == "pending_approval")
                 FilledButton.tonal(

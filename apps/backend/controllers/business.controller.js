@@ -356,6 +356,7 @@ const PRODUCTION_COPY = {
   STAFF_CAPACITY_LOADED: "Staff capacity loaded",
   TASK_ASSIGNMENT_UPDATED: "Task assignment updated successfully",
   TASK_CREATED: "Production task created successfully",
+  TASK_DELETED: "Production task deleted successfully",
   TASK_CREATE_PLAN_ID_REQUIRED: "Production plan id is required",
   TASK_CREATE_PHASE_ID_REQUIRED: "Production phase id is required",
   TASK_CREATE_PHASE_ID_INVALID: "Production phase id is invalid",
@@ -363,6 +364,8 @@ const PRODUCTION_COPY = {
   TASK_CREATE_TITLE_REQUIRED: "Task title is required",
   TASK_CREATE_PLAN_STATUS_INVALID:
     "Only active, paused, or draft production plans can accept new tasks",
+  TASK_DELETE_PLAN_STATUS_INVALID:
+    "Only active, paused, or draft production plans can delete tasks",
   TASK_ASSIGNMENT_TASK_ID_REQUIRED: "Task id is required",
   TASK_ASSIGNMENT_TASK_ID_INVALID: "Task id is invalid",
   TASK_ASSIGNMENT_STAFF_IDS_REQUIRED:
@@ -5555,6 +5558,186 @@ async function loadProductionTaskInBusinessScope({ taskId, businessId }) {
   return {
     task,
     plan,
+  };
+}
+
+async function deleteProductionTaskCascade({ session = null, task } = {}) {
+  const normalizedTaskId = normalizeStaffIdInput(task?._id);
+  if (!mongoose.Types.ObjectId.isValid(normalizedTaskId)) {
+    return {
+      deletedTaskCount: 0,
+      deletedProgressCount: 0,
+      deletedLedgerCount: 0,
+      deletedAttendanceCount: 0,
+      deletedUnitScheduleCount: 0,
+      deletedWarningCount: 0,
+      deletedAlertCount: 0,
+      deletedCompletionCount: 0,
+      clearedDependencyCount: 0,
+    };
+  }
+
+  const normalizedPlanId = normalizeStaffIdInput(task?.planId);
+  const normalizedPhaseId = normalizeStaffIdInput(task?.phaseId);
+  const transactionOptions = session ? { session } : undefined;
+  const scopedProgressRows = await TaskProgress.find({
+    taskId: normalizedTaskId,
+  })
+    .select({ _id: 1 })
+    .session(session)
+    .lean();
+  const scopedProgressIds = scopedProgressRows.map((row) => row._id);
+  const taskScopedWarningFilter = {
+    planId: normalizedPlanId,
+    $or: [
+      {
+        taskId: normalizedTaskId,
+      },
+      ...(scopedProgressIds.length > 0
+        ? [
+            {
+              sourceProgressId: {
+                $in: scopedProgressIds,
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+  const taskScopedAlertFilter = {
+    planId: normalizedPlanId,
+    $or: [
+      {
+        sourceTaskId: normalizedTaskId,
+      },
+      ...(scopedProgressIds.length > 0
+        ? [
+            {
+              sourceProgressId: {
+                $in: scopedProgressIds,
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+
+  const [
+    dependencyUpdateResult,
+    progressDeleteResult,
+    ledgerDeleteResult,
+    attendanceDeleteResult,
+    unitScheduleDeleteResult,
+    warningDeleteResult,
+    alertDeleteResult,
+    completionDeleteResult,
+    taskDeleteResult,
+  ] = await Promise.all([
+    ProductionTask.updateMany(
+      {
+        planId: normalizedPlanId,
+        _id: {
+          $ne: normalizedTaskId,
+        },
+        dependencies: normalizedTaskId,
+      },
+      {
+        $pull: {
+          dependencies: normalizedTaskId,
+        },
+      },
+      transactionOptions,
+    ),
+    TaskProgress.deleteMany(
+      {
+        taskId: normalizedTaskId,
+      },
+      transactionOptions,
+    ),
+    ProductionTaskDayLedger.deleteMany(
+      {
+        taskId: normalizedTaskId,
+      },
+      transactionOptions,
+    ),
+    StaffAttendance.deleteMany(
+      {
+        taskId: normalizedTaskId,
+      },
+      transactionOptions,
+    ),
+    ProductionUnitTaskSchedule.deleteMany(
+      {
+        planId: normalizedPlanId,
+        taskId: normalizedTaskId,
+      },
+      transactionOptions,
+    ),
+    ProductionUnitScheduleWarning.deleteMany(
+      taskScopedWarningFilter,
+      transactionOptions,
+    ),
+    LifecycleDeviationAlert.deleteMany(
+      taskScopedAlertFilter,
+      transactionOptions,
+    ),
+    ProductionPhaseUnitCompletion.deleteMany(
+      {
+        planId: normalizedPlanId,
+        phaseId: normalizedPhaseId,
+        sourceTaskId: normalizedTaskId,
+      },
+      transactionOptions,
+    ),
+    ProductionTask.deleteOne(
+      {
+        _id: normalizedTaskId,
+      },
+      transactionOptions,
+    ),
+  ]);
+
+  return {
+    deletedTaskCount: Math.max(
+      0,
+      Number(taskDeleteResult?.deletedCount || 0),
+    ),
+    deletedProgressCount: Math.max(
+      0,
+      Number(progressDeleteResult?.deletedCount || 0),
+    ),
+    deletedLedgerCount: Math.max(
+      0,
+      Number(ledgerDeleteResult?.deletedCount || 0),
+    ),
+    deletedAttendanceCount: Math.max(
+      0,
+      Number(attendanceDeleteResult?.deletedCount || 0),
+    ),
+    deletedUnitScheduleCount: Math.max(
+      0,
+      Number(unitScheduleDeleteResult?.deletedCount || 0),
+    ),
+    deletedWarningCount: Math.max(
+      0,
+      Number(warningDeleteResult?.deletedCount || 0),
+    ),
+    deletedAlertCount: Math.max(
+      0,
+      Number(alertDeleteResult?.deletedCount || 0),
+    ),
+    deletedCompletionCount: Math.max(
+      0,
+      Number(completionDeleteResult?.deletedCount || 0),
+    ),
+    clearedDependencyCount: Math.max(
+      0,
+      Number(
+        dependencyUpdateResult?.modifiedCount ||
+          dependencyUpdateResult?.nModified ||
+          0,
+      ),
+    ),
   };
 }
 
@@ -18809,6 +18992,144 @@ async function updateProductionTaskStatus(req, res) {
 }
 
 /**
+ * DELETE /business/production/tasks/:taskId
+ * Owner + managers: delete a production task and cascade all task-scoped execution records.
+ */
+async function deleteProductionTask(req, res) {
+  debug("BUSINESS CONTROLLER: deleteProductionTask - entry", {
+    actorId: req.user?.sub,
+    taskId: req.params?.taskId,
+  });
+
+  let session = null;
+  try {
+    const taskId = (req.params?.taskId || "").toString().trim();
+    if (!taskId || !mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const { actor, businessId } = await getBusinessContext(req.user.sub);
+    const staffProfile = await getStaffProfileForActor({
+      actor,
+      businessId,
+      allowMissing: true,
+    });
+
+    if (
+      !canAssignProductionTasks({
+        actorRole: actor.role,
+        staffRole: staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error: PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const { task, plan } = await loadProductionTaskInBusinessScope({
+      taskId,
+      businessId,
+    });
+    if (!task || !plan) {
+      return res.status(404).json({
+        error: PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      plan.estateAssetId?.toString() !== actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error: PRODUCTION_COPY.STAFF_TASK_FORBIDDEN,
+      });
+    }
+
+    const normalizedPlanStatus = (plan.status || "")
+      .toString()
+      .trim()
+      .toLowerCase();
+    if (
+      ![
+        PRODUCTION_STATUS_DRAFT,
+        PRODUCTION_STATUS_ACTIVE,
+        PRODUCTION_STATUS_PAUSED,
+      ].includes(normalizedPlanStatus)
+    ) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_DELETE_PLAN_STATUS_INVALID,
+      });
+    }
+
+    session = await mongoose.startSession();
+    let deleteSummary = null;
+    await session.withTransaction(async () => {
+      deleteSummary = await deleteProductionTaskCascade({
+        session,
+        task,
+      });
+    });
+
+    const normalizedTaskId = normalizeStaffIdInput(task._id);
+    const normalizedPlanId = normalizeStaffIdInput(plan._id);
+    await writeAuditLog({
+      businessId,
+      actorId: actor._id,
+      actorRole: actor.role,
+      action: "production_task_deleted",
+      entityType: "production_task",
+      entityId: task._id,
+      message: "Deleted production task",
+      changes: {
+        planId: normalizedPlanId,
+        phaseId: task.phaseId || null,
+        taskId: normalizedTaskId,
+        title: task.title || "",
+        roleRequired: task.roleRequired || "",
+        status: task.status || "",
+        ...deleteSummary,
+      },
+    });
+
+    await emitProductionPlanRoomSnapshot({
+      businessId,
+      planId: plan._id,
+      context: "task_deleted",
+    });
+
+    debug("BUSINESS CONTROLLER: deleteProductionTask - success", {
+      actorId: actor._id,
+      taskId: normalizedTaskId,
+      planId: normalizedPlanId,
+      deleteSummary,
+    });
+
+    return res.status(200).json({
+      message: PRODUCTION_COPY.TASK_DELETED,
+      taskId: normalizedTaskId,
+      planId: normalizedPlanId,
+      ...deleteSummary,
+    });
+  } catch (err) {
+    debug("BUSINESS CONTROLLER: deleteProductionTask - error", {
+      actorId: req.user?.sub,
+      taskId: req.params?.taskId,
+      reason: err.message,
+    });
+    return res.status(400).json({
+      error: err.message,
+    });
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+/**
  * PUT /business/production/tasks/:taskId/assign
  * Owner + managers: assign one or more staff profiles to a task role.
  */
@@ -23684,6 +24005,7 @@ module.exports = {
   reconcileExpiredPreorderReservationsHandler,
   createProductionPlanTask,
   updateProductionTaskStatus,
+  deleteProductionTask,
   assignProductionTaskStaffProfiles,
   resetProductionTaskHistory,
   logProductionTaskProgress,

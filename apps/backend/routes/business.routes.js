@@ -575,6 +575,13 @@ router.patch(
   businessController.updateProductionTaskStatus,
 );
 
+router.delete(
+  "/production/tasks/:taskId",
+  requireAuth,
+  requireAnyRole(["business_owner", "staff"]),
+  businessController.deleteProductionTask,
+);
+
 router.post(
   "/production/plans/:planId/tasks",
   requireAuth,

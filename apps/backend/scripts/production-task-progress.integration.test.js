@@ -38,6 +38,11 @@ const ProductionPlan = require("../models/ProductionPlan");
 const ProductionPhase = require("../models/ProductionPhase");
 const ProductionTask = require("../models/ProductionTask");
 const ProductionTaskDayLedger = require("../models/ProductionTaskDayLedger");
+const PlanUnit = require("../models/PlanUnit");
+const ProductionPhaseUnitCompletion = require("../models/ProductionPhaseUnitCompletion");
+const LifecycleDeviationAlert = require("../models/LifecycleDeviationAlert");
+const ProductionUnitTaskSchedule = require("../models/ProductionUnitTaskSchedule");
+const ProductionUnitScheduleWarning = require("../models/ProductionUnitScheduleWarning");
 const StaffAttendance = require("../models/StaffAttendance");
 const TaskProgress = require("../models/TaskProgress");
 const staffAttendanceProofService = require("../services/staff_attendance_proof.service");
@@ -69,6 +74,11 @@ const originalUploadStaffAttendanceProofs =
 
 const RESET_MODELS = [
   ProductionTaskDayLedger,
+  ProductionUnitScheduleWarning,
+  ProductionUnitTaskSchedule,
+  LifecycleDeviationAlert,
+  ProductionPhaseUnitCompletion,
+  PlanUnit,
   StaffAttendance,
   TaskProgress,
   ProductionTask,
@@ -116,6 +126,12 @@ function buildProgressApp() {
     requireAuth,
     requireAnyRole([OWNER_ROLE, "staff"]),
     businessController.createProductionPlanTask,
+  );
+  app.delete(
+    `${ROUTE_PREFIX}/:taskId`,
+    requireAuth,
+    requireAnyRole([OWNER_ROLE, "staff"]),
+    businessController.deleteProductionTask,
   );
   app.post(
     `${ATTENDANCE_ROUTE_PREFIX}/clock-in`,
@@ -328,6 +344,14 @@ async function postResetTaskHistory({ token, taskId, payload }) {
     routePath: `${ROUTE_PREFIX}/${taskId}/reset-history`,
     token,
     payload,
+  });
+}
+
+async function deleteTaskRequest({ token, taskId }) {
+  return requestJson({
+    method: "DELETE",
+    routePath: `${ROUTE_PREFIX}/${taskId}`,
+    token,
   });
 }
 
@@ -2111,4 +2135,201 @@ test("reset-history refuses to delete approved progress rows", async () => {
   }).lean();
   assert.ok(remainingProgress);
   assert.ok(remainingProgress.approvedAt);
+});
+
+test("delete task cascades linked execution rows and clears dependent task references", async () => {
+  const scenario = await seedScenario();
+  const planUnitId = new mongoose.Types.ObjectId();
+  const dependentTaskId = new mongoose.Types.ObjectId();
+
+  await PlanUnit.create({
+    _id: planUnitId,
+    planId: scenario.planId,
+    unitIndex: 1,
+    label: "Greenhouse 1",
+  });
+
+  const completedProgress = await createCompletedProgress({
+    ownerId: scenario.ownerId,
+    planId: scenario.planId,
+    taskId: scenario.taskId,
+    staffId: scenario.staffProfileAId,
+    actualPlots: 2,
+    proofCount: 1,
+    notes: "delete task cascade",
+  });
+
+  const attendance = await StaffAttendance.create({
+    staffProfileId: scenario.staffProfileAId,
+    planId: scenario.planId,
+    taskId: scenario.taskId,
+    workDate: WORK_DATE_NORMALIZED,
+    clockInAt: new Date("2026-04-12T08:00:00.000Z"),
+    clockOutAt: new Date("2026-04-12T12:00:00.000Z"),
+    durationMinutes: 240,
+    clockInBy: scenario.ownerId,
+    clockOutBy: scenario.ownerId,
+    notes: "delete task attendance",
+    proofs: [],
+    requiredProofs: 0,
+    proofStatus: "not_required",
+    sessionStatus: "completed",
+  });
+
+  const ledger = await ProductionTaskDayLedger.create({
+    planId: scenario.planId,
+    taskId: scenario.taskId,
+    workDate: WORK_DATE_NORMALIZED,
+    unitType: "plots",
+    unitTarget: 5,
+    unitCompleted: 2,
+    unitRemaining: 3,
+    status: "in_progress",
+    activityTargets: {},
+    activityCompleted: {},
+    activityRemaining: {},
+    activityUnits: {},
+  });
+
+  const unitSchedule = await ProductionUnitTaskSchedule.create({
+    planId: scenario.planId,
+    taskId: scenario.taskId,
+    phaseId: scenario.phaseId,
+    unitId: planUnitId,
+    timingMode: "absolute",
+    referencePhaseId: null,
+    referenceEvent: "phase_start",
+    baselineStartDate: new Date("2026-04-12T07:00:00.000Z"),
+    baselineDueDate: new Date("2026-04-12T16:00:00.000Z"),
+    currentStartDate: new Date("2026-04-12T07:00:00.000Z"),
+    currentDueDate: new Date("2026-04-12T16:00:00.000Z"),
+    startOffsetDays: 0,
+    dueOffsetDays: 0,
+    lastShiftDays: 1,
+    lastShiftReason: "delay",
+    lastShiftedByProgressId: completedProgress._id,
+  });
+
+  const completion = await ProductionPhaseUnitCompletion.create({
+    planId: scenario.planId,
+    phaseId: scenario.phaseId,
+    unitId: planUnitId,
+    completedBy: scenario.ownerId,
+    completedAt: new Date("2026-04-12T17:00:00.000Z"),
+    sourceTaskId: scenario.taskId,
+  });
+
+  const warning = await ProductionUnitScheduleWarning.create({
+    planId: scenario.planId,
+    taskId: scenario.taskId,
+    phaseId: scenario.phaseId,
+    unitId: planUnitId,
+    warningType: "SHIFT_CONFLICT",
+    severity: "warning",
+    message: "Conflicting unit shift",
+    shiftDays: 1,
+    sourceProgressId: completedProgress._id,
+  });
+
+  const alert = await LifecycleDeviationAlert.create({
+    planId: scenario.planId,
+    businessId: scenario.businessId,
+    unitId: planUnitId,
+    sourceProgressId: completedProgress._id,
+    sourceTaskId: scenario.taskId,
+    cumulativeDeviationDays: 2,
+    thresholdDays: 1,
+    status: "open",
+    message:
+      "Unit deviation 2 day(s) exceeded threshold 1 day(s). Automatic shifts are now frozen until manager intervention.",
+    triggeredAt: new Date("2026-04-12T18:00:00.000Z"),
+    actionHistory: [
+      {
+        actionType: "triggered",
+        actorId: scenario.ownerId,
+        actedAt: new Date("2026-04-12T18:00:00.000Z"),
+        note: "",
+        metadata: {
+          operation: "integration_test",
+        },
+      },
+    ],
+  });
+
+  await createTask({
+    id: dependentTaskId,
+    planId: scenario.planId,
+    phaseId: scenario.phaseId,
+    title: "Dependent Task",
+    assignedStaffId: scenario.staffProfileBId,
+    assignedStaffProfileIds: [scenario.staffProfileBId],
+    createdBy: scenario.ownerId,
+    weight: 2,
+  });
+  await ProductionTask.updateOne(
+    {
+      _id: dependentTaskId,
+    },
+    {
+      $set: {
+        dependencies: [scenario.taskId],
+      },
+    },
+  );
+
+  const response = await deleteTaskRequest({
+    token: scenario.token,
+    taskId: scenario.taskId.toString(),
+  });
+
+  assert.equal(response.statusCode, HTTP_OK);
+  assert.equal(response.body.message, "Production task deleted successfully");
+  assert.equal(response.body.taskId, scenario.taskId.toString());
+  assert.equal(response.body.planId, scenario.planId.toString());
+  assert.equal(response.body.deletedTaskCount, 1);
+  assert.equal(response.body.deletedProgressCount, 1);
+  assert.equal(response.body.deletedLedgerCount, 1);
+  assert.equal(response.body.deletedAttendanceCount, 1);
+  assert.equal(response.body.deletedUnitScheduleCount, 1);
+  assert.equal(response.body.deletedWarningCount, 1);
+  assert.equal(response.body.deletedAlertCount, 1);
+  assert.equal(response.body.deletedCompletionCount, 1);
+  assert.equal(response.body.clearedDependencyCount, 1);
+
+  const deletedTask = await ProductionTask.findById(scenario.taskId).lean();
+  const deletedProgress = await TaskProgress.findById(
+    completedProgress._id,
+  ).lean();
+  const deletedAttendance = await StaffAttendance.findById(
+    attendance._id,
+  ).lean();
+  const deletedLedger = await ProductionTaskDayLedger.findById(
+    ledger._id,
+  ).lean();
+  const deletedUnitSchedule = await ProductionUnitTaskSchedule.findById(
+    unitSchedule._id,
+  ).lean();
+  const deletedCompletion = await ProductionPhaseUnitCompletion.findById(
+    completion._id,
+  ).lean();
+  const deletedWarning = await ProductionUnitScheduleWarning.findById(
+    warning._id,
+  ).lean();
+  const deletedAlert = await LifecycleDeviationAlert.findById(
+    alert._id,
+  ).lean();
+  const dependentTask = await ProductionTask.findById(dependentTaskId)
+    .select({ dependencies: 1 })
+    .lean();
+
+  assert.equal(deletedTask, null);
+  assert.equal(deletedProgress, null);
+  assert.equal(deletedAttendance, null);
+  assert.equal(deletedLedger, null);
+  assert.equal(deletedUnitSchedule, null);
+  assert.equal(deletedCompletion, null);
+  assert.equal(deletedWarning, null);
+  assert.equal(deletedAlert, null);
+  assert.ok(dependentTask);
+  assert.deepEqual(dependentTask.dependencies || [], []);
 });

@@ -69,6 +69,7 @@ const String _intentPreorderReservations = "list preorder reservations";
 const String _intentPreorderReconcile =
     "reconcile expired preorder reservations";
 const String _intentTaskCreate = "create production task";
+const String _intentTaskDelete = "delete production task";
 const String _intentTaskStatus = "update production task status";
 const String _intentTaskAssign = "assign production task staff profiles";
 const String _intentTaskResetHistory = "reset production task history";
@@ -102,6 +103,7 @@ const String _operationPlanPreorder = "updatePlanPreorder";
 const String _operationPreorderReservations = "listPreorderReservations";
 const String _operationPreorderReconcile = "reconcileExpiredPreorders";
 const String _operationTaskCreate = "createTask";
+const String _operationTaskDelete = "deleteTask";
 const String _operationTaskStatus = "updateTaskStatus";
 const String _operationTaskAssign = "assignTaskStaffProfiles";
 const String _operationTaskResetHistory = "resetTaskHistory";
@@ -241,6 +243,9 @@ const String _preorderReconcileFailureMessage =
 const String _taskCreateStartMessage = "createTask() start";
 const String _taskCreateSuccessMessage = "createTask() success";
 const String _taskCreateFailureMessage = "createTask() failed";
+const String _taskDeleteStartMessage = "deleteTask() start";
+const String _taskDeleteSuccessMessage = "deleteTask() success";
+const String _taskDeleteFailureMessage = "deleteTask() failed";
 const String _taskStatusStartMessage = "updateTaskStatus() start";
 const String _taskStatusSuccessMessage = "updateTaskStatus() success";
 const String _taskStatusFailureMessage = "updateTaskStatus() failed";
@@ -1896,6 +1901,65 @@ class ProductionApi {
           _extraOperationKey: _operationTaskCreate,
           _extraIntentKey: _intentTaskCreate,
           _extraPlanIdKey: planId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<String> deleteTask({
+    required String? token,
+    required String taskId,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskDeleteStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskDelete,
+        _extraIntentKey: _intentTaskDelete,
+        _extraTaskIdKey: taskId,
+      },
+    );
+
+    try {
+      final resp = await _dio.delete(
+        "$_tasksPath/$taskId",
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final message = (data[_keyMessage] ?? "").toString().trim();
+
+      AppDebug.log(
+        _logTag,
+        _taskDeleteSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskDelete,
+          _extraIntentKey: _intentTaskDelete,
+          _extraTaskIdKey: taskId,
+        },
+      );
+
+      return message.isNotEmpty ? message : "Production task deleted.";
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskDeleteFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskDelete,
+          _extraIntentKey: _intentTaskDelete,
+          _extraTaskIdKey: taskId,
           _extraStatusKey: statusCode,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,

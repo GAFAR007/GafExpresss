@@ -62,6 +62,8 @@ const String _reasonStaffCapacityMissing =
     "production_staff_capacity_session_missing";
 const String _reasonTaskStatusMissing =
     "production_task_status_session_missing";
+const String _reasonTaskDeleteMissing =
+    "production_task_delete_session_missing";
 const String _reasonTaskResetHistoryMissing =
     "production_task_reset_history_session_missing";
 const String _reasonTaskProgressMissing =
@@ -691,6 +693,33 @@ class ProductionPlanActions {
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPortfolioConfidenceProvider);
     return task;
+  }
+
+  Future<String> deleteTask({
+    required String taskId,
+    required String planId,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskDeleteMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final message = await api.deleteTask(token: session.token, taskId: taskId);
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return message;
   }
 
   Future<ProductionTask> updateTaskStatus({

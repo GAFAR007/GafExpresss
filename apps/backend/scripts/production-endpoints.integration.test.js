@@ -166,6 +166,7 @@ test("business routes expose core production lifecycle endpoints", () => {
     "GET /production/plans/:planId/units",
     "GET /production/plans/:planId/deviation-alerts",
     "POST /production/plans/:planId/tasks",
+    "DELETE /production/tasks/:taskId",
     "POST /production/plans/:planId/deviation-alerts/:alertId/accept-variance",
     "POST /production/plans/:planId/deviation-alerts/:alertId/replan-unit",
     "PATCH /production/tasks/:id/status",
