@@ -1016,12 +1016,16 @@ class _HeroToggleOption {
   final String label;
   final IconData icon;
   final Color accentColor;
+  final Color activeFillColor;
+  final Color activeTextColor;
   final double iconSize;
 
   const _HeroToggleOption({
     required this.label,
     required this.icon,
     required this.accentColor,
+    required this.activeFillColor,
+    required this.activeTextColor,
     this.iconSize = 18,
   });
 }
@@ -1066,138 +1070,127 @@ class _HeroToggleSwitch extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Positioned.fill(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF4568A7), Color(0xFF102A5D)],
-                    ),
-                    borderRadius: BorderRadius.circular(AppRadius.pill),
-                    border: Border.all(
-                      color: Colors.white.withValues(
-                        alpha: isDark ? 0.16 : 0.24,
-                      ),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.white.withValues(alpha: 0.16),
-                        blurRadius: 1,
-                        offset: const Offset(0, 1),
-                      ),
-                      BoxShadow(
-                        color: const Color(
-                          0xFF081A39,
-                        ).withValues(alpha: isDark ? 0.5 : 0.3),
-                        blurRadius: 16,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF203E78), Color(0xFF07152F)],
                 ),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: isDark ? 0.18 : 0.24),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(
+                      0xFF06142D,
+                    ).withValues(alpha: isDark ? 0.5 : 0.3),
+                    blurRadius: 14,
+                    offset: const Offset(0, 7),
+                  ),
+                ],
               ),
-              IgnorePointer(
-                child: AnimatedPositioned(
-                  duration: const Duration(milliseconds: 240),
-                  curve: Curves.easeOutCubic,
-                  left: highlightLeft,
-                  top: trackInset,
-                  bottom: trackInset,
-                  width: halfWidth - trackInset,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.16),
-                          scheme.primary.withValues(alpha: 0.18),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.16),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: activeOption.accentColor.withValues(
-                            alpha: 0.2,
+              child: Stack(
+                clipBehavior: Clip.hardEdge,
+                children: [
+                  IgnorePointer(
+                    child: AnimatedPositioned(
+                      duration: const Duration(milliseconds: 240),
+                      curve: Curves.easeOutCubic,
+                      left: highlightLeft,
+                      top: trackInset,
+                      bottom: trackInset,
+                      width: halfWidth - trackInset,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        decoration: BoxDecoration(
+                          color: activeOption.activeFillColor,
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          border: Border.all(
+                            color: Colors.white.withValues(
+                              alpha: isLeftSelected ? 0.26 : 0.14,
+                            ),
                           ),
-                          blurRadius: 14,
-                          offset: const Offset(0, 5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: activeOption.accentColor.withValues(
+                                alpha: 0.22,
+                              ),
+                              blurRadius: 14,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: Row(
+                      children: [
+                        _HeroToggleLabel(
+                          option: leftOption,
+                          isActive: isLeftSelected,
+                          isLeft: true,
+                          onTap: () => onChanged(true),
+                        ),
+                        _HeroToggleLabel(
+                          option: rightOption,
+                          isActive: !isLeftSelected,
+                          isLeft: false,
+                          onTap: () => onChanged(false),
                         ),
                       ],
                     ),
                   ),
-                ),
-              ),
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    _HeroToggleLabel(
-                      option: leftOption,
-                      isActive: isLeftSelected,
-                      isLeft: true,
-                      onTap: () => onChanged(true),
-                    ),
-                    _HeroToggleLabel(
-                      option: rightOption,
-                      isActive: !isLeftSelected,
-                      isLeft: false,
-                      onTap: () => onChanged(false),
-                    ),
-                  ],
-                ),
-              ),
-              IgnorePointer(
-                child: AnimatedPositioned(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  left: indicatorLeft,
-                  top: trackInset,
-                  width: indicatorSize,
-                  height: indicatorSize,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.96),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: activeOption.accentColor.withValues(alpha: 0.12),
+                  IgnorePointer(
+                    child: AnimatedPositioned(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      left: indicatorLeft,
+                      top: trackInset,
+                      width: indicatorSize,
+                      height: indicatorSize,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: activeOption.accentColor.withValues(
+                              alpha: 0.16,
+                            ),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.16),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                            BoxShadow(
+                              color: activeOption.accentColor.withValues(
+                                alpha: 0.18,
+                              ),
+                              blurRadius: 12,
+                            ),
+                          ],
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          activeOption.icon,
+                          size: activeOption.iconSize,
+                          color: activeOption.accentColor,
+                        ),
                       ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: scheme.shadow.withValues(
-                            alpha: isDark ? 0.22 : 0.16,
-                          ),
-                          blurRadius: 12,
-                          offset: const Offset(0, 5),
-                        ),
-                        BoxShadow(
-                          color: activeOption.accentColor.withValues(
-                            alpha: 0.18,
-                          ),
-                          blurRadius: 14,
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      activeOption.icon,
-                      size: activeOption.iconSize,
-                      color: activeOption.accentColor,
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1241,9 +1234,9 @@ class _HeroToggleLabel extends StatelessWidget {
                   option.label.toUpperCase(),
                   maxLines: 1,
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: Colors.white.withValues(
-                      alpha: isActive ? 0.98 : 0.58,
-                    ),
+                    color: isActive
+                        ? option.activeTextColor
+                        : Colors.white.withValues(alpha: 0.72),
                     fontSize: 12.5,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0.48,
@@ -1273,12 +1266,16 @@ class _PresenceToggle extends StatelessWidget {
         label: _ChatInboxCopy.onlineLabel,
         icon: Icons.circle_rounded,
         accentColor: AppColors.success,
+        activeFillColor: Color(0xFF526B9F),
+        activeTextColor: Colors.white,
         iconSize: 14,
       ),
       rightOption: const _HeroToggleOption(
         label: _ChatInboxCopy.offlineLabel,
         icon: Icons.circle_rounded,
         accentColor: Color(0xFF9CA3AF),
+        activeFillColor: Color(0xFF050B16),
+        activeTextColor: Colors.white,
         iconSize: 14,
       ),
       onChanged: onChanged,
@@ -1306,12 +1303,16 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
         label: "Day mode",
         icon: Icons.wb_sunny_outlined,
         accentColor: Color(0xFF1F2A44),
+        activeFillColor: Color(0xFFF2F5FA),
+        activeTextColor: Color(0xFF1F2A44),
         iconSize: 20,
       ),
       rightOption: _HeroToggleOption(
         label: "Night mode",
         icon: Icons.dark_mode_outlined,
         accentColor: scheme.primary,
+        activeFillColor: const Color(0xFF050B16),
+        activeTextColor: Colors.white,
         iconSize: 20,
       ),
       onChanged: (isDay) =>
