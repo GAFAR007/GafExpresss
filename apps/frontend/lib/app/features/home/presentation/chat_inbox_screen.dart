@@ -1047,9 +1047,6 @@ class _HeroToggleSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final isDark = _isDarkScheme(scheme);
     const height = 36.0;
     const trackInset = 3.0;
     const indicatorSize = height - (trackInset * 2);
@@ -1058,92 +1055,77 @@ class _HeroToggleSwitch extends StatelessWidget {
         ? halfWidth - indicatorSize - trackInset
         : halfWidth + trackInset;
     final activeOption = isLeftSelected ? leftOption : rightOption;
-    final inactiveTextColor = Colors.white.withValues(alpha: 0.76);
+    const inactiveTextColor = Color(0xCCFFFFFF);
 
     return Semantics(
       button: true,
       toggled: isLeftSelected,
       label: "${leftOption.label} ${rightOption.label}",
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: Material(
-          color: Colors.transparent,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: InkWell(
+          onTap: () => onChanged(!isLeftSelected),
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadius.pill),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF082C66), Color(0xFF020816)],
+          child: Container(
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              color: const Color(0xFF061A3D),
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: const Color(0x668DB4FF)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.18),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
                 ),
-                borderRadius: BorderRadius.circular(AppRadius.pill),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: isDark ? 0.24 : 0.3),
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      _HeroToggleLabel(
+                        option: leftOption,
+                        isActive: isLeftSelected,
+                        isLeft: true,
+                        inactiveTextColor: inactiveTextColor,
+                        onTap: () => onChanged(true),
+                      ),
+                      _HeroToggleLabel(
+                        option: rightOption,
+                        isActive: !isLeftSelected,
+                        isLeft: false,
+                        inactiveTextColor: inactiveTextColor,
+                        onTap: () => onChanged(false),
+                      ),
+                    ],
+                  ),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(
-                      0xFF06142D,
-                    ).withValues(alpha: isDark ? 0.36 : 0.22),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Stack(
-                clipBehavior: Clip.hardEdge,
-                children: [
-                  Positioned.fill(
-                    child: Row(
-                      children: [
-                        _HeroToggleLabel(
-                          option: leftOption,
-                          isActive: isLeftSelected,
-                          isLeft: true,
-                          inactiveTextColor: inactiveTextColor,
-                          onTap: () => onChanged(true),
-                        ),
-                        _HeroToggleLabel(
-                          option: rightOption,
-                          isActive: !isLeftSelected,
-                          isLeft: false,
-                          inactiveTextColor: inactiveTextColor,
-                          onTap: () => onChanged(false),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IgnorePointer(
-                    child: AnimatedPositioned(
-                      duration: const Duration(milliseconds: 260),
-                      curve: Curves.easeOutCubic,
-                      left: indicatorLeft,
-                      top: trackInset,
-                      width: indicatorSize,
-                      height: indicatorSize,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOutCubic,
+                IgnorePointer(
+                  child: AnimatedPositioned(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    left: indicatorLeft,
+                    top: trackInset,
+                    width: indicatorSize,
+                    height: indicatorSize,
+                    child: AnimatedScale(
+                      duration: const Duration(milliseconds: 160),
+                      scale: 1,
+                      child: Container(
                         decoration: BoxDecoration(
                           color: activeOption.activeFillColor,
                           shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.55),
-                          ),
-                          boxShadow: [
+                          border: Border.all(color: Colors.white, width: 1.2),
+                          boxShadow: const [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.28),
+                              color: Color(0x66000000),
                               blurRadius: 7,
-                              offset: const Offset(0, 3),
-                            ),
-                            BoxShadow(
-                              color: activeOption.activeFillColor.withValues(
-                                alpha: 0.38,
-                              ),
-                              blurRadius: 9,
+                              offset: Offset(0, 3),
                             ),
                           ],
                         ),
@@ -1156,8 +1138,8 @@ class _HeroToggleSwitch extends StatelessWidget {
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
