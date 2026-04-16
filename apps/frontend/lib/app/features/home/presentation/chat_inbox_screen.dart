@@ -47,12 +47,7 @@ const String _logPresenceChange = "presence_change";
 
 const double _kInboxMaxWidth = 760;
 const double _kAvatarSize = 44;
-const Color _kInboxHeroTop = Color(0xFF1E3F86);
-const Color _kInboxHeroMiddle = Color(0xFF3158AB);
-const Color _kInboxHeroBottom = Color(0xFF4E76D0);
-const Color _kInboxHeroDarkTop = Color(0xFF0D1932);
-const Color _kInboxHeroDarkMiddle = Color(0xFF16305C);
-const Color _kInboxHeroDarkBottom = Color(0xFF22467E);
+const Color _kInboxHeroTop = Color(0xFF082A55);
 const Color _kInboxHeroGlass = Color(0xFFFDFEFF);
 
 class _ChatInboxCopy {
@@ -747,103 +742,54 @@ class _InboxHeroSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = _isDarkScheme(scheme);
     final topInset = MediaQuery.of(context).viewPadding.top;
     final horizontalPadding = isWide ? AppSpacing.lg : AppSpacing.md;
-    final topPadding = topInset + (isWide ? AppSpacing.md : AppSpacing.sm + 2);
-    final bottomPadding = isWide ? AppSpacing.lg : AppSpacing.md;
+    final topPadding = topInset + (isWide ? AppSpacing.lg : AppSpacing.md);
+    final bottomPadding = isWide ? AppSpacing.lg : AppSpacing.md + 2;
     const radius = BorderRadius.only(
-      bottomLeft: Radius.circular(34),
-      bottomRight: Radius.circular(34),
+      bottomLeft: Radius.circular(30),
+      bottomRight: Radius.circular(30),
     );
-    final topColor = isDark ? _kInboxHeroDarkTop : _kInboxHeroTop;
-    final middleColor = isDark ? _kInboxHeroDarkMiddle : _kInboxHeroMiddle;
-    final bottomColor = isDark ? _kInboxHeroDarkBottom : _kInboxHeroBottom;
 
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [topColor, middleColor, bottomColor],
-          stops: const [0, 0.5, 1],
-        ),
+        color: _kInboxHeroTop,
         borderRadius: radius,
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-            color: scheme.shadow.withValues(alpha: isDark ? 0.18 : 0.05),
-            blurRadius: isDark ? 24 : 18,
-            offset: const Offset(0, 10),
+            color: Color(0x22000000),
+            blurRadius: 18,
+            offset: Offset(0, 10),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: Stack(
-          children: [
-            Positioned(
-              top: -72,
-              right: -40,
-              child: _BackdropBloom(
-                size: isWide ? 240 : 210,
-                color: Colors.white.withValues(alpha: isDark ? 0.14 : 0.2),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            topPadding,
+            horizontalPadding,
+            bottomPadding,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _InboxHeader(
+                isOnline: isOnline,
+                isWide: isWide,
+                onOpenProfile: onOpenProfile,
+                onPresenceChanged: onPresenceChanged,
               ),
-            ),
-            Positioned(
-              left: -60,
-              bottom: -96,
-              child: _BackdropBloom(
-                size: isWide ? 250 : 220,
-                color: _blendTone(
-                  Colors.white,
-                  scheme.primary,
-                  alpha: isDark ? 0.18 : 0.24,
-                ),
+              SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
+              _InboxTopControls(
+                controller: controller,
+                filter: filter,
+                onSearchChanged: onSearchChanged,
+                onFilterChange: onFilterChange,
               ),
-            ),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withValues(alpha: isDark ? 0.06 : 0.1),
-                      Colors.white.withValues(alpha: isDark ? 0.01 : 0.02),
-                      Colors.black.withValues(alpha: isDark ? 0.04 : 0.06),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                topPadding,
-                horizontalPadding,
-                bottomPadding,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _InboxHeader(
-                    isOnline: isOnline,
-                    isWide: isWide,
-                    onOpenProfile: onOpenProfile,
-                    onPresenceChanged: onPresenceChanged,
-                  ),
-                  SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
-                  _InboxTopControls(
-                    controller: controller,
-                    filter: filter,
-                    onSearchChanged: onSearchChanged,
-                    onFilterChange: onFilterChange,
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -958,14 +904,14 @@ class _HeaderPresenceIconToggle extends StatelessWidget {
       rightIcon: Icons.circle_rounded,
       leftIconSize: 15,
       rightIconSize: 15,
-      leftActiveColor: const Color(0xFF34D399),
-      leftInactiveColor: Colors.white.withValues(alpha: 0.46),
-      rightActiveColor: const Color(0xFFCBD5E1),
+      leftActiveColor: Colors.white,
+      leftInactiveColor: Colors.white.withValues(alpha: 0.42),
+      rightActiveColor: Colors.white,
       rightInactiveColor: Colors.white.withValues(alpha: 0.42),
-      leftTrackColors: const [Color(0xFFE7F6EF), Color(0xFFD4ECE0)],
-      rightTrackColors: const [Color(0xFFE8ECF4), Color(0xFFD8DEE9)],
-      leftBorderColor: const Color(0x8034D399),
-      rightBorderColor: const Color(0xFFCAD2DE),
+      leftTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
+      rightTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
+      leftBorderColor: Colors.white,
+      rightBorderColor: Colors.white,
       onRightSelectedChanged: (isOffline) => onChanged(!isOffline),
     );
   }
@@ -990,14 +936,14 @@ class _HeaderThemeIconToggle extends StatelessWidget {
       rightIcon: Icons.dark_mode_outlined,
       leftIconSize: 22,
       rightIconSize: 22,
-      leftActiveColor: Colors.white.withValues(alpha: 0.82),
-      leftInactiveColor: Colors.white.withValues(alpha: 0.38),
-      rightActiveColor: Colors.white.withValues(alpha: 0.86),
+      leftActiveColor: Colors.white,
+      leftInactiveColor: Colors.white.withValues(alpha: 0.42),
+      rightActiveColor: Colors.white,
       rightInactiveColor: Colors.white.withValues(alpha: 0.42),
-      leftTrackColors: const [Color(0xFFE8ECF4), Color(0xFFD8DEE9)],
-      rightTrackColors: const [Color(0xFF273349), Color(0xFF111827)],
-      leftBorderColor: const Color(0xFFCAD2DE),
-      rightBorderColor: Colors.white.withValues(alpha: 0.12),
+      leftTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
+      rightTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
+      leftBorderColor: Colors.white,
+      rightBorderColor: Colors.white,
       onRightSelectedChanged: onChanged,
     );
   }
@@ -1111,9 +1057,7 @@ class _HeaderIconToggle extends StatelessWidget {
                               offset: const Offset(0, 4),
                             ),
                             BoxShadow(
-                              color: Colors.white.withValues(
-                                alpha: isRightSelected ? 0.05 : 0.48,
-                              ),
+                              color: Colors.white.withValues(alpha: 0.48),
                               blurRadius: 3,
                               offset: const Offset(-1, -1),
                             ),
@@ -1130,7 +1074,7 @@ class _HeaderIconToggle extends StatelessWidget {
                         child: DecoratedBox(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFFF8FAFC),
+                            color: _kInboxHeroTop,
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.22),
@@ -1167,37 +1111,32 @@ class _ProfileActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = _isDarkScheme(scheme);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onPressed,
-        overlayColor: _interactiveOverlay(scheme),
+        overlayColor: WidgetStateProperty.all(
+          _kInboxHeroTop.withValues(alpha: 0.08),
+        ),
         borderRadius: BorderRadius.circular(AppRadius.pill),
         child: Ink(
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.12)
-                : Colors.white.withValues(alpha: 0.96),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(AppRadius.pill),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: isDark ? 0.18 : 0.72),
-            ),
-            boxShadow: [
+            boxShadow: const [
               BoxShadow(
-                color: scheme.shadow.withValues(alpha: isDark ? 0.16 : 0.08),
-                blurRadius: isDark ? 18 : 14,
-                offset: const Offset(0, 8),
+                color: Color(0x22000000),
+                blurRadius: 14,
+                offset: Offset(0, 8),
               ),
             ],
           ),
           child: Icon(
             Icons.person_outline_rounded,
             size: 18,
-            color: isDark ? Colors.white : scheme.primary,
+            color: _kInboxHeroTop,
           ),
         ),
       ),
@@ -1252,28 +1191,18 @@ class _InboxSearchBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final isDark = _isDarkScheme(scheme);
-    final searchFill = isDark
-        ? Colors.white.withValues(alpha: 0.1)
-        : const Color(0xFFEAF1FB).withValues(alpha: 0.94);
-    final searchBorder = isDark
-        ? Colors.white.withValues(alpha: 0.1)
-        : const Color(0xFFC8D6EC).withValues(alpha: 0.42);
-    final searchTextColor = isDark ? Colors.white : const Color(0xFF14213D);
-    final searchHintColor = isDark
-        ? Colors.white.withValues(alpha: 0.58)
-        : const Color(0xFF6B778A).withValues(alpha: 0.78);
-    final searchIconColor = isDark
-        ? Colors.white.withValues(alpha: 0.76)
-        : const Color(0xFF56657A);
+    const searchFill = Color(0xFF38506F);
+    final searchBorder = Colors.white.withValues(alpha: 0.08);
+    const searchTextColor = Colors.white;
+    final searchHintColor = Colors.white.withValues(alpha: 0.58);
+    final searchIconColor = Colors.white.withValues(alpha: 0.72);
 
     return SizedBox(
-      height: 40,
+      height: 42,
       child: TextField(
         controller: controller,
         onChanged: onChanged,
-        cursorColor: scheme.primary,
+        cursorColor: Colors.white,
         style: theme.textTheme.bodyMedium?.copyWith(
           color: searchTextColor,
           fontWeight: FontWeight.w600,
@@ -1308,20 +1237,16 @@ class _InboxSearchBar extends StatelessWidget {
                   icon: const Icon(Icons.close_rounded),
                 ),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(6),
             borderSide: BorderSide.none,
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(6),
             borderSide: BorderSide(color: searchBorder),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.22)
-                  : scheme.primary.withValues(alpha: 0.32),
-            ),
+            borderRadius: BorderRadius.circular(6),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.28)),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm,
@@ -1342,7 +1267,6 @@ class _InboxTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const activeBlue = Color(0xFF0B2F6B);
     final activeIndex = switch (filter) {
       _ChatInboxFilter.direct => 0,
       _ChatInboxFilter.group => 1,
@@ -1390,7 +1314,7 @@ class _InboxTabBar extends StatelessWidget {
                 bottom: 0,
                 child: Container(
                   height: 1,
-                  color: Colors.white.withValues(alpha: 0.14),
+                  color: Colors.white.withValues(alpha: 0.16),
                 ),
               ),
               AnimatedPositioned(
@@ -1405,7 +1329,7 @@ class _InboxTabBar extends StatelessWidget {
                     widthFactor: 0.52,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: activeBlue,
+                        color: Colors.white,
                         borderRadius: BorderRadius.circular(AppRadius.pill),
                       ),
                     ),
@@ -1435,7 +1359,6 @@ class _InboxTabButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    const activeBlue = Color(0xFF0B2F6B);
 
     return Material(
       color: Colors.transparent,
@@ -1449,14 +1372,14 @@ class _InboxTabButton extends StatelessWidget {
             style:
                 theme.textTheme.labelLarge?.copyWith(
                   color: selected
-                      ? activeBlue
+                      ? Colors.white
                       : Colors.white.withValues(alpha: 0.58),
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                   letterSpacing: -0.1,
                 ) ??
                 TextStyle(
                   color: selected
-                      ? activeBlue
+                      ? Colors.white
                       : Colors.white.withValues(alpha: 0.58),
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                 ),
