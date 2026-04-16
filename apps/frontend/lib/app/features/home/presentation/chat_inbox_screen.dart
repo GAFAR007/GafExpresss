@@ -908,6 +908,8 @@ class _HeaderPresenceIconToggle extends StatelessWidget {
       leftInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
       rightActiveColor: Colors.white,
       rightInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
+      leftKnobColor: const Color(0xFF22C55E),
+      rightKnobColor: _kInboxHeroTop,
       leftTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       rightTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       leftBorderColor: Colors.white,
@@ -940,6 +942,8 @@ class _HeaderThemeIconToggle extends StatelessWidget {
       leftInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
       rightActiveColor: Colors.white,
       rightInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
+      leftKnobColor: _kInboxHeroTop,
+      rightKnobColor: _kInboxHeroTop,
       leftTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       rightTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       leftBorderColor: Colors.white,
@@ -961,6 +965,8 @@ class _HeaderIconToggle extends StatelessWidget {
   final Color leftInactiveColor;
   final Color rightActiveColor;
   final Color rightInactiveColor;
+  final Color leftKnobColor;
+  final Color rightKnobColor;
   final List<Color> leftTrackColors;
   final List<Color> rightTrackColors;
   final Color leftBorderColor;
@@ -979,6 +985,8 @@ class _HeaderIconToggle extends StatelessWidget {
     required this.leftInactiveColor,
     required this.rightActiveColor,
     required this.rightInactiveColor,
+    required this.leftKnobColor,
+    required this.rightKnobColor,
     required this.leftTrackColors,
     required this.rightTrackColors,
     required this.leftBorderColor,
@@ -1003,6 +1011,7 @@ class _HeaderIconToggle extends StatelessWidget {
     final activeBorderColor = isRightSelected
         ? rightBorderColor
         : leftBorderColor;
+    final activeKnobColor = isRightSelected ? rightKnobColor : leftKnobColor;
 
     return Semantics(
       button: true,
@@ -1069,7 +1078,7 @@ class _HeaderIconToggle extends StatelessWidget {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: _kInboxHeroTop,
+                        color: activeKnobColor,
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.22),
