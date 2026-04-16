@@ -1018,6 +1018,9 @@ class _HeroToggleOption {
   final Color accentColor;
   final Color activeFillColor;
   final Color activeTextColor;
+  final Color inactiveTextColor;
+  final Color trackColor;
+  final Color trackBorderColor;
   final double iconSize;
 
   const _HeroToggleOption({
@@ -1026,6 +1029,9 @@ class _HeroToggleOption {
     required this.accentColor,
     required this.activeFillColor,
     required this.activeTextColor,
+    required this.inactiveTextColor,
+    required this.trackColor,
+    required this.trackBorderColor,
     this.iconSize = 18,
   });
 }
@@ -1055,7 +1061,6 @@ class _HeroToggleSwitch extends StatelessWidget {
         ? halfWidth - indicatorSize - trackInset
         : halfWidth + trackInset;
     final activeOption = isLeftSelected ? leftOption : rightOption;
-    const inactiveTextColor = Color(0xCCFFFFFF);
 
     return Semantics(
       button: true,
@@ -1071,9 +1076,9 @@ class _HeroToggleSwitch extends StatelessWidget {
             width: width,
             height: height,
             decoration: BoxDecoration(
-              color: const Color(0xFF061A3D),
+              color: activeOption.trackColor,
               borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: const Color(0x668DB4FF)),
+              border: Border.all(color: activeOption.trackBorderColor),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.18),
@@ -1092,14 +1097,14 @@ class _HeroToggleSwitch extends StatelessWidget {
                         option: leftOption,
                         isActive: isLeftSelected,
                         isLeft: true,
-                        inactiveTextColor: inactiveTextColor,
+                        inactiveTextColor: activeOption.inactiveTextColor,
                         onTap: () => onChanged(true),
                       ),
                       _HeroToggleLabel(
                         option: rightOption,
                         isActive: !isLeftSelected,
                         isLeft: false,
-                        inactiveTextColor: inactiveTextColor,
+                        inactiveTextColor: activeOption.inactiveTextColor,
                         onTap: () => onChanged(false),
                       ),
                     ],
@@ -1219,7 +1224,10 @@ class _PresenceToggle extends StatelessWidget {
         icon: Icons.circle_rounded,
         accentColor: Colors.white,
         activeFillColor: Color(0xFF22C55E),
-        activeTextColor: Colors.white,
+        activeTextColor: Color(0xFF0F172A),
+        inactiveTextColor: Color(0xB30F172A),
+        trackColor: Color(0xFFF8FAFC),
+        trackBorderColor: Color(0xFFE2E8F0),
         iconSize: 11,
       ),
       rightOption: const _HeroToggleOption(
@@ -1228,6 +1236,9 @@ class _PresenceToggle extends StatelessWidget {
         accentColor: Color(0xFF111827),
         activeFillColor: Color(0xFFCBD5E1),
         activeTextColor: Colors.white,
+        inactiveTextColor: Color(0xCCFFFFFF),
+        trackColor: Color(0xFF05070D),
+        trackBorderColor: Color(0xFF1F2937),
         iconSize: 11,
       ),
       onChanged: onChanged,
@@ -1255,7 +1266,10 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
         icon: Icons.wb_sunny_outlined,
         accentColor: Color(0xFF1F2A44),
         activeFillColor: Color(0xFFF59E0B),
-        activeTextColor: Colors.white,
+        activeTextColor: Color(0xFF111827),
+        inactiveTextColor: Color(0xB3111827),
+        trackColor: Color(0xFFF8FAFC),
+        trackBorderColor: Color(0xFFE2E8F0),
         iconSize: 16,
       ),
       rightOption: _HeroToggleOption(
@@ -1264,6 +1278,9 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
         accentColor: Colors.white,
         activeFillColor: const Color(0xFF2563EB),
         activeTextColor: Colors.white,
+        inactiveTextColor: Color(0xCCFFFFFF),
+        trackColor: Color(0xFF05070D),
+        trackBorderColor: Color(0xFF1F2937),
         iconSize: 16,
       ),
       onChanged: (isDay) =>
