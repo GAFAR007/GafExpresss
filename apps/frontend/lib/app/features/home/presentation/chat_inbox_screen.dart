@@ -1017,10 +1017,6 @@ class _HeroToggleOption {
   final IconData icon;
   final Color accentColor;
   final Color activeFillColor;
-  final Color activeTextColor;
-  final Color inactiveTextColor;
-  final Color trackColor;
-  final Color trackBorderColor;
   final double iconSize;
 
   const _HeroToggleOption({
@@ -1028,10 +1024,6 @@ class _HeroToggleOption {
     required this.icon,
     required this.accentColor,
     required this.activeFillColor,
-    required this.activeTextColor,
-    required this.inactiveTextColor,
-    required this.trackColor,
-    required this.trackBorderColor,
     this.iconSize = 18,
   });
 }
@@ -1053,6 +1045,18 @@ class _HeroToggleSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hoverOverlay = WidgetStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(WidgetState.pressed)) {
+        return Colors.black.withValues(alpha: 0.14);
+      }
+      if (states.contains(WidgetState.hovered)) {
+        return Colors.black.withValues(alpha: 0.08);
+      }
+      if (states.contains(WidgetState.focused)) {
+        return Colors.white.withValues(alpha: 0.10);
+      }
+      return null;
+    });
     const height = 36.0;
     const trackInset = 3.0;
     const indicatorSize = height - (trackInset * 2);
@@ -1072,17 +1076,26 @@ class _HeroToggleSwitch extends StatelessWidget {
         child: InkWell(
           onTap: () => onChanged(!isLeftSelected),
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          child: Container(
+          overlayColor: hoverOverlay,
+          child: Ink(
             width: width,
             height: height,
             decoration: BoxDecoration(
-              color: activeOption.trackColor,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF7B95D3),
+                  Color(0xFF6B86C5),
+                  Color(0xFF4B6FB7),
+                ],
+              ),
               borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: activeOption.trackBorderColor),
+              border: Border.all(color: const Color(0x99D9E4FF)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  blurRadius: 8,
+                  color: const Color(0xFF233E79).withValues(alpha: 0.22),
+                  blurRadius: 9,
                   offset: const Offset(0, 4),
                 ),
               ],
@@ -1097,14 +1110,12 @@ class _HeroToggleSwitch extends StatelessWidget {
                         option: leftOption,
                         isActive: isLeftSelected,
                         isLeft: true,
-                        inactiveTextColor: activeOption.inactiveTextColor,
                         onTap: () => onChanged(true),
                       ),
                       _HeroToggleLabel(
                         option: rightOption,
                         isActive: !isLeftSelected,
                         isLeft: false,
-                        inactiveTextColor: activeOption.inactiveTextColor,
                         onTap: () => onChanged(false),
                       ),
                     ],
@@ -1157,14 +1168,12 @@ class _HeroToggleLabel extends StatelessWidget {
   final _HeroToggleOption option;
   final bool isActive;
   final bool isLeft;
-  final Color inactiveTextColor;
   final VoidCallback onTap;
 
   const _HeroToggleLabel({
     required this.option,
     required this.isActive,
     required this.isLeft,
-    required this.inactiveTextColor,
     required this.onTap,
   });
 
@@ -1191,12 +1200,17 @@ class _HeroToggleLabel extends StatelessWidget {
                   option.label.toUpperCase(),
                   maxLines: 1,
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: isActive
-                        ? option.activeTextColor
-                        : inactiveTextColor,
+                    color: isActive ? Colors.white : const Color(0xDDEAF0FF),
                     fontSize: 11.2,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0.26,
+                    shadows: const [
+                      Shadow(
+                        color: Color(0x33000000),
+                        blurRadius: 2,
+                        offset: Offset(0, 1),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1224,10 +1238,6 @@ class _PresenceToggle extends StatelessWidget {
         icon: Icons.circle_rounded,
         accentColor: Colors.white,
         activeFillColor: Color(0xFF22C55E),
-        activeTextColor: Color(0xFF0F172A),
-        inactiveTextColor: Color(0xB30F172A),
-        trackColor: Color(0xFFF8FAFC),
-        trackBorderColor: Color(0xFFE2E8F0),
         iconSize: 11,
       ),
       rightOption: const _HeroToggleOption(
@@ -1235,10 +1245,6 @@ class _PresenceToggle extends StatelessWidget {
         icon: Icons.circle_rounded,
         accentColor: Color(0xFF111827),
         activeFillColor: Color(0xFFCBD5E1),
-        activeTextColor: Colors.white,
-        inactiveTextColor: Color(0xCCFFFFFF),
-        trackColor: Color(0xFF05070D),
-        trackBorderColor: Color(0xFF1F2937),
         iconSize: 11,
       ),
       onChanged: onChanged,
@@ -1266,21 +1272,13 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
         icon: Icons.wb_sunny_outlined,
         accentColor: Color(0xFF1F2A44),
         activeFillColor: Color(0xFFF59E0B),
-        activeTextColor: Color(0xFF111827),
-        inactiveTextColor: Color(0xB3111827),
-        trackColor: Color(0xFFF8FAFC),
-        trackBorderColor: Color(0xFFE2E8F0),
         iconSize: 16,
       ),
-      rightOption: _HeroToggleOption(
+      rightOption: const _HeroToggleOption(
         label: "Night mode",
         icon: Icons.dark_mode_outlined,
         accentColor: Colors.white,
-        activeFillColor: const Color(0xFF2563EB),
-        activeTextColor: Colors.white,
-        inactiveTextColor: Color(0xCCFFFFFF),
-        trackColor: Color(0xFF05070D),
-        trackBorderColor: Color(0xFF1F2937),
+        activeFillColor: Color(0xFF2563EB),
         iconSize: 16,
       ),
       onChanged: (isDay) =>
