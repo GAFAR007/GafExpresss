@@ -733,23 +733,10 @@ class _InboxHeroSection extends StatelessWidget {
     final horizontalPadding = isWide ? AppSpacing.lg : 14.0;
     final topPadding = topInset + (isWide ? 14.0 : 10.0);
     final bottomPadding = isWide ? 14.0 : 12.0;
-    const radius = BorderRadius.only(
-      bottomLeft: Radius.circular(24),
-      bottomRight: Radius.circular(24),
-    );
+    const radius = BorderRadius.zero;
 
     return Container(
-      decoration: BoxDecoration(
-        color: _kInboxHeroTop,
-        borderRadius: radius,
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x22000000),
-            blurRadius: 14,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
+      decoration: BoxDecoration(color: _kInboxHeroTop, borderRadius: radius),
       child: ClipRRect(
         borderRadius: radius,
         child: Padding(
