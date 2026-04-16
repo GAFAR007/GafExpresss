@@ -905,9 +905,9 @@ class _HeaderPresenceIconToggle extends StatelessWidget {
       leftIconSize: 15,
       rightIconSize: 15,
       leftActiveColor: Colors.white,
-      leftInactiveColor: Colors.white.withValues(alpha: 0.42),
+      leftInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
       rightActiveColor: Colors.white,
-      rightInactiveColor: Colors.white.withValues(alpha: 0.42),
+      rightInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
       leftTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       rightTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       leftBorderColor: Colors.white,
@@ -937,9 +937,9 @@ class _HeaderThemeIconToggle extends StatelessWidget {
       leftIconSize: 22,
       rightIconSize: 22,
       leftActiveColor: Colors.white,
-      leftInactiveColor: Colors.white.withValues(alpha: 0.42),
+      leftInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
       rightActiveColor: Colors.white,
-      rightInactiveColor: Colors.white.withValues(alpha: 0.42),
+      rightInactiveColor: _kInboxHeroTop.withValues(alpha: 0.42),
       leftTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       rightTrackColors: const [Color(0xFFFFFFFF), Color(0xFFEAF0F8)],
       leftBorderColor: Colors.white,
@@ -1024,78 +1024,93 @@ class _HeaderIconToggle extends StatelessWidget {
             return null;
           }),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(leftIcon, size: leftIconSize, color: leftColor),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: trackWidth,
-                  height: trackHeight,
-                  child: Stack(
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutCubic,
-                        width: trackWidth,
-                        height: trackHeight,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: activeTrackColors,
-                          ),
-                          borderRadius: BorderRadius.circular(AppRadius.pill),
-                          border: Border.all(color: activeBorderColor),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(
-                                alpha: isRightSelected ? 0.22 : 0.18,
-                              ),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                            BoxShadow(
-                              color: Colors.white.withValues(alpha: 0.48),
-                              blurRadius: 3,
-                              offset: const Offset(-1, -1),
-                            ),
-                          ],
-                        ),
+            padding: const EdgeInsets.all(2),
+            child: SizedBox(
+              width: trackWidth,
+              height: trackHeight,
+              child: Stack(
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    width: trackWidth,
+                    height: trackHeight,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: activeTrackColors,
                       ),
-                      AnimatedPositioned(
-                        duration: const Duration(milliseconds: 230),
-                        curve: Curves.easeOutCubic,
-                        left: knobLeft,
-                        top: knobInset,
-                        width: knobSize,
-                        height: knobSize,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _kInboxHeroTop,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.22),
-                                blurRadius: 9,
-                                offset: const Offset(0, 3),
-                              ),
-                              BoxShadow(
-                                color: Colors.white.withValues(alpha: 0.72),
-                                blurRadius: 2,
-                                offset: const Offset(-1, -1),
-                              ),
-                            ],
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(color: activeBorderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: isRightSelected ? 0.22 : 0.18,
                           ),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
                         ),
-                      ),
-                    ],
+                        BoxShadow(
+                          color: Colors.white.withValues(alpha: 0.48),
+                          blurRadius: 3,
+                          offset: const Offset(-1, -1),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Icon(rightIcon, size: rightIconSize, color: rightColor),
-              ],
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 230),
+                    curve: Curves.easeOutCubic,
+                    left: knobLeft,
+                    top: knobInset,
+                    width: knobSize,
+                    height: knobSize,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _kInboxHeroTop,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.22),
+                            blurRadius: 9,
+                            offset: const Offset(0, 3),
+                          ),
+                          BoxShadow(
+                            color: Colors.white.withValues(alpha: 0.72),
+                            blurRadius: 2,
+                            offset: const Offset(-1, -1),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Center(
+                            child: Icon(
+                              leftIcon,
+                              size: leftIconSize,
+                              color: leftColor,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Center(
+                            child: Icon(
+                              rightIcon,
+                              size: rightIconSize,
+                              color: rightColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
