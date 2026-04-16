@@ -33,7 +33,6 @@ import 'package:frontend/app/features/home/presentation/purchase_request_models.
 import 'package:frontend/app/theme/app_colors.dart';
 import 'package:frontend/app/theme/app_radius.dart';
 import 'package:frontend/app/theme/app_spacing.dart';
-import 'package:frontend/app/theme/app_theme_mode.dart';
 
 const String _logTag = "CHAT_INBOX";
 const String _logBuild = "build()";
@@ -43,8 +42,6 @@ const String _logRefresh = "refresh";
 const String _logNewChatOpen = "new_chat_open";
 const String _logFilterChange = "filter_change";
 const String _logSearchChange = "search_change";
-const String _logPresenceChange = "presence_change";
-const String _logThemeChange = "theme_change";
 
 const double _kInboxMaxWidth = 760;
 const double _kAvatarSize = 44;
@@ -62,8 +59,6 @@ class _ChatInboxCopy {
   static const String directLabel = "Direct";
   static const String groupLabel = "Group";
   static const String queueLabel = "Queue";
-  static const String onlineLabel = "Online";
-  static const String offlineLabel = "Offline";
   static const String queueLoading = "Loading request queue";
   static const String queueError = "Unable to load request queue";
   static const String directEmptyTitle = "No direct conversations";
@@ -152,7 +147,6 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
   StreamSubscription? _readSub;
 
   _ChatInboxFilter _filter = _ChatInboxFilter.direct;
-  bool _isOnline = true;
 
   void _log(String message, {Map<String, dynamic>? extra}) {
     AppDebug.log(_logTag, message, extra: extra);
@@ -355,19 +349,8 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
                     conversations: conversations,
                     queueAsync: queueAsync,
                     filter: _filter,
-                    isOnline: _isOnline,
                     searchController: _searchController,
                     onOpenProfile: () => context.go('/settings'),
-                    onPresenceChanged: (value) {
-                      _log(_logPresenceChange, extra: {"online": value});
-                      setState(() => _isOnline = value);
-                    },
-                    onThemeChanged: (mode) {
-                      _log(_logThemeChange, extra: {"mode": mode.name});
-                      ref
-                          .read(appThemeModeProvider.notifier)
-                          .setMode(mode, source: "chat_inbox_header");
-                    },
                     onFilterChange: (value) {
                       _log(_logFilterChange, extra: {"filter": value.name});
                       setState(() => _filter = value);
@@ -395,11 +378,8 @@ class _ChatInboxContent extends StatelessWidget {
   final List<ChatConversation> conversations;
   final AsyncValue<List<_QueueConversationEntry>>? queueAsync;
   final _ChatInboxFilter filter;
-  final bool isOnline;
   final TextEditingController searchController;
   final VoidCallback onOpenProfile;
-  final ValueChanged<bool> onPresenceChanged;
-  final ValueChanged<AppThemeMode> onThemeChanged;
   final ValueChanged<_ChatInboxFilter> onFilterChange;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<ChatConversation> onConversationTap;
@@ -408,11 +388,8 @@ class _ChatInboxContent extends StatelessWidget {
     required this.conversations,
     required this.queueAsync,
     required this.filter,
-    required this.isOnline,
     required this.searchController,
     required this.onOpenProfile,
-    required this.onPresenceChanged,
-    required this.onThemeChanged,
     required this.onFilterChange,
     required this.onSearchChanged,
     required this.onConversationTap,
@@ -454,13 +431,10 @@ class _ChatInboxContent extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: AppSpacing.xxxl + 4),
                 children: [
                   _InboxHeroSection(
-                    isOnline: isOnline,
                     filter: filter,
                     isWide: isWide,
                     controller: searchController,
                     onOpenProfile: onOpenProfile,
-                    onPresenceChanged: onPresenceChanged,
-                    onThemeChanged: onThemeChanged,
                     onFilterChange: onFilterChange,
                     onSearchChanged: onSearchChanged,
                   ),
@@ -737,24 +711,18 @@ class _BackdropBloom extends StatelessWidget {
 }
 
 class _InboxHeroSection extends StatelessWidget {
-  final bool isOnline;
   final _ChatInboxFilter filter;
   final bool isWide;
   final TextEditingController controller;
   final VoidCallback onOpenProfile;
-  final ValueChanged<bool> onPresenceChanged;
-  final ValueChanged<AppThemeMode> onThemeChanged;
   final ValueChanged<_ChatInboxFilter> onFilterChange;
   final ValueChanged<String> onSearchChanged;
 
   const _InboxHeroSection({
-    required this.isOnline,
     required this.filter,
     required this.isWide,
     required this.controller,
     required this.onOpenProfile,
-    required this.onPresenceChanged,
-    required this.onThemeChanged,
     required this.onFilterChange,
     required this.onSearchChanged,
   });
@@ -841,13 +809,7 @@ class _InboxHeroSection extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _InboxHeader(
-                    isOnline: isOnline,
-                    isWide: isWide,
-                    onOpenProfile: onOpenProfile,
-                    onPresenceChanged: onPresenceChanged,
-                    onThemeChanged: onThemeChanged,
-                  ),
+                  _InboxHeader(isWide: isWide, onOpenProfile: onOpenProfile),
                   SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
                   _InboxTopControls(
                     controller: controller,
@@ -866,19 +828,10 @@ class _InboxHeroSection extends StatelessWidget {
 }
 
 class _InboxHeader extends StatelessWidget {
-  final bool isOnline;
   final bool isWide;
   final VoidCallback onOpenProfile;
-  final ValueChanged<bool> onPresenceChanged;
-  final ValueChanged<AppThemeMode> onThemeChanged;
 
-  const _InboxHeader({
-    required this.isOnline,
-    required this.isWide,
-    required this.onOpenProfile,
-    required this.onPresenceChanged,
-    required this.onThemeChanged,
-  });
+  const _InboxHeader({required this.isWide, required this.onOpenProfile});
 
   @override
   Widget build(BuildContext context) {
@@ -911,57 +864,12 @@ class _InboxHeader extends StatelessWidget {
       ],
     );
 
-    if (isWide) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: titleBlock),
-          const SizedBox(width: AppSpacing.lg),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 296),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _ThemeModeMiniToggle(onChanged: onThemeChanged),
-                    const SizedBox(width: AppSpacing.sm),
-                    _ProfileActionButton(onPressed: onOpenProfile),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                _PresenceToggle(
-                  isOnline: isOnline,
-                  onChanged: onPresenceChanged,
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: titleBlock),
-            const SizedBox(width: AppSpacing.sm),
-            _ProfileActionButton(onPressed: onOpenProfile),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            _PresenceToggle(isOnline: isOnline, onChanged: onPresenceChanged),
-            _ThemeModeMiniToggle(onChanged: onThemeChanged),
-          ],
-        ),
+        Expanded(child: titleBlock),
+        SizedBox(width: isWide ? AppSpacing.lg : AppSpacing.sm),
+        _ProfileActionButton(onPressed: onOpenProfile),
       ],
     );
   }
@@ -1008,281 +916,6 @@ class _ProfileActionButton extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _HeroToggleOption {
-  final String label;
-  final IconData icon;
-  final Color accentColor;
-  final Color activeFillColor;
-  final double iconSize;
-
-  const _HeroToggleOption({
-    required this.label,
-    required this.icon,
-    required this.accentColor,
-    required this.activeFillColor,
-    this.iconSize = 18,
-  });
-}
-
-class _HeroToggleSwitch extends StatelessWidget {
-  final _HeroToggleOption leftOption;
-  final _HeroToggleOption rightOption;
-  final bool isLeftSelected;
-  final ValueChanged<bool> onChanged;
-  final double width;
-
-  const _HeroToggleSwitch({
-    required this.leftOption,
-    required this.rightOption,
-    required this.isLeftSelected,
-    required this.onChanged,
-    required this.width,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hoverOverlay = WidgetStateProperty.resolveWith<Color?>((states) {
-      if (states.contains(WidgetState.pressed)) {
-        return Colors.black.withValues(alpha: 0.14);
-      }
-      if (states.contains(WidgetState.hovered)) {
-        return Colors.black.withValues(alpha: 0.08);
-      }
-      if (states.contains(WidgetState.focused)) {
-        return Colors.white.withValues(alpha: 0.10);
-      }
-      return null;
-    });
-    const height = 36.0;
-    const trackInset = 3.0;
-    const indicatorSize = height - (trackInset * 2);
-    final halfWidth = width / 2;
-    final indicatorLeft = isLeftSelected
-        ? halfWidth - indicatorSize - trackInset
-        : halfWidth + trackInset;
-    final activeOption = isLeftSelected ? leftOption : rightOption;
-
-    return Semantics(
-      button: true,
-      toggled: isLeftSelected,
-      label: "${leftOption.label} ${rightOption.label}",
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        child: InkWell(
-          onTap: () => onChanged(!isLeftSelected),
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          overlayColor: hoverOverlay,
-          child: Ink(
-            width: width,
-            height: height,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF7B95D3),
-                  Color(0xFF6B86C5),
-                  Color(0xFF4B6FB7),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: const Color(0x99D9E4FF)),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF233E79).withValues(alpha: 0.22),
-                  blurRadius: 9,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Positioned.fill(
-                  child: Row(
-                    children: [
-                      _HeroToggleLabel(
-                        option: leftOption,
-                        isActive: isLeftSelected,
-                        isLeft: true,
-                        onTap: () => onChanged(true),
-                      ),
-                      _HeroToggleLabel(
-                        option: rightOption,
-                        isActive: !isLeftSelected,
-                        isLeft: false,
-                        onTap: () => onChanged(false),
-                      ),
-                    ],
-                  ),
-                ),
-                IgnorePointer(
-                  child: AnimatedPositioned(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    left: indicatorLeft,
-                    top: trackInset,
-                    width: indicatorSize,
-                    height: indicatorSize,
-                    child: AnimatedScale(
-                      duration: const Duration(milliseconds: 160),
-                      scale: 1,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: activeOption.activeFillColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 1.2),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x66000000),
-                              blurRadius: 7,
-                              offset: Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          activeOption.icon,
-                          size: activeOption.iconSize,
-                          color: activeOption.accentColor,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroToggleLabel extends StatelessWidget {
-  final _HeroToggleOption option;
-  final bool isActive;
-  final bool isLeft;
-  final VoidCallback onTap;
-
-  const _HeroToggleLabel({
-    required this.option,
-    required this.isActive,
-    required this.isLeft,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Expanded(
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: isLeft ? 11 : 34,
-              right: isLeft ? 34 : 11,
-            ),
-            child: Align(
-              alignment: isLeft ? Alignment.centerLeft : Alignment.centerRight,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  option.label.toUpperCase(),
-                  maxLines: 1,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: isActive ? Colors.white : const Color(0xDDEAF0FF),
-                    fontSize: 11.2,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.26,
-                    shadows: const [
-                      Shadow(
-                        color: Color(0x33000000),
-                        blurRadius: 2,
-                        offset: Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PresenceToggle extends StatelessWidget {
-  final bool isOnline;
-  final ValueChanged<bool> onChanged;
-
-  const _PresenceToggle({required this.isOnline, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return _HeroToggleSwitch(
-      width: 184,
-      isLeftSelected: isOnline,
-      leftOption: const _HeroToggleOption(
-        label: _ChatInboxCopy.onlineLabel,
-        icon: Icons.circle_rounded,
-        accentColor: Colors.white,
-        activeFillColor: Color(0xFF22C55E),
-        iconSize: 11,
-      ),
-      rightOption: const _HeroToggleOption(
-        label: _ChatInboxCopy.offlineLabel,
-        icon: Icons.circle_rounded,
-        accentColor: Color(0xFF111827),
-        activeFillColor: Color(0xFFCBD5E1),
-        iconSize: 11,
-      ),
-      onChanged: onChanged,
-    );
-  }
-}
-
-class _ThemeModeMiniToggle extends ConsumerWidget {
-  final ValueChanged<AppThemeMode> onChanged;
-
-  const _ThemeModeMiniToggle({required this.onChanged});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final mode = ref.watch(appThemeModeProvider);
-    final activeMode = mode == AppThemeMode.classic
-        ? AppThemeMode.classic
-        : AppThemeMode.dark;
-
-    return _HeroToggleSwitch(
-      width: 226,
-      isLeftSelected: activeMode == AppThemeMode.classic,
-      leftOption: const _HeroToggleOption(
-        label: "Day mode",
-        icon: Icons.wb_sunny_outlined,
-        accentColor: Color(0xFF1F2A44),
-        activeFillColor: Color(0xFFF59E0B),
-        iconSize: 16,
-      ),
-      rightOption: const _HeroToggleOption(
-        label: "Night mode",
-        icon: Icons.dark_mode_outlined,
-        accentColor: Colors.white,
-        activeFillColor: Color(0xFF2563EB),
-        iconSize: 16,
-      ),
-      onChanged: (isDay) =>
-          onChanged(isDay ? AppThemeMode.classic : AppThemeMode.dark),
     );
   }
 }
