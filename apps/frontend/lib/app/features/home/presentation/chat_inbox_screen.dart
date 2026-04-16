@@ -43,6 +43,7 @@ const String _logRefresh = "refresh";
 const String _logNewChatOpen = "new_chat_open";
 const String _logFilterChange = "filter_change";
 const String _logSearchChange = "search_change";
+const String _logPresenceChange = "presence_change";
 
 const double _kInboxMaxWidth = 760;
 const double _kAvatarSize = 44;
@@ -148,6 +149,7 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
   StreamSubscription? _readSub;
 
   _ChatInboxFilter _filter = _ChatInboxFilter.direct;
+  bool _isOnline = true;
 
   void _log(String message, {Map<String, dynamic>? extra}) {
     AppDebug.log(_logTag, message, extra: extra);
@@ -350,8 +352,13 @@ class _ChatInboxScreenState extends ConsumerState<ChatInboxScreen> {
                     conversations: conversations,
                     queueAsync: queueAsync,
                     filter: _filter,
+                    isOnline: _isOnline,
                     searchController: _searchController,
                     onOpenProfile: () => context.go('/settings'),
+                    onPresenceChanged: (value) {
+                      _log(_logPresenceChange, extra: {"online": value});
+                      setState(() => _isOnline = value);
+                    },
                     onFilterChange: (value) {
                       _log(_logFilterChange, extra: {"filter": value.name});
                       setState(() => _filter = value);
@@ -379,8 +386,10 @@ class _ChatInboxContent extends StatelessWidget {
   final List<ChatConversation> conversations;
   final AsyncValue<List<_QueueConversationEntry>>? queueAsync;
   final _ChatInboxFilter filter;
+  final bool isOnline;
   final TextEditingController searchController;
   final VoidCallback onOpenProfile;
+  final ValueChanged<bool> onPresenceChanged;
   final ValueChanged<_ChatInboxFilter> onFilterChange;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<ChatConversation> onConversationTap;
@@ -389,8 +398,10 @@ class _ChatInboxContent extends StatelessWidget {
     required this.conversations,
     required this.queueAsync,
     required this.filter,
+    required this.isOnline,
     required this.searchController,
     required this.onOpenProfile,
+    required this.onPresenceChanged,
     required this.onFilterChange,
     required this.onSearchChanged,
     required this.onConversationTap,
@@ -433,9 +444,11 @@ class _ChatInboxContent extends StatelessWidget {
                 children: [
                   _InboxHeroSection(
                     filter: filter,
+                    isOnline: isOnline,
                     isWide: isWide,
                     controller: searchController,
                     onOpenProfile: onOpenProfile,
+                    onPresenceChanged: onPresenceChanged,
                     onFilterChange: onFilterChange,
                     onSearchChanged: onSearchChanged,
                   ),
@@ -713,17 +726,21 @@ class _BackdropBloom extends StatelessWidget {
 
 class _InboxHeroSection extends StatelessWidget {
   final _ChatInboxFilter filter;
+  final bool isOnline;
   final bool isWide;
   final TextEditingController controller;
   final VoidCallback onOpenProfile;
+  final ValueChanged<bool> onPresenceChanged;
   final ValueChanged<_ChatInboxFilter> onFilterChange;
   final ValueChanged<String> onSearchChanged;
 
   const _InboxHeroSection({
     required this.filter,
+    required this.isOnline,
     required this.isWide,
     required this.controller,
     required this.onOpenProfile,
+    required this.onPresenceChanged,
     required this.onFilterChange,
     required this.onSearchChanged,
   });
@@ -810,7 +827,12 @@ class _InboxHeroSection extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _InboxHeader(isWide: isWide, onOpenProfile: onOpenProfile),
+                  _InboxHeader(
+                    isOnline: isOnline,
+                    isWide: isWide,
+                    onOpenProfile: onOpenProfile,
+                    onPresenceChanged: onPresenceChanged,
+                  ),
                   SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
                   _InboxTopControls(
                     controller: controller,
@@ -829,10 +851,17 @@ class _InboxHeroSection extends StatelessWidget {
 }
 
 class _InboxHeader extends ConsumerWidget {
+  final bool isOnline;
   final bool isWide;
   final VoidCallback onOpenProfile;
+  final ValueChanged<bool> onPresenceChanged;
 
-  const _InboxHeader({required this.isWide, required this.onOpenProfile});
+  const _InboxHeader({
+    required this.isOnline,
+    required this.isWide,
+    required this.onOpenProfile,
+    required this.onPresenceChanged,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -867,14 +896,26 @@ class _InboxHeader extends ConsumerWidget {
       ],
     );
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(child: titleBlock),
-        SizedBox(width: isWide ? AppSpacing.lg : AppSpacing.sm),
         Row(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Expanded(child: titleBlock),
+            SizedBox(width: isWide ? AppSpacing.lg : AppSpacing.sm),
+            _ProfileActionButton(onPressed: onOpenProfile),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.xs,
+          children: [
+            _HeaderPresenceIconToggle(
+              isOnline: isOnline,
+              onChanged: onPresenceChanged,
+            ),
             _HeaderThemeIconToggle(
               isNight: isNightMode,
               onChanged: (nextIsNight) {
@@ -891,11 +932,41 @@ class _InboxHeader extends ConsumerWidget {
                     .setMode(nextMode, source: "chat_inbox_theme_toggle");
               },
             ),
-            const SizedBox(width: AppSpacing.xs + 2),
-            _ProfileActionButton(onPressed: onOpenProfile),
           ],
         ),
       ],
+    );
+  }
+}
+
+class _HeaderPresenceIconToggle extends StatelessWidget {
+  final bool isOnline;
+  final ValueChanged<bool> onChanged;
+
+  const _HeaderPresenceIconToggle({
+    required this.isOnline,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _HeaderIconToggle(
+      isRightSelected: !isOnline,
+      leftSemanticLabel: "Online",
+      rightSemanticLabel: "Offline",
+      leftIcon: Icons.circle_rounded,
+      rightIcon: Icons.circle_rounded,
+      leftIconSize: 15,
+      rightIconSize: 15,
+      leftActiveColor: const Color(0xFF34D399),
+      leftInactiveColor: Colors.white.withValues(alpha: 0.46),
+      rightActiveColor: const Color(0xFFCBD5E1),
+      rightInactiveColor: Colors.white.withValues(alpha: 0.42),
+      leftTrackColors: const [Color(0xFFE7F6EF), Color(0xFFD4ECE0)],
+      rightTrackColors: const [Color(0xFFE8ECF4), Color(0xFFD8DEE9)],
+      leftBorderColor: const Color(0x8034D399),
+      rightBorderColor: const Color(0xFFCAD2DE),
+      onRightSelectedChanged: (isOffline) => onChanged(!isOffline),
     );
   }
 }
@@ -911,28 +982,91 @@ class _HeaderThemeIconToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return _HeaderIconToggle(
+      isRightSelected: isNight,
+      leftSemanticLabel: "Day mode",
+      rightSemanticLabel: "Night mode",
+      leftIcon: Icons.wb_sunny_outlined,
+      rightIcon: Icons.dark_mode_outlined,
+      leftIconSize: 22,
+      rightIconSize: 22,
+      leftActiveColor: Colors.white.withValues(alpha: 0.82),
+      leftInactiveColor: Colors.white.withValues(alpha: 0.38),
+      rightActiveColor: Colors.white.withValues(alpha: 0.86),
+      rightInactiveColor: Colors.white.withValues(alpha: 0.42),
+      leftTrackColors: const [Color(0xFFE8ECF4), Color(0xFFD8DEE9)],
+      rightTrackColors: const [Color(0xFF273349), Color(0xFF111827)],
+      leftBorderColor: const Color(0xFFCAD2DE),
+      rightBorderColor: Colors.white.withValues(alpha: 0.12),
+      onRightSelectedChanged: onChanged,
+    );
+  }
+}
+
+class _HeaderIconToggle extends StatelessWidget {
+  final bool isRightSelected;
+  final String leftSemanticLabel;
+  final String rightSemanticLabel;
+  final IconData leftIcon;
+  final IconData rightIcon;
+  final double leftIconSize;
+  final double rightIconSize;
+  final Color leftActiveColor;
+  final Color leftInactiveColor;
+  final Color rightActiveColor;
+  final Color rightInactiveColor;
+  final List<Color> leftTrackColors;
+  final List<Color> rightTrackColors;
+  final Color leftBorderColor;
+  final Color rightBorderColor;
+  final ValueChanged<bool> onRightSelectedChanged;
+
+  const _HeaderIconToggle({
+    required this.isRightSelected,
+    required this.leftSemanticLabel,
+    required this.rightSemanticLabel,
+    required this.leftIcon,
+    required this.rightIcon,
+    required this.leftIconSize,
+    required this.rightIconSize,
+    required this.leftActiveColor,
+    required this.leftInactiveColor,
+    required this.rightActiveColor,
+    required this.rightInactiveColor,
+    required this.leftTrackColors,
+    required this.rightTrackColors,
+    required this.leftBorderColor,
+    required this.rightBorderColor,
+    required this.onRightSelectedChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     const trackWidth = 66.0;
     const trackHeight = 32.0;
     const knobSize = 30.0;
-    const iconSize = 22.0;
     const knobInset = 1.0;
-    final knobLeft = isNight ? trackWidth - knobSize - knobInset : knobInset;
-    final sunColor = isNight
-        ? Colors.white.withValues(alpha: 0.38)
-        : Colors.white.withValues(alpha: 0.82);
-    final moonColor = isNight
-        ? Colors.white.withValues(alpha: 0.86)
-        : Colors.white.withValues(alpha: 0.42);
+    final knobLeft = isRightSelected
+        ? trackWidth - knobSize - knobInset
+        : knobInset;
+    final leftColor = isRightSelected ? leftInactiveColor : leftActiveColor;
+    final rightColor = isRightSelected ? rightActiveColor : rightInactiveColor;
+    final activeTrackColors = isRightSelected
+        ? rightTrackColors
+        : leftTrackColors;
+    final activeBorderColor = isRightSelected
+        ? rightBorderColor
+        : leftBorderColor;
 
     return Semantics(
       button: true,
-      toggled: isNight,
-      label: isNight ? "Night mode" : "Day mode",
+      toggled: isRightSelected,
+      label: isRightSelected ? rightSemanticLabel : leftSemanticLabel,
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadius.pill),
         child: InkWell(
-          onTap: () => onChanged(!isNight),
+          onTap: () => onRightSelectedChanged(!isRightSelected),
           borderRadius: BorderRadius.circular(AppRadius.pill),
           overlayColor: WidgetStateProperty.resolveWith((states) {
             if (states.contains(WidgetState.pressed)) {
@@ -948,7 +1082,7 @@ class _HeaderThemeIconToggle extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.wb_sunny_outlined, size: iconSize, color: sunColor),
+                Icon(leftIcon, size: leftIconSize, color: leftColor),
                 const SizedBox(width: 8),
                 SizedBox(
                   width: trackWidth,
@@ -964,27 +1098,21 @@ class _HeaderThemeIconToggle extends StatelessWidget {
                           gradient: LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
-                            colors: isNight
-                                ? const [Color(0xFF273349), Color(0xFF111827)]
-                                : const [Color(0xFFE8ECF4), Color(0xFFD8DEE9)],
+                            colors: activeTrackColors,
                           ),
                           borderRadius: BorderRadius.circular(AppRadius.pill),
-                          border: Border.all(
-                            color: isNight
-                                ? Colors.white.withValues(alpha: 0.12)
-                                : const Color(0xFFCAD2DE),
-                          ),
+                          border: Border.all(color: activeBorderColor),
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withValues(
-                                alpha: isNight ? 0.22 : 0.18,
+                                alpha: isRightSelected ? 0.22 : 0.18,
                               ),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             ),
                             BoxShadow(
                               color: Colors.white.withValues(
-                                alpha: isNight ? 0.05 : 0.48,
+                                alpha: isRightSelected ? 0.05 : 0.48,
                               ),
                               blurRadius: 3,
                               offset: const Offset(-1, -1),
@@ -1022,11 +1150,7 @@ class _HeaderThemeIconToggle extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(
-                  Icons.dark_mode_outlined,
-                  size: iconSize,
-                  color: moonColor,
-                ),
+                Icon(rightIcon, size: rightIconSize, color: rightColor),
               ],
             ),
           ),
