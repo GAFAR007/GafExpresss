@@ -849,43 +849,12 @@ class _InboxHeroSection extends StatelessWidget {
                     onThemeChanged: onThemeChanged,
                   ),
                   SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
-                  if (isWide)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 5,
-                          child: _InboxSearchBar(
-                            controller: controller,
-                            onChanged: onSearchChanged,
-                            onClear: () {
-                              controller.clear();
-                              onSearchChanged('');
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          flex: 4,
-                          child: _InboxTabBar(
-                            filter: filter,
-                            onChanged: onFilterChange,
-                          ),
-                        ),
-                      ],
-                    )
-                  else ...[
-                    _InboxSearchBar(
-                      controller: controller,
-                      onChanged: onSearchChanged,
-                      onClear: () {
-                        controller.clear();
-                        onSearchChanged('');
-                      },
-                    ),
-                    const SizedBox(height: AppSpacing.xs + 2),
-                    _InboxTabBar(filter: filter, onChanged: onFilterChange),
-                  ],
+                  _InboxTopControls(
+                    controller: controller,
+                    filter: filter,
+                    onSearchChanged: onSearchChanged,
+                    onFilterChange: onFilterChange,
+                  ),
                 ],
               ),
             ),
@@ -1351,6 +1320,39 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
   }
 }
 
+class _InboxTopControls extends StatelessWidget {
+  final TextEditingController controller;
+  final _ChatInboxFilter filter;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<_ChatInboxFilter> onFilterChange;
+
+  const _InboxTopControls({
+    required this.controller,
+    required this.filter,
+    required this.onSearchChanged,
+    required this.onFilterChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _InboxSearchBar(
+          controller: controller,
+          onChanged: onSearchChanged,
+          onClear: () {
+            controller.clear();
+            onSearchChanged('');
+          },
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _InboxTabBar(filter: filter, onChanged: onFilterChange),
+      ],
+    );
+  }
+}
+
 class _InboxSearchBar extends StatelessWidget {
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
@@ -1367,62 +1369,80 @@ class _InboxSearchBar extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = _isDarkScheme(scheme);
+    final searchFill = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : const Color(0xFFEAF1FB).withValues(alpha: 0.94);
+    final searchBorder = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : const Color(0xFFC8D6EC).withValues(alpha: 0.42);
+    final searchTextColor = isDark ? Colors.white : const Color(0xFF14213D);
+    final searchHintColor = isDark
+        ? Colors.white.withValues(alpha: 0.58)
+        : const Color(0xFF6B778A).withValues(alpha: 0.78);
+    final searchIconColor = isDark
+        ? Colors.white.withValues(alpha: 0.76)
+        : const Color(0xFF56657A);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: isDark ? 0.12 : 0.97),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.68),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.shadow.withValues(alpha: isDark ? 0.14 : 0.08),
-            blurRadius: isDark ? 18 : 16,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
+    return SizedBox(
+      height: 40,
       child: TextField(
         controller: controller,
         onChanged: onChanged,
         cursorColor: scheme.primary,
-        style: theme.textTheme.titleSmall?.copyWith(
-          color: scheme.onSurface,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: searchTextColor,
           fontWeight: FontWeight.w600,
+          height: 1.1,
         ),
         decoration: InputDecoration(
+          filled: true,
+          fillColor: searchFill,
           hintText: _ChatInboxCopy.searchHint,
           hintStyle: theme.textTheme.bodyMedium?.copyWith(
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.62),
+            color: searchHintColor,
             fontWeight: FontWeight.w500,
+            height: 1.1,
           ),
           prefixIcon: Icon(
             Icons.search_rounded,
-            color: scheme.primary.withValues(alpha: 0.92),
-            size: 18,
+            color: searchIconColor,
+            size: 17,
           ),
           prefixIconConstraints: const BoxConstraints(
-            minWidth: 40,
-            minHeight: 40,
+            minWidth: 38,
+            minHeight: 36,
           ),
           suffixIcon: controller.text.trim().isEmpty
               ? null
               : IconButton(
                   onPressed: onClear,
-                  iconSize: 18,
-                  splashRadius: 18,
+                  iconSize: 17,
+                  splashRadius: 17,
                   visualDensity: VisualDensity.compact,
-                  color: scheme.onSurfaceVariant,
+                  color: searchIconColor,
                   icon: const Icon(Icons.close_rounded),
                 ),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm + 1,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
           ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: searchBorder),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.22)
+                  : scheme.primary.withValues(alpha: 0.32),
+            ),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: 10,
+          ),
+          isDense: true,
         ),
       ),
     );
@@ -1437,32 +1457,80 @@ class _InboxTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _InboxTabButton(
-            label: _ChatInboxCopy.directLabel,
-            selected: filter == _ChatInboxFilter.direct,
-            onTap: () => onChanged(_ChatInboxFilter.direct),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.xs + 1),
-        Expanded(
-          child: _InboxTabButton(
-            label: _ChatInboxCopy.groupLabel,
-            selected: filter == _ChatInboxFilter.group,
-            onTap: () => onChanged(_ChatInboxFilter.group),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.xs + 1),
-        Expanded(
-          child: _InboxTabButton(
-            label: _ChatInboxCopy.queueLabel,
-            selected: filter == _ChatInboxFilter.queue,
-            onTap: () => onChanged(_ChatInboxFilter.queue),
-          ),
-        ),
-      ],
+    const activeBlue = Color(0xFF0B2F6B);
+    final activeIndex = switch (filter) {
+      _ChatInboxFilter.direct => 0,
+      _ChatInboxFilter.group => 1,
+      _ChatInboxFilter.queue => 2,
+    };
+
+    return SizedBox(
+      height: 38,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = constraints.maxWidth / 3;
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _InboxTabButton(
+                        label: _ChatInboxCopy.directLabel,
+                        selected: filter == _ChatInboxFilter.direct,
+                        onTap: () => onChanged(_ChatInboxFilter.direct),
+                      ),
+                    ),
+                    Expanded(
+                      child: _InboxTabButton(
+                        label: _ChatInboxCopy.groupLabel,
+                        selected: filter == _ChatInboxFilter.group,
+                        onTap: () => onChanged(_ChatInboxFilter.group),
+                      ),
+                    ),
+                    Expanded(
+                      child: _InboxTabButton(
+                        label: _ChatInboxCopy.queueLabel,
+                        selected: filter == _ChatInboxFilter.queue,
+                        onTap: () => onChanged(_ChatInboxFilter.queue),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height: 1,
+                  color: Colors.white.withValues(alpha: 0.14),
+                ),
+              ),
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                left: tabWidth * activeIndex,
+                bottom: 0,
+                width: tabWidth,
+                height: 2,
+                child: Center(
+                  child: FractionallySizedBox(
+                    widthFactor: 0.52,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: activeBlue,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -1482,51 +1550,32 @@ class _InboxTabButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final isDark = _isDarkScheme(scheme);
+    const activeBlue = Color(0xFF0B2F6B);
 
-    return InkWell(
-      onTap: onTap,
-      overlayColor: _interactiveOverlay(scheme),
-      borderRadius: BorderRadius.circular(16),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        height: 40,
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xs + 1,
-          vertical: AppSpacing.sm - 1,
-        ),
-        decoration: BoxDecoration(
-          color: selected
-              ? (isDark ? Colors.white.withValues(alpha: 0.16) : Colors.white)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected
-                ? Colors.white.withValues(alpha: isDark ? 0.22 : 0.72)
-                : Colors.white.withValues(alpha: isDark ? 0.18 : 0.32),
-          ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: scheme.shadow.withValues(
-                      alpha: isDark ? 0.14 : 0.06,
-                    ),
-                    blurRadius: 10,
-                    offset: const Offset(0, 5),
-                  ),
-                ]
-              : null,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: selected
-                ? (isDark ? Colors.white : scheme.primary)
-                : Colors.white.withValues(alpha: 0.86),
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-            letterSpacing: -0.15,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        overlayColor: _interactiveOverlay(scheme),
+        child: Center(
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            style:
+                theme.textTheme.labelLarge?.copyWith(
+                  color: selected
+                      ? activeBlue
+                      : Colors.white.withValues(alpha: 0.58),
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  letterSpacing: -0.1,
+                ) ??
+                TextStyle(
+                  color: selected
+                      ? activeBlue
+                      : Colors.white.withValues(alpha: 0.58),
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                ),
+            child: Text(label),
           ),
         ),
       ),
