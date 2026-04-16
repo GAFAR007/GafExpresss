@@ -33,6 +33,7 @@ import 'package:frontend/app/features/home/presentation/purchase_request_models.
 import 'package:frontend/app/theme/app_colors.dart';
 import 'package:frontend/app/theme/app_radius.dart';
 import 'package:frontend/app/theme/app_spacing.dart';
+import 'package:frontend/app/theme/app_theme_mode.dart';
 
 const String _logTag = "CHAT_INBOX";
 const String _logBuild = "build()";
@@ -827,15 +828,17 @@ class _InboxHeroSection extends StatelessWidget {
   }
 }
 
-class _InboxHeader extends StatelessWidget {
+class _InboxHeader extends ConsumerWidget {
   final bool isWide;
   final VoidCallback onOpenProfile;
 
   const _InboxHeader({required this.isWide, required this.onOpenProfile});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final mode = ref.watch(appThemeModeProvider);
+    final isNightMode = mode == AppThemeMode.dark;
     final titleBlock = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -869,8 +872,166 @@ class _InboxHeader extends StatelessWidget {
       children: [
         Expanded(child: titleBlock),
         SizedBox(width: isWide ? AppSpacing.lg : AppSpacing.sm),
-        _ProfileActionButton(onPressed: onOpenProfile),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _HeaderThemeIconToggle(
+              isNight: isNightMode,
+              onChanged: (nextIsNight) {
+                final nextMode = nextIsNight
+                    ? AppThemeMode.dark
+                    : AppThemeMode.classic;
+                AppDebug.log(
+                  _logTag,
+                  "theme_toggle",
+                  extra: {"mode": nextMode.name},
+                );
+                ref
+                    .read(appThemeModeProvider.notifier)
+                    .setMode(nextMode, source: "chat_inbox_theme_toggle");
+              },
+            ),
+            const SizedBox(width: AppSpacing.xs + 2),
+            _ProfileActionButton(onPressed: onOpenProfile),
+          ],
+        ),
       ],
+    );
+  }
+}
+
+class _HeaderThemeIconToggle extends StatelessWidget {
+  final bool isNight;
+  final ValueChanged<bool> onChanged;
+
+  const _HeaderThemeIconToggle({
+    required this.isNight,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const trackWidth = 66.0;
+    const trackHeight = 32.0;
+    const knobSize = 30.0;
+    const iconSize = 22.0;
+    const knobInset = 1.0;
+    final knobLeft = isNight ? trackWidth - knobSize - knobInset : knobInset;
+    final sunColor = isNight
+        ? Colors.white.withValues(alpha: 0.38)
+        : Colors.white.withValues(alpha: 0.82);
+    final moonColor = isNight
+        ? Colors.white.withValues(alpha: 0.86)
+        : Colors.white.withValues(alpha: 0.42);
+
+    return Semantics(
+      button: true,
+      toggled: isNight,
+      label: isNight ? "Night mode" : "Day mode",
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: InkWell(
+          onTap: () => onChanged(!isNight),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          overlayColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.pressed)) {
+              return Colors.white.withValues(alpha: 0.16);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return Colors.white.withValues(alpha: 0.09);
+            }
+            return null;
+          }),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.wb_sunny_outlined, size: iconSize, color: sunColor),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: trackWidth,
+                  height: trackHeight,
+                  child: Stack(
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeOutCubic,
+                        width: trackWidth,
+                        height: trackHeight,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: isNight
+                                ? const [Color(0xFF273349), Color(0xFF111827)]
+                                : const [Color(0xFFE8ECF4), Color(0xFFD8DEE9)],
+                          ),
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          border: Border.all(
+                            color: isNight
+                                ? Colors.white.withValues(alpha: 0.12)
+                                : const Color(0xFFCAD2DE),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(
+                                alpha: isNight ? 0.22 : 0.18,
+                              ),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                            BoxShadow(
+                              color: Colors.white.withValues(
+                                alpha: isNight ? 0.05 : 0.48,
+                              ),
+                              blurRadius: 3,
+                              offset: const Offset(-1, -1),
+                            ),
+                          ],
+                        ),
+                      ),
+                      AnimatedPositioned(
+                        duration: const Duration(milliseconds: 230),
+                        curve: Curves.easeOutCubic,
+                        left: knobLeft,
+                        top: knobInset,
+                        width: knobSize,
+                        height: knobSize,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xFFF8FAFC),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.22),
+                                blurRadius: 9,
+                                offset: const Offset(0, 3),
+                              ),
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.72),
+                                blurRadius: 2,
+                                offset: const Offset(-1, -1),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.dark_mode_outlined,
+                  size: iconSize,
+                  color: moonColor,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
