@@ -435,7 +435,7 @@ class _ChatInboxContent extends StatelessWidget {
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
                 ),
-                padding: const EdgeInsets.only(bottom: AppSpacing.xxxl + 4),
+                padding: const EdgeInsets.only(bottom: AppSpacing.xxxl),
                 children: [
                   _InboxHeroSection(
                     filter: filter,
@@ -448,24 +448,14 @@ class _ChatInboxContent extends StatelessWidget {
                     onSearchChanged: onSearchChanged,
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.md,
-                      AppSpacing.lg,
-                      0,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
                     child: _InboxSectionHeader(
                       title: sectionTitle,
                       countLabel: sectionCountLabel,
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.xs + 2,
-                      AppSpacing.lg,
-                      0,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 220),
                       switchInCurve: Curves.easeOutCubic,
@@ -579,10 +569,7 @@ class _InboxSectionHeader extends StatelessWidget {
           ),
         ),
         Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm + 2,
-            vertical: AppSpacing.xs + 1,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
           decoration: BoxDecoration(
             color: _blendTone(
               scheme.primary,
@@ -743,12 +730,12 @@ class _InboxHeroSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final topInset = MediaQuery.of(context).viewPadding.top;
-    final horizontalPadding = isWide ? AppSpacing.lg : AppSpacing.md;
-    final topPadding = topInset + (isWide ? AppSpacing.lg : AppSpacing.md);
-    final bottomPadding = isWide ? AppSpacing.lg : AppSpacing.md + 2;
+    final horizontalPadding = isWide ? AppSpacing.lg : 14.0;
+    final topPadding = topInset + (isWide ? 14.0 : 10.0);
+    final bottomPadding = isWide ? 14.0 : 12.0;
     const radius = BorderRadius.only(
-      bottomLeft: Radius.circular(30),
-      bottomRight: Radius.circular(30),
+      bottomLeft: Radius.circular(24),
+      bottomRight: Radius.circular(24),
     );
 
     return Container(
@@ -758,8 +745,8 @@ class _InboxHeroSection extends StatelessWidget {
         boxShadow: const [
           BoxShadow(
             color: Color(0x22000000),
-            blurRadius: 18,
-            offset: Offset(0, 10),
+            blurRadius: 14,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -781,7 +768,7 @@ class _InboxHeroSection extends StatelessWidget {
                 onOpenProfile: onOpenProfile,
                 onPresenceChanged: onPresenceChanged,
               ),
-              SizedBox(height: isWide ? AppSpacing.md + 2 : AppSpacing.sm),
+              SizedBox(height: isWide ? AppSpacing.md : AppSpacing.sm),
               _InboxTopControls(
                 controller: controller,
                 filter: filter,
@@ -853,10 +840,10 @@ class _InboxHeader extends ConsumerWidget {
             _ProfileActionButton(onPressed: onOpenProfile),
           ],
         ),
-        const SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: 9),
         Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.xs,
+          spacing: 10,
+          runSpacing: 6,
           children: [
             _HeaderPresenceIconToggle(
               isOnline: isOnline,
@@ -996,9 +983,9 @@ class _HeaderIconToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const trackWidth = 66.0;
-    const trackHeight = 32.0;
-    const knobSize = 30.0;
+    const trackWidth = 62.0;
+    const trackHeight = 30.0;
+    const knobSize = 28.0;
     const knobInset = 1.0;
     final knobLeft = isRightSelected
         ? trackWidth - knobSize - knobInset
@@ -1033,7 +1020,7 @@ class _HeaderIconToggle extends StatelessWidget {
             return null;
           }),
           child: Padding(
-            padding: const EdgeInsets.all(2),
+            padding: const EdgeInsets.all(1),
             child: SizedBox(
               width: trackWidth,
               height: trackHeight,
@@ -1194,7 +1181,7 @@ class _InboxTopControls extends StatelessWidget {
             onSearchChanged('');
           },
         ),
-        const SizedBox(height: AppSpacing.xs),
+        const SizedBox(height: 4),
         _InboxTabBar(filter: filter, onChanged: onFilterChange),
       ],
     );
@@ -1222,7 +1209,7 @@ class _InboxSearchBar extends StatelessWidget {
     final searchIconColor = Colors.white.withValues(alpha: 0.72);
 
     return SizedBox(
-      height: 42,
+      height: 38,
       child: TextField(
         controller: controller,
         onChanged: onChanged,
@@ -1247,8 +1234,8 @@ class _InboxSearchBar extends StatelessWidget {
             size: 17,
           ),
           prefixIconConstraints: const BoxConstraints(
-            minWidth: 38,
-            minHeight: 36,
+            minWidth: 36,
+            minHeight: 34,
           ),
           suffixIcon: controller.text.trim().isEmpty
               ? null
@@ -1273,8 +1260,8 @@ class _InboxSearchBar extends StatelessWidget {
             borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.28)),
           ),
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm,
-            vertical: 10,
+            horizontal: 10,
+            vertical: 8,
           ),
           isDense: true,
         ),
@@ -1298,7 +1285,7 @@ class _InboxTabBar extends StatelessWidget {
     };
 
     return SizedBox(
-      height: 38,
+      height: 34,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final tabWidth = constraints.maxWidth / 3;
@@ -1509,7 +1496,7 @@ class _InboxListSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final isDark = _isDarkScheme(scheme);
-    final radius = BorderRadius.circular(28);
+    final radius = BorderRadius.circular(22);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1523,8 +1510,8 @@ class _InboxListSurface extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: scheme.shadow.withValues(alpha: isDark ? 0.16 : 0.06),
-            blurRadius: isDark ? 20 : 18,
-            offset: const Offset(0, 12),
+            blurRadius: isDark ? 16 : 14,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -1552,9 +1539,9 @@ class _ConversationRow extends StatelessWidget {
     final subtitle = conversation.lastMessagePreview.trim().isNotEmpty
         ? conversation.lastMessagePreview.trim()
         : "No messages yet";
-    final timeLabel = _formatInboxTime(
-      conversation.lastMessageAt ?? conversation.createdAt,
-    );
+    final activityAt = conversation.lastMessageAt ?? conversation.createdAt;
+    final timeLabel = _formatInboxTime(activityAt);
+    final activityLabel = _conversationActivityLabel(conversation, activityAt);
     final accent = _accentForConversation(conversation, scheme);
     final avatarUrl = conversation.displayAvatar.trim();
 
@@ -1573,7 +1560,7 @@ class _ConversationRow extends StatelessWidget {
                     alpha: isDark ? 0.14 : 0.045,
                   )
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: hasUnread
                   ? scheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
@@ -1581,109 +1568,134 @@ class _ConversationRow extends StatelessWidget {
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md + 2,
-              vertical: AppSpacing.md,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _ConversationAvatar(
                   title: title,
                   avatarUrl: avatarUrl,
                   accent: accent,
                 ),
-                const SizedBox(width: AppSpacing.md),
+                const SizedBox(width: 11),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 1),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: hasUnread
-                                ? FontWeight.w800
-                                : FontWeight.w700,
-                            color: scheme.onSurface,
-                            letterSpacing: -0.15,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: AppSpacing.xxs + 2),
-                        Text(
-                          subtitle,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant.withValues(
-                              alpha: hasUnread ? 0.9 : 0.76,
-                            ),
-                            fontWeight: hasUnread
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                            fontSize: 13.2,
-                            height: 1.16,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Padding(
-                  padding: const EdgeInsets.only(top: 1),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                          vertical: AppSpacing.xxs + 2,
+                      Text(
+                        title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: hasUnread
+                              ? FontWeight.w800
+                              : FontWeight.w700,
+                          color: scheme.onSurface,
+                          letterSpacing: -0.15,
                         ),
-                        decoration: BoxDecoration(
-                          color: _blendTone(
-                            scheme.primary,
-                            scheme.surface,
-                            alpha: hasUnread
-                                ? (isDark ? 0.18 : 0.09)
-                                : (isDark ? 0.12 : 0.04),
-                          ),
-                          borderRadius: BorderRadius.circular(AppRadius.pill),
-                          border: Border.all(
-                            color: scheme.primary.withValues(
-                              alpha: hasUnread ? 0.16 : 0.08,
-                            ),
-                          ),
-                        ),
-                        child: Text(
-                          timeLabel,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: hasUnread
-                                ? scheme.primary
-                                : scheme.onSurfaceVariant.withValues(
-                                    alpha: 0.68,
-                                  ),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.02,
-                          ),
-                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      if (hasUnread) ...[
-                        const SizedBox(height: AppSpacing.xs + 1),
-                        _UnreadCountBadge(count: conversation.unreadCount),
-                      ],
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant.withValues(
+                            alpha: hasUnread ? 0.9 : 0.76,
+                          ),
+                          fontWeight: hasUnread
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          fontSize: 13.2,
+                          height: 1.12,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      _InboxRowMeta(
+                        icon: conversation.type.trim().toLowerCase() == "group"
+                            ? Icons.groups_2_outlined
+                            : Icons.access_time_rounded,
+                        label: activityLabel,
+                        accent: hasUnread ? scheme.primary : accent,
+                      ),
                     ],
                   ),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      timeLabel,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: hasUnread
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                        fontSize: 12,
+                        fontWeight: hasUnread
+                            ? FontWeight.w800
+                            : FontWeight.w700,
+                        letterSpacing: -0.05,
+                      ),
+                    ),
+                    if (hasUnread) ...[
+                      const SizedBox(height: 7),
+                      _UnreadCountBadge(count: conversation.unreadCount),
+                    ],
+                  ],
                 ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class _InboxRowMeta extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color accent;
+
+  const _InboxRowMeta({
+    required this.icon,
+    required this.label,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = _isDarkScheme(scheme);
+
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 12,
+          color: accent.withValues(alpha: isDark ? 0.86 : 0.76),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant.withValues(
+                alpha: isDark ? 0.78 : 0.72,
+              ),
+              fontSize: 11,
+              height: 1,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.05,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1696,19 +1708,19 @@ class _UnreadCountBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
     final label = count > 99 ? "99+" : "$count";
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.94),
+        color: scheme.primary.withValues(alpha: 0.96),
         borderRadius: BorderRadius.circular(AppRadius.pill),
         boxShadow: [
           BoxShadow(
-            color: scheme.primary.withValues(alpha: 0.18),
-            blurRadius: 10,
-            offset: const Offset(0, 6),
+            color: scheme.primary.withValues(alpha: 0.16),
+            blurRadius: 8,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -1716,9 +1728,10 @@ class _UnreadCountBadge extends StatelessWidget {
         label,
         style: theme.textTheme.labelSmall?.copyWith(
           color: scheme.onPrimary,
-          fontSize: 11,
+          fontSize: 10.5,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.02,
+          height: 1,
         ),
       ),
     );
@@ -1743,6 +1756,9 @@ class _QueueRow extends StatelessWidget {
     final accent = _queueStatusColor(request.progressStage, scheme);
     final statusLabel = _queueStatusLabel(request.progressStage);
     final timeLabel = _formatInboxTime(entry.sortTime);
+    final itemCount = entry.request.items.length;
+    final itemCountLabel = itemCount == 1 ? "1 item" : "$itemCount items";
+    final metaLabel = "$statusLabel - $itemCountLabel";
 
     return Material(
       color: Colors.transparent,
@@ -1759,7 +1775,7 @@ class _QueueRow extends StatelessWidget {
                     alpha: isDark ? 0.14 : 0.045,
                   )
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: hasUnread
                   ? scheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
@@ -1767,12 +1783,9 @@ class _QueueRow extends StatelessWidget {
             ),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md + 2,
-              vertical: AppSpacing.md,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 _ConversationAvatar(
                   title: title,
@@ -1780,110 +1793,70 @@ class _QueueRow extends StatelessWidget {
                   accent: accent,
                   icon: Icons.inventory_2_outlined,
                 ),
-                const SizedBox(width: AppSpacing.md),
+                const SizedBox(width: 11),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 1),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: hasUnread
-                                ? FontWeight.w800
-                                : FontWeight.w700,
-                            color: scheme.onSurface,
-                            letterSpacing: -0.15,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: hasUnread
+                              ? FontWeight.w800
+                              : FontWeight.w700,
+                          color: scheme.onSurface,
+                          letterSpacing: -0.15,
                         ),
-                        const SizedBox(height: AppSpacing.xxs + 2),
-                        Text(
-                          subtitle,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant.withValues(
-                              alpha: hasUnread ? 0.9 : 0.76,
-                            ),
-                            fontWeight: hasUnread
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                            fontSize: 13,
-                            height: 1.16,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant.withValues(
+                            alpha: hasUnread ? 0.9 : 0.76,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                          fontWeight: hasUnread
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          fontSize: 13,
+                          height: 1.12,
                         ),
-                      ],
-                    ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      _InboxRowMeta(
+                        icon: Icons.local_shipping_outlined,
+                        label: metaLabel,
+                        accent: accent,
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: AppSpacing.md),
+                const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                        vertical: AppSpacing.xxs + 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _blendTone(
-                          scheme.primary,
-                          scheme.surface,
-                          alpha: hasUnread
-                              ? (isDark ? 0.18 : 0.09)
-                              : (isDark ? 0.12 : 0.04),
-                        ),
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                        border: Border.all(
-                          color: scheme.primary.withValues(
-                            alpha: hasUnread ? 0.16 : 0.08,
-                          ),
-                        ),
-                      ),
-                      child: Text(
-                        timeLabel,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: hasUnread
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant.withValues(alpha: 0.68),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.02,
-                        ),
+                    Text(
+                      timeLabel,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: hasUnread
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                        fontSize: 12,
+                        fontWeight: hasUnread
+                            ? FontWeight.w800
+                            : FontWeight.w700,
+                        letterSpacing: -0.05,
                       ),
                     ),
                     if (hasUnread) ...[
-                      const SizedBox(height: AppSpacing.xs + 1),
+                      const SizedBox(height: 7),
                       _UnreadCountBadge(count: entry.conversation.unreadCount),
                     ],
-                    const SizedBox(height: AppSpacing.xs + 1),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                        vertical: AppSpacing.xxs + 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Color.alphaBlend(
-                          accent.withValues(alpha: isDark ? 0.16 : 0.1),
-                          scheme.surface,
-                        ),
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                        border: Border.all(
-                          color: accent.withValues(alpha: 0.16),
-                        ),
-                      ),
-                      child: Text(
-                        statusLabel,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: accent,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.08,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ],
@@ -2281,20 +2254,38 @@ String _formatInboxTime(DateTime? value) {
   }
 
   final local = value.toLocal();
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
-  final target = DateTime(local.year, local.month, local.day);
-  final difference = today.difference(target).inDays;
-  if (difference == 0) {
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return "$hour:$minute";
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return "$hour:$minute";
+}
+
+String _conversationActivityLabel(
+  ChatConversation conversation,
+  DateTime? activityAt,
+) {
+  final parts = <String>[];
+  final type = conversation.type.trim().toLowerCase();
+  if (type == "group") {
+    final count = conversation.participantsCount;
+    if (count > 0) {
+      parts.add(count == 1 ? "1 member" : "$count members");
+    } else {
+      parts.add("Group chat");
+    }
+  } else {
+    parts.add("Direct chat");
   }
-  if (difference > 0 && difference < 7) {
-    const weekdays = <String>["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    return weekdays[local.weekday - 1];
+
+  if (conversation.unreadCount > 0) {
+    final count = conversation.unreadCount;
+    parts.add(count == 1 ? "1 unread" : "$count unread");
+  } else if (activityAt != null) {
+    parts.add("Last active ${_formatInboxTime(activityAt)}");
+  } else {
+    parts.add("No activity yet");
   }
-  return "${local.day}/${local.month}";
+
+  return parts.join(" - ");
 }
 
 String _initialsFor(String value) {
