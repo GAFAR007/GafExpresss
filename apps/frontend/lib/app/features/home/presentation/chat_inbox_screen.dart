@@ -1043,27 +1043,33 @@ class _ProfileActionButton extends StatelessWidget {
   }
 }
 
-enum _HeroPillStyle { softBlue, softLight, dark }
-
-class _HeroControlPill extends StatelessWidget {
+class _HeroToggleOption {
   final String label;
   final IconData icon;
-  final bool selected;
-  final bool bubbleLeading;
-  final _HeroPillStyle styleVariant;
-  final Color activeIconColor;
-  final VoidCallback onTap;
-  final BorderRadius borderRadius;
+  final Color accentColor;
+  final double iconSize;
 
-  const _HeroControlPill({
+  const _HeroToggleOption({
     required this.label,
     required this.icon,
-    required this.selected,
-    required this.bubbleLeading,
-    required this.styleVariant,
-    required this.activeIconColor,
-    required this.onTap,
-    required this.borderRadius,
+    required this.accentColor,
+    this.iconSize = 18,
+  });
+}
+
+class _HeroToggleSwitch extends StatelessWidget {
+  final _HeroToggleOption leftOption;
+  final _HeroToggleOption rightOption;
+  final bool isLeftSelected;
+  final ValueChanged<bool> onChanged;
+  final double width;
+
+  const _HeroToggleSwitch({
+    required this.leftOption,
+    required this.rightOption,
+    required this.isLeftSelected,
+    required this.onChanged,
+    required this.width,
   });
 
   @override
@@ -1071,129 +1077,158 @@ class _HeroControlPill extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = _isDarkScheme(scheme);
-    final backgroundColor = switch (styleVariant) {
-      _HeroPillStyle.softBlue => const Color(
-        0xFF516898,
-      ).withValues(alpha: 0.98),
-      _HeroPillStyle.softLight => Colors.white.withValues(alpha: 0.96),
-      _HeroPillStyle.dark => const Color(0xFF070B14).withValues(alpha: 0.98),
-    };
-    final activeBorderColor = switch (styleVariant) {
-      _HeroPillStyle.softBlue => Colors.white.withValues(alpha: 0.18),
-      _HeroPillStyle.softLight => Colors.black.withValues(alpha: 0.05),
-      _HeroPillStyle.dark => Colors.white.withValues(alpha: 0.1),
-    };
-    final activeTextColor = switch (styleVariant) {
-      _HeroPillStyle.softBlue => Colors.white,
-      _HeroPillStyle.softLight => const Color(0xFF121A2C),
-      _HeroPillStyle.dark => Colors.white,
-    };
-    final inactiveTextColor = Colors.white.withValues(alpha: 0.84);
-    final bubbleColor = switch (styleVariant) {
-      _HeroPillStyle.softBlue => Colors.white.withValues(
-        alpha: selected ? 0.14 : 0.08,
-      ),
-      _HeroPillStyle.softLight =>
-        selected
-            ? _blendTone(
-                scheme.primary,
-                Colors.white,
-                alpha: isDark ? 0.18 : 0.1,
-              )
-            : Colors.white.withValues(alpha: 0.1),
-      _HeroPillStyle.dark => Colors.white.withValues(
-        alpha: selected ? 0.98 : 0.12,
-      ),
-    };
-    final iconColor = selected
-        ? activeIconColor
-        : switch (styleVariant) {
-            _HeroPillStyle.softLight => Colors.white.withValues(alpha: 0.76),
-            _HeroPillStyle.softBlue ||
-            _HeroPillStyle.dark => Colors.white.withValues(alpha: 0.74),
-          };
+    const height = 48.0;
+    const trackInset = 5.0;
+    const indicatorSize = height - (trackInset * 2);
+    final halfWidth = width / 2;
+    final indicatorLeft = isLeftSelected
+        ? halfWidth - indicatorSize - trackInset
+        : halfWidth + trackInset;
+    final highlightLeft = isLeftSelected ? trackInset : halfWidth;
+    final activeOption = isLeftSelected ? leftOption : rightOption;
 
-    final bubble = Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        color: bubbleColor,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: switch (styleVariant) {
-            _HeroPillStyle.softLight =>
-              selected
-                  ? Colors.black.withValues(alpha: 0.06)
-                  : Colors.white.withValues(alpha: 0.08),
-            _HeroPillStyle.softBlue => Colors.white.withValues(
-              alpha: selected ? 0.18 : 0.08,
-            ),
-            _HeroPillStyle.dark =>
-              selected
-                  ? Colors.black.withValues(alpha: 0.08)
-                  : Colors.white.withValues(alpha: 0.08),
-          },
-        ),
-      ),
-      alignment: Alignment.center,
-      child: Icon(icon, size: 18, color: iconColor),
-    );
-
-    final text = Expanded(
-      child: Text(
-        label.toUpperCase(),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: bubbleLeading ? TextAlign.center : TextAlign.start,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: selected ? activeTextColor : inactiveTextColor,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.22,
-        ),
-      ),
-    );
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: borderRadius,
-        overlayColor: _interactiveOverlay(scheme),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOutCubic,
-          height: 46,
-          padding: const EdgeInsets.symmetric(horizontal: 5),
-          decoration: BoxDecoration(
-            color: selected ? backgroundColor : Colors.transparent,
-            borderRadius: borderRadius,
-            border: selected ? Border.all(color: activeBorderColor) : null,
-            boxShadow: selected
-                ? [
-                    BoxShadow(
-                      color: scheme.shadow.withValues(
-                        alpha: isDark ? 0.16 : 0.08,
-                      ),
-                      blurRadius: 10,
-                      offset: const Offset(0, 5),
+    return Semantics(
+      button: true,
+      toggled: isLeftSelected,
+      label: "${leftOption.label} ${rightOption.label}",
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF4568A7), Color(0xFF102A5D)],
                     ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            children: bubbleLeading
-                ? [
-                    bubble,
-                    const SizedBox(width: AppSpacing.sm),
-                    text,
-                    const SizedBox(width: AppSpacing.xs),
-                  ]
-                : [
-                    const SizedBox(width: AppSpacing.xs),
-                    text,
-                    const SizedBox(width: AppSpacing.sm),
-                    bubble,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    border: Border.all(
+                      color: Colors.white.withValues(
+                        alpha: isDark ? 0.16 : 0.24,
+                      ),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        blurRadius: 1,
+                        offset: const Offset(0, 1),
+                      ),
+                      BoxShadow(
+                        color: const Color(
+                          0xFF081A39,
+                        ).withValues(alpha: isDark ? 0.5 : 0.3),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IgnorePointer(
+                child: AnimatedPositioned(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  left: highlightLeft,
+                  top: trackInset,
+                  bottom: trackInset,
+                  width: halfWidth - trackInset,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Colors.white.withValues(alpha: 0.16),
+                          scheme.primary.withValues(alpha: 0.18),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.16),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: activeOption.accentColor.withValues(
+                            alpha: 0.2,
+                          ),
+                          blurRadius: 14,
+                          offset: const Offset(0, 5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    _HeroToggleLabel(
+                      option: leftOption,
+                      isActive: isLeftSelected,
+                      isLeft: true,
+                      onTap: () => onChanged(true),
+                    ),
+                    _HeroToggleLabel(
+                      option: rightOption,
+                      isActive: !isLeftSelected,
+                      isLeft: false,
+                      onTap: () => onChanged(false),
+                    ),
                   ],
+                ),
+              ),
+              IgnorePointer(
+                child: AnimatedPositioned(
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  left: indicatorLeft,
+                  top: trackInset,
+                  width: indicatorSize,
+                  height: indicatorSize,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.96),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: activeOption.accentColor.withValues(alpha: 0.12),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: scheme.shadow.withValues(
+                            alpha: isDark ? 0.22 : 0.16,
+                          ),
+                          blurRadius: 12,
+                          offset: const Offset(0, 5),
+                        ),
+                        BoxShadow(
+                          color: activeOption.accentColor.withValues(
+                            alpha: 0.18,
+                          ),
+                          blurRadius: 14,
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      activeOption.icon,
+                      size: activeOption.iconSize,
+                      color: activeOption.accentColor,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1201,47 +1236,53 @@ class _HeroControlPill extends StatelessWidget {
   }
 }
 
-class _HeroControlPair extends StatelessWidget {
-  final double width;
-  final _HeroControlPill leading;
-  final _HeroControlPill trailing;
+class _HeroToggleLabel extends StatelessWidget {
+  final _HeroToggleOption option;
+  final bool isActive;
+  final bool isLeft;
+  final VoidCallback onTap;
 
-  const _HeroControlPair({
-    required this.width,
-    required this.leading,
-    required this.trailing,
+  const _HeroToggleLabel({
+    required this.option,
+    required this.isActive,
+    required this.isLeft,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = _isDarkScheme(scheme);
+    final theme = Theme.of(context);
 
-    return SizedBox(
-      width: width,
-      child: Container(
-        height: 54,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: isDark ? 0.1 : 0.14),
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: isDark ? 0.16 : 0.22),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: scheme.shadow.withValues(alpha: isDark ? 0.12 : 0.05),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
+    return Expanded(
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: isLeft ? 14 : 44,
+              right: isLeft ? 44 : 14,
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(child: leading),
-            const SizedBox(width: 4),
-            Expanded(child: trailing),
-          ],
+            child: Align(
+              alignment: isLeft ? Alignment.centerLeft : Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  option.label.toUpperCase(),
+                  maxLines: 1,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: Colors.white.withValues(
+                      alpha: isActive ? 0.98 : 0.58,
+                    ),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.48,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -1256,34 +1297,22 @@ class _PresenceToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final isDark = _isDarkScheme(scheme);
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 224, maxWidth: 238),
-      child: _HeroControlPair(
-        width: 236,
-        leading: _HeroControlPill(
-          label: _ChatInboxCopy.onlineLabel,
-          icon: Icons.circle_rounded,
-          selected: isOnline,
-          bubbleLeading: false,
-          styleVariant: _HeroPillStyle.softBlue,
-          activeIconColor: AppColors.success,
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          onTap: () => onChanged(true),
-        ),
-        trailing: _HeroControlPill(
-          label: _ChatInboxCopy.offlineLabel,
-          icon: Icons.circle_rounded,
-          selected: !isOnline,
-          bubbleLeading: true,
-          styleVariant: _HeroPillStyle.dark,
-          activeIconColor: isDark ? const Color(0xFF070B14) : scheme.primary,
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          onTap: () => onChanged(false),
-        ),
+    return _HeroToggleSwitch(
+      width: 236,
+      isLeftSelected: isOnline,
+      leftOption: const _HeroToggleOption(
+        label: _ChatInboxCopy.onlineLabel,
+        icon: Icons.circle_rounded,
+        accentColor: AppColors.success,
+        iconSize: 14,
       ),
+      rightOption: const _HeroToggleOption(
+        label: _ChatInboxCopy.offlineLabel,
+        icon: Icons.circle_rounded,
+        accentColor: Color(0xFF9CA3AF),
+        iconSize: 14,
+      ),
+      onChanged: onChanged,
     );
   }
 }
@@ -1296,38 +1325,28 @@ class _ThemeModeMiniToggle extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final isDark = _isDarkScheme(scheme);
     final mode = ref.watch(appThemeModeProvider);
     final activeMode = mode == AppThemeMode.classic
         ? AppThemeMode.classic
         : AppThemeMode.dark;
 
-    return _HeroControlPair(
-      width: 260,
-      leading: _HeroControlPill(
+    return _HeroToggleSwitch(
+      width: 270,
+      isLeftSelected: activeMode == AppThemeMode.classic,
+      leftOption: const _HeroToggleOption(
         label: "Day mode",
         icon: Icons.wb_sunny_outlined,
-        selected: activeMode == AppThemeMode.classic,
-        bubbleLeading: false,
-        styleVariant: _HeroPillStyle.softLight,
-        activeIconColor: const Color(0xFF121A2C),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        onTap: activeMode == AppThemeMode.classic
-            ? () {}
-            : () => onChanged(AppThemeMode.classic),
+        accentColor: Color(0xFF1F2A44),
+        iconSize: 20,
       ),
-      trailing: _HeroControlPill(
+      rightOption: _HeroToggleOption(
         label: "Night mode",
         icon: Icons.dark_mode_outlined,
-        selected: activeMode == AppThemeMode.dark,
-        bubbleLeading: true,
-        styleVariant: _HeroPillStyle.dark,
-        activeIconColor: isDark ? const Color(0xFF070B14) : scheme.primary,
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-        onTap: activeMode == AppThemeMode.dark
-            ? () {}
-            : () => onChanged(AppThemeMode.dark),
+        accentColor: scheme.primary,
+        iconSize: 20,
       ),
+      onChanged: (isDay) =>
+          onChanged(isDay ? AppThemeMode.classic : AppThemeMode.dark),
     );
   }
 }
