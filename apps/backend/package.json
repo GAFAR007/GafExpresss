@@ -26,6 +26,7 @@
     "ops:crop-profiles:import": "./scripts/run-with-project-node.sh node scripts/import-production-crop-profile-source-file.js",
     "ops:gafar-express:seed-management-staff": "./scripts/run-with-project-node.sh node scripts/seed-gafar-express-management-staff.js",
     "seed:staff-bots": "./scripts/run-with-project-node.sh node scripts/seed-staff-bots.js",
+    "test:chat:calls": "./scripts/run-with-project-node.sh node --test scripts/chat-call.integration.test.js",
     "cleanup:staff-bots": "./scripts/run-with-project-node.sh node scripts/cleanup-staff-bots.js"
   },
   "keywords": [],

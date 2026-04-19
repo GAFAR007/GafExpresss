@@ -25,6 +25,7 @@ import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/business_order_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_attachment_picker.dart';
+import 'package:frontend/app/features/home/presentation/chat_call_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_models.dart';
 import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_routes.dart';
@@ -44,6 +45,7 @@ const String _logAttachTap = "attach_tap";
 const String _logAttachPick = "attach_pick";
 const String _logBackTap = "back_tap";
 const String _logProfileTap = "profile_tap";
+const String _logCallTap = "call_tap";
 const String _logAiToggleTap = "ai_toggle_tap";
 const String _logAttendTap = "attend_tap";
 const String _logOverflowTap = "overflow_tap";
@@ -61,6 +63,7 @@ const String _tooltipAiToggle = "Toggle AI assistant";
 const String _tooltipAttend = "Attend this chat";
 const String _tooltipMore = "More actions";
 const String _tooltipInfo = "Open profile";
+const String _tooltipCall = "Start voice call";
 const Color _threadHeroTop = Color(0xFF082A55);
 const Color _threadCanvas = Color(0xFFF8FAFC);
 
@@ -1103,6 +1106,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         purchaseRequest != null &&
         _hiddenRequestId.trim() == purchaseRequest.id.trim();
     final currentUserRole = session?.user.role ?? "";
+    final callState = ref.watch(chatCallProvider);
     final currentStaffRole = profileAsync.valueOrNull?.staffRole ?? "";
     final conversation = detail?.conversation ?? widget.args?.conversation;
     final matchesRequestBusinessScope = purchaseRequest == null
@@ -1205,6 +1209,12 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         !_isSubmittingRequestAction;
     final attendLabel = isCurrentAttendant ? "In Chat" : "Attend Chat";
     final supportsCamera = PlatformInfo.isAndroid || PlatformInfo.isIOS;
+    final hasLiveCall =
+        callState.call != null && !(callState.call?.isTerminal ?? true);
+    final canVoiceCall =
+        conversation?.type != _conversationTypeGroup &&
+        displayParticipants.isNotEmpty &&
+        !hasLiveCall;
     final canSendMessage =
         (_hasDraftText || state.pendingAttachments.isNotEmpty) &&
         !state.isSending &&
@@ -1273,6 +1283,27 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
             ? [
                 Padding(
                   padding: const EdgeInsets.only(left: 2),
+                  child: _ThreadToolbarButton(
+                    icon: Icons.call_rounded,
+                    tooltip: _tooltipCall,
+                    heroStyle: true,
+                    onPressed: !canVoiceCall
+                        ? null
+                        : () async {
+                            _log(_logCallTap);
+                            final error = await ref
+                                .read(chatCallProvider.notifier)
+                                .startOutgoingCall(
+                                  conversationId: widget.conversationId,
+                                );
+                            if (error != null && mounted) {
+                              _showMessage(error);
+                            }
+                          },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
                   child: _HeaderAiToggleButton(
                     enabled: isAiEnabled,
                     isBusy: _isSubmittingRequestAction,
@@ -1319,6 +1350,27 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 ),
               ]
             : [
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: _ThreadToolbarButton(
+                    icon: Icons.call_rounded,
+                    tooltip: _tooltipCall,
+                    heroStyle: true,
+                    onPressed: !canVoiceCall
+                        ? null
+                        : () async {
+                            _log(_logCallTap);
+                            final error = await ref
+                                .read(chatCallProvider.notifier)
+                                .startOutgoingCall(
+                                  conversationId: widget.conversationId,
+                                );
+                            if (error != null && mounted) {
+                              _showMessage(error);
+                            }
+                          },
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: _ThreadToolbarButton(

@@ -32,6 +32,8 @@ const String _logJoin = "join";
 const String _logLeave = "leave";
 const String _logReadEmit = "read_emit";
 const String _logMessageEvent = "message_event";
+const String _logCallEvent = "call_event";
+const String _logCallSignalEmit = "call_signal_emit";
 const String _logErrorEvent = "error_event";
 
 class ChatSocketMessageEvent {
@@ -58,6 +60,24 @@ class ChatSocketReadEvent {
   });
 }
 
+class ChatSocketCallEvent {
+  final ChatCallSession call;
+
+  const ChatSocketCallEvent({required this.call});
+}
+
+class ChatSocketCallSignalEvent {
+  final String callId;
+  final String fromUserId;
+  final ChatCallSignalPayload signal;
+
+  const ChatSocketCallSignalEvent({
+    required this.callId,
+    required this.fromUserId,
+    required this.signal,
+  });
+}
+
 class ChatSocketService {
   io.Socket? _socket;
   String? _token;
@@ -65,9 +85,25 @@ class ChatSocketService {
   final _messageController =
       StreamController<ChatSocketMessageEvent>.broadcast();
   final _readController = StreamController<ChatSocketReadEvent>.broadcast();
+  final _incomingCallController =
+      StreamController<ChatSocketCallEvent>.broadcast();
+  final _callUpdateController =
+      StreamController<ChatSocketCallEvent>.broadcast();
+  final _callEndedController =
+      StreamController<ChatSocketCallEvent>.broadcast();
+  final _callSignalController =
+      StreamController<ChatSocketCallSignalEvent>.broadcast();
 
   Stream<ChatSocketMessageEvent> get messageStream => _messageController.stream;
   Stream<ChatSocketReadEvent> get readStream => _readController.stream;
+  Stream<ChatSocketCallEvent> get incomingCallStream =>
+      _incomingCallController.stream;
+  Stream<ChatSocketCallEvent> get callUpdateStream =>
+      _callUpdateController.stream;
+  Stream<ChatSocketCallEvent> get callEndedStream =>
+      _callEndedController.stream;
+  Stream<ChatSocketCallSignalEvent> get callSignalStream =>
+      _callSignalController.stream;
 
   bool get isConnected => _socket?.connected ?? false;
 
@@ -155,6 +191,56 @@ class ChatSocketService {
       );
     });
 
+    _socket?.on(chatEventCallIncoming, (payload) {
+      AppDebug.log(_logTag, _logCallEvent, extra: {"type": "incoming"});
+      if (payload is! Map) return;
+      final map = Map<String, dynamic>.from(payload);
+      final callMap = map["call"] as Map<String, dynamic>?;
+      if (callMap == null) return;
+      _incomingCallController.add(
+        ChatSocketCallEvent(call: ChatCallSession.fromJson(callMap)),
+      );
+    });
+
+    _socket?.on(chatEventCallUpdated, (payload) {
+      AppDebug.log(_logTag, _logCallEvent, extra: {"type": "updated"});
+      if (payload is! Map) return;
+      final map = Map<String, dynamic>.from(payload);
+      final callMap = map["call"] as Map<String, dynamic>?;
+      if (callMap == null) return;
+      _callUpdateController.add(
+        ChatSocketCallEvent(call: ChatCallSession.fromJson(callMap)),
+      );
+    });
+
+    _socket?.on(chatEventCallEnded, (payload) {
+      AppDebug.log(_logTag, _logCallEvent, extra: {"type": "ended"});
+      if (payload is! Map) return;
+      final map = Map<String, dynamic>.from(payload);
+      final callMap = map["call"] as Map<String, dynamic>?;
+      if (callMap == null) return;
+      _callEndedController.add(
+        ChatSocketCallEvent(call: ChatCallSession.fromJson(callMap)),
+      );
+    });
+
+    _socket?.on(chatEventCallSignal, (payload) {
+      AppDebug.log(_logTag, _logCallEvent, extra: {"type": "signal"});
+      if (payload is! Map) return;
+      final map = Map<String, dynamic>.from(payload);
+      final callId = map["callId"]?.toString() ?? "";
+      final fromUserId = map["fromUserId"]?.toString() ?? "";
+      final signalMap = map["signal"] as Map<String, dynamic>?;
+      if (callId.isEmpty || fromUserId.isEmpty || signalMap == null) return;
+      _callSignalController.add(
+        ChatSocketCallSignalEvent(
+          callId: callId,
+          fromUserId: fromUserId,
+          signal: ChatCallSignalPayload.fromJson(signalMap),
+        ),
+      );
+    });
+
     _socket?.on(chatEventError, (payload) {
       AppDebug.log(
         _logTag,
@@ -231,6 +317,22 @@ class ChatSocketService {
     });
   }
 
+  void emitCallSignal({
+    required String callId,
+    required ChatCallSignalPayload signal,
+  }) {
+    if (!isConnected || callId.trim().isEmpty) return;
+    AppDebug.log(
+      _logTag,
+      _logCallSignalEmit,
+      extra: {"callId": callId, "type": signal.type},
+    );
+    _socket?.emit(chatEventCallSignal, {
+      "callId": callId,
+      "signal": signal.toJson(),
+    });
+  }
+
   void disconnect() {
     _token = null;
     _disposeSocket(clearTrackedConversations: true);
@@ -248,6 +350,10 @@ class ChatSocketService {
   void dispose() {
     _messageController.close();
     _readController.close();
+    _incomingCallController.close();
+    _callUpdateController.close();
+    _callEndedController.close();
+    _callSignalController.close();
     disconnect();
   }
 }

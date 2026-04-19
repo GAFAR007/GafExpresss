@@ -54,11 +54,40 @@ const String _keyPublicId = "publicId";
 const String _keyPurchaseRequest = "purchaseRequest";
 const String _keyEventType = "eventType";
 const String _keyEventData = "eventData";
+const String _keyMediaMode = "mediaMode";
+const String _keyState = "state";
+const String _keyCallerUserId = "callerUserId";
+const String _keyCalleeUserId = "calleeUserId";
+const String _keyCallerName = "callerName";
+const String _keyCalleeName = "calleeName";
+const String _keyCallerRole = "callerRole";
+const String _keyCalleeRole = "calleeRole";
+const String _keyCallerProfileImageUrl = "callerProfileImageUrl";
+const String _keyCalleeProfileImageUrl = "calleeProfileImageUrl";
+const String _keyRingTimeoutAt = "ringTimeoutAt";
+const String _keyAnsweredAt = "answeredAt";
+const String _keyEndedAt = "endedAt";
+const String _keyEndedByUserId = "endedByUserId";
+const String _keyEndedByName = "endedByName";
+const String _keyEndReason = "endReason";
+const String _keyDurationSeconds = "durationSeconds";
+const String _keyCallId = "callId";
+const String _keySdp = "sdp";
+const String _keyCandidate = "candidate";
+const String _keySdpMid = "sdpMid";
+const String _keySdpMLineIndex = "sdpMLineIndex";
 
 DateTime? _parseDate(dynamic value) {
   // WHY: Prevent crashes on invalid timestamps.
   if (value == null) return null;
   return DateTime.tryParse(value.toString());
+}
+
+int? _parseInt(dynamic value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value.toString());
 }
 
 enum ChatMessageStatus { sending, sent, delivered, seen, failed }
@@ -404,6 +433,199 @@ class ChatMessage {
       isInternalNote: json["isInternalNote"] == true,
       failureMessage: (json["failureMessage"] ?? "").toString(),
       attachments: attachments,
+    );
+  }
+}
+
+class ChatCallSession {
+  final String id;
+  final String conversationId;
+  final String businessId;
+  final String mediaMode;
+  final String state;
+  final String callerUserId;
+  final String callerName;
+  final String callerRole;
+  final String callerProfileImageUrl;
+  final String calleeUserId;
+  final String calleeName;
+  final String calleeRole;
+  final String calleeProfileImageUrl;
+  final DateTime? ringTimeoutAt;
+  final DateTime? answeredAt;
+  final DateTime? endedAt;
+  final String endedByUserId;
+  final String endedByName;
+  final String endReason;
+  final int durationSeconds;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  const ChatCallSession({
+    required this.id,
+    required this.conversationId,
+    required this.businessId,
+    required this.mediaMode,
+    required this.state,
+    required this.callerUserId,
+    required this.callerName,
+    required this.callerRole,
+    required this.callerProfileImageUrl,
+    required this.calleeUserId,
+    required this.calleeName,
+    required this.calleeRole,
+    required this.calleeProfileImageUrl,
+    required this.ringTimeoutAt,
+    required this.answeredAt,
+    required this.endedAt,
+    required this.endedByUserId,
+    required this.endedByName,
+    required this.endReason,
+    required this.durationSeconds,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  bool get isRinging => state == "ringing";
+  bool get isActive => state == "active";
+  bool get isTerminal =>
+      state == "declined" ||
+      state == "ended" ||
+      state == "missed" ||
+      state == "cancelled";
+
+  bool isIncomingFor(String currentUserId) => calleeUserId == currentUserId;
+
+  String peerUserIdFor(String currentUserId) {
+    return currentUserId == callerUserId ? calleeUserId : callerUserId;
+  }
+
+  String peerNameFor(String currentUserId) {
+    return currentUserId == callerUserId ? calleeName : callerName;
+  }
+
+  String peerProfileImageUrlFor(String currentUserId) {
+    return currentUserId == callerUserId
+        ? calleeProfileImageUrl
+        : callerProfileImageUrl;
+  }
+
+  ChatCallSession copyWith({
+    String? id,
+    String? conversationId,
+    String? businessId,
+    String? mediaMode,
+    String? state,
+    String? callerUserId,
+    String? callerName,
+    String? callerRole,
+    String? callerProfileImageUrl,
+    String? calleeUserId,
+    String? calleeName,
+    String? calleeRole,
+    String? calleeProfileImageUrl,
+    DateTime? ringTimeoutAt,
+    DateTime? answeredAt,
+    DateTime? endedAt,
+    String? endedByUserId,
+    String? endedByName,
+    String? endReason,
+    int? durationSeconds,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return ChatCallSession(
+      id: id ?? this.id,
+      conversationId: conversationId ?? this.conversationId,
+      businessId: businessId ?? this.businessId,
+      mediaMode: mediaMode ?? this.mediaMode,
+      state: state ?? this.state,
+      callerUserId: callerUserId ?? this.callerUserId,
+      callerName: callerName ?? this.callerName,
+      callerRole: callerRole ?? this.callerRole,
+      callerProfileImageUrl:
+          callerProfileImageUrl ?? this.callerProfileImageUrl,
+      calleeUserId: calleeUserId ?? this.calleeUserId,
+      calleeName: calleeName ?? this.calleeName,
+      calleeRole: calleeRole ?? this.calleeRole,
+      calleeProfileImageUrl:
+          calleeProfileImageUrl ?? this.calleeProfileImageUrl,
+      ringTimeoutAt: ringTimeoutAt ?? this.ringTimeoutAt,
+      answeredAt: answeredAt ?? this.answeredAt,
+      endedAt: endedAt ?? this.endedAt,
+      endedByUserId: endedByUserId ?? this.endedByUserId,
+      endedByName: endedByName ?? this.endedByName,
+      endReason: endReason ?? this.endReason,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  factory ChatCallSession.fromJson(Map<String, dynamic> json) {
+    return ChatCallSession(
+      id: (json[_keyId] ?? json[_keyCallId] ?? "").toString(),
+      conversationId: (json[_keyConversationId] ?? "").toString(),
+      businessId: (json[_keyBusinessId] ?? "").toString(),
+      mediaMode: (json[_keyMediaMode] ?? "").toString(),
+      state: (json[_keyState] ?? "").toString(),
+      callerUserId: (json[_keyCallerUserId] ?? "").toString(),
+      callerName: (json[_keyCallerName] ?? "").toString(),
+      callerRole: (json[_keyCallerRole] ?? "").toString(),
+      callerProfileImageUrl: (json[_keyCallerProfileImageUrl] ?? "").toString(),
+      calleeUserId: (json[_keyCalleeUserId] ?? "").toString(),
+      calleeName: (json[_keyCalleeName] ?? "").toString(),
+      calleeRole: (json[_keyCalleeRole] ?? "").toString(),
+      calleeProfileImageUrl: (json[_keyCalleeProfileImageUrl] ?? "").toString(),
+      ringTimeoutAt: _parseDate(json[_keyRingTimeoutAt]),
+      answeredAt: _parseDate(json[_keyAnsweredAt]),
+      endedAt: _parseDate(json[_keyEndedAt]),
+      endedByUserId: (json[_keyEndedByUserId] ?? "").toString(),
+      endedByName: (json[_keyEndedByName] ?? "").toString(),
+      endReason: (json[_keyEndReason] ?? "").toString(),
+      durationSeconds: _parseInt(json[_keyDurationSeconds]) ?? 0,
+      createdAt: _parseDate(json[_keyCreatedAt]),
+      updatedAt: _parseDate(json["updatedAt"]),
+    );
+  }
+}
+
+class ChatCallSignalPayload {
+  final String type;
+  final String sdp;
+  final String candidate;
+  final String sdpMid;
+  final int? sdpMLineIndex;
+
+  const ChatCallSignalPayload({
+    required this.type,
+    required this.sdp,
+    required this.candidate,
+    required this.sdpMid,
+    required this.sdpMLineIndex,
+  });
+
+  bool get isOffer => type == "offer";
+  bool get isAnswer => type == "answer";
+  bool get isCandidate => type == "candidate";
+
+  Map<String, dynamic> toJson() {
+    return {
+      _keyType: type,
+      if (sdp.isNotEmpty) _keySdp: sdp,
+      if (candidate.isNotEmpty) _keyCandidate: candidate,
+      if (sdpMid.isNotEmpty) _keySdpMid: sdpMid,
+      if (sdpMLineIndex != null) _keySdpMLineIndex: sdpMLineIndex,
+    };
+  }
+
+  factory ChatCallSignalPayload.fromJson(Map<String, dynamic> json) {
+    return ChatCallSignalPayload(
+      type: (json[_keyType] ?? "").toString(),
+      sdp: (json[_keySdp] ?? "").toString(),
+      candidate: (json[_keyCandidate] ?? "").toString(),
+      sdpMid: (json[_keySdpMid] ?? "").toString(),
+      sdpMLineIndex: _parseInt(json[_keySdpMLineIndex]),
     );
   }
 }

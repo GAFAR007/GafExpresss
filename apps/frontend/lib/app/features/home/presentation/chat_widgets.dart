@@ -1049,6 +1049,18 @@ String _systemEventLabel(String eventType) {
       return "Request Cancelled";
     case "seller_attending":
       return "Seller Attending";
+    case "call_started":
+      return "Voice Call Started";
+    case "call_ended":
+      return "Voice Call Ended";
+    case "call_declined":
+      return "Voice Call Declined";
+    case "call_missed":
+      return "Missed Voice Call";
+    case "call_cancelled":
+      return "Voice Call Cancelled";
+    case "call_busy":
+      return "Line Busy";
     default:
       return "System Update";
   }
@@ -1068,6 +1080,16 @@ Color _systemEventAccent(String eventType) {
       return AppColors.error;
     case "seller_attending":
       return AppColors.paid;
+    case "call_started":
+      return AppColors.businessAccent;
+    case "call_ended":
+      return AppColors.recordsAccent;
+    case "call_declined":
+    case "call_cancelled":
+      return AppColors.error;
+    case "call_missed":
+    case "call_busy":
+      return AppColors.commerceAccent;
     default:
       return AppColors.recordsAccent;
   }

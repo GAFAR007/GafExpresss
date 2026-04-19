@@ -54,6 +54,9 @@ dependencies:
   # Socket.IO client for real-time chat
   socket_io_client: ^2.0.3
 
+  # WebRTC audio calling for chat
+  flutter_webrtc: ^1.4.1
+
   # Secure storage for JWTs / refresh tokens
   flutter_secure_storage: ^9.2.2
 

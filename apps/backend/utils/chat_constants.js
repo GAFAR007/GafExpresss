@@ -26,6 +26,22 @@ const CHAT_MESSAGE_TYPES = {
   SYSTEM: 'system',
 };
 
+// WHY: Keep call media modes ready for audio now and video later.
+const CHAT_CALL_MEDIA_MODES = {
+  AUDIO: 'audio',
+  VIDEO: 'video',
+};
+
+// WHY: Shared call session states keep backend + frontend aligned.
+const CHAT_CALL_STATES = {
+  RINGING: 'ringing',
+  ACTIVE: 'active',
+  DECLINED: 'declined',
+  ENDED: 'ended',
+  MISSED: 'missed',
+  CANCELLED: 'cancelled',
+};
+
 // WHY: Keep attachment type names consistent for validation.
 const CHAT_ATTACHMENT_TYPES = {
   IMAGE: 'image',
@@ -55,12 +71,18 @@ const CHAT_SOCKET_EVENTS = {
   MESSAGE_READ: 'message:read',
   CONVERSATION_JOIN: 'conversation:join',
   CONVERSATION_LEAVE: 'conversation:leave',
+  CALL_INCOMING: 'call:incoming',
+  CALL_UPDATED: 'call:updated',
+  CALL_SIGNAL: 'call:signal',
+  CALL_ENDED: 'call:ended',
   ERROR: 'chat:error',
 };
 
 module.exports = {
   CHAT_CONVERSATION_TYPES,
   CHAT_MESSAGE_TYPES,
+  CHAT_CALL_MEDIA_MODES,
+  CHAT_CALL_STATES,
   CHAT_ATTACHMENT_TYPES,
   CHAT_ATTACHMENT_MIME_TYPES,
   CHAT_LIMITS,

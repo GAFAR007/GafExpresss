@@ -21,6 +21,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import '../app/theme/app_theme.dart';
 import 'package:frontend/app/theme/app_theme_mode.dart';
 import 'router.dart';
+import 'features/home/presentation/chat_call_overlay.dart';
 import 'features/home/presentation/presentation/providers/auth_providers.dart';
 
 class AppRoot extends ConsumerStatefulWidget {
@@ -54,8 +55,9 @@ class _AppRootState extends ConsumerState<AppRoot> {
 
     final router = ref.watch(routerProvider);
     final mode = ref.watch(appThemeModeProvider);
-    final themeMode =
-        mode == AppThemeMode.dark ? ThemeMode.dark : ThemeMode.light;
+    final themeMode = mode == AppThemeMode.dark
+        ? ThemeMode.dark
+        : ThemeMode.light;
     AppDebug.log("THEME", "AppRoot theme", extra: {"mode": mode.name});
 
     return MaterialApp.router(
@@ -64,6 +66,14 @@ class _AppRootState extends ConsumerState<AppRoot> {
       darkTheme: AppTheme.dark(),
       themeMode: themeMode,
       routerConfig: router,
+      builder: (context, child) {
+        return Stack(
+          children: [
+            child ?? const SizedBox.shrink(),
+            const ChatCallOverlayHost(),
+          ],
+        );
+      },
     );
   }
 }

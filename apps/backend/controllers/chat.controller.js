@@ -16,10 +16,14 @@
 const debug = require("../utils/debug");
 const ChatConversation = require("../models/ChatConversation");
 const chatService = require("../services/chat.service");
+const chatCallService = require("../services/chat_call.service");
 const purchaseRequestService = require("../services/purchase_request.service");
 const {
   emitMessageCreated,
   emitMessageRead,
+  emitCallIncoming,
+  emitCallUpdated,
+  emitCallEnded,
 } = require("../services/chat_socket.service");
 const { CHAT_CONVERSATION_TYPES } = require("../utils/chat_constants");
 
@@ -36,7 +40,13 @@ const CHAT_COPY = {
   MESSAGE_SENT: "Message sent successfully",
   MESSAGE_READ: "Messages marked as read",
   ATTACHMENT_OK: "Attachment uploaded successfully",
+  CALL_STARTED: "Call started successfully",
+  CALL_OK: "Call loaded successfully",
+  CALL_ACCEPTED: "Call accepted successfully",
+  CALL_DECLINED: "Call declined successfully",
+  CALL_ENDED: "Call ended successfully",
   CONVERSATION_REQUIRED: "Conversation id is required",
+  CALL_REQUIRED: "Call id is required",
   UNKNOWN_ERROR: "Unable to complete chat request",
 };
 
@@ -310,6 +320,250 @@ async function sendMessage(req, res) {
   }
 }
 
+async function startCall(req, res) {
+  const context = buildContext(
+    req,
+    "StartCall",
+    "start chat call",
+  );
+  const conversationId =
+    req.body?.conversationId;
+
+  if (!conversationId) {
+    return res.status(400).json({
+      error: CHAT_COPY.CONVERSATION_REQUIRED,
+    });
+  }
+
+  try {
+    const result =
+      await chatCallService.startCall({
+        actorId: req.user?.sub,
+        conversationId,
+        mediaMode: req.body?.mediaMode,
+        context,
+      });
+
+    emitCallIncoming({
+      userId: result.call?.calleeUserId,
+      call: result.call,
+    });
+    emitCallUpdated({
+      userIds: [result.call?.callerUserId],
+      call: result.call,
+    });
+
+    return res.status(201).json({
+      message: CHAT_COPY.CALL_STARTED,
+      call: result.call,
+    });
+  } catch (error) {
+    logError("startCall", error, context);
+    return res.status(error?.httpStatus || 400).json({
+      error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
+      ...(error?.activeCall
+        ? { activeCall: error.activeCall }
+        : {}),
+    });
+  }
+}
+
+async function getCall(req, res) {
+  const context = buildContext(
+    req,
+    "GetCall",
+    "load chat call",
+  );
+  const callId = req.params?.callId;
+
+  if (!callId) {
+    return res.status(400).json({
+      error: CHAT_COPY.CALL_REQUIRED,
+    });
+  }
+
+  try {
+    const result =
+      await chatCallService.getCall({
+        callId,
+        userId: req.user?.sub,
+        context,
+      });
+    return res.status(200).json({
+      message: CHAT_COPY.CALL_OK,
+      call: result.call,
+    });
+  } catch (error) {
+    logError("getCall", error, context);
+    return res.status(error?.httpStatus || 400).json({
+      error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
+    });
+  }
+}
+
+async function acceptCall(req, res) {
+  const context = buildContext(
+    req,
+    "AcceptCall",
+    "accept chat call",
+  );
+  const callId = req.params?.callId;
+
+  if (!callId) {
+    return res.status(400).json({
+      error: CHAT_COPY.CALL_REQUIRED,
+    });
+  }
+
+  try {
+    const result =
+      await chatCallService.acceptCall({
+        callId,
+        userId: req.user?.sub,
+        context,
+      });
+
+    emitCallUpdated({
+      userIds: [
+        result.call?.callerUserId,
+        result.call?.calleeUserId,
+      ],
+      call: result.call,
+    });
+    if (result.systemMessage) {
+      emitMessageCreated({
+        conversationId:
+          result.systemMessage.conversationId,
+        message: result.systemMessage,
+      });
+    }
+
+    return res.status(200).json({
+      message: CHAT_COPY.CALL_ACCEPTED,
+      call: result.call,
+    });
+  } catch (error) {
+    logError("acceptCall", error, context);
+    return res.status(error?.httpStatus || 400).json({
+      error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
+    });
+  }
+}
+
+async function declineCall(req, res) {
+  const context = buildContext(
+    req,
+    "DeclineCall",
+    "decline chat call",
+  );
+  const callId = req.params?.callId;
+
+  if (!callId) {
+    return res.status(400).json({
+      error: CHAT_COPY.CALL_REQUIRED,
+    });
+  }
+
+  try {
+    const result =
+      await chatCallService.declineCall({
+        callId,
+        userId: req.user?.sub,
+        reason: req.body?.reason,
+        context,
+      });
+
+    emitCallUpdated({
+      userIds: [
+        result.call?.callerUserId,
+        result.call?.calleeUserId,
+      ],
+      call: result.call,
+    });
+    emitCallEnded({
+      userIds: [
+        result.call?.callerUserId,
+        result.call?.calleeUserId,
+      ],
+      call: result.call,
+    });
+    if (result.systemMessage) {
+      emitMessageCreated({
+        conversationId:
+          result.systemMessage.conversationId,
+        message: result.systemMessage,
+      });
+    }
+
+    return res.status(200).json({
+      message: CHAT_COPY.CALL_DECLINED,
+      call: result.call,
+    });
+  } catch (error) {
+    logError("declineCall", error, context);
+    return res.status(error?.httpStatus || 400).json({
+      error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
+    });
+  }
+}
+
+async function endCall(req, res) {
+  const context = buildContext(
+    req,
+    "EndCall",
+    "end chat call",
+  );
+  const callId = req.params?.callId;
+
+  if (!callId) {
+    return res.status(400).json({
+      error: CHAT_COPY.CALL_REQUIRED,
+    });
+  }
+
+  try {
+    const result =
+      await chatCallService.endCall({
+        callId,
+        userId: req.user?.sub,
+        reason: req.body?.reason,
+        context,
+      });
+
+    emitCallUpdated({
+      userIds: [
+        result.call?.callerUserId,
+        result.call?.calleeUserId,
+      ],
+      call: result.call,
+    });
+    emitCallEnded({
+      userIds: [
+        result.call?.callerUserId,
+        result.call?.calleeUserId,
+      ],
+      call: result.call,
+    });
+    if (result.systemMessage) {
+      emitMessageCreated({
+        conversationId:
+          result.systemMessage.conversationId,
+        message: result.systemMessage,
+      });
+    }
+
+    return res.status(200).json({
+      message: CHAT_COPY.CALL_ENDED,
+      call: result.call,
+    });
+  } catch (error) {
+    logError("endCall", error, context);
+    return res.status(error?.httpStatus || 400).json({
+      error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
+    });
+  }
+}
+
 async function markMessagesRead(req, res) {
   const context = buildContext(
     req,
@@ -405,4 +659,9 @@ module.exports = {
   sendMessage,
   markMessagesRead,
   uploadChatAttachment,
+  startCall,
+  getCall,
+  acceptCall,
+  declineCall,
+  endCall,
 };
