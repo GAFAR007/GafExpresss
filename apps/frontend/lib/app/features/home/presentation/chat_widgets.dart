@@ -724,7 +724,7 @@ class ChatMessageBubble extends StatelessWidget {
       return Align(
         alignment: Alignment.centerLeft,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
           margin: outerMargin,
           constraints: const BoxConstraints(maxWidth: 408),
           decoration: BoxDecoration(
@@ -740,8 +740,8 @@ class ChatMessageBubble extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: assistantAccent.withValues(alpha: isDark ? 0.1 : 0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 4),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
@@ -777,7 +777,8 @@ class ChatMessageBubble extends StatelessWidget {
                   message.body,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurface,
-                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                    height: 1.42,
                   ),
                 ),
               ],
@@ -890,14 +891,27 @@ class ChatMessageBubble extends StatelessWidget {
 
     final bubbleColor = isMine
         ? (isDark ? const Color(0xFF6079DA) : const Color(0xFF7189E2))
-        : (isDark ? const Color(0xFF182338) : Colors.white);
-    final textColor = isMine ? Colors.white : scheme.onSurface;
+        : (isDark ? const Color(0xFF182338) : const Color(0xFFF5F8FF));
+    final bubbleGradient = isMine
+        ? const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF3366F6), Color(0xFF1D4ED8)],
+          )
+        : isDark
+        ? null
+        : const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFFFFFFF), Color(0xFFF3F7FF)],
+          );
+    final textColor = isMine ? Colors.white : const Color(0xFF0F172A);
     final senderPillBackground = isMine
-        ? Colors.white.withValues(alpha: 0.16)
-        : (isDark ? const Color(0xFF26334A) : const Color(0xFFE4EAF4));
+        ? Colors.white.withValues(alpha: 0.18)
+        : (isDark ? const Color(0xFF26334A) : const Color(0xFFE0E9FB));
     final senderPillText = isMine
         ? Colors.white
-        : (isDark ? const Color(0xFFDCE6FA) : const Color(0xFF5B6C89));
+        : (isDark ? const Color(0xFFDCE6FA) : const Color(0xFF29457D));
     final namePillLabel = isMine
         ? "You"
         : senderRoleLabel.trim().isNotEmpty
@@ -912,11 +926,12 @@ class ChatMessageBubble extends StatelessWidget {
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 9, 12, 7),
+        padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
         margin: outerMargin,
         constraints: const BoxConstraints(maxWidth: 418),
         decoration: BoxDecoration(
-          color: bubbleColor,
+          color: isMine ? null : bubbleColor,
+          gradient: bubbleGradient,
           borderRadius: _bubbleRadius(
             isMine: isMine,
             mergeWithPrevious: mergeWithPrevious,
@@ -924,16 +939,16 @@ class ChatMessageBubble extends StatelessWidget {
           ),
           border: Border.all(
             color: isMine
-                ? (isDark ? const Color(0xFF7E94E8) : const Color(0xFF7C92E6))
-                : (isDark ? const Color(0xFF273550) : const Color(0xFFD8E1EE)),
+                ? (isDark ? const Color(0xFF7E94E8) : const Color(0xFF2E5DEE))
+                : (isDark ? const Color(0xFF273550) : const Color(0xFFD6E3F7)),
           ),
           boxShadow: [
             BoxShadow(
               color: (isDark ? Colors.black : scheme.shadow).withValues(
-                alpha: isDark ? 0.12 : 0.07,
+                alpha: isDark ? 0.12 : 0.09,
               ),
-              blurRadius: isDark ? 10 : 9,
-              offset: const Offset(0, 4),
+              blurRadius: isDark ? 10 : 12,
+              offset: const Offset(0, 5),
             ),
           ],
         ),
@@ -967,7 +982,8 @@ class ChatMessageBubble extends StatelessWidget {
                 message.body,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: textColor,
-                  height: 1.3,
+                  fontWeight: FontWeight.w500,
+                  height: 1.42,
                 ),
               ),
             if (message.attachments.isNotEmpty) ...[
