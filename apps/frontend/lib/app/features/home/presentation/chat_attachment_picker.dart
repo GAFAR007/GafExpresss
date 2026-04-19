@@ -21,9 +21,30 @@ import 'package:frontend/app/core/platform/platform_info.dart';
 class ChatPickedAttachment {
   final List<int> bytes;
   final String filename;
+  final String mimeType;
 
-  const ChatPickedAttachment({required this.bytes, required this.filename});
+  const ChatPickedAttachment({
+    required this.bytes,
+    required this.filename,
+    required this.mimeType,
+  });
 }
+
+const List<String> _chatFileExtensions = [
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "docx",
+  "wav",
+  "mp3",
+  "m4a",
+  "aac",
+  "ogg",
+  "oga",
+  "webm",
+];
 
 Future<List<ChatPickedAttachment>> pickChatImages() async {
   if (PlatformInfo.isWeb) {
@@ -43,7 +64,13 @@ Future<List<ChatPickedAttachment>> pickChatImages() async {
       if (bytes.isEmpty) {
         continue;
       }
-      picked.add(ChatPickedAttachment(bytes: bytes, filename: file.name));
+      picked.add(
+        ChatPickedAttachment(
+          bytes: bytes,
+          filename: file.name,
+          mimeType: _normalizePickedMimeType(null, file.name),
+        ),
+      );
     }
     return picked;
   }
@@ -60,7 +87,13 @@ Future<List<ChatPickedAttachment>> pickChatImages() async {
     if (bytes.isEmpty) {
       continue;
     }
-    picked.add(ChatPickedAttachment(bytes: bytes, filename: image.name));
+    picked.add(
+      ChatPickedAttachment(
+        bytes: bytes,
+        filename: image.name,
+        mimeType: _normalizePickedMimeType(null, image.name),
+      ),
+    );
   }
   return picked;
 }
@@ -84,7 +117,11 @@ Future<ChatPickedAttachment?> captureChatImage() async {
     return null;
   }
 
-  return ChatPickedAttachment(bytes: bytes, filename: image.name);
+  return ChatPickedAttachment(
+    bytes: bytes,
+    filename: image.name,
+    mimeType: _normalizePickedMimeType(null, image.name),
+  );
 }
 
 Future<ChatPickedAttachment?> pickChatDocument() async {
@@ -104,5 +141,79 @@ Future<ChatPickedAttachment?> pickChatDocument() async {
     return null;
   }
 
-  return ChatPickedAttachment(bytes: bytes, filename: file.name);
+  return ChatPickedAttachment(
+    bytes: bytes,
+    filename: file.name,
+    mimeType: _normalizePickedMimeType(null, file.name),
+  );
+}
+
+Future<List<ChatPickedAttachment>> pickChatFiles() async {
+  final result = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: _chatFileExtensions,
+    withData: true,
+    allowMultiple: true,
+  );
+
+  if (result == null || result.files.isEmpty) {
+    return const [];
+  }
+
+  final picked = <ChatPickedAttachment>[];
+  for (final file in result.files) {
+    final bytes = file.bytes ?? <int>[];
+    if (bytes.isEmpty) {
+      continue;
+    }
+    picked.add(
+      ChatPickedAttachment(
+        bytes: bytes,
+        filename: file.name,
+        mimeType: _normalizePickedMimeType(null, file.name),
+      ),
+    );
+  }
+  return picked;
+}
+
+String _normalizePickedMimeType(String? rawMimeType, String filename) {
+  final normalized = rawMimeType?.trim().toLowerCase() ?? "";
+  if (normalized.isNotEmpty && normalized != "application/octet-stream") {
+    return normalized;
+  }
+  return _guessMimeTypeFromFilename(filename);
+}
+
+String _guessMimeTypeFromFilename(String filename) {
+  final parts = filename.trim().toLowerCase().split(".");
+  final extension = parts.length > 1 ? parts.last : "";
+  switch (extension) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "pdf":
+      return "application/pdf";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "wav":
+      return "audio/wav";
+    case "mp3":
+      return "audio/mpeg";
+    case "m4a":
+      return "audio/mp4";
+    case "aac":
+      return "audio/aac";
+    case "ogg":
+    case "oga":
+      return "audio/ogg";
+    case "webm":
+      return "audio/webm";
+    default:
+      return "";
+  }
 }

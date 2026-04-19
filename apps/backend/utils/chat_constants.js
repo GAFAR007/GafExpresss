@@ -46,12 +46,14 @@ const CHAT_CALL_STATES = {
 const CHAT_ATTACHMENT_TYPES = {
   IMAGE: 'image',
   DOCUMENT: 'document',
+  AUDIO: 'audio',
 };
 
 // WHY: Centralize size limits to avoid inline magic numbers.
 const CHAT_LIMITS = {
   MAX_IMAGE_BYTES: 10 * 1024 * 1024,
   MAX_DOCUMENT_BYTES: 20 * 1024 * 1024,
+  MAX_AUDIO_BYTES: 16 * 1024 * 1024,
   MAX_TEXT_LENGTH: 4000,
   MAX_TITLE_LENGTH: 120,
 };
@@ -62,6 +64,18 @@ const CHAT_ATTACHMENT_MIME_TYPES = {
   DOCUMENT: [
     'application/pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ],
+  AUDIO: [
+    'audio/wav',
+    'audio/x-wav',
+    'audio/wave',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/ogg',
+    'audio/webm',
   ],
 };
 

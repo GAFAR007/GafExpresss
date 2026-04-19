@@ -635,6 +635,7 @@ async function uploadChatAttachment(req, res) {
       businessId: conversation.businessId.toString(),
       conversationId,
       file: req.file,
+      mimeType: req.body?.mimeType,
       context,
     });
 

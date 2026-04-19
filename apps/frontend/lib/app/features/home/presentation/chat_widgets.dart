@@ -50,6 +50,7 @@ const String _kAttachmentOpenTap = "attachment_open_tap";
 const String _kAttachmentOpenFail = "attachment_open_fail";
 const String _kAttachmentOpenSuccess = "attachment_open_success";
 const String _kAttachmentTypeImage = "image";
+const String _kAttachmentTypeAudio = "audio";
 const int _kBytesInKb = 1024;
 const int _kBytesInMb = 1024 * 1024;
 
@@ -69,6 +70,7 @@ class _ChatAttachmentCopy {
   static const String fallbackName = "Attachment";
   static const String imageLabel = "Image";
   static const String documentLabel = "Document";
+  static const String voiceNoteLabel = "Voice note";
   static const String openFail = "Unable to open attachment.";
   static const String missingUrl = "Attachment link is unavailable.";
 }
@@ -1343,6 +1345,7 @@ class _AttachmentPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isImage = _isImageAttachment(attachment);
+    final isAudio = _isAudioAttachment(attachment);
     // WHY: Show a neutral placeholder for documents and unknown types.
     if (!isImage) {
       return Container(
@@ -1353,9 +1356,11 @@ class _AttachmentPreview extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
-          Icons.insert_drive_file,
+          isAudio ? Icons.mic_rounded : Icons.insert_drive_file,
           size: 20,
-          color: theme.colorScheme.onSurfaceVariant,
+          color: isAudio
+              ? const Color(0xFF1D4ED8)
+              : theme.colorScheme.onSurfaceVariant,
         ),
       );
     }
@@ -1457,6 +1462,9 @@ String _attachmentTypeLabel(ChatAttachment attachment) {
   if (_isImageAttachment(attachment)) {
     return _ChatAttachmentCopy.imageLabel;
   }
+  if (_isAudioAttachment(attachment)) {
+    return _ChatAttachmentCopy.voiceNoteLabel;
+  }
   // WHY: Default unknown types to document for safe user expectations.
   if (attachment.mimeType.isNotEmpty || attachment.type.isNotEmpty) {
     return _ChatAttachmentCopy.documentLabel;
@@ -1470,6 +1478,13 @@ bool _isImageAttachment(ChatAttachment attachment) {
     return true;
   }
   return attachment.mimeType.toLowerCase().startsWith("image/");
+}
+
+bool _isAudioAttachment(ChatAttachment attachment) {
+  if (attachment.type.toLowerCase() == _kAttachmentTypeAudio) {
+    return true;
+  }
+  return attachment.mimeType.toLowerCase().startsWith("audio/");
 }
 
 String _formatBytes(int bytes) {

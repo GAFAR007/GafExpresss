@@ -116,6 +116,73 @@ const ACTOR_SELECT_FIELDS =
 // WHY: Keep participant lookups small while supporting profile summary.
 const PARTICIPANT_SELECT_FIELDS =
   "role businessId estateAssetId name email firstName middleName lastName companyName profileImageUrl";
+const GENERIC_UPLOAD_MIME_TYPES = new Set([
+  "",
+  "application/octet-stream",
+  "binary/octet-stream",
+]);
+const ATTACHMENT_MIME_BY_EXTENSION = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  webm: "audio/webm",
+};
+
+function resolveAttachmentMimeType({ explicitMimeType, file }) {
+  const candidateMimeTypes = [explicitMimeType, file?.mimetype];
+
+  for (const candidate of candidateMimeTypes) {
+    const normalized = (candidate || "").toString().trim().toLowerCase();
+    if (!GENERIC_UPLOAD_MIME_TYPES.has(normalized)) {
+      return normalized;
+    }
+  }
+
+  const originalName = (file?.originalname || "").toString().trim().toLowerCase();
+  const extension = originalName.includes(".")
+    ? originalName.split(".").pop()
+    : "";
+  return ATTACHMENT_MIME_BY_EXTENSION[extension] || "";
+}
+
+function resolveAttachmentType(mimeType) {
+  const normalized = (mimeType || "").toString().trim().toLowerCase();
+  if (
+    CHAT_ATTACHMENT_MIME_TYPES.IMAGE.includes(normalized) ||
+    normalized.startsWith("image/")
+  ) {
+    return CHAT_ATTACHMENT_TYPES.IMAGE;
+  }
+  if (
+    CHAT_ATTACHMENT_MIME_TYPES.AUDIO.includes(normalized) ||
+    normalized.startsWith("audio/")
+  ) {
+    return CHAT_ATTACHMENT_TYPES.AUDIO;
+  }
+  if (CHAT_ATTACHMENT_MIME_TYPES.DOCUMENT.includes(normalized)) {
+    return CHAT_ATTACHMENT_TYPES.DOCUMENT;
+  }
+  return "";
+}
+
+function resolveAttachmentMaxBytes(type) {
+  if (type === CHAT_ATTACHMENT_TYPES.IMAGE) {
+    return CHAT_LIMITS.MAX_IMAGE_BYTES;
+  }
+  if (type === CHAT_ATTACHMENT_TYPES.AUDIO) {
+    return CHAT_LIMITS.MAX_AUDIO_BYTES;
+  }
+  return CHAT_LIMITS.MAX_DOCUMENT_BYTES;
+}
 
 function logStep(step, context = {}) {
   // WHY: Avoid noisy logs unless context is provided.
@@ -1603,6 +1670,7 @@ async function uploadChatAttachment({
   businessId,
   conversationId,
   file,
+  mimeType,
   context,
 }) {
   logStep(LOG_STEPS.SERVICE_START, context);
@@ -1623,12 +1691,13 @@ async function uploadChatAttachment({
     });
   }
 
-  const isImage = CHAT_ATTACHMENT_MIME_TYPES.IMAGE.includes(file.mimetype);
-  const isDocument = CHAT_ATTACHMENT_MIME_TYPES.DOCUMENT.includes(
-    file.mimetype,
-  );
+  const resolvedMimeType = resolveAttachmentMimeType({
+    explicitMimeType: mimeType,
+    file,
+  });
+  const attachmentType = resolveAttachmentType(resolvedMimeType);
 
-  if (!isImage && !isDocument) {
+  if (!attachmentType) {
     throw buildChatError({
       message: "Unsupported attachment type",
       classification: "INVALID_INPUT",
@@ -1638,19 +1707,14 @@ async function uploadChatAttachment({
     });
   }
 
-  if (isImage && file.size > CHAT_LIMITS.MAX_IMAGE_BYTES) {
+  if (file.size > resolveAttachmentMaxBytes(attachmentType)) {
     throw buildChatError({
-      message: "Image exceeds max size",
-      classification: "INVALID_INPUT",
-      errorCode: ERROR_CODES.ATTACHMENT_INVALID,
-      resolutionHint: RESOLUTION_HINTS.ATTACHMENT_INVALID,
-      httpStatus: HTTP_STATUS.BAD_REQUEST,
-    });
-  }
-
-  if (isDocument && file.size > CHAT_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw buildChatError({
-      message: "Document exceeds max size",
+      message:
+        attachmentType === CHAT_ATTACHMENT_TYPES.IMAGE
+          ? "Image exceeds max size"
+          : attachmentType === CHAT_ATTACHMENT_TYPES.AUDIO
+            ? "Voice note exceeds max size"
+            : "Document exceeds max size",
       classification: "INVALID_INPUT",
       errorCode: ERROR_CODES.ATTACHMENT_INVALID,
       resolutionHint: RESOLUTION_HINTS.ATTACHMENT_INVALID,
@@ -1666,7 +1730,21 @@ async function uploadChatAttachment({
         {
           folder: `gafexpress/chat/${businessId}/${conversationId}`,
           resource_type: "auto",
-          allowed_formats: ["pdf", "png", "jpg", "jpeg", "webp", "docx"],
+          allowed_formats: [
+            "pdf",
+            "png",
+            "jpg",
+            "jpeg",
+            "webp",
+            "docx",
+            "wav",
+            "mp3",
+            "m4a",
+            "aac",
+            "ogg",
+            "oga",
+            "webm",
+          ],
         },
         (error, result) => {
           if (error) return reject(error);
@@ -1680,10 +1758,8 @@ async function uploadChatAttachment({
       conversationId,
       messageId: null,
       uploadedByUserId: actor._id,
-      type: isImage
-        ? CHAT_ATTACHMENT_TYPES.IMAGE
-        : CHAT_ATTACHMENT_TYPES.DOCUMENT,
-      mimeType: file.mimetype,
+      type: attachmentType,
+      mimeType: resolvedMimeType,
       sizeBytes: file.size,
       url: uploadResult.secure_url,
       publicId: uploadResult.public_id || "",

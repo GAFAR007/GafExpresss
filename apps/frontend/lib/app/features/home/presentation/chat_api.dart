@@ -512,6 +512,7 @@ class ChatApi {
     required String conversationId,
     required List<int> bytes,
     required String filename,
+    String? mimeType,
   }) async {
     AppDebug.log(
       _logTag,
@@ -526,18 +527,15 @@ class ChatApi {
     try {
       final formData = FormData.fromMap({
         "conversationId": conversationId,
+        if (mimeType != null && mimeType.trim().isNotEmpty)
+          "mimeType": mimeType.trim(),
         "file": MultipartFile.fromBytes(bytes, filename: filename),
       });
 
-      final resp = await _dio.post(
-        _attachmentsPath,
-        data: formData,
-        options: _authOptions(token),
+      final attachment = await _postAttachmentFormData(
+        token: token,
+        formData: formData,
       );
-
-      final data = resp.data as Map<String, dynamic>;
-      final attachmentMap = (data["attachment"] ?? {}) as Map<String, dynamic>;
-      final attachment = ChatAttachment.fromJson(attachmentMap);
 
       AppDebug.log(
         _logTag,
@@ -570,6 +568,84 @@ class ChatApi {
       );
       rethrow;
     }
+  }
+
+  Future<ChatAttachment> uploadAttachmentFile({
+    required String? token,
+    required String conversationId,
+    required String filePath,
+    required String filename,
+    String? mimeType,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "uploadAttachmentFile() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationUpload,
+        _extraIntentKey: _intentUpload,
+      },
+    );
+
+    try {
+      final formData = FormData.fromMap({
+        "conversationId": conversationId,
+        if (mimeType != null && mimeType.trim().isNotEmpty)
+          "mimeType": mimeType.trim(),
+        "file": await MultipartFile.fromFile(filePath, filename: filename),
+      });
+
+      final attachment = await _postAttachmentFormData(
+        token: token,
+        formData: formData,
+      );
+
+      AppDebug.log(
+        _logTag,
+        "uploadAttachmentFile() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationUpload,
+          _extraIntentKey: _intentUpload,
+        },
+      );
+
+      return attachment;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "uploadAttachmentFile() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationUpload,
+          _extraIntentKey: _intentUpload,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatAttachment> _postAttachmentFormData({
+    required String? token,
+    required FormData formData,
+  }) async {
+    final resp = await _dio.post(
+      _attachmentsPath,
+      data: formData,
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final attachmentMap = (data["attachment"] ?? {}) as Map<String, dynamic>;
+    return ChatAttachment.fromJson(attachmentMap);
   }
 
   Future<ChatCallSession> startCall({

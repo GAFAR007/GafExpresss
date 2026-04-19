@@ -342,6 +342,7 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
   Future<void> addAttachment({
     required List<int> bytes,
     required String filename,
+    String? mimeType,
   }) async {
     AppDebug.log(_logTag, _threadAttachStart);
     final session = _ref.read(authSessionProvider);
@@ -357,6 +358,41 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
         conversationId: conversationId,
         bytes: bytes,
         filename: filename,
+        mimeType: mimeType,
+      );
+      final updated = [...state.pendingAttachments, attachment];
+      state = state.copyWith(pendingAttachments: updated, error: null);
+      AppDebug.log(_logTag, _threadAttachSuccess);
+    } catch (error) {
+      AppDebug.log(
+        _logTag,
+        _threadAttachFail,
+        extra: {"error": error.toString()},
+      );
+      state = state.copyWith(error: error.toString());
+    }
+  }
+
+  Future<void> addAttachmentFile({
+    required String filePath,
+    required String filename,
+    String? mimeType,
+  }) async {
+    AppDebug.log(_logTag, _threadAttachStart);
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      state = state.copyWith(error: _sessionExpiredMessage);
+      return;
+    }
+
+    try {
+      final api = _ref.read(chatApiProvider);
+      final attachment = await api.uploadAttachmentFile(
+        token: session.token,
+        conversationId: conversationId,
+        filePath: filePath,
+        filename: filename,
+        mimeType: mimeType,
       );
       final updated = [...state.pendingAttachments, attachment];
       state = state.copyWith(pendingAttachments: updated, error: null);

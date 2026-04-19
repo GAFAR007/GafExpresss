@@ -81,6 +81,9 @@ dependencies:
   # Save generated draft files on mobile/desktop
   path_provider: ^2.1.5
 
+  # Voice note recording for chat composer
+  record: ^6.1.2
+
   # Browser APIs for safe Flutter web downloads
   web: ^1.1.1
 
