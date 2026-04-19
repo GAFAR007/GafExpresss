@@ -22,10 +22,12 @@ import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import 'package:frontend/app/core/constants/app_constants.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/core/platform/platform_info.dart';
+import 'package:frontend/app/core/platform/voice_note_blob.dart';
 import 'package:frontend/app/features/home/presentation/business_order_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_attachment_picker.dart';
 import 'package:frontend/app/features/home/presentation/chat_call_providers.dart';
@@ -67,6 +69,7 @@ const String _tooltipAttend = "Attend this chat";
 const String _tooltipMore = "More actions";
 const String _tooltipInfo = "Open profile";
 const String _tooltipCall = "Start voice call";
+const String _tooltipCallUnavailable = "Voice calling is not available yet";
 const Color _threadHeroTop = Color(0xFF082A55);
 const Color _threadCanvas = Color(0xFFF8FAFC);
 
@@ -81,6 +84,18 @@ class ChatThreadArgs {
 }
 
 enum _ComposerAttachmentAction { photos, camera, files }
+
+class _VoiceNoteProfile {
+  final AudioEncoder encoder;
+  final String mimeType;
+  final String fileExtension;
+
+  const _VoiceNoteProfile({
+    required this.encoder,
+    required this.mimeType,
+    required this.fileExtension,
+  });
+}
 
 enum _ThreadOverflowAction { viewProfile, hideRequest, showRequest, returnToAi }
 
@@ -106,6 +121,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   bool _isVoiceRecording = false;
   bool _isProcessingVoiceNote = false;
   Duration _voiceRecordingDuration = Duration.zero;
+  _VoiceNoteProfile? _activeVoiceNoteProfile;
 
   @override
   void initState() {
@@ -1215,10 +1231,6 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     if (_isVoiceRecording || _isProcessingVoiceNote) {
       return;
     }
-    if (!(PlatformInfo.isAndroid || PlatformInfo.isIOS)) {
-      _showMessage("Voice notes are available in the mobile app right now.");
-      return;
-    }
 
     final hasPermission = await _voiceRecorder.hasPermission();
     if (!hasPermission) {
@@ -1226,12 +1238,22 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       return;
     }
 
-    final tempDir = await getTemporaryDirectory();
-    final filename = "voice-note-${DateTime.now().millisecondsSinceEpoch}.wav";
-    final path = "${tempDir.path}/$filename";
+    final profile = await _resolveVoiceNoteProfile();
+    if (profile == null) {
+      _showMessage("Voice notes are not supported in this browser yet.");
+      return;
+    }
+
+    var path = "";
+    if (!PlatformInfo.isWeb) {
+      final tempDir = await getTemporaryDirectory();
+      final filename =
+          "voice-note-${DateTime.now().millisecondsSinceEpoch}.${profile.fileExtension}";
+      path = "${tempDir.path}/$filename";
+    }
 
     await _voiceRecorder.start(
-      const RecordConfig(encoder: AudioEncoder.wav),
+      RecordConfig(encoder: profile.encoder),
       path: path,
     );
 
@@ -1247,6 +1269,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     setState(() {
       _isVoiceRecording = true;
       _voiceRecordingDuration = Duration.zero;
+      _activeVoiceNoteProfile = profile;
     });
 
     _voiceRecordingTicker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -1277,6 +1300,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     setState(() {
       _isVoiceRecording = false;
       _voiceRecordingDuration = Duration.zero;
+      _activeVoiceNoteProfile = null;
     });
   }
 
@@ -1287,6 +1311,13 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
 
     _voiceRecordingTicker?.cancel();
     _voiceRecordingStopwatch.stop();
+    final profile =
+        _activeVoiceNoteProfile ??
+        const _VoiceNoteProfile(
+          encoder: AudioEncoder.wav,
+          mimeType: "audio/wav",
+          fileExtension: "wav",
+        );
 
     if (mounted) {
       setState(() {
@@ -1307,13 +1338,26 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
           .pendingAttachments
           .length;
       final filename =
-          "voice-note-${DateTime.now().millisecondsSinceEpoch}.wav";
+          "voice-note-${DateTime.now().millisecondsSinceEpoch}.${profile.fileExtension}";
 
-      await controller.addAttachmentFile(
-        filePath: path,
-        filename: filename,
-        mimeType: "audio/wav",
-      );
+      if (PlatformInfo.isWeb) {
+        try {
+          final bytes = await readVoiceNoteBlobBytes(path);
+          await controller.addAttachment(
+            bytes: bytes,
+            filename: filename,
+            mimeType: profile.mimeType,
+          );
+        } finally {
+          await revokeVoiceNoteBlobUrl(path);
+        }
+      } else {
+        await controller.addAttachmentFile(
+          filePath: path,
+          filename: filename,
+          mimeType: profile.mimeType,
+        );
+      }
 
       final afterCount = ref
           .read(chatThreadProvider(widget.conversationId))
@@ -1332,9 +1376,45 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         setState(() {
           _isProcessingVoiceNote = false;
           _voiceRecordingDuration = Duration.zero;
+          _activeVoiceNoteProfile = null;
         });
       }
     }
+  }
+
+  Future<_VoiceNoteProfile?> _resolveVoiceNoteProfile() async {
+    if (PlatformInfo.isWeb) {
+      const webProfiles = [
+        _VoiceNoteProfile(
+          encoder: AudioEncoder.aacLc,
+          mimeType: "audio/mp4",
+          fileExtension: "m4a",
+        ),
+        _VoiceNoteProfile(
+          encoder: AudioEncoder.opus,
+          mimeType: "audio/webm",
+          fileExtension: "webm",
+        ),
+        _VoiceNoteProfile(
+          encoder: AudioEncoder.wav,
+          mimeType: "audio/wav",
+          fileExtension: "wav",
+        ),
+      ];
+
+      for (final profile in webProfiles) {
+        if (await _voiceRecorder.isEncoderSupported(profile.encoder)) {
+          return profile;
+        }
+      }
+      return null;
+    }
+
+    return const _VoiceNoteProfile(
+      encoder: AudioEncoder.wav,
+      mimeType: "audio/wav",
+      fileExtension: "wav",
+    );
   }
 
   @override
@@ -1463,10 +1543,12 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         !_isSubmittingRequestAction;
     final attendLabel = isCurrentAttendant ? "In Chat" : "Attend Chat";
     final supportsCamera = PlatformInfo.isAndroid || PlatformInfo.isIOS;
-    final supportsVoiceRecording = PlatformInfo.isAndroid || PlatformInfo.isIOS;
+    final supportsVoiceRecording =
+        PlatformInfo.isWeb || PlatformInfo.isAndroid || PlatformInfo.isIOS;
     final hasLiveCall =
         callState.call != null && !(callState.call?.isTerminal ?? true);
     final canVoiceCall =
+        AppConstants.chatCallingEnabled &&
         conversation?.type != _conversationTypeGroup &&
         displayParticipants.isNotEmpty &&
         !hasLiveCall;
@@ -1549,7 +1631,9 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                   padding: const EdgeInsets.only(left: 2),
                   child: _ThreadToolbarButton(
                     icon: Icons.call_rounded,
-                    tooltip: _tooltipCall,
+                    tooltip: canVoiceCall
+                        ? _tooltipCall
+                        : _tooltipCallUnavailable,
                     heroStyle: true,
                     onPressed: !canVoiceCall
                         ? null
@@ -1618,7 +1702,9 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                   padding: const EdgeInsets.only(right: 4),
                   child: _ThreadToolbarButton(
                     icon: Icons.call_rounded,
-                    tooltip: _tooltipCall,
+                    tooltip: canVoiceCall
+                        ? _tooltipCall
+                        : _tooltipCallUnavailable,
                     heroStyle: true,
                     onPressed: !canVoiceCall
                         ? null
