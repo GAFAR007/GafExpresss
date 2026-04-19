@@ -28,6 +28,7 @@ const String _logTag = "CHAT_PROVIDERS";
 const String _apiProviderCreated = "chatApiProvider created";
 const String _socketProviderCreated = "chatSocketProvider created";
 const String _inboxFetchStart = "chatInboxProvider fetch start";
+const String _contactsFetchStart = "chatContactsProvider fetch start";
 const String _threadLoadStart = "chatThread load start";
 const String _threadLoadSuccess = "chatThread load success";
 const String _threadLoadFail = "chatThread load failed";
@@ -46,6 +47,7 @@ const String _nextActionSignIn = "Sign in and retry.";
 const String _extraReasonKey = "reason";
 const String _extraNextActionKey = "next_action";
 const String _reasonInboxMissing = "chat_inbox_session_missing";
+const String _reasonContactsMissing = "chat_contacts_session_missing";
 const String _reasonThreadMissing = "chat_thread_session_missing";
 const String _reasonDetailMissing = "chat_detail_session_missing";
 
@@ -80,6 +82,26 @@ final chatInboxProvider = FutureProvider<List<ChatConversation>>((ref) async {
 
   final api = ref.read(chatApiProvider);
   return api.fetchConversations(token: session.token);
+});
+
+final chatContactsProvider = FutureProvider<List<ChatContact>>((ref) async {
+  AppDebug.log(_logTag, _contactsFetchStart);
+
+  final session = ref.read(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    AppDebug.log(
+      _logTag,
+      _sessionMissingMessage,
+      extra: {
+        _extraReasonKey: _reasonContactsMissing,
+        _extraNextActionKey: _nextActionSignIn,
+      },
+    );
+    throw Exception(_sessionExpiredMessage);
+  }
+
+  final api = ref.read(chatApiProvider);
+  return api.fetchContacts(token: session.token);
 });
 
 final chatInboxRealtimeProvider = Provider.autoDispose<void>((ref) {

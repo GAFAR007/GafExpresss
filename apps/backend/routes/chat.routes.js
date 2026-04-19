@@ -31,6 +31,7 @@ const upload = multer({
 
 // WHY: Conversation list + creation endpoints.
 router.get('/conversations', requireAuth, chatController.listConversations);
+router.get('/contacts', requireAuth, chatController.listContacts);
 router.post('/conversations', requireAuth, chatController.createConversation);
 router.get(
   '/conversations/:conversationId',

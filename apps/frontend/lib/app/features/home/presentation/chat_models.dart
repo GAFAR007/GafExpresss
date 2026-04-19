@@ -42,6 +42,8 @@ const String _keyBusinessName = "businessName";
 const String _keyEstateAssetId = "estateAssetId";
 const String _keyEstateName = "estateName";
 const String _keyProfileImageUrl = "profileImageUrl";
+const String _keyAccountRole = "accountRole";
+const String _keyCanJoinGroup = "canJoinGroup";
 const String _keyJoinedAt = "joinedAt";
 const String _keyLastReadAt = "lastReadAt";
 const String _keyUrl = "url";
@@ -175,6 +177,50 @@ class ChatParticipantSummary {
       estateName: (json[_keyEstateName] ?? "").toString(),
       joinedAt: _parseDate(json[_keyJoinedAt]),
       lastReadAt: _parseDate(json[_keyLastReadAt]),
+    );
+  }
+}
+
+class ChatContact {
+  final String userId;
+  final String name;
+  final String email;
+  final String profileImageUrl;
+  final String role;
+  final String accountRole;
+  final String businessId;
+  final String businessName;
+  final String estateAssetId;
+  final String estateName;
+  final bool canJoinGroup;
+
+  const ChatContact({
+    required this.userId,
+    required this.name,
+    required this.email,
+    required this.profileImageUrl,
+    required this.role,
+    required this.accountRole,
+    required this.businessId,
+    required this.businessName,
+    required this.estateAssetId,
+    required this.estateName,
+    required this.canJoinGroup,
+  });
+
+  factory ChatContact.fromJson(Map<String, dynamic> json) {
+    return ChatContact(
+      userId: (json[_keyUserId] ?? "").toString(),
+      name: (json[_keyName] ?? "").toString(),
+      email: (json[_keyEmail] ?? "").toString(),
+      profileImageUrl: (json[_keyProfileImageUrl] ?? "").toString(),
+      role: (json[_keyRole] ?? "").toString(),
+      accountRole: (json[_keyAccountRole] ?? "").toString(),
+      businessId: (json[_keyBusinessId] ?? "").toString(),
+      businessName: (json[_keyBusinessName] ?? "").toString(),
+      estateAssetId: (json[_keyEstateAssetId] ?? "").toString(),
+      estateName: (json[_keyEstateName] ?? "").toString(),
+      canJoinGroup: json[_keyCanJoinGroup] == true,
     );
   }
 }

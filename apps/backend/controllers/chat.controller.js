@@ -29,6 +29,7 @@ const LOG_TAG = "CHAT_CONTROLLER";
 // WHY: Centralize response copy to avoid inline strings.
 const CHAT_COPY = {
   CONVERSATIONS_OK: "Conversations loaded successfully",
+  CONTACTS_OK: "Chat contacts loaded successfully",
   CONVERSATION_CREATED: "Conversation created successfully",
   CONVERSATION_DETAIL_OK: "Conversation loaded successfully",
   MESSAGES_OK: "Messages loaded successfully",
@@ -102,6 +103,35 @@ async function listConversations(req, res) {
     });
   } catch (error) {
     logError("listConversations", error, context);
+    return res.status(error?.httpStatus || 400).json({
+      error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
+    });
+  }
+}
+
+async function listContacts(req, res) {
+  const context = buildContext(req, "ListContacts", "load chat contacts");
+  debug(`${LOG_TAG}: listContacts - entry`, {
+    actorId: req.user?.sub,
+  });
+
+  try {
+    const actor = await chatService.loadActor(req.user?.sub, context);
+    const contacts = await chatService.listContacts({
+      actor,
+      context,
+    });
+
+    debug(`${LOG_TAG}: listContacts - success`, {
+      count: contacts.length,
+    });
+
+    return res.status(200).json({
+      message: CHAT_COPY.CONTACTS_OK,
+      contacts,
+    });
+  } catch (error) {
+    logError("listContacts", error, context);
     return res.status(error?.httpStatus || 400).json({
       error: error?.message || CHAT_COPY.UNKNOWN_ERROR,
     });
@@ -368,6 +398,7 @@ async function uploadChatAttachment(req, res) {
 
 module.exports = {
   listConversations,
+  listContacts,
   createConversation,
   getConversationDetail,
   listMessages,

@@ -55,17 +55,13 @@ const String _groupRoleLabel = "Group";
 const String _multipleLabel = "Multiple";
 const String _metaSeparator = " • ";
 const String _conversationTypeGroup = "group";
-const String _avatarFallbackInitial = "?";
 const String _tooltipAiToggle = "Toggle AI assistant";
 const String _tooltipAttend = "Attend this chat";
 const String _tooltipMore = "More actions";
 const String _tooltipInfo = "Open profile";
 
 const double _headerMetaSpacing = 2;
-const double _appBarInfoHeight = 68;
-const double _participantPillAvatarRadius = 12;
-const double _participantPillSpacing = 8;
-const double _participantPillRadius = 999;
+const double _appBarInfoHeight = 60;
 const EdgeInsets _appBarInfoPadding = EdgeInsets.fromLTRB(16, 0, 16, 8);
 
 class ChatThreadArgs {
@@ -1083,7 +1079,6 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       currentUserRole: currentUserRole,
       currentUserBusinessId: currentUserBusinessId,
     );
-    final primaryParticipant = _resolvePrimaryParticipant(displayParticipants);
     final currentParticipant = _findParticipantByUserId(
       allParticipants,
       currentUserId,
@@ -1256,35 +1251,17 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                         ),
                       ),
                     ],
-              bottom: supportConversation && primaryParticipant != null
+              bottom: supportConversation
                   ? PreferredSize(
                       preferredSize: const Size.fromHeight(_appBarInfoHeight),
                       child: _StaffSupportHeaderBar(
-                        participant: primaryParticipant,
                         assignedStaffName: assignedStaffName,
                         assignedStaffLabel: assignedStaffLabel,
                         conversationStatus: conversationStatus,
                         conversationStatusAccent: conversationStatusAccent,
-                        onTapProfile: () => _openProfileScreen(
-                          context,
-                          displayParticipants,
-                          userId: primaryParticipant.userId,
-                        ),
                       ),
                     )
-                  : displayParticipants.isEmpty
-                  ? null
-                  : PreferredSize(
-                      preferredSize: const Size.fromHeight(_appBarInfoHeight),
-                      child: _ThreadInfoBar(
-                        participants: displayParticipants,
-                        onTapParticipant: (participant) => _openProfileScreen(
-                          context,
-                          displayParticipants,
-                          userId: participant.userId,
-                        ),
-                      ),
-                    ),
+                  : null,
             ),
             body: DecoratedBox(
               decoration: BoxDecoration(
@@ -3624,6 +3601,8 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: _headerMetaSpacing),
         Text(
@@ -3633,6 +3612,8 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
             color: theme.colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w600,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -3640,20 +3621,16 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
 }
 
 class _StaffSupportHeaderBar extends StatelessWidget {
-  final ChatParticipantSummary participant;
   final String assignedStaffName;
   final String assignedStaffLabel;
   final String conversationStatus;
   final Color conversationStatusAccent;
-  final VoidCallback onTapProfile;
 
   const _StaffSupportHeaderBar({
-    required this.participant,
     required this.assignedStaffName,
     required this.assignedStaffLabel,
     required this.conversationStatus,
     required this.conversationStatusAccent,
-    required this.onTapProfile,
   });
 
   @override
@@ -3666,8 +3643,6 @@ class _StaffSupportHeaderBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _ParticipantInfoPill(participant: participant, onTap: onTapProfile),
-            const SizedBox(width: 10),
             _SupportMetaChip(
               icon: Icons.badge_outlined,
               title: "Assigned",
@@ -3805,12 +3780,40 @@ class _ThreadHeaderTitle extends StatelessWidget {
     required this.estateLabel,
   });
 
+  String? _buildMetaText() {
+    final labels = <String>[];
+    final seen = <String>{};
+    final hiddenValues = <String>{
+      _fallbackRole.toLowerCase(),
+      _fallbackBusiness.toLowerCase(),
+      _fallbackEstate.toLowerCase(),
+    };
+
+    void addLabel(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return;
+      }
+      final normalized = trimmed.toLowerCase();
+      if (hiddenValues.contains(normalized) || !seen.add(normalized)) {
+        return;
+      }
+      labels.add(trimmed);
+    }
+
+    addLabel(roleLabel);
+    addLabel(businessLabel);
+    addLabel(estateLabel);
+    if (labels.isEmpty) {
+      return null;
+    }
+    return labels.join(_metaSeparator);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // WHY: Stack name and metadata to match the requested header layout.
-    final metaText =
-        "$roleLabel$_metaSeparator$businessLabel$_metaSeparator$estateLabel";
+    final metaText = _buildMetaText();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -3820,144 +3823,22 @@ class _ThreadHeaderTitle extends StatelessWidget {
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: _headerMetaSpacing),
-        Text(
-          metaText,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        if (metaText != null) ...[
+          const SizedBox(height: _headerMetaSpacing),
+          Text(
+            metaText,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        ),
+        ],
       ],
-    );
-  }
-}
-
-class _ThreadInfoBar extends StatelessWidget {
-  final List<ChatParticipantSummary> participants;
-  final ValueChanged<ChatParticipantSummary> onTapParticipant;
-
-  const _ThreadInfoBar({
-    required this.participants,
-    required this.onTapParticipant,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // WHY: Keep participant context visible without leaving the thread.
-    return Container(
-      width: double.infinity,
-      padding: _appBarInfoPadding,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: participants
-              .map(
-                (participant) => Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: _ParticipantInfoPill(
-                    participant: participant,
-                    onTap: () => onTapParticipant(participant),
-                  ),
-                ),
-              )
-              .toList(),
-        ),
-      ),
-    );
-  }
-}
-
-class _ParticipantInfoPill extends StatelessWidget {
-  final ChatParticipantSummary participant;
-  final VoidCallback onTap;
-
-  const _ParticipantInfoPill({required this.participant, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final displayName = participant.name.trim().isEmpty
-        ? participant.email
-        : participant.name;
-    final avatarUrl = participant.profileImageUrl.trim();
-    final roleLabel = participant.role.trim().isEmpty
-        ? _fallbackRole
-        : participant.role.replaceAll("_", " ");
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(_participantPillRadius),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(_participantPillRadius),
-            border: Border.all(color: colorScheme.outlineVariant),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 10,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: _participantPillAvatarRadius + 2,
-                backgroundColor: colorScheme.primaryContainer,
-                backgroundImage: avatarUrl.isEmpty
-                    ? null
-                    : NetworkImage(avatarUrl),
-                child: avatarUrl.isEmpty
-                    ? Text(
-                        displayName.isNotEmpty
-                            ? displayName[0].toUpperCase()
-                            : _avatarFallbackInitial,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onPrimaryContainer,
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: _participantPillSpacing),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayName,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Chip(
-                    label: Text(
-                      roleLabel,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    backgroundColor: colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.34),
-                    side: BorderSide(color: colorScheme.outlineVariant),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

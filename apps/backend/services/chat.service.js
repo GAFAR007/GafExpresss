@@ -99,6 +99,7 @@ const ROLE_TENANT = "tenant";
 const ROLE_CUSTOMER = "customer";
 const ROLE_ADMIN = "admin";
 const ROLE_SUPPORT = "support";
+const CHAT_CONTACT_ROLES = [ROLE_BUSINESS_OWNER, ROLE_STAFF, ROLE_TENANT];
 const SELLER_REQUEST_STAFF_ROLES = new Set([
   "farm_manager",
   "estate_manager",
@@ -956,6 +957,132 @@ async function listConversations({ userId, businessId, limit, context }) {
   return enriched;
 }
 
+function canActorListContacts(actor) {
+  return [ROLE_BUSINESS_OWNER, ROLE_STAFF].includes(actor?.role || "");
+}
+
+function canContactJoinGroup(userRole) {
+  return [ROLE_BUSINESS_OWNER, ROLE_STAFF].includes((userRole || "").trim());
+}
+
+async function listContacts({ actor, context }) {
+  logStep(LOG_STEPS.SERVICE_START, context);
+
+  if (!canActorListContacts(actor)) {
+    throw buildChatError({
+      message: "User is not allowed to load chat contacts",
+      classification: "AUTHENTICATION_ERROR",
+      errorCode: ERROR_CODES.ACCESS_FORBIDDEN,
+      resolutionHint: RESOLUTION_HINTS.ACCESS_FORBIDDEN,
+      httpStatus: HTTP_STATUS.FORBIDDEN,
+    });
+  }
+
+  const businessId = await resolveBusinessScope({
+    actor,
+    businessIdHint: null,
+    context,
+  });
+
+  logStep(LOG_STEPS.DB_QUERY_START, {
+    ...context,
+    businessId,
+  });
+
+  const users = await User.find({
+    businessId,
+    role: { $in: CHAT_CONTACT_ROLES },
+    _id: { $ne: actor._id },
+  }).select(PARTICIPANT_SELECT_FIELDS);
+
+  const staffUserIds = users
+    .filter((user) => user.role === ROLE_STAFF)
+    .map((user) => user._id.toString());
+  const staffProfiles = await BusinessStaffProfile.find({
+    businessId,
+    userId: { $in: staffUserIds },
+    status: "active",
+  }).select("userId estateAssetId staffRole");
+  const activeStaffUserIds = new Set(
+    staffProfiles.map((profile) => profile.userId?.toString()).filter(Boolean),
+  );
+  const staffProfileMap = new Map();
+  staffProfiles.forEach((profile) => {
+    if (!profile.userId) {
+      return;
+    }
+    staffProfileMap.set(profile.userId.toString(), {
+      estateAssetId: profile.estateAssetId?.toString() || "",
+      staffRole: profile.staffRole || "",
+    });
+  });
+
+  const visibleUsers = users.filter((user) => {
+    if (user.role !== ROLE_STAFF) {
+      return true;
+    }
+    return activeStaffUserIds.has(user._id.toString());
+  });
+
+  const businessNameMap = await loadBusinessNameMap([businessId]);
+  const estateIds = visibleUsers
+    .map((user) => {
+      const staffProfile = staffProfileMap.get(user._id.toString());
+      return (
+        staffProfile?.estateAssetId ||
+        user.estateAssetId?.toString() ||
+        ""
+      );
+    })
+    .filter(Boolean);
+  const estateNameMap = await loadEstateNameMap(estateIds);
+
+  const rolePriority = new Map([
+    [ROLE_BUSINESS_OWNER, 0],
+    [ROLE_STAFF, 1],
+    [ROLE_TENANT, 2],
+  ]);
+  const businessName = businessNameMap.get(businessId) || "";
+  const contacts = visibleUsers
+    .map((user) => {
+      const staffProfile = staffProfileMap.get(user._id.toString());
+      const estateId =
+        staffProfile?.estateAssetId || user.estateAssetId?.toString() || "";
+      return {
+        userId: user._id.toString(),
+        name: resolveDisplayName(user),
+        email: user.email || "",
+        profileImageUrl: user.profileImageUrl || "",
+        role: staffProfile?.staffRole || user.role || "",
+        accountRole: user.role || "",
+        businessId,
+        businessName,
+        estateAssetId: estateId,
+        estateName: estateId ? estateNameMap.get(estateId) || "" : "",
+        canJoinGroup: canContactJoinGroup(user.role),
+      };
+    })
+    .sort((left, right) => {
+      const leftPriority = rolePriority.get(left.accountRole) ?? 99;
+      const rightPriority = rolePriority.get(right.accountRole) ?? 99;
+      if (leftPriority != rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+  logStep(LOG_STEPS.DB_QUERY_OK, {
+    ...context,
+    businessId,
+    extra: { count: contacts.length },
+  });
+  logStep(LOG_STEPS.SERVICE_OK, {
+    ...context,
+    businessId,
+  });
+  return contacts;
+}
+
 async function createConversation({
   actor,
   businessId,
@@ -1586,6 +1713,7 @@ module.exports = {
   ensureConversationAccess,
   ensureParticipant,
   listConversations,
+  listContacts,
   createConversation,
   getConversationDetail,
   listMessages,
