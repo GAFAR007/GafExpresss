@@ -4130,7 +4130,7 @@ class _ComposerState extends State<_Composer> {
     final isDark = scheme.brightness == Brightness.dark;
     final composerSurface = isDark
         ? scheme.surfaceContainerLow
-        : _blendThreadTone(scheme.primary, Colors.white, alpha: 0.035);
+        : const Color(0xFFF7F9FD);
     final quickActionDisabled =
         widget.isSending || widget.isUploadingAttachments;
 
@@ -4212,13 +4212,15 @@ class _ComposerState extends State<_Composer> {
                 margin: const EdgeInsets.only(top: 10),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _blendThreadTone(
-                    scheme.primary,
-                    scheme.surface,
-                    alpha: isDark ? 0.12 : 0.06,
-                  ),
+                  color: isDark
+                      ? const Color(0xFF19263B)
+                      : const Color(0xFFF0F4FB),
                   borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: scheme.outlineVariant),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFF2B3A54)
+                        : const Color(0xFFD6E0EF),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -4249,23 +4251,25 @@ class _ComposerState extends State<_Composer> {
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 180),
                       decoration: BoxDecoration(
-                        color: Color.alphaBlend(
-                          (_hasFocus ? scheme.primary : scheme.primaryContainer)
-                              .withValues(alpha: _hasFocus ? 0.1 : 0.14),
-                          scheme.surface,
-                        ),
+                        color: isDark ? const Color(0xFF162133) : Colors.white,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: _hasFocus
-                              ? scheme.primary.withValues(alpha: 0.42)
-                              : scheme.outlineVariant,
+                              ? (isDark
+                                    ? const Color(0xFF7F95E8)
+                                    : const Color(0xFF8AA0EB))
+                              : (isDark
+                                    ? const Color(0xFF2A3851)
+                                    : const Color(0xFFD4DFEE)),
                         ),
                         boxShadow: _hasFocus
                             ? [
                                 BoxShadow(
-                                  color: scheme.primary.withValues(alpha: 0.1),
-                                  blurRadius: 14,
-                                  offset: const Offset(0, 8),
+                                  color: scheme.primary.withValues(
+                                    alpha: isDark ? 0.14 : 0.1,
+                                  ),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 6),
                                 ),
                               ]
                             : const [],
@@ -4298,14 +4302,16 @@ class _ComposerState extends State<_Composer> {
                     decoration: BoxDecoration(
                       color: widget.canSend
                           ? scheme.primary
-                          : scheme.surfaceContainerHighest,
+                          : (isDark
+                                ? const Color(0xFF22314B)
+                                : const Color(0xFFE3EAF5)),
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: widget.canSend
                           ? [
                               BoxShadow(
-                                color: scheme.primary.withValues(alpha: 0.22),
-                                blurRadius: 18,
-                                offset: const Offset(0, 10),
+                                color: scheme.primary.withValues(alpha: 0.24),
+                                blurRadius: 14,
+                                offset: const Offset(0, 7),
                               ),
                             ]
                           : const [],
@@ -4367,9 +4373,25 @@ class _ComposerQuickAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final background = isPrimary
-        ? _blendThreadTone(tone, scheme.surface, alpha: 0.16)
-        : _blendThreadTone(scheme.surfaceContainerHighest, scheme.surface);
+    final background = onPressed == null
+        ? (scheme.brightness == Brightness.dark
+              ? const Color(0xFF1B2940)
+              : const Color(0xFFE9EEF7))
+        : isPrimary
+        ? tone
+        : (scheme.brightness == Brightness.dark
+              ? const Color(0xFF22314B)
+              : Colors.white);
+    final foreground = onPressed == null
+        ? scheme.onSurfaceVariant
+        : isPrimary
+        ? Colors.white
+        : tone;
+    final borderColor = onPressed == null
+        ? scheme.outlineVariant.withValues(alpha: 0.8)
+        : isPrimary
+        ? tone
+        : tone.withValues(alpha: 0.38);
 
     return Material(
       color: Colors.transparent,
@@ -4381,25 +4403,26 @@ class _ComposerQuickAction extends StatelessWidget {
           decoration: BoxDecoration(
             color: background,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: onPressed == null
-                  ? scheme.outlineVariant.withValues(alpha: 0.7)
-                  : tone.withValues(alpha: isPrimary ? 0.34 : 0.2),
-            ),
+            border: Border.all(color: borderColor),
+            boxShadow: onPressed != null && isPrimary
+                ? [
+                    BoxShadow(
+                      color: tone.withValues(alpha: 0.24),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : const [],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                icon,
-                size: 18,
-                color: onPressed == null ? scheme.onSurfaceVariant : tone,
-              ),
+              Icon(icon, size: 18, color: foreground),
               const SizedBox(width: 8),
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: onPressed == null ? scheme.onSurfaceVariant : tone,
+                  color: foreground,
                   fontWeight: FontWeight.w800,
                 ),
               ),

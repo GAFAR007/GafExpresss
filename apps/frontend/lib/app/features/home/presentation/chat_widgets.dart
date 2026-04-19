@@ -704,12 +704,6 @@ class ChatMessageBubble extends StatelessWidget {
     final label = isMine
         ? "You"
         : (senderLabel.trim().isNotEmpty ? senderLabel.trim() : "Message");
-    final accentColor = _messageAccentForRole(
-      isMine: isMine,
-      senderRoleLabel: senderRoleLabel,
-      fallbackName: label,
-      scheme: scheme,
-    );
     final timeLabel = _formatConversationTime(message.createdAt);
     final isAssistantMessage =
         (message.eventData?["presentation"] ?? "").toString() == "assistant";
@@ -722,13 +716,9 @@ class ChatMessageBubble extends StatelessWidget {
 
     if (isAssistantMessage) {
       const assistantAccent = Color(0xFF1FE0C5);
-      final bubbleColor = _blendMessageSurface(
-        assistantAccent,
-        theme.colorScheme.surfaceContainerLow,
-        darkAlpha: 0.18,
-        lightAlpha: 0.08,
-        isDark: isDark,
-      );
+      final bubbleColor = isDark
+          ? const Color(0xFF143238)
+          : const Color(0xFFE4FBF7);
       final assistantName = (message.eventData?["assistantName"] ?? "Amara")
           .toString();
       return Align(
@@ -744,12 +734,14 @@ class ChatMessageBubble extends StatelessWidget {
               mergeWithPrevious: mergeWithPrevious,
               mergeWithNext: mergeWithNext,
             ),
-            border: Border.all(color: assistantAccent.withValues(alpha: 0.26)),
+            border: Border.all(
+              color: isDark ? const Color(0xFF235158) : const Color(0xFF9BDED2),
+            ),
             boxShadow: [
               BoxShadow(
-                color: assistantAccent.withValues(alpha: 0.08),
-                blurRadius: 10,
-                offset: const Offset(0, 6),
+                color: assistantAccent.withValues(alpha: isDark ? 0.1 : 0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
@@ -759,7 +751,9 @@ class ChatMessageBubble extends StatelessWidget {
               if (showSenderLabel)
                 DecoratedBox(
                   decoration: BoxDecoration(
-                    color: assistantAccent.withValues(alpha: 0.18),
+                    color: isDark
+                        ? const Color(0xFF1C4A51)
+                        : const Color(0xFFBFECE3),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Padding(
@@ -817,13 +811,18 @@ class ChatMessageBubble extends StatelessWidget {
     }
     if (isSystemMessage) {
       final systemAccent = _systemEventAccent(message.eventType);
-      final systemBackground = _blendMessageSurface(
-        systemAccent,
-        theme.colorScheme.surfaceContainerHigh,
-        darkAlpha: 0.18,
-        lightAlpha: 0.08,
-        isDark: isDark,
-      );
+      final systemBackground = isDark
+          ? _blendMessageSurface(
+              systemAccent,
+              theme.colorScheme.surfaceContainerHigh,
+              darkAlpha: 0.24,
+              lightAlpha: 0.1,
+              isDark: isDark,
+            )
+          : Color.alphaBlend(
+              systemAccent.withValues(alpha: 0.14),
+              Colors.white,
+            );
       return Center(
         child: Container(
           margin: outerMargin,
@@ -890,21 +889,15 @@ class ChatMessageBubble extends StatelessWidget {
     }
 
     final bubbleColor = isMine
-        ? _blendMessageSurface(
-            const Color(0xFF667FD7),
-            scheme.surface,
-            darkAlpha: 0.56,
-            lightAlpha: 0.82,
-            isDark: isDark,
-          )
-        : _blendMessageSurface(
-            accentColor,
-            scheme.surface,
-            darkAlpha: 0.1,
-            lightAlpha: 0.04,
-            isDark: isDark,
-          );
+        ? (isDark ? const Color(0xFF6079DA) : const Color(0xFF7189E2))
+        : (isDark ? const Color(0xFF182338) : Colors.white);
     final textColor = isMine ? Colors.white : scheme.onSurface;
+    final senderPillBackground = isMine
+        ? Colors.white.withValues(alpha: 0.16)
+        : (isDark ? const Color(0xFF26334A) : const Color(0xFFE4EAF4));
+    final senderPillText = isMine
+        ? Colors.white
+        : (isDark ? const Color(0xFFDCE6FA) : const Color(0xFF5B6C89));
     final namePillLabel = isMine
         ? "You"
         : senderRoleLabel.trim().isNotEmpty
@@ -931,16 +924,16 @@ class ChatMessageBubble extends StatelessWidget {
           ),
           border: Border.all(
             color: isMine
-                ? Colors.white.withValues(alpha: isDark ? 0.08 : 0.14)
-                : accentColor.withValues(alpha: isDark ? 0.2 : 0.12),
+                ? (isDark ? const Color(0xFF7E94E8) : const Color(0xFF7C92E6))
+                : (isDark ? const Color(0xFF273550) : const Color(0xFFD8E1EE)),
           ),
           boxShadow: [
             BoxShadow(
               color: (isDark ? Colors.black : scheme.shadow).withValues(
-                alpha: isDark ? 0.1 : 0.06,
+                alpha: isDark ? 0.12 : 0.07,
               ),
-              blurRadius: isDark ? 10 : 8,
-              offset: const Offset(0, 5),
+              blurRadius: isDark ? 10 : 9,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -950,9 +943,7 @@ class ChatMessageBubble extends StatelessWidget {
             if (showSenderLabel)
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: isMine
-                      ? Colors.white.withValues(alpha: 0.14)
-                      : accentColor.withValues(alpha: isDark ? 0.14 : 0.12),
+                  color: senderPillBackground,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Padding(
@@ -963,7 +954,7 @@ class ChatMessageBubble extends StatelessWidget {
                   child: Text(
                     namePillLabel,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: isMine ? Colors.white : accentColor,
+                      color: senderPillText,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0,
                     ),
@@ -1077,30 +1068,6 @@ Color _blendMessageSurface(
     accent.withValues(alpha: isDark ? darkAlpha : lightAlpha),
     base,
   );
-}
-
-Color _messageAccentForRole({
-  required bool isMine,
-  required String senderRoleLabel,
-  required String fallbackName,
-  required ColorScheme scheme,
-}) {
-  if (isMine) {
-    return const Color(0xFF7E97E8);
-  }
-
-  final normalizedRole = senderRoleLabel.trim().toLowerCase();
-  if (normalizedRole.contains("customer") ||
-      normalizedRole.contains("tenant")) {
-    return const Color(0xFF6A84C8);
-  }
-  if (normalizedRole.contains("owner") ||
-      normalizedRole.contains("manager") ||
-      normalizedRole.contains("care") ||
-      normalizedRole.contains("staff")) {
-    return const Color(0xFF7A86A3);
-  }
-  return const Color(0xFF7282A4);
 }
 
 String _rolePresentation(String value) {
