@@ -61,8 +61,7 @@ const String _tooltipAiToggle = "Toggle AI assistant";
 const String _tooltipAttend = "Attend this chat";
 const String _tooltipMore = "More actions";
 const String _tooltipInfo = "Open profile";
-const Color _threadHeroTop = Color(0xFF163B88);
-const Color _threadHeroBottom = Color(0xFF1D4ED8);
+const Color _threadHeroTop = Color(0xFF082A55);
 const Color _threadCanvas = Color(0xFFF8FAFC);
 
 const double _headerMetaSpacing = 2;
@@ -1236,27 +1235,10 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
           ? colorScheme.surfaceContainerLowest
           : _threadCanvas,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _threadHeroTop,
         foregroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
-        elevation: 0,
         scrolledUnderElevation: 0,
-        flexibleSpace: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [_threadHeroTop, _threadHeroBottom],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x33061A3D),
-                blurRadius: 18,
-                offset: Offset(0, 6),
-              ),
-            ],
-          ),
-        ),
         centerTitle: true,
         title: supportConversation
             ? _SupportThreadHeaderTitle(
@@ -1480,9 +1462,8 @@ class _ThreadBackdrop extends StatelessWidget {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              const Color(0xFFEAF1FD),
               Color.alphaBlend(
-                _threadHeroBottom.withValues(alpha: 0.06),
+                _threadHeroTop.withValues(alpha: 0.05),
                 _threadCanvas,
               ),
               _threadCanvas,
@@ -3467,9 +3448,6 @@ class _HeaderAiToggleButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = enabled ? const Color(0xFF2DE0C4) : scheme.onSurfaceVariant;
-    final background = enabled
-        ? const Color(0x33204BA6)
-        : const Color(0x26204280);
 
     return Tooltip(
       message: _tooltipAiToggle,
@@ -3483,20 +3461,23 @@ class _HeaderAiToggleButton extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: background,
+              color: Color.alphaBlend(
+                accent.withValues(alpha: enabled ? 0.22 : 0.08),
+                scheme.surfaceContainerLow,
+              ),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: enabled
-                    ? accent.withValues(alpha: 0.42)
-                    : Colors.white.withValues(alpha: 0.14),
+                color: accent.withValues(alpha: enabled ? 0.42 : 0.2),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: enabled ? 0.14 : 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              boxShadow: enabled
+                  ? [
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.18),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
+                      ),
+                    ]
+                  : const [],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -3506,9 +3487,7 @@ class _HeaderAiToggleButton extends StatelessWidget {
                 Text(
                   enabled ? "AI ON" : "AI OFF",
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: enabled
-                        ? accent
-                        : Colors.white.withValues(alpha: 0.8),
+                    color: enabled ? accent : scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.2,
                   ),
@@ -3539,12 +3518,10 @@ class _HeaderAttendChatButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final accent = isActive
         ? const Color(0xFFFFA35C)
         : AppColors.businessAccent;
-    final background = isActive
-        ? const Color(0x402E5AD6)
-        : const Color(0x33204BA6);
 
     return Tooltip(
       message: _tooltipAttend,
@@ -3563,20 +3540,21 @@ class _HeaderAttendChatButton extends StatelessWidget {
             style: FilledButton.styleFrom(
               foregroundColor: enabled
                   ? accent
-                  : Colors.white.withValues(alpha: 0.72),
-              backgroundColor: background,
-              disabledForegroundColor: Colors.white.withValues(alpha: 0.72),
-              disabledBackgroundColor: const Color(0x26204280),
+                  : scheme.onSurfaceVariant.withValues(alpha: 0.72),
+              backgroundColor: Color.alphaBlend(
+                accent.withValues(alpha: isActive ? 0.2 : 0.12),
+                scheme.surfaceContainerLow,
+              ),
+              disabledForegroundColor: scheme.onSurfaceVariant.withValues(
+                alpha: 0.72,
+              ),
+              disabledBackgroundColor: scheme.surfaceContainerLow,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
               minimumSize: const Size(0, 44),
-              elevation: 0,
-              shadowColor: Colors.black.withValues(alpha: 0.16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(18),
                 side: BorderSide(
-                  color: enabled
-                      ? accent.withValues(alpha: 0.34)
-                      : Colors.white.withValues(alpha: 0.14),
+                  color: accent.withValues(alpha: enabled ? 0.34 : 0.14),
                 ),
               ),
               textStyle: Theme.of(
@@ -3612,16 +3590,9 @@ class _ThreadOverflowMenu extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
-        color: const Color(0x33294FA7),
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.14),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: PopupMenuButton<_ThreadOverflowAction>(
         tooltip: tooltip,
@@ -3816,7 +3787,6 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
             color: Colors.white,
-            letterSpacing: -0.2,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -3826,8 +3796,8 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
           "$customerStatusLabel$_metaSeparator$assignedStaffName",
           textAlign: TextAlign.center,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: Colors.white.withValues(alpha: 0.84),
-            fontWeight: FontWeight.w700,
+            color: Colors.white.withValues(alpha: 0.78),
+            fontWeight: FontWeight.w600,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -3899,15 +3869,13 @@ class _SupportMetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Color.alphaBlend(
-          tone.withValues(alpha: 0.18),
-          const Color(0xFF17336C),
-        ),
+        color: Color.alphaBlend(tone.withValues(alpha: 0.12), scheme.surface),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: tone.withValues(alpha: 0.28)),
+        border: Border.all(color: tone.withValues(alpha: 0.22)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -3916,7 +3884,7 @@ class _SupportMetaChip extends StatelessWidget {
             width: 28,
             height: 28,
             decoration: BoxDecoration(
-              color: tone.withValues(alpha: 0.18),
+              color: tone.withValues(alpha: 0.16),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, size: 15, color: tone),
@@ -3929,7 +3897,7 @@ class _SupportMetaChip extends StatelessWidget {
               Text(
                 title,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.72),
+                  color: scheme.onSurfaceVariant,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -3945,7 +3913,7 @@ class _SupportMetaChip extends StatelessWidget {
                 Text(
                   subtitle,
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.72),
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
             ],
@@ -3973,10 +3941,10 @@ class _ThreadToolbarButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final backgroundColor = heroStyle
-        ? const Color(0x33294FA7)
+        ? Colors.white.withValues(alpha: 0.12)
         : colorScheme.surfaceContainerLow;
     final borderColor = heroStyle
-        ? Colors.white.withValues(alpha: 0.14)
+        ? Colors.white.withValues(alpha: 0.12)
         : colorScheme.outlineVariant;
     final iconColor = heroStyle
         ? Colors.white
@@ -3989,15 +3957,6 @@ class _ThreadToolbarButton extends StatelessWidget {
         color: backgroundColor,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor),
-        boxShadow: heroStyle
-            ? [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.14),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ]
-            : const [],
       ),
       child: IconButton(
         color: iconColor,
@@ -4064,9 +4023,8 @@ class _ThreadHeaderTitle extends StatelessWidget {
           title,
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
             color: Colors.white,
-            letterSpacing: -0.2,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -4077,8 +4035,8 @@ class _ThreadHeaderTitle extends StatelessWidget {
             metaText,
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: Colors.white.withValues(alpha: 0.84),
-              fontWeight: FontWeight.w700,
+              color: Colors.white.withValues(alpha: 0.78),
+              fontWeight: FontWeight.w600,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
