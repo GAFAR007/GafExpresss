@@ -12,6 +12,8 @@
 /// - Renders message list + composer with attachment chips.
 library;
 
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +22,7 @@ import 'package:go_router/go_router.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/business_order_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_attachment_picker.dart';
 import 'package:frontend/app/features/home/presentation/chat_models.dart';
@@ -33,7 +36,6 @@ import 'package:frontend/app/features/home/presentation/purchase_request_provide
 import 'package:frontend/app/features/home/presentation/purchase_request_quote_screen.dart';
 import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/theme/app_colors.dart';
-import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "CHAT_THREAD";
 const String _logBuild = "build()";
@@ -59,6 +61,8 @@ const String _tooltipAiToggle = "Toggle AI assistant";
 const String _tooltipAttend = "Attend this chat";
 const String _tooltipMore = "More actions";
 const String _tooltipInfo = "Open profile";
+const Color _threadHeroTop = Color(0xFF082A55);
+const Color _threadCanvas = Color(0xFFFDFEFF);
 
 const double _headerMetaSpacing = 2;
 const double _appBarInfoHeight = 60;
@@ -87,6 +91,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   bool _isSubmittingRequestAction = false;
   String _hiddenRequestId = "";
   bool _hasDraftText = false;
+  bool _isUploadingAttachments = false;
 
   @override
   void initState() {
@@ -476,7 +481,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       return;
     }
 
-    final picked = await pickChatAttachment();
+    final picked = await pickChatDocument();
     if (picked == null) return;
 
     setState(() => _isSubmittingRequestAction = true);
@@ -987,14 +992,91 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     super.dispose();
   }
 
-  Future<void> _handleAttach(ChatThreadController controller) async {
-    _log(_logAttachTap);
-    final picked = await pickChatAttachment();
-    if (picked == null) return;
-    _log(_logAttachPick, extra: {"name": picked.filename});
-    await controller.addAttachment(
-      bytes: picked.bytes,
-      filename: picked.filename,
+  Future<void> _queuePickedAttachments({
+    required ChatThreadController controller,
+    required List<ChatPickedAttachment> picked,
+    required String singularLabel,
+    required String pluralLabel,
+  }) async {
+    if (picked.isEmpty || _isUploadingAttachments) {
+      return;
+    }
+
+    setState(() => _isUploadingAttachments = true);
+    var addedCount = 0;
+
+    try {
+      for (final attachment in picked) {
+        _log(
+          _logAttachPick,
+          extra: {"name": attachment.filename, "kind": singularLabel},
+        );
+        final beforeCount = ref
+            .read(chatThreadProvider(widget.conversationId))
+            .pendingAttachments
+            .length;
+        await controller.addAttachment(
+          bytes: attachment.bytes,
+          filename: attachment.filename,
+        );
+        final afterCount = ref
+            .read(chatThreadProvider(widget.conversationId))
+            .pendingAttachments
+            .length;
+        if (afterCount > beforeCount) {
+          addedCount += 1;
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUploadingAttachments = false);
+      }
+    }
+
+    if (!mounted || addedCount == 0) {
+      return;
+    }
+
+    final noun = addedCount == 1 ? singularLabel : pluralLabel;
+    _showMessage("$addedCount $noun ready to send");
+  }
+
+  Future<void> _handleAttachPhotos(ChatThreadController controller) async {
+    _log(_logAttachTap, extra: {"kind": "photos"});
+    final picked = await pickChatImages();
+    await _queuePickedAttachments(
+      controller: controller,
+      picked: picked,
+      singularLabel: "photo",
+      pluralLabel: "photos",
+    );
+  }
+
+  Future<void> _handleCapturePhoto(ChatThreadController controller) async {
+    _log(_logAttachTap, extra: {"kind": "camera"});
+    final picked = await captureChatImage();
+    if (picked == null) {
+      return;
+    }
+    await _queuePickedAttachments(
+      controller: controller,
+      picked: [picked],
+      singularLabel: "photo",
+      pluralLabel: "photos",
+    );
+  }
+
+  Future<void> _handleAttachFiles(ChatThreadController controller) async {
+    _log(_logAttachTap, extra: {"kind": "files"});
+    final picked = await pickChatDocument();
+    if (picked == null) {
+      return;
+    }
+    await _queuePickedAttachments(
+      controller: controller,
+      picked: [picked],
+      singularLabel: "file",
+      pluralLabel: "files",
     );
   }
 
@@ -1122,9 +1204,11 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         !isCurrentAttendant &&
         !_isSubmittingRequestAction;
     final attendLabel = isCurrentAttendant ? "In Chat" : "Attend Chat";
+    final supportsCamera = PlatformInfo.isAndroid || PlatformInfo.isIOS;
     final canSendMessage =
         (_hasDraftText || state.pendingAttachments.isNotEmpty) &&
-        !state.isSending;
+        !state.isSending &&
+        !_isUploadingAttachments;
     final title = _resolveTitle(
       conversation: conversation,
       participants: displayParticipants,
@@ -1143,235 +1227,339 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       conversation: conversation,
       participants: displayParticipants,
     );
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = colorScheme.brightness == Brightness.dark;
 
-    return Theme(
-      data: AppTheme.business(),
-      child: Builder(
-        builder: (context) {
-          final colorScheme = Theme.of(context).colorScheme;
-          return Scaffold(
-            backgroundColor: colorScheme.surfaceContainerLowest,
-            appBar: AppBar(
-              centerTitle: true,
-              title: supportConversation
-                  ? _SupportThreadHeaderTitle(
-                      title: title,
-                      customerStatusLabel: _titleCaseWords(roleLabel),
-                      assignedStaffName: assignedStaffName,
-                    )
-                  : _ThreadHeaderTitle(
-                      title: title,
-                      roleLabel: roleLabel,
-                      businessLabel: businessLabel,
-                      estateLabel: estateLabel,
-                    ),
-              leadingWidth: 64,
-              leading: Padding(
-                padding: const EdgeInsets.only(left: 12),
-                child: _ThreadToolbarButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: "Back",
-                  onPressed: () {
-                    _log(_logBackTap);
-                    if (context.canPop()) {
-                      context.pop();
-                      return;
-                    }
-                    context.go(chatInboxRoute);
-                  },
-                ),
+    return Scaffold(
+      backgroundColor: isDark
+          ? colorScheme.surfaceContainerLowest
+          : _threadCanvas,
+      appBar: AppBar(
+        backgroundColor: _threadHeroTop,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        title: supportConversation
+            ? _SupportThreadHeaderTitle(
+                title: title,
+                customerStatusLabel: _titleCaseWords(roleLabel),
+                assignedStaffName: assignedStaffName,
+              )
+            : _ThreadHeaderTitle(
+                title: title,
+                roleLabel: roleLabel,
+                businessLabel: businessLabel,
+                estateLabel: estateLabel,
               ),
-              actions: supportConversation
-                  ? [
-                      Padding(
-                        padding: const EdgeInsets.only(left: 2),
-                        child: _HeaderAiToggleButton(
-                          enabled: isAiEnabled,
-                          isBusy: _isSubmittingRequestAction,
-                          onPressed: canToggleAi
-                              ? () {
-                                  _log(_logAiToggleTap);
-                                  _handleUpdateAiControl(
-                                    supportRequest,
-                                    !isAiEnabled,
-                                  );
-                                }
-                              : null,
-                        ),
-                      ),
-                      _HeaderAttendChatButton(
-                        label: attendLabel,
-                        enabled: canAttendChat,
-                        isActive: isCurrentAttendant,
-                        isBusy: _isSubmittingRequestAction,
-                        onPressed: canAttendChat
-                            ? () {
-                                _log(_logAttendTap);
-                                _handleAttendChat(supportRequest);
-                              }
-                            : null,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: _ThreadOverflowMenu(
-                          tooltip: _tooltipMore,
-                          purchaseRequest: purchaseRequest,
-                          hasProfile: displayParticipants.isNotEmpty,
-                          isRequestSummaryHidden: isRequestSummaryHidden,
-                          onSelected: (action) {
-                            _log(
-                              _logOverflowTap,
-                              extra: {"action": action.name},
+        leadingWidth: 64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: _ThreadToolbarButton(
+            icon: Icons.arrow_back_rounded,
+            tooltip: "Back",
+            heroStyle: true,
+            onPressed: () {
+              _log(_logBackTap);
+              if (context.canPop()) {
+                context.pop();
+                return;
+              }
+              context.go(chatInboxRoute);
+            },
+          ),
+        ),
+        actions: supportConversation
+            ? [
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: _HeaderAiToggleButton(
+                    enabled: isAiEnabled,
+                    isBusy: _isSubmittingRequestAction,
+                    onPressed: canToggleAi
+                        ? () {
+                            _log(_logAiToggleTap);
+                            _handleUpdateAiControl(
+                              supportRequest,
+                              !isAiEnabled,
                             );
-                            _handleOverflowAction(
-                              action: action,
-                              profileParticipants: displayParticipants,
-                              purchaseRequest: purchaseRequest,
-                              isRequestSummaryHidden: isRequestSummaryHidden,
-                            );
-                          },
-                        ),
-                      ),
-                    ]
-                  : [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: _ThreadToolbarButton(
-                          icon: Icons.person_outline_rounded,
-                          tooltip: _tooltipInfo,
-                          onPressed: displayParticipants.isEmpty
-                              ? null
-                              : () {
-                                  _log(_logProfileTap);
-                                  _openProfileScreen(
-                                    context,
-                                    displayParticipants,
-                                  );
-                                },
-                        ),
-                      ),
-                    ],
-              bottom: supportConversation
-                  ? PreferredSize(
-                      preferredSize: const Size.fromHeight(_appBarInfoHeight),
-                      child: _StaffSupportHeaderBar(
-                        assignedStaffName: assignedStaffName,
-                        assignedStaffLabel: assignedStaffLabel,
-                        conversationStatus: conversationStatus,
-                        conversationStatusAccent: conversationStatusAccent,
-                      ),
-                    )
-                  : null,
-            ),
-            body: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    colorScheme.surfaceContainerLowest,
-                    colorScheme.surfaceContainerLow,
-                    colorScheme.surfaceContainerLowest,
-                  ],
+                          }
+                        : null,
+                  ),
                 ),
-              ),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: state.isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : _MessageList(
-                            messages: state.messages,
-                            participants: allParticipants,
-                            currentUserId: currentUserId,
-                            currentParticipant: currentParticipant,
-                            onRetryMessage: (message) {
-                              _log(
-                                _logRetryTap,
-                                extra: {"messageId": message.id},
-                              );
-                              controller.retryMessage(message.id);
-                            },
-                          ),
-                  ),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: purchaseRequest == null
-                        ? const SizedBox.shrink()
-                        : isRequestSummaryHidden
-                        ? Padding(
-                            key: const ValueKey("request_restore"),
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: _RequestRestoreButton(
-                              onPressed: _showRequestSummary,
-                            ),
-                          )
-                        : Padding(
-                            key: ValueKey(
-                              "request_panel_${purchaseRequest.id}",
-                            ),
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                            child: _PurchaseRequestPanel(
-                              request: purchaseRequest,
-                              isBusinessActor: isBusinessActor,
-                              canSendInvoice: canSendRequestInvoice,
-                              canManageFulfillment: canManageRequestFulfillment,
-                              canReviewProof: canManageSellerRequest,
-                              isBuyer: isBuyer,
-                              isSubmitting: _isSubmittingRequestAction,
-                              onOpenQuotation: () =>
-                                  _openQuotationScreen(purchaseRequest),
-                              onUploadProof: () =>
-                                  _handleUploadProof(purchaseRequest),
-                              onApproveProof: () => _handleReviewProof(
-                                request: purchaseRequest,
-                                decision: "approved",
-                              ),
-                              onRejectProof: () => _handleReviewProof(
-                                request: purchaseRequest,
-                                decision: "rejected",
-                              ),
-                              onShipOrder: () =>
-                                  _handleShipOrder(purchaseRequest),
-                              onMarkDelivered: () =>
-                                  _handleMarkDelivered(purchaseRequest),
-                              onCancelRequest: () =>
-                                  _handleCancelRequest(purchaseRequest),
-                              onHide: () =>
-                                  _hideRequestSummary(purchaseRequest.id),
-                            ),
-                          ),
-                  ),
-                  if (state.pendingAttachments.isNotEmpty)
-                    // WHY: Show pending attachments before send for clarity.
-                    _AttachmentRow(
-                      attachments: state.pendingAttachments,
-                      onRemove: (id) => controller.removeAttachment(id),
-                    ),
-                  _Composer(
-                    controller: _messageCtrl,
-                    isSending: state.isSending,
-                    canSend: canSendMessage,
-                    onAttach: () => _handleAttach(controller),
-                    onSend: () {
-                      if (!canSendMessage) {
-                        return;
-                      }
-                      _log(_logSendTap);
-                      final text = _messageCtrl.text;
-                      // WHY: Send uses optimistic UI in the controller.
-                      controller.sendMessage(body: text);
-                      _messageCtrl.clear();
+                _HeaderAttendChatButton(
+                  label: attendLabel,
+                  enabled: canAttendChat,
+                  isActive: isCurrentAttendant,
+                  isBusy: _isSubmittingRequestAction,
+                  onPressed: canAttendChat
+                      ? () {
+                          _log(_logAttendTap);
+                          _handleAttendChat(supportRequest);
+                        }
+                      : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _ThreadOverflowMenu(
+                    tooltip: _tooltipMore,
+                    purchaseRequest: purchaseRequest,
+                    hasProfile: displayParticipants.isNotEmpty,
+                    isRequestSummaryHidden: isRequestSummaryHidden,
+                    onSelected: (action) {
+                      _log(_logOverflowTap, extra: {"action": action.name});
+                      _handleOverflowAction(
+                        action: action,
+                        profileParticipants: displayParticipants,
+                        purchaseRequest: purchaseRequest,
+                        isRequestSummaryHidden: isRequestSummaryHidden,
+                      );
                     },
                   ),
-                ],
-              ),
+                ),
+              ]
+            : [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _ThreadToolbarButton(
+                    icon: Icons.person_outline_rounded,
+                    tooltip: _tooltipInfo,
+                    heroStyle: true,
+                    onPressed: displayParticipants.isEmpty
+                        ? null
+                        : () {
+                            _log(_logProfileTap);
+                            _openProfileScreen(context, displayParticipants);
+                          },
+                  ),
+                ),
+              ],
+        bottom: supportConversation
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(_appBarInfoHeight),
+                child: _StaffSupportHeaderBar(
+                  assignedStaffName: assignedStaffName,
+                  assignedStaffLabel: assignedStaffLabel,
+                  conversationStatus: conversationStatus,
+                  conversationStatusAccent: conversationStatusAccent,
+                ),
+              )
+            : null,
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: _ThreadBackdrop()),
+          Positioned.fill(
+            child: Column(
+              children: [
+                Expanded(
+                  child: state.isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _MessageList(
+                          messages: state.messages,
+                          participants: allParticipants,
+                          currentUserId: currentUserId,
+                          currentParticipant: currentParticipant,
+                          onRetryMessage: (message) {
+                            _log(
+                              _logRetryTap,
+                              extra: {"messageId": message.id},
+                            );
+                            controller.retryMessage(message.id);
+                          },
+                        ),
+                ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: purchaseRequest == null
+                      ? const SizedBox.shrink()
+                      : isRequestSummaryHidden
+                      ? Padding(
+                          key: const ValueKey("request_restore"),
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: _RequestRestoreButton(
+                            onPressed: _showRequestSummary,
+                          ),
+                        )
+                      : Padding(
+                          key: ValueKey("request_panel_${purchaseRequest.id}"),
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: _PurchaseRequestPanel(
+                            request: purchaseRequest,
+                            isBusinessActor: isBusinessActor,
+                            canSendInvoice: canSendRequestInvoice,
+                            canManageFulfillment: canManageRequestFulfillment,
+                            canReviewProof: canManageSellerRequest,
+                            isBuyer: isBuyer,
+                            isSubmitting: _isSubmittingRequestAction,
+                            onOpenQuotation: () =>
+                                _openQuotationScreen(purchaseRequest),
+                            onUploadProof: () =>
+                                _handleUploadProof(purchaseRequest),
+                            onApproveProof: () => _handleReviewProof(
+                              request: purchaseRequest,
+                              decision: "approved",
+                            ),
+                            onRejectProof: () => _handleReviewProof(
+                              request: purchaseRequest,
+                              decision: "rejected",
+                            ),
+                            onShipOrder: () =>
+                                _handleShipOrder(purchaseRequest),
+                            onMarkDelivered: () =>
+                                _handleMarkDelivered(purchaseRequest),
+                            onCancelRequest: () =>
+                                _handleCancelRequest(purchaseRequest),
+                            onHide: () =>
+                                _hideRequestSummary(purchaseRequest.id),
+                          ),
+                        ),
+                ),
+                _Composer(
+                  controller: _messageCtrl,
+                  attachments: state.pendingAttachments,
+                  isSending: state.isSending,
+                  isUploadingAttachments: _isUploadingAttachments,
+                  canSend: canSendMessage,
+                  onRemoveAttachment: (id) => controller.removeAttachment(id),
+                  onAttachPhotos: () => _handleAttachPhotos(controller),
+                  onAttachFiles: () => _handleAttachFiles(controller),
+                  onCapturePhoto: supportsCamera
+                      ? () => _handleCapturePhoto(controller)
+                      : null,
+                  onSend: () {
+                    if (!canSendMessage) {
+                      return;
+                    }
+                    _log(_logSendTap);
+                    final text = _messageCtrl.text;
+                    controller.sendMessage(body: text);
+                    _messageCtrl.clear();
+                  },
+                ),
+              ],
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
+}
+
+class _ThreadBackdrop extends StatelessWidget {
+  const _ThreadBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+
+    if (!isDark) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: _threadCanvas,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.alphaBlend(
+                _threadHeroTop.withValues(alpha: 0.05),
+                _threadCanvas,
+              ),
+              _threadCanvas,
+            ],
+          ),
+        ),
+        child: const SizedBox.expand(),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            _blendThreadTone(
+              scheme.primary,
+              scheme.surfaceContainerLowest,
+              alpha: 0.08,
+            ),
+            _blendThreadTone(
+              scheme.secondary,
+              scheme.surfaceContainerLow,
+              alpha: 0.05,
+            ),
+            scheme.surface,
+          ],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -92,
+            right: -84,
+            child: _ThreadBloom(
+              size: 250,
+              color: _blendThreadTone(
+                scheme.primary,
+                scheme.surfaceContainerHighest,
+                alpha: 0.3,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 120,
+            left: -104,
+            child: _ThreadBloom(
+              size: 220,
+              color: _blendThreadTone(
+                scheme.tertiary,
+                scheme.surfaceContainer,
+                alpha: 0.18,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThreadBloom extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _ThreadBloom({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: ImageFiltered(
+        imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                color.withValues(alpha: 0.92),
+                color.withValues(alpha: 0.26),
+                color.withValues(alpha: 0.02),
+                Colors.transparent,
+              ],
+              stops: const [0, 0.42, 0.74, 1],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Color _blendThreadTone(Color accent, Color base, {double alpha = 0.08}) {
+  return Color.alphaBlend(accent.withValues(alpha: alpha), base);
 }
 
 class _MessageList extends StatefulWidget {
@@ -1842,20 +2030,17 @@ class _AttachmentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        children: attachments
-            .map(
-              (attachment) => ChatAttachmentChip(
-                attachment: attachment,
-                onRemove: () => onRemove(attachment.id),
-              ),
-            )
-            .toList(),
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: attachments
+          .map(
+            (attachment) => ChatAttachmentChip(
+              attachment: attachment,
+              onRemove: () => onRemove(attachment.id),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -3405,12 +3590,13 @@ class _ThreadOverflowMenu extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: scheme.outlineVariant),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: PopupMenuButton<_ThreadOverflowAction>(
         tooltip: tooltip,
+        iconColor: Colors.white,
         onSelected: onSelected,
         offset: const Offset(0, 42),
         color: Color.alphaBlend(
@@ -3600,6 +3786,7 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
+            color: Colors.white,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -3609,7 +3796,7 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
           "$customerStatusLabel$_metaSeparator$assignedStaffName",
           textAlign: TextAlign.center,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+            color: Colors.white.withValues(alpha: 0.78),
             fontWeight: FontWeight.w600,
           ),
           maxLines: 1,
@@ -3741,24 +3928,39 @@ class _ThreadToolbarButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
+  final bool heroStyle;
 
   const _ThreadToolbarButton({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.heroStyle = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final backgroundColor = heroStyle
+        ? Colors.white.withValues(alpha: 0.12)
+        : colorScheme.surfaceContainerLow;
+    final borderColor = heroStyle
+        ? Colors.white.withValues(alpha: 0.12)
+        : colorScheme.outlineVariant;
+    final iconColor = heroStyle
+        ? Colors.white
+        : onPressed == null
+        ? colorScheme.onSurfaceVariant
+        : colorScheme.onSurface;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: borderColor),
       ),
       child: IconButton(
+        color: iconColor,
+        disabledColor: iconColor.withValues(alpha: 0.42),
         icon: Icon(icon),
         tooltip: tooltip,
         onPressed: onPressed,
@@ -3822,6 +4024,7 @@ class _ThreadHeaderTitle extends StatelessWidget {
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
+            color: Colors.white,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -3832,7 +4035,8 @@ class _ThreadHeaderTitle extends StatelessWidget {
             metaText,
             textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              color: Colors.white.withValues(alpha: 0.78),
+              fontWeight: FontWeight.w600,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -3845,16 +4049,26 @@ class _ThreadHeaderTitle extends StatelessWidget {
 
 class _Composer extends StatefulWidget {
   final TextEditingController controller;
+  final List<ChatAttachment> attachments;
   final bool isSending;
+  final bool isUploadingAttachments;
   final bool canSend;
-  final VoidCallback onAttach;
+  final void Function(String id) onRemoveAttachment;
+  final VoidCallback onAttachPhotos;
+  final VoidCallback onAttachFiles;
+  final VoidCallback? onCapturePhoto;
   final VoidCallback onSend;
 
   const _Composer({
     required this.controller,
+    required this.attachments,
     required this.isSending,
+    required this.isUploadingAttachments,
     required this.canSend,
-    required this.onAttach,
+    required this.onRemoveAttachment,
+    required this.onAttachPhotos,
+    required this.onAttachFiles,
+    required this.onCapturePhoto,
     required this.onSend,
   });
 
@@ -3913,119 +4127,284 @@ class _ComposerState extends State<_Composer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final composerSurface = isDark
+        ? scheme.surfaceContainerLow
+        : _blendThreadTone(scheme.primary, Colors.white, alpha: 0.035);
+    final quickActionDisabled =
+        widget.isSending || widget.isUploadingAttachments;
+
     return SafeArea(
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerLow,
+          color: composerSurface,
           border: Border(top: BorderSide(color: scheme.outlineVariant)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _ThreadToolbarButton(
-              icon: Icons.attach_file_rounded,
-              tooltip: "Attach",
-              onPressed: widget.isSending ? null : widget.onAttach,
+          boxShadow: [
+            BoxShadow(
+              color: scheme.shadow.withValues(alpha: isDark ? 0.16 : 0.05),
+              blurRadius: 20,
+              offset: const Offset(0, -8),
             ),
-            Expanded(
-              child: Focus(
-                focusNode: _focusNode,
-                onKeyEvent: _handleKeyEvent,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  decoration: BoxDecoration(
-                    color: Color.alphaBlend(
-                      (_hasFocus ? scheme.primary : scheme.primaryContainer)
-                          .withValues(alpha: _hasFocus ? 0.12 : 0.18),
-                      scheme.surface,
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: _hasFocus
-                          ? scheme.primary.withValues(alpha: 0.48)
-                          : scheme.outlineVariant,
-                    ),
-                    boxShadow: _hasFocus
-                        ? [
-                            BoxShadow(
-                              color: scheme.primary.withValues(alpha: 0.12),
-                              blurRadius: 14,
-                              offset: const Offset(0, 8),
-                            ),
-                          ]
-                        : const [],
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (widget.onCapturePhoto != null)
+                  _ComposerQuickAction(
+                    icon: Icons.photo_camera_rounded,
+                    label: "Camera",
+                    tone: AppColors.commerceAccent,
+                    onPressed: quickActionDisabled
+                        ? null
+                        : widget.onCapturePhoto,
                   ),
-                  child: TextField(
-                    controller: widget.controller,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    minLines: 1,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      hintText: "Type a message",
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
+                _ComposerQuickAction(
+                  icon: Icons.photo_library_rounded,
+                  label: widget.isUploadingAttachments ? "Adding..." : "Photos",
+                  tone: scheme.primary,
+                  isPrimary: true,
+                  onPressed: quickActionDisabled ? null : widget.onAttachPhotos,
+                ),
+                _ComposerQuickAction(
+                  icon: Icons.attach_file_rounded,
+                  label: "Files",
+                  tone: AppColors.analyticsAccent,
+                  onPressed: quickActionDisabled ? null : widget.onAttachFiles,
+                ),
+              ],
+            ),
+            if (widget.isUploadingAttachments)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          scheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      "Adding selected attachments...",
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (widget.attachments.isNotEmpty)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _blendThreadTone(
+                    scheme.primary,
+                    scheme.surface,
+                    alpha: isDark ? 0.12 : 0.06,
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: scheme.outlineVariant),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "${widget.attachments.length} attachment${widget.attachments.length == 1 ? "" : "s"} ready to send",
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _AttachmentRow(
+                      attachments: widget.attachments,
+                      onRemove: widget.onRemoveAttachment,
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Focus(
+                    focusNode: _focusNode,
+                    onKeyEvent: _handleKeyEvent,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      decoration: BoxDecoration(
+                        color: Color.alphaBlend(
+                          (_hasFocus ? scheme.primary : scheme.primaryContainer)
+                              .withValues(alpha: _hasFocus ? 0.1 : 0.14),
+                          scheme.surface,
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: _hasFocus
+                              ? scheme.primary.withValues(alpha: 0.42)
+                              : scheme.outlineVariant,
+                        ),
+                        boxShadow: _hasFocus
+                            ? [
+                                BoxShadow(
+                                  color: scheme.primary.withValues(alpha: 0.1),
+                                  blurRadius: 14,
+                                  offset: const Offset(0, 8),
+                                ),
+                              ]
+                            : const [],
+                      ),
+                      child: TextField(
+                        controller: widget.controller,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        minLines: 1,
+                        maxLines: 5,
+                        decoration: InputDecoration(
+                          hintText: widget.attachments.isEmpty
+                              ? "Type a message or add photos"
+                              : "Add a caption or send now",
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: "Send",
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                decoration: BoxDecoration(
-                  color: widget.canSend
-                      ? scheme.primary
-                      : scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: widget.canSend
-                      ? [
-                          BoxShadow(
-                            color: scheme.primary.withValues(alpha: 0.22),
-                            blurRadius: 18,
-                            offset: const Offset(0, 10),
-                          ),
-                        ]
-                      : const [],
-                ),
-                child: IconButton(
-                  tooltip: "Send",
-                  onPressed: widget.canSend && !widget.isSending
-                      ? widget.onSend
-                      : null,
-                  icon: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 160),
-                    child: widget.isSending
-                        ? SizedBox(
-                            key: const ValueKey("composer_loading"),
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                scheme.onPrimary,
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: "Send",
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    decoration: BoxDecoration(
+                      color: widget.canSend
+                          ? scheme.primary
+                          : scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: widget.canSend
+                          ? [
+                              BoxShadow(
+                                color: scheme.primary.withValues(alpha: 0.22),
+                                blurRadius: 18,
+                                offset: const Offset(0, 10),
                               ),
-                            ),
-                          )
-                        : Icon(
-                            Icons.send_rounded,
-                            key: const ValueKey("composer_send"),
-                            color: widget.canSend
-                                ? scheme.onPrimary
-                                : scheme.onSurfaceVariant,
-                          ),
+                            ]
+                          : const [],
+                    ),
+                    child: IconButton(
+                      tooltip: "Send",
+                      onPressed: widget.canSend && !widget.isSending
+                          ? widget.onSend
+                          : null,
+                      icon: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 160),
+                        child: widget.isSending
+                            ? SizedBox(
+                                key: const ValueKey("composer_loading"),
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    scheme.onPrimary,
+                                  ),
+                                ),
+                              )
+                            : Icon(
+                                Icons.send_rounded,
+                                key: const ValueKey("composer_send"),
+                                color: widget.canSend
+                                    ? scheme.onPrimary
+                                    : scheme.onSurfaceVariant,
+                              ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerQuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color tone;
+  final bool isPrimary;
+  final VoidCallback? onPressed;
+
+  const _ComposerQuickAction({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onPressed,
+    this.isPrimary = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final background = isPrimary
+        ? _blendThreadTone(tone, scheme.surface, alpha: 0.16)
+        : _blendThreadTone(scheme.surfaceContainerHighest, scheme.surface);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(999),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: onPressed == null
+                  ? scheme.outlineVariant.withValues(alpha: 0.7)
+                  : tone.withValues(alpha: isPrimary ? 0.34 : 0.2),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: onPressed == null ? scheme.onSurfaceVariant : tone,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: onPressed == null ? scheme.onSurfaceVariant : tone,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
