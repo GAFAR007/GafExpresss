@@ -28,6 +28,7 @@ const String _logTag = "CHAT_PROVIDERS";
 const String _apiProviderCreated = "chatApiProvider created";
 const String _socketProviderCreated = "chatSocketProvider created";
 const String _inboxFetchStart = "chatInboxProvider fetch start";
+const String _contactsFetchStart = "chatContactsProvider fetch start";
 const String _threadLoadStart = "chatThread load start";
 const String _threadLoadSuccess = "chatThread load success";
 const String _threadLoadFail = "chatThread load failed";
@@ -46,6 +47,7 @@ const String _nextActionSignIn = "Sign in and retry.";
 const String _extraReasonKey = "reason";
 const String _extraNextActionKey = "next_action";
 const String _reasonInboxMissing = "chat_inbox_session_missing";
+const String _reasonContactsMissing = "chat_contacts_session_missing";
 const String _reasonThreadMissing = "chat_thread_session_missing";
 const String _reasonDetailMissing = "chat_detail_session_missing";
 
@@ -80,6 +82,65 @@ final chatInboxProvider = FutureProvider<List<ChatConversation>>((ref) async {
 
   final api = ref.read(chatApiProvider);
   return api.fetchConversations(token: session.token);
+});
+
+final chatContactsProvider = FutureProvider<List<ChatContact>>((ref) async {
+  AppDebug.log(_logTag, _contactsFetchStart);
+
+  final session = ref.read(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    AppDebug.log(
+      _logTag,
+      _sessionMissingMessage,
+      extra: {
+        _extraReasonKey: _reasonContactsMissing,
+        _extraNextActionKey: _nextActionSignIn,
+      },
+    );
+    throw Exception(_sessionExpiredMessage);
+  }
+
+  final api = ref.read(chatApiProvider);
+  return api.fetchContacts(token: session.token);
+});
+
+final chatInboxRealtimeProvider = Provider.autoDispose<void>((ref) {
+  final session = ref.watch(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    return;
+  }
+
+  final socket = ref.watch(chatSocketProvider);
+  socket.connect(token: session.token);
+
+  final messageSub = socket.messageStream.listen((_) {
+    ref.invalidate(chatInboxProvider);
+  });
+  final readSub = socket.readStream.listen((_) {
+    ref.invalidate(chatInboxProvider);
+  });
+
+  ref.onDispose(() {
+    messageSub.cancel();
+    readSub.cancel();
+  });
+});
+
+final chatUnreadCountProvider = Provider.autoDispose<int>((ref) {
+  final session = ref.watch(authSessionProvider);
+  if (session == null || !session.isTokenValid) {
+    return 0;
+  }
+
+  ref.watch(chatInboxRealtimeProvider);
+  final conversationsAsync = ref.watch(chatInboxProvider);
+  return conversationsAsync.maybeWhen(
+    data: (conversations) => conversations.fold<int>(
+      0,
+      (sum, conversation) => sum + conversation.unreadCount,
+    ),
+    orElse: () => 0,
+  );
 });
 
 final chatConversationDetailProvider =
@@ -272,6 +333,7 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
         conversationId: conversationId,
         messageIds: unread,
       );
+      _ref.invalidate(chatInboxProvider);
     } catch (_) {
       // WHY: Read receipts are non-blocking; ignore failures.
     }
@@ -280,6 +342,7 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
   Future<void> addAttachment({
     required List<int> bytes,
     required String filename,
+    String? mimeType,
   }) async {
     AppDebug.log(_logTag, _threadAttachStart);
     final session = _ref.read(authSessionProvider);
@@ -295,6 +358,41 @@ class ChatThreadController extends StateNotifier<ChatThreadState> {
         conversationId: conversationId,
         bytes: bytes,
         filename: filename,
+        mimeType: mimeType,
+      );
+      final updated = [...state.pendingAttachments, attachment];
+      state = state.copyWith(pendingAttachments: updated, error: null);
+      AppDebug.log(_logTag, _threadAttachSuccess);
+    } catch (error) {
+      AppDebug.log(
+        _logTag,
+        _threadAttachFail,
+        extra: {"error": error.toString()},
+      );
+      state = state.copyWith(error: error.toString());
+    }
+  }
+
+  Future<void> addAttachmentFile({
+    required String filePath,
+    required String filename,
+    String? mimeType,
+  }) async {
+    AppDebug.log(_logTag, _threadAttachStart);
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      state = state.copyWith(error: _sessionExpiredMessage);
+      return;
+    }
+
+    try {
+      final api = _ref.read(chatApiProvider);
+      final attachment = await api.uploadAttachmentFile(
+        token: session.token,
+        conversationId: conversationId,
+        filePath: filePath,
+        filename: filename,
+        mimeType: mimeType,
       );
       final updated = [...state.pendingAttachments, attachment];
       state = state.copyWith(pendingAttachments: updated, error: null);

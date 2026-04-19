@@ -29,6 +29,7 @@ class StaffAttendanceListSection extends StatelessWidget {
   final AsyncValue<List<BusinessStaffProfileSummary>> staffAsync;
   final StaffAttendanceFilters filters;
   final VoidCallback onRetry;
+  final Future<void> Function(StaffAttendanceRecord record)? onUploadProof;
 
   const StaffAttendanceListSection({
     super.key,
@@ -36,6 +37,7 @@ class StaffAttendanceListSection extends StatelessWidget {
     required this.staffAsync,
     required this.filters,
     required this.onRetry,
+    this.onUploadProof,
   });
 
   @override
@@ -47,7 +49,7 @@ class StaffAttendanceListSection extends StatelessWidget {
         // WHY: Merge staff metadata so the list can show names/roles.
         final staffMap = staffAsync.when(
           data: (staff) => buildStaffMap(staff),
-          error: (_, __) => <String, BusinessStaffProfileSummary>{},
+          error: (_, _) => <String, BusinessStaffProfileSummary>{},
           loading: () => <String, BusinessStaffProfileSummary>{},
         );
         // WHY: Apply filters before rendering to keep UI responsive.
@@ -77,6 +79,11 @@ class StaffAttendanceListSection extends StatelessWidget {
               staffRole: staffRole == null
                   ? null
                   : formatStaffRoleLabel(staffRole),
+              onUploadProof: onUploadProof == null
+                  ? null
+                  : () {
+                      onUploadProof!(record);
+                    },
             );
           }).toList(),
         );
@@ -104,10 +111,7 @@ class _EmptyState extends StatelessWidget {
   final String title;
   final String helper;
 
-  const _EmptyState({
-    required this.title,
-    required this.helper,
-  });
+  const _EmptyState({required this.title, required this.helper});
 
   @override
   Widget build(BuildContext context) {
@@ -126,9 +130,7 @@ class _EmptyState extends StatelessWidget {
           // WHY: Title explains why the list is empty.
           Text(
             title,
-            style: textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
@@ -174,23 +176,16 @@ class _ErrorState extends StatelessWidget {
           // WHY: Title clarifies the error state.
           Text(
             title,
-            style: textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
             helper,
-            style: textTheme.bodySmall?.copyWith(
-              color: colorScheme.error,
-            ),
+            style: textTheme.bodySmall?.copyWith(color: colorScheme.error),
           ),
           const SizedBox(height: AppSpacing.sm),
           // WHY: Retry button lets users recover quickly.
-          TextButton(
-            onPressed: onRetry,
-            child: Text(retryLabel),
-          ),
+          TextButton(onPressed: onRetry, child: Text(retryLabel)),
         ],
       ),
     );

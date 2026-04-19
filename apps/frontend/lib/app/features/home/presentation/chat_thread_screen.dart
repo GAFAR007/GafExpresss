@@ -12,16 +12,23 @@
 /// - Renders message list + composer with attachment chips.
 library;
 
+import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/platform_info.dart';
 import 'package:frontend/app/features/home/presentation/business_order_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_attachment_picker.dart';
+import 'package:frontend/app/features/home/presentation/chat_call_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_models.dart';
 import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/features/home/presentation/chat_routes.dart';
@@ -33,7 +40,6 @@ import 'package:frontend/app/features/home/presentation/purchase_request_provide
 import 'package:frontend/app/features/home/presentation/purchase_request_quote_screen.dart';
 import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/theme/app_colors.dart';
-import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "CHAT_THREAD";
 const String _logBuild = "build()";
@@ -42,6 +48,7 @@ const String _logAttachTap = "attach_tap";
 const String _logAttachPick = "attach_pick";
 const String _logBackTap = "back_tap";
 const String _logProfileTap = "profile_tap";
+const String _logCallTap = "call_tap";
 const String _logAiToggleTap = "ai_toggle_tap";
 const String _logAttendTap = "attend_tap";
 const String _logOverflowTap = "overflow_tap";
@@ -55,17 +62,16 @@ const String _groupRoleLabel = "Group";
 const String _multipleLabel = "Multiple";
 const String _metaSeparator = " • ";
 const String _conversationTypeGroup = "group";
-const String _avatarFallbackInitial = "?";
 const String _tooltipAiToggle = "Toggle AI assistant";
 const String _tooltipAttend = "Attend this chat";
 const String _tooltipMore = "More actions";
 const String _tooltipInfo = "Open profile";
+const String _tooltipCall = "Start voice call";
+const Color _threadHeroTop = Color(0xFF082A55);
+const Color _threadCanvas = Color(0xFFF8FAFC);
 
 const double _headerMetaSpacing = 2;
-const double _appBarInfoHeight = 68;
-const double _participantPillAvatarRadius = 12;
-const double _participantPillSpacing = 8;
-const double _participantPillRadius = 999;
+const double _appBarInfoHeight = 60;
 const EdgeInsets _appBarInfoPadding = EdgeInsets.fromLTRB(16, 0, 16, 8);
 
 class ChatThreadArgs {
@@ -73,6 +79,8 @@ class ChatThreadArgs {
 
   const ChatThreadArgs({this.conversation});
 }
+
+enum _ComposerAttachmentAction { photos, camera, files }
 
 enum _ThreadOverflowAction { viewProfile, hideRequest, showRequest, returnToAi }
 
@@ -91,10 +99,18 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   bool _isSubmittingRequestAction = false;
   String _hiddenRequestId = "";
   bool _hasDraftText = false;
+  bool _isUploadingAttachments = false;
+  late final AudioRecorder _voiceRecorder;
+  final Stopwatch _voiceRecordingStopwatch = Stopwatch();
+  Timer? _voiceRecordingTicker;
+  bool _isVoiceRecording = false;
+  bool _isProcessingVoiceNote = false;
+  Duration _voiceRecordingDuration = Duration.zero;
 
   @override
   void initState() {
     super.initState();
+    _voiceRecorder = AudioRecorder();
     _messageCtrl.addListener(_handleComposerChanged);
   }
 
@@ -480,7 +496,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       return;
     }
 
-    final picked = await pickChatAttachment();
+    final picked = await pickChatDocument();
     if (picked == null) return;
 
     setState(() => _isSubmittingRequestAction = true);
@@ -491,6 +507,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         conversationId: widget.conversationId,
         bytes: picked.bytes,
         filename: picked.filename,
+        mimeType: picked.mimeType,
       );
       final api = ref.read(purchaseRequestApiProvider);
       await api.submitPaymentProof(
@@ -986,20 +1003,338 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
 
   @override
   void dispose() {
+    _voiceRecordingTicker?.cancel();
+    unawaited(_voiceRecorder.dispose());
     _messageCtrl.removeListener(_handleComposerChanged);
     _messageCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _handleAttach(ChatThreadController controller) async {
-    _log(_logAttachTap);
-    final picked = await pickChatAttachment();
-    if (picked == null) return;
-    _log(_logAttachPick, extra: {"name": picked.filename});
-    await controller.addAttachment(
-      bytes: picked.bytes,
-      filename: picked.filename,
+  Future<void> _queuePickedAttachments({
+    required ChatThreadController controller,
+    required List<ChatPickedAttachment> picked,
+    required String singularLabel,
+    required String pluralLabel,
+  }) async {
+    if (picked.isEmpty || _isUploadingAttachments) {
+      return;
+    }
+
+    setState(() => _isUploadingAttachments = true);
+    var addedCount = 0;
+
+    try {
+      for (final attachment in picked) {
+        _log(
+          _logAttachPick,
+          extra: {"name": attachment.filename, "kind": singularLabel},
+        );
+        final beforeCount = ref
+            .read(chatThreadProvider(widget.conversationId))
+            .pendingAttachments
+            .length;
+        await controller.addAttachment(
+          bytes: attachment.bytes,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+        );
+        final afterCount = ref
+            .read(chatThreadProvider(widget.conversationId))
+            .pendingAttachments
+            .length;
+        if (afterCount > beforeCount) {
+          addedCount += 1;
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUploadingAttachments = false);
+      }
+    }
+
+    if (!mounted || addedCount == 0) {
+      return;
+    }
+
+    final noun = addedCount == 1 ? singularLabel : pluralLabel;
+    _showMessage("$addedCount $noun ready to send");
+  }
+
+  Future<void> _handleAttachPhotos(ChatThreadController controller) async {
+    _log(_logAttachTap, extra: {"kind": "photos"});
+    final picked = await pickChatImages();
+    await _queuePickedAttachments(
+      controller: controller,
+      picked: picked,
+      singularLabel: "photo",
+      pluralLabel: "photos",
     );
+  }
+
+  Future<void> _handleCapturePhoto(ChatThreadController controller) async {
+    _log(_logAttachTap, extra: {"kind": "camera"});
+    final picked = await captureChatImage();
+    if (picked == null) {
+      return;
+    }
+    await _queuePickedAttachments(
+      controller: controller,
+      picked: [picked],
+      singularLabel: "photo",
+      pluralLabel: "photos",
+    );
+  }
+
+  Future<void> _handleAttachFiles(ChatThreadController controller) async {
+    _log(_logAttachTap, extra: {"kind": "files"});
+    final picked = await pickChatFiles();
+    await _queuePickedAttachments(
+      controller: controller,
+      picked: picked,
+      singularLabel: "file",
+      pluralLabel: "files",
+    );
+  }
+
+  Future<void> _openAttachmentSheet(
+    ChatThreadController controller, {
+    required bool supportsCamera,
+  }) async {
+    if (_isUploadingAttachments ||
+        _isProcessingVoiceNote ||
+        _isVoiceRecording) {
+      return;
+    }
+
+    final selection = await showModalBottomSheet<_ComposerAttachmentAction>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: false,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final scheme = theme.colorScheme;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.shadow.withValues(alpha: 0.18),
+                  blurRadius: 28,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Add to chat",
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "Choose a quick action just like a chat app attachment menu.",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    if (supportsCamera)
+                      _ComposerAttachOption(
+                        icon: Icons.camera_alt_rounded,
+                        label: "Camera",
+                        tone: const Color(0xFF0F766E),
+                        onTap: () => Navigator.of(
+                          sheetContext,
+                        ).pop(_ComposerAttachmentAction.camera),
+                      ),
+                    _ComposerAttachOption(
+                      icon: Icons.photo_library_rounded,
+                      label: "Photos",
+                      tone: const Color(0xFF1D4ED8),
+                      onTap: () => Navigator.of(
+                        sheetContext,
+                      ).pop(_ComposerAttachmentAction.photos),
+                    ),
+                    _ComposerAttachOption(
+                      icon: Icons.folder_rounded,
+                      label: "Files",
+                      tone: const Color(0xFF4F46E5),
+                      onTap: () => Navigator.of(
+                        sheetContext,
+                      ).pop(_ComposerAttachmentAction.files),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || selection == null) {
+      return;
+    }
+
+    switch (selection) {
+      case _ComposerAttachmentAction.photos:
+        await _handleAttachPhotos(controller);
+        return;
+      case _ComposerAttachmentAction.camera:
+        await _handleCapturePhoto(controller);
+        return;
+      case _ComposerAttachmentAction.files:
+        await _handleAttachFiles(controller);
+        return;
+    }
+  }
+
+  Future<void> _toggleVoiceRecording(ChatThreadController controller) async {
+    if (_isVoiceRecording) {
+      await _stopVoiceRecording(controller);
+      return;
+    }
+    await _startVoiceRecording();
+  }
+
+  Future<void> _startVoiceRecording() async {
+    if (_isVoiceRecording || _isProcessingVoiceNote) {
+      return;
+    }
+    if (!(PlatformInfo.isAndroid || PlatformInfo.isIOS)) {
+      _showMessage("Voice notes are available in the mobile app right now.");
+      return;
+    }
+
+    final hasPermission = await _voiceRecorder.hasPermission();
+    if (!hasPermission) {
+      _showMessage("Microphone permission is required for voice notes.");
+      return;
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final filename = "voice-note-${DateTime.now().millisecondsSinceEpoch}.wav";
+    final path = "${tempDir.path}/$filename";
+
+    await _voiceRecorder.start(
+      const RecordConfig(encoder: AudioEncoder.wav),
+      path: path,
+    );
+
+    _voiceRecordingTicker?.cancel();
+    _voiceRecordingStopwatch
+      ..reset()
+      ..start();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isVoiceRecording = true;
+      _voiceRecordingDuration = Duration.zero;
+    });
+
+    _voiceRecordingTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceRecordingDuration = _voiceRecordingStopwatch.elapsed;
+      });
+    });
+  }
+
+  Future<void> _cancelVoiceRecording() async {
+    if (!_isVoiceRecording) {
+      return;
+    }
+
+    _voiceRecordingTicker?.cancel();
+    _voiceRecordingStopwatch
+      ..stop()
+      ..reset();
+    await _voiceRecorder.cancel();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isVoiceRecording = false;
+      _voiceRecordingDuration = Duration.zero;
+    });
+  }
+
+  Future<void> _stopVoiceRecording(ChatThreadController controller) async {
+    if (!_isVoiceRecording) {
+      return;
+    }
+
+    _voiceRecordingTicker?.cancel();
+    _voiceRecordingStopwatch.stop();
+
+    if (mounted) {
+      setState(() {
+        _isVoiceRecording = false;
+        _isProcessingVoiceNote = true;
+        _voiceRecordingDuration = _voiceRecordingStopwatch.elapsed;
+      });
+    }
+
+    try {
+      final path = await _voiceRecorder.stop();
+      if (path == null || path.trim().isEmpty) {
+        throw Exception("Recording was not saved.");
+      }
+
+      final beforeCount = ref
+          .read(chatThreadProvider(widget.conversationId))
+          .pendingAttachments
+          .length;
+      final filename =
+          "voice-note-${DateTime.now().millisecondsSinceEpoch}.wav";
+
+      await controller.addAttachmentFile(
+        filePath: path,
+        filename: filename,
+        mimeType: "audio/wav",
+      );
+
+      final afterCount = ref
+          .read(chatThreadProvider(widget.conversationId))
+          .pendingAttachments
+          .length;
+      if (afterCount <= beforeCount) {
+        throw Exception("Voice note upload did not complete.");
+      }
+
+      await controller.sendMessage(body: "");
+    } catch (error) {
+      _showMessage("Unable to send voice note: $error");
+    } finally {
+      _voiceRecordingStopwatch.reset();
+      if (mounted) {
+        setState(() {
+          _isProcessingVoiceNote = false;
+          _voiceRecordingDuration = Duration.zero;
+        });
+      }
+    }
   }
 
   @override
@@ -1025,6 +1360,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         purchaseRequest != null &&
         _hiddenRequestId.trim() == purchaseRequest.id.trim();
     final currentUserRole = session?.user.role ?? "";
+    final callState = ref.watch(chatCallProvider);
     final currentStaffRole = profileAsync.valueOrNull?.staffRole ?? "";
     final conversation = detail?.conversation ?? widget.args?.conversation;
     final matchesRequestBusinessScope = purchaseRequest == null
@@ -1083,7 +1419,6 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       currentUserRole: currentUserRole,
       currentUserBusinessId: currentUserBusinessId,
     );
-    final primaryParticipant = _resolvePrimaryParticipant(displayParticipants);
     final currentParticipant = _findParticipantByUserId(
       allParticipants,
       currentUserId,
@@ -1127,9 +1462,27 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         !isCurrentAttendant &&
         !_isSubmittingRequestAction;
     final attendLabel = isCurrentAttendant ? "In Chat" : "Attend Chat";
+    final supportsCamera = PlatformInfo.isAndroid || PlatformInfo.isIOS;
+    final supportsVoiceRecording = PlatformInfo.isAndroid || PlatformInfo.isIOS;
+    final hasLiveCall =
+        callState.call != null && !(callState.call?.isTerminal ?? true);
+    final canVoiceCall =
+        conversation?.type != _conversationTypeGroup &&
+        displayParticipants.isNotEmpty &&
+        !hasLiveCall;
     final canSendMessage =
         (_hasDraftText || state.pendingAttachments.isNotEmpty) &&
-        !state.isSending;
+        !state.isSending &&
+        !_isUploadingAttachments &&
+        !_isProcessingVoiceNote &&
+        !_isVoiceRecording;
+    final canRecordVoice =
+        supportsVoiceRecording &&
+        !_hasDraftText &&
+        state.pendingAttachments.isEmpty &&
+        !state.isSending &&
+        !_isUploadingAttachments &&
+        !_isProcessingVoiceNote;
     final title = _resolveTitle(
       conversation: conversation,
       participants: displayParticipants,
@@ -1148,253 +1501,387 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       conversation: conversation,
       participants: displayParticipants,
     );
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = colorScheme.brightness == Brightness.dark;
 
-    return Theme(
-      data: AppTheme.business(),
-      child: Builder(
-        builder: (context) {
-          final colorScheme = Theme.of(context).colorScheme;
-          return Scaffold(
-            backgroundColor: colorScheme.surfaceContainerLowest,
-            appBar: AppBar(
-              centerTitle: true,
-              title: supportConversation
-                  ? _SupportThreadHeaderTitle(
-                      title: title,
-                      customerStatusLabel: _titleCaseWords(roleLabel),
-                      assignedStaffName: assignedStaffName,
-                    )
-                  : _ThreadHeaderTitle(
-                      title: title,
-                      roleLabel: roleLabel,
-                      businessLabel: businessLabel,
-                      estateLabel: estateLabel,
-                    ),
-              leadingWidth: 64,
-              leading: Padding(
-                padding: const EdgeInsets.only(left: 12),
-                child: _ThreadToolbarButton(
-                  icon: Icons.arrow_back_rounded,
-                  tooltip: "Back",
-                  onPressed: () {
-                    _log(_logBackTap);
-                    if (context.canPop()) {
-                      context.pop();
-                      return;
-                    }
-                    context.go(chatInboxRoute);
-                  },
-                ),
+    return Scaffold(
+      backgroundColor: isDark
+          ? colorScheme.surfaceContainerLowest
+          : _threadCanvas,
+      appBar: AppBar(
+        backgroundColor: _threadHeroTop,
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        title: supportConversation
+            ? _SupportThreadHeaderTitle(
+                title: title,
+                customerStatusLabel: _titleCaseWords(roleLabel),
+                assignedStaffName: assignedStaffName,
+              )
+            : _ThreadHeaderTitle(
+                title: title,
+                roleLabel: roleLabel,
+                businessLabel: businessLabel,
+                estateLabel: estateLabel,
               ),
-              actions: supportConversation
-                  ? [
-                      Padding(
-                        padding: const EdgeInsets.only(left: 2),
-                        child: _HeaderAiToggleButton(
-                          enabled: isAiEnabled,
-                          isBusy: _isSubmittingRequestAction,
-                          onPressed: canToggleAi
-                              ? () {
-                                  _log(_logAiToggleTap);
-                                  _handleUpdateAiControl(
-                                    supportRequest,
-                                    !isAiEnabled,
-                                  );
-                                }
-                              : null,
-                        ),
-                      ),
-                      _HeaderAttendChatButton(
-                        label: attendLabel,
-                        enabled: canAttendChat,
-                        isActive: isCurrentAttendant,
-                        isBusy: _isSubmittingRequestAction,
-                        onPressed: canAttendChat
-                            ? () {
-                                _log(_logAttendTap);
-                                _handleAttendChat(supportRequest);
-                              }
-                            : null,
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: _ThreadOverflowMenu(
-                          tooltip: _tooltipMore,
-                          purchaseRequest: purchaseRequest,
-                          hasProfile: displayParticipants.isNotEmpty,
-                          isRequestSummaryHidden: isRequestSummaryHidden,
-                          onSelected: (action) {
-                            _log(
-                              _logOverflowTap,
-                              extra: {"action": action.name},
-                            );
-                            _handleOverflowAction(
-                              action: action,
-                              profileParticipants: displayParticipants,
-                              purchaseRequest: purchaseRequest,
-                              isRequestSummaryHidden: isRequestSummaryHidden,
-                            );
+        leadingWidth: 64,
+        leading: Padding(
+          padding: const EdgeInsets.only(left: 12),
+          child: _ThreadToolbarButton(
+            icon: Icons.arrow_back_rounded,
+            tooltip: "Back",
+            heroStyle: true,
+            onPressed: () {
+              _log(_logBackTap);
+              if (context.canPop()) {
+                context.pop();
+                return;
+              }
+              context.go(chatInboxRoute);
+            },
+          ),
+        ),
+        actions: supportConversation
+            ? [
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: _ThreadToolbarButton(
+                    icon: Icons.call_rounded,
+                    tooltip: _tooltipCall,
+                    heroStyle: true,
+                    onPressed: !canVoiceCall
+                        ? null
+                        : () async {
+                            _log(_logCallTap);
+                            final error = await ref
+                                .read(chatCallProvider.notifier)
+                                .startOutgoingCall(
+                                  conversationId: widget.conversationId,
+                                );
+                            if (error != null && mounted) {
+                              _showMessage(error);
+                            }
                           },
-                        ),
-                      ),
-                    ]
-                  : [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: _ThreadToolbarButton(
-                          icon: Icons.person_outline_rounded,
-                          tooltip: _tooltipInfo,
-                          onPressed: displayParticipants.isEmpty
-                              ? null
-                              : () {
-                                  _log(_logProfileTap);
-                                  _openProfileScreen(
-                                    context,
-                                    displayParticipants,
-                                  );
-                                },
-                        ),
-                      ),
-                    ],
-              bottom: supportConversation && primaryParticipant != null
-                  ? PreferredSize(
-                      preferredSize: const Size.fromHeight(_appBarInfoHeight),
-                      child: _StaffSupportHeaderBar(
-                        participant: primaryParticipant,
-                        assignedStaffName: assignedStaffName,
-                        assignedStaffLabel: assignedStaffLabel,
-                        conversationStatus: conversationStatus,
-                        conversationStatusAccent: conversationStatusAccent,
-                        onTapProfile: () => _openProfileScreen(
-                          context,
-                          displayParticipants,
-                          userId: primaryParticipant.userId,
-                        ),
-                      ),
-                    )
-                  : displayParticipants.isEmpty
-                  ? null
-                  : PreferredSize(
-                      preferredSize: const Size.fromHeight(_appBarInfoHeight),
-                      child: _ThreadInfoBar(
-                        participants: displayParticipants,
-                        onTapParticipant: (participant) => _openProfileScreen(
-                          context,
-                          displayParticipants,
-                          userId: participant.userId,
-                        ),
-                      ),
-                    ),
-            ),
-            body: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    colorScheme.surfaceContainerLowest,
-                    colorScheme.surfaceContainerLow,
-                    colorScheme.surfaceContainerLowest,
-                  ],
+                  ),
                 ),
-              ),
-              child: Column(
-                children: [
-                  Expanded(
-                    child: state.isLoading
-                        ? const Center(child: CircularProgressIndicator())
-                        : _MessageList(
-                            messages: state.messages,
-                            participants: allParticipants,
-                            currentUserId: currentUserId,
-                            currentParticipant: currentParticipant,
-                            onRetryMessage: (message) {
-                              _log(
-                                _logRetryTap,
-                                extra: {"messageId": message.id},
-                              );
-                              controller.retryMessage(message.id);
-                            },
-                          ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 2),
+                  child: _HeaderAiToggleButton(
+                    enabled: isAiEnabled,
+                    isBusy: _isSubmittingRequestAction,
+                    onPressed: canToggleAi
+                        ? () {
+                            _log(_logAiToggleTap);
+                            _handleUpdateAiControl(
+                              supportRequest,
+                              !isAiEnabled,
+                            );
+                          }
+                        : null,
                   ),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: purchaseRequest == null
-                        ? const SizedBox.shrink()
-                        : isRequestSummaryHidden
-                        ? Padding(
-                            key: const ValueKey("request_restore"),
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: _RequestRestoreButton(
-                              onPressed: _showRequestSummary,
-                            ),
-                          )
-                        : Padding(
-                            key: ValueKey(
-                              "request_panel_${purchaseRequest.id}",
-                            ),
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                            child: _PurchaseRequestPanel(
-                              request: purchaseRequest,
-                              isBusinessActor: isBusinessActor,
-                              canSendInvoice: canSendRequestInvoice,
-                              canManageFulfillment: canManageRequestFulfillment,
-                              canReviewProof: canManageSellerRequest,
-                              isBuyer: isBuyer,
-                              isSubmitting: _isSubmittingRequestAction,
-                              onOpenQuotation: () =>
-                                  _openQuotationScreen(purchaseRequest),
-                              onUploadProof: () =>
-                                  _handleUploadProof(purchaseRequest),
-                              onApproveProof: () => _handleReviewProof(
-                                request: purchaseRequest,
-                                decision: "approved",
-                              ),
-                              onRejectProof: () => _handleReviewProof(
-                                request: purchaseRequest,
-                                decision: "rejected",
-                              ),
-                              onShipOrder: () =>
-                                  _handleShipOrder(purchaseRequest),
-                              onMarkDelivered: () =>
-                                  _handleMarkDelivered(purchaseRequest),
-                              onCancelRequest: () =>
-                                  _handleCancelRequest(purchaseRequest),
-                              onHide: () =>
-                                  _hideRequestSummary(purchaseRequest.id),
-                            ),
-                          ),
-                  ),
-                  if (state.pendingAttachments.isNotEmpty)
-                    // WHY: Show pending attachments before send for clarity.
-                    _AttachmentRow(
-                      attachments: state.pendingAttachments,
-                      onRemove: (id) => controller.removeAttachment(id),
-                    ),
-                  _Composer(
-                    controller: _messageCtrl,
-                    isSending: state.isSending,
-                    canSend: canSendMessage,
-                    onAttach: () => _handleAttach(controller),
-                    onSend: () {
-                      if (!canSendMessage) {
-                        return;
-                      }
-                      _log(_logSendTap);
-                      final text = _messageCtrl.text;
-                      // WHY: Send uses optimistic UI in the controller.
-                      controller.sendMessage(body: text);
-                      _messageCtrl.clear();
+                ),
+                _HeaderAttendChatButton(
+                  label: attendLabel,
+                  enabled: canAttendChat,
+                  isActive: isCurrentAttendant,
+                  isBusy: _isSubmittingRequestAction,
+                  onPressed: canAttendChat
+                      ? () {
+                          _log(_logAttendTap);
+                          _handleAttendChat(supportRequest);
+                        }
+                      : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _ThreadOverflowMenu(
+                    tooltip: _tooltipMore,
+                    purchaseRequest: purchaseRequest,
+                    hasProfile: displayParticipants.isNotEmpty,
+                    isRequestSummaryHidden: isRequestSummaryHidden,
+                    onSelected: (action) {
+                      _log(_logOverflowTap, extra: {"action": action.name});
+                      _handleOverflowAction(
+                        action: action,
+                        profileParticipants: displayParticipants,
+                        purchaseRequest: purchaseRequest,
+                        isRequestSummaryHidden: isRequestSummaryHidden,
+                      );
                     },
                   ),
-                ],
-              ),
+                ),
+              ]
+            : [
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: _ThreadToolbarButton(
+                    icon: Icons.call_rounded,
+                    tooltip: _tooltipCall,
+                    heroStyle: true,
+                    onPressed: !canVoiceCall
+                        ? null
+                        : () async {
+                            _log(_logCallTap);
+                            final error = await ref
+                                .read(chatCallProvider.notifier)
+                                .startOutgoingCall(
+                                  conversationId: widget.conversationId,
+                                );
+                            if (error != null && mounted) {
+                              _showMessage(error);
+                            }
+                          },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: _ThreadToolbarButton(
+                    icon: Icons.person_outline_rounded,
+                    tooltip: _tooltipInfo,
+                    heroStyle: true,
+                    onPressed: displayParticipants.isEmpty
+                        ? null
+                        : () {
+                            _log(_logProfileTap);
+                            _openProfileScreen(context, displayParticipants);
+                          },
+                  ),
+                ),
+              ],
+        bottom: supportConversation
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(_appBarInfoHeight),
+                child: _StaffSupportHeaderBar(
+                  assignedStaffName: assignedStaffName,
+                  assignedStaffLabel: assignedStaffLabel,
+                  conversationStatus: conversationStatus,
+                  conversationStatusAccent: conversationStatusAccent,
+                ),
+              )
+            : null,
+      ),
+      body: Stack(
+        children: [
+          const Positioned.fill(child: _ThreadBackdrop()),
+          Positioned.fill(
+            child: Column(
+              children: [
+                Expanded(
+                  child: state.isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _MessageList(
+                          messages: state.messages,
+                          participants: allParticipants,
+                          currentUserId: currentUserId,
+                          currentParticipant: currentParticipant,
+                          onRetryMessage: (message) {
+                            _log(
+                              _logRetryTap,
+                              extra: {"messageId": message.id},
+                            );
+                            controller.retryMessage(message.id);
+                          },
+                        ),
+                ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: purchaseRequest == null
+                      ? const SizedBox.shrink()
+                      : isRequestSummaryHidden
+                      ? Padding(
+                          key: const ValueKey("request_restore"),
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: _RequestRestoreButton(
+                            onPressed: _showRequestSummary,
+                          ),
+                        )
+                      : Padding(
+                          key: ValueKey("request_panel_${purchaseRequest.id}"),
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                          child: _PurchaseRequestPanel(
+                            request: purchaseRequest,
+                            isBusinessActor: isBusinessActor,
+                            canSendInvoice: canSendRequestInvoice,
+                            canManageFulfillment: canManageRequestFulfillment,
+                            canReviewProof: canManageSellerRequest,
+                            isBuyer: isBuyer,
+                            isSubmitting: _isSubmittingRequestAction,
+                            onOpenQuotation: () =>
+                                _openQuotationScreen(purchaseRequest),
+                            onUploadProof: () =>
+                                _handleUploadProof(purchaseRequest),
+                            onApproveProof: () => _handleReviewProof(
+                              request: purchaseRequest,
+                              decision: "approved",
+                            ),
+                            onRejectProof: () => _handleReviewProof(
+                              request: purchaseRequest,
+                              decision: "rejected",
+                            ),
+                            onShipOrder: () =>
+                                _handleShipOrder(purchaseRequest),
+                            onMarkDelivered: () =>
+                                _handleMarkDelivered(purchaseRequest),
+                            onCancelRequest: () =>
+                                _handleCancelRequest(purchaseRequest),
+                            onHide: () =>
+                                _hideRequestSummary(purchaseRequest.id),
+                          ),
+                        ),
+                ),
+                _Composer(
+                  controller: _messageCtrl,
+                  attachments: state.pendingAttachments,
+                  isSending: state.isSending,
+                  isUploadingAttachments: _isUploadingAttachments,
+                  isVoiceRecording: _isVoiceRecording,
+                  isProcessingVoiceNote: _isProcessingVoiceNote,
+                  voiceRecordingDuration: _voiceRecordingDuration,
+                  canSend: canSendMessage,
+                  canRecordVoice: canRecordVoice,
+                  onRemoveAttachment: (id) => controller.removeAttachment(id),
+                  onOpenAttachmentOptions: () => _openAttachmentSheet(
+                    controller,
+                    supportsCamera: supportsCamera,
+                  ),
+                  onToggleVoiceRecording: () =>
+                      _toggleVoiceRecording(controller),
+                  onCancelVoiceRecording: _cancelVoiceRecording,
+                  onSend: () {
+                    if (!canSendMessage) {
+                      return;
+                    }
+                    _log(_logSendTap);
+                    final text = _messageCtrl.text;
+                    controller.sendMessage(body: text);
+                    _messageCtrl.clear();
+                  },
+                ),
+              ],
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
+}
+
+class _ThreadBackdrop extends StatelessWidget {
+  const _ThreadBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+
+    if (!isDark) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: _threadCanvas,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.alphaBlend(
+                _threadHeroTop.withValues(alpha: 0.05),
+                _threadCanvas,
+              ),
+              _threadCanvas,
+            ],
+          ),
+        ),
+        child: const SizedBox.expand(),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            _blendThreadTone(
+              scheme.primary,
+              scheme.surfaceContainerLowest,
+              alpha: 0.08,
+            ),
+            _blendThreadTone(
+              scheme.secondary,
+              scheme.surfaceContainerLow,
+              alpha: 0.05,
+            ),
+            scheme.surface,
+          ],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -92,
+            right: -84,
+            child: _ThreadBloom(
+              size: 250,
+              color: _blendThreadTone(
+                scheme.primary,
+                scheme.surfaceContainerHighest,
+                alpha: 0.3,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 120,
+            left: -104,
+            child: _ThreadBloom(
+              size: 220,
+              color: _blendThreadTone(
+                scheme.tertiary,
+                scheme.surfaceContainer,
+                alpha: 0.18,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThreadBloom extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _ThreadBloom({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: ImageFiltered(
+        imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: [
+                color.withValues(alpha: 0.92),
+                color.withValues(alpha: 0.26),
+                color.withValues(alpha: 0.02),
+                Colors.transparent,
+              ],
+              stops: const [0, 0.42, 0.74, 1],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Color _blendThreadTone(Color accent, Color base, {double alpha = 0.08}) {
+  return Color.alphaBlend(accent.withValues(alpha: alpha), base);
 }
 
 class _MessageList extends StatefulWidget {
@@ -1681,7 +2168,7 @@ class _MessageListState extends State<_MessageList> {
 
     return ListView.builder(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       itemCount: entries.length,
       itemBuilder: (context, index) {
         final entry = entries[index];
@@ -1778,7 +2265,7 @@ class _ThreadDateDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
           Expanded(
@@ -1817,7 +2304,7 @@ class _ThreadUnreadDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
           Expanded(
@@ -1865,20 +2352,17 @@ class _AttachmentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        children: attachments
-            .map(
-              (attachment) => ChatAttachmentChip(
-                attachment: attachment,
-                onRemove: () => onRemove(attachment.id),
-              ),
-            )
-            .toList(),
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: attachments
+          .map(
+            (attachment) => ChatAttachmentChip(
+              attachment: attachment,
+              onRemove: () => onRemove(attachment.id),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -3428,12 +3912,13 @@ class _ThreadOverflowMenu extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: scheme.outlineVariant),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
       child: PopupMenuButton<_ThreadOverflowAction>(
         tooltip: tooltip,
+        iconColor: Colors.white,
         onSelected: onSelected,
         offset: const Offset(0, 42),
         color: Color.alphaBlend(
@@ -3623,16 +4108,21 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w800,
+            color: Colors.white,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: _headerMetaSpacing),
         Text(
           "$customerStatusLabel$_metaSeparator$assignedStaffName",
           textAlign: TextAlign.center,
           style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+            color: Colors.white.withValues(alpha: 0.78),
             fontWeight: FontWeight.w600,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );
@@ -3640,20 +4130,16 @@ class _SupportThreadHeaderTitle extends StatelessWidget {
 }
 
 class _StaffSupportHeaderBar extends StatelessWidget {
-  final ChatParticipantSummary participant;
   final String assignedStaffName;
   final String assignedStaffLabel;
   final String conversationStatus;
   final Color conversationStatusAccent;
-  final VoidCallback onTapProfile;
 
   const _StaffSupportHeaderBar({
-    required this.participant,
     required this.assignedStaffName,
     required this.assignedStaffLabel,
     required this.conversationStatus,
     required this.conversationStatusAccent,
-    required this.onTapProfile,
   });
 
   @override
@@ -3666,8 +4152,6 @@ class _StaffSupportHeaderBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _ParticipantInfoPill(participant: participant, onTap: onTapProfile),
-            const SizedBox(width: 10),
             _SupportMetaChip(
               icon: Icons.badge_outlined,
               title: "Assigned",
@@ -3766,24 +4250,39 @@ class _ThreadToolbarButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
+  final bool heroStyle;
 
   const _ThreadToolbarButton({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.heroStyle = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final backgroundColor = heroStyle
+        ? Colors.white.withValues(alpha: 0.12)
+        : colorScheme.surfaceContainerLow;
+    final borderColor = heroStyle
+        ? Colors.white.withValues(alpha: 0.12)
+        : colorScheme.outlineVariant;
+    final iconColor = heroStyle
+        ? Colors.white
+        : onPressed == null
+        ? colorScheme.onSurfaceVariant
+        : colorScheme.onSurface;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: borderColor),
       ),
       child: IconButton(
+        color: iconColor,
+        disabledColor: iconColor.withValues(alpha: 0.42),
         icon: Icon(icon),
         tooltip: tooltip,
         onPressed: onPressed,
@@ -3805,12 +4304,40 @@ class _ThreadHeaderTitle extends StatelessWidget {
     required this.estateLabel,
   });
 
+  String? _buildMetaText() {
+    final labels = <String>[];
+    final seen = <String>{};
+    final hiddenValues = <String>{
+      _fallbackRole.toLowerCase(),
+      _fallbackBusiness.toLowerCase(),
+      _fallbackEstate.toLowerCase(),
+    };
+
+    void addLabel(String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return;
+      }
+      final normalized = trimmed.toLowerCase();
+      if (hiddenValues.contains(normalized) || !seen.add(normalized)) {
+        return;
+      }
+      labels.add(trimmed);
+    }
+
+    addLabel(roleLabel);
+    addLabel(businessLabel);
+    addLabel(estateLabel);
+    if (labels.isEmpty) {
+      return null;
+    }
+    return labels.join(_metaSeparator);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // WHY: Stack name and metadata to match the requested header layout.
-    final metaText =
-        "$roleLabel$_metaSeparator$businessLabel$_metaSeparator$estateLabel";
+    final metaText = _buildMetaText();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -3819,161 +4346,59 @@ class _ThreadHeaderTitle extends StatelessWidget {
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
+            color: Colors.white,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: _headerMetaSpacing),
-        Text(
-          metaText,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
+        if (metaText != null) ...[
+          const SizedBox(height: _headerMetaSpacing),
+          Text(
+            metaText,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.78),
+              fontWeight: FontWeight.w600,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        ),
+        ],
       ],
-    );
-  }
-}
-
-class _ThreadInfoBar extends StatelessWidget {
-  final List<ChatParticipantSummary> participants;
-  final ValueChanged<ChatParticipantSummary> onTapParticipant;
-
-  const _ThreadInfoBar({
-    required this.participants,
-    required this.onTapParticipant,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // WHY: Keep participant context visible without leaving the thread.
-    return Container(
-      width: double.infinity,
-      padding: _appBarInfoPadding,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: participants
-              .map(
-                (participant) => Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: _ParticipantInfoPill(
-                    participant: participant,
-                    onTap: () => onTapParticipant(participant),
-                  ),
-                ),
-              )
-              .toList(),
-        ),
-      ),
-    );
-  }
-}
-
-class _ParticipantInfoPill extends StatelessWidget {
-  final ChatParticipantSummary participant;
-  final VoidCallback onTap;
-
-  const _ParticipantInfoPill({required this.participant, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final displayName = participant.name.trim().isEmpty
-        ? participant.email
-        : participant.name;
-    final avatarUrl = participant.profileImageUrl.trim();
-    final roleLabel = participant.role.trim().isEmpty
-        ? _fallbackRole
-        : participant.role.replaceAll("_", " ");
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(_participantPillRadius),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(_participantPillRadius),
-            border: Border.all(color: colorScheme.outlineVariant),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 10,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: _participantPillAvatarRadius + 2,
-                backgroundColor: colorScheme.primaryContainer,
-                backgroundImage: avatarUrl.isEmpty
-                    ? null
-                    : NetworkImage(avatarUrl),
-                child: avatarUrl.isEmpty
-                    ? Text(
-                        displayName.isNotEmpty
-                            ? displayName[0].toUpperCase()
-                            : _avatarFallbackInitial,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onPrimaryContainer,
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: _participantPillSpacing),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayName,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Chip(
-                    label: Text(
-                      roleLabel,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    backgroundColor: colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.34),
-                    side: BorderSide(color: colorScheme.outlineVariant),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
 
 class _Composer extends StatefulWidget {
   final TextEditingController controller;
+  final List<ChatAttachment> attachments;
   final bool isSending;
+  final bool isUploadingAttachments;
+  final bool isVoiceRecording;
+  final bool isProcessingVoiceNote;
+  final Duration voiceRecordingDuration;
   final bool canSend;
-  final VoidCallback onAttach;
+  final bool canRecordVoice;
+  final void Function(String id) onRemoveAttachment;
+  final VoidCallback onOpenAttachmentOptions;
+  final VoidCallback onToggleVoiceRecording;
+  final VoidCallback onCancelVoiceRecording;
   final VoidCallback onSend;
 
   const _Composer({
     required this.controller,
+    required this.attachments,
     required this.isSending,
+    required this.isUploadingAttachments,
+    required this.isVoiceRecording,
+    required this.isProcessingVoiceNote,
+    required this.voiceRecordingDuration,
     required this.canSend,
-    required this.onAttach,
+    required this.canRecordVoice,
+    required this.onRemoveAttachment,
+    required this.onOpenAttachmentOptions,
+    required this.onToggleVoiceRecording,
+    required this.onCancelVoiceRecording,
     required this.onSend,
   });
 
@@ -3984,6 +4409,28 @@ class _Composer extends StatefulWidget {
 class _ComposerState extends State<_Composer> {
   final FocusNode _focusNode = FocusNode();
   bool _hasFocus = false;
+  static const List<String> _quickEmojis = [
+    "😀",
+    "😂",
+    "😍",
+    "🙏",
+    "👍",
+    "🔥",
+    "✅",
+    "🎉",
+    "❤️",
+    "🙂",
+    "🤝",
+    "📌",
+    "📦",
+    "🧾",
+    "📍",
+    "🚚",
+    "📸",
+    "🎤",
+    "💬",
+    "👀",
+  ];
 
   @override
   void initState() {
@@ -4028,120 +4475,493 @@ class _ComposerState extends State<_Composer> {
     return KeyEventResult.handled;
   }
 
+  void _insertAtCursor(String text) {
+    final value = widget.controller.value;
+    final selection = value.selection;
+    final hasSelection = selection.isValid;
+    final start = hasSelection ? selection.start : value.text.length;
+    final end = hasSelection ? selection.end : value.text.length;
+    final nextText = value.text.replaceRange(start, end, text);
+
+    widget.controller.value = value.copyWith(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: start + text.length),
+      composing: TextRange.empty,
+    );
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _showEmojiPickerSheet() async {
+    if (widget.isVoiceRecording || widget.isProcessingVoiceNote) {
+      return;
+    }
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final scheme = theme.colorScheme;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Container(
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.shadow.withValues(alpha: 0.16),
+                  blurRadius: 24,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Add emoji",
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: _quickEmojis
+                      .map(
+                        (emoji) => InkWell(
+                          onTap: () => Navigator.of(sheetContext).pop(emoji),
+                          borderRadius: BorderRadius.circular(18),
+                          child: Ink(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: scheme.surfaceContainerLow,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: scheme.outlineVariant),
+                            ),
+                            child: Center(
+                              child: Text(
+                                emoji,
+                                style: const TextStyle(fontSize: 24),
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected == null || selected.isEmpty) {
+      return;
+    }
+    _insertAtCursor(selected);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final composerSurface = isDark
+        ? scheme.surfaceContainerLow
+        : const Color(0xFFF7F9FD);
+    final isBusy =
+        widget.isSending ||
+        widget.isUploadingAttachments ||
+        widget.isProcessingVoiceNote;
+    final showSendAction = widget.canSend;
+    final voiceButtonEnabled =
+        widget.isVoiceRecording || (widget.canRecordVoice && !isBusy);
+    final actionTooltip = widget.isVoiceRecording
+        ? "Stop and send voice note"
+        : showSendAction
+        ? "Send"
+        : "Record voice note";
+    final actionColor = widget.isVoiceRecording
+        ? const Color(0xFFDC2626)
+        : showSendAction
+        ? scheme.primary
+        : (isDark ? const Color(0xFF20304D) : const Color(0xFFE2E8F0));
+    final actionIconColor = widget.isVoiceRecording || showSendAction
+        ? Colors.white
+        : scheme.onSurfaceVariant;
+
     return SafeArea(
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
         decoration: BoxDecoration(
-          color: scheme.surfaceContainerLow,
+          color: composerSurface,
           border: Border(top: BorderSide(color: scheme.outlineVariant)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            _ThreadToolbarButton(
-              icon: Icons.attach_file_rounded,
-              tooltip: "Attach",
-              onPressed: widget.isSending ? null : widget.onAttach,
+          boxShadow: [
+            BoxShadow(
+              color: scheme.shadow.withValues(alpha: isDark ? 0.16 : 0.05),
+              blurRadius: 20,
+              offset: const Offset(0, -8),
             ),
-            Expanded(
-              child: Focus(
-                focusNode: _focusNode,
-                onKeyEvent: _handleKeyEvent,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  decoration: BoxDecoration(
-                    color: Color.alphaBlend(
-                      (_hasFocus ? scheme.primary : scheme.primaryContainer)
-                          .withValues(alpha: _hasFocus ? 0.12 : 0.18),
-                      scheme.surface,
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.isUploadingAttachments || widget.isProcessingVoiceNote)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          scheme.primary,
+                        ),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: _hasFocus
-                          ? scheme.primary.withValues(alpha: 0.48)
-                          : scheme.outlineVariant,
+                    const SizedBox(width: 10),
+                    Text(
+                      widget.isUploadingAttachments
+                          ? "Adding selected attachments..."
+                          : "Preparing voice note...",
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    boxShadow: _hasFocus
-                        ? [
-                            BoxShadow(
-                              color: scheme.primary.withValues(alpha: 0.12),
-                              blurRadius: 14,
-                              offset: const Offset(0, 8),
-                            ),
-                          ]
-                        : const [],
+                  ],
+                ),
+              ),
+            if (widget.isVoiceRecording)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2A1620)
+                      : const Color(0xFFFFF1F2),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFF5C2230)
+                        : const Color(0xFFF3B4BF),
                   ),
-                  child: TextField(
-                    controller: widget.controller,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    minLines: 1,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      hintText: "Type a message",
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.fiber_manual_record_rounded,
+                      color: Color(0xFFDC2626),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        "Recording ${_formatComposerDuration(widget.voiceRecordingDuration)}",
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: scheme.onSurface,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: widget.onCancelVoiceRecording,
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text("Cancel"),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        textStyle: theme.textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (widget.attachments.isNotEmpty)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF19263B)
+                      : const Color(0xFFF0F4FB),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFF2B3A54)
+                        : const Color(0xFFD6E0EF),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "${widget.attachments.length} attachment${widget.attachments.length == 1 ? "" : "s"} ready to send",
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _AttachmentRow(
+                      attachments: widget.attachments,
+                      onRemove: widget.onRemoveAttachment,
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF162133) : Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: _hasFocus
+                            ? (isDark
+                                  ? const Color(0xFF7F95E8)
+                                  : const Color(0xFF8AA0EB))
+                            : (isDark
+                                  ? const Color(0xFF2A3851)
+                                  : const Color(0xFFD4DFEE)),
+                      ),
+                      boxShadow: _hasFocus
+                          ? [
+                              BoxShadow(
+                                color: scheme.primary.withValues(
+                                  alpha: isDark ? 0.14 : 0.1,
+                                ),
+                                blurRadius: 12,
+                                offset: const Offset(0, 6),
+                              ),
+                            ]
+                          : const [],
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _ComposerInlineIconButton(
+                          tooltip: "Add attachment",
+                          icon: Icons.attach_file_rounded,
+                          onPressed: isBusy || widget.isVoiceRecording
+                              ? null
+                              : widget.onOpenAttachmentOptions,
+                        ),
+                        Expanded(
+                          child: widget.isVoiceRecording
+                              ? Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 2,
+                                    vertical: 16,
+                                  ),
+                                  child: Text(
+                                    "Tap stop to send your voice note",
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                )
+                              : Focus(
+                                  focusNode: _focusNode,
+                                  onKeyEvent: _handleKeyEvent,
+                                  child: TextField(
+                                    controller: widget.controller,
+                                    keyboardType: TextInputType.multiline,
+                                    textInputAction: TextInputAction.newline,
+                                    minLines: 1,
+                                    maxLines: 5,
+                                    decoration: InputDecoration(
+                                      hintText: widget.attachments.isEmpty
+                                          ? "Message"
+                                          : "Add a caption or send now",
+                                      border: InputBorder.none,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 14,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                        _ComposerInlineIconButton(
+                          tooltip: "Add emoji",
+                          icon: Icons.emoji_emotions_outlined,
+                          onPressed: isBusy || widget.isVoiceRecording
+                              ? null
+                              : _showEmojiPickerSheet,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: actionTooltip,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    decoration: BoxDecoration(
+                      color: actionColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: widget.canSend || widget.isVoiceRecording
+                          ? [
+                              BoxShadow(
+                                color: actionColor.withValues(alpha: 0.24),
+                                blurRadius: 14,
+                                offset: const Offset(0, 7),
+                              ),
+                            ]
+                          : const [],
+                    ),
+                    child: IconButton(
+                      tooltip: actionTooltip,
+                      onPressed: widget.isSending
+                          ? null
+                          : widget.canSend
+                          ? widget.onSend
+                          : voiceButtonEnabled
+                          ? widget.onToggleVoiceRecording
+                          : null,
+                      icon: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 160),
+                        child: widget.isSending || widget.isProcessingVoiceNote
+                            ? SizedBox(
+                                key: const ValueKey("composer_action_loading"),
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
+                              )
+                            : widget.isVoiceRecording
+                            ? Icon(
+                                Icons.stop_rounded,
+                                key: const ValueKey("composer_stop_voice"),
+                                color: actionIconColor,
+                              )
+                            : Icon(
+                                widget.canSend
+                                    ? Icons.send_rounded
+                                    : Icons.mic_rounded,
+                                key: ValueKey(
+                                  widget.canSend
+                                      ? "composer_send"
+                                      : "composer_mic",
+                                ),
+                                color: actionIconColor,
+                              ),
                       ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: "Send",
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                decoration: BoxDecoration(
-                  color: widget.canSend
-                      ? scheme.primary
-                      : scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: widget.canSend
-                      ? [
-                          BoxShadow(
-                            color: scheme.primary.withValues(alpha: 0.22),
-                            blurRadius: 18,
-                            offset: const Offset(0, 10),
-                          ),
-                        ]
-                      : const [],
-                ),
-                child: IconButton(
-                  tooltip: "Send",
-                  onPressed: widget.canSend && !widget.isSending
-                      ? widget.onSend
-                      : null,
-                  icon: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 160),
-                    child: widget.isSending
-                        ? SizedBox(
-                            key: const ValueKey("composer_loading"),
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                scheme.onPrimary,
-                              ),
-                            ),
-                          )
-                        : Icon(
-                            Icons.send_rounded,
-                            key: const ValueKey("composer_send"),
-                            color: widget.canSend
-                                ? scheme.onPrimary
-                                : scheme.onSurfaceVariant,
-                          ),
-                  ),
-                ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formatComposerDuration(Duration duration) {
+  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, "0");
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, "0");
+  return "$minutes:$seconds";
+}
+
+class _ComposerInlineIconButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  const _ComposerInlineIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      color: scheme.onSurfaceVariant,
+      disabledColor: scheme.onSurfaceVariant.withValues(alpha: 0.42),
+      icon: Icon(icon),
+    );
+  }
+}
+
+class _ComposerAttachOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color tone;
+  final VoidCallback onTap;
+
+  const _ComposerAttachOption({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(22),
+      child: Ink(
+        width: 104,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: tone.withValues(alpha: 0.22)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.16),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: tone),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],

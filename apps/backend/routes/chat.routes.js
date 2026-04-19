@@ -31,6 +31,7 @@ const upload = multer({
 
 // WHY: Conversation list + creation endpoints.
 router.get('/conversations', requireAuth, chatController.listConversations);
+router.get('/contacts', requireAuth, chatController.listContacts);
 router.post('/conversations', requireAuth, chatController.createConversation);
 router.get(
   '/conversations/:conversationId',
@@ -44,6 +45,12 @@ router.get(
   requireAuth,
   chatController.listMessages
 );
+
+router.post('/calls', requireAuth, chatController.startCall);
+router.get('/calls/:callId', requireAuth, chatController.getCall);
+router.post('/calls/:callId/accept', requireAuth, chatController.acceptCall);
+router.post('/calls/:callId/decline', requireAuth, chatController.declineCall);
+router.post('/calls/:callId/end', requireAuth, chatController.endCall);
 
 // WHY: Message send is REST-first to guarantee persistence.
 router.post('/messages', requireAuth, chatController.sendMessage);

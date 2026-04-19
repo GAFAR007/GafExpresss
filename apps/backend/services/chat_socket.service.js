@@ -17,6 +17,7 @@
 const jwt = require("jsonwebtoken");
 const debug = require("../utils/debug");
 const chatService = require("./chat.service");
+const chatCallService = require("./chat_call.service");
 const {
   CHAT_SOCKET_EVENTS,
 } = require("../utils/chat_constants");
@@ -26,6 +27,10 @@ let socketServer = null;
 
 // WHY: Use a dedicated log tag for socket operations.
 const LOG_TAG = "CHAT_SOCKET";
+
+function resolveUserRoom(userId) {
+  return `user:${userId}`;
+}
 
 function parseSocketToken(socket) {
   // WHY: Support both auth payload and Authorization header.
@@ -105,6 +110,7 @@ function registerChatSocket(io) {
       id: decoded.sub,
       role: decoded.role,
     };
+    socket.join(resolveUserRoom(decoded.sub));
 
     debug(LOG_TAG, {
       step: "AUTH_OK",
@@ -250,6 +256,71 @@ function registerChatSocket(io) {
         }
       },
     );
+
+    socket.on(
+      CHAT_SOCKET_EVENTS.CALL_SIGNAL,
+      async (payload) => {
+        const callId = payload?.callId;
+        const signal =
+          payload?.signal &&
+          typeof payload.signal === "object"
+            ? payload.signal
+            : null;
+        if (!callId || !signal) {
+          emitSocketError(
+            socket,
+            "Call id and signal payload are required",
+          );
+          return;
+        }
+
+        try {
+          const relay =
+            await chatCallService.resolveSignalTarget(
+              {
+                callId,
+                userId: socket.data.user.id,
+                context: {
+                  route:
+                    "socket:call:signal",
+                  requestId: socket.id,
+                  userRole:
+                    socket.data.user.role,
+                },
+              },
+            );
+
+          socketServer
+            .to(
+              resolveUserRoom(
+                relay.targetUserId,
+              ),
+            )
+            .emit(
+              CHAT_SOCKET_EVENTS.CALL_SIGNAL,
+              {
+                callId: relay.callId,
+                fromUserId:
+                  socket.data.user.id,
+                signal,
+              },
+            );
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "CALL_SIGNAL_FAIL",
+            callId,
+            userId: socket.data.user.id,
+            reason: error?.message,
+            resolution_hint:
+              error?.resolutionHint,
+          });
+          emitSocketError(
+            socket,
+            "Unable to relay call signal",
+          );
+        }
+      },
+    );
   });
 }
 
@@ -297,8 +368,55 @@ function emitMessageRead({
     );
 }
 
+function emitCallIncoming({ userId, call }) {
+  if (!socketServer || !userId || !call) {
+    return;
+  }
+  socketServer
+    .to(resolveUserRoom(userId))
+    .emit(
+      CHAT_SOCKET_EVENTS.CALL_INCOMING,
+      { call },
+    );
+}
+
+function emitCallUpdated({ userIds, call }) {
+  if (!socketServer || !call) {
+    return;
+  }
+  (userIds || [])
+    .filter(Boolean)
+    .forEach((userId) => {
+      socketServer
+        .to(resolveUserRoom(userId))
+        .emit(
+          CHAT_SOCKET_EVENTS.CALL_UPDATED,
+          { call },
+        );
+    });
+}
+
+function emitCallEnded({ userIds, call }) {
+  if (!socketServer || !call) {
+    return;
+  }
+  (userIds || [])
+    .filter(Boolean)
+    .forEach((userId) => {
+      socketServer
+        .to(resolveUserRoom(userId))
+        .emit(
+          CHAT_SOCKET_EVENTS.CALL_ENDED,
+          { call },
+        );
+    });
+}
+
 module.exports = {
   registerChatSocket,
   emitMessageCreated,
   emitMessageRead,
+  emitCallIncoming,
+  emitCallUpdated,
+  emitCallEnded,
 };

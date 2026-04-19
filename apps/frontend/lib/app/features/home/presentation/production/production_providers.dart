@@ -62,6 +62,10 @@ const String _reasonStaffCapacityMissing =
     "production_staff_capacity_session_missing";
 const String _reasonTaskStatusMissing =
     "production_task_status_session_missing";
+const String _reasonTaskDeleteMissing =
+    "production_task_delete_session_missing";
+const String _reasonTaskResetHistoryMissing =
+    "production_task_reset_history_session_missing";
 const String _reasonTaskProgressMissing =
     "production_task_progress_session_missing";
 const String _reasonTaskProgressBatchMissing =
@@ -661,6 +665,63 @@ class ProductionPlanActions {
     return updated;
   }
 
+  Future<ProductionTask> createTask({
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskStatusMissing,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final task = await api.createTask(
+      token: session.token,
+      planId: planId,
+      payload: payload,
+    );
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return task;
+  }
+
+  Future<String> deleteTask({
+    required String taskId,
+    required String planId,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskDeleteMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final message = await api.deleteTask(token: session.token, taskId: taskId);
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return message;
+  }
+
   Future<ProductionTask> updateTaskStatus({
     required String taskId,
     required String status,
@@ -749,14 +810,55 @@ class ProductionPlanActions {
     return task;
   }
 
+  Future<String> resetTaskHistory({
+    required String taskId,
+    required DateTime workDate,
+    required String staffId,
+    required String planId,
+    String? notes,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskResetHistoryMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final message = await api.resetTaskHistory(
+      token: session.token,
+      taskId: taskId,
+      workDate: workDate,
+      staffId: staffId,
+      notes: notes,
+    );
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return message;
+  }
+
   Future<ProductionTaskProgressRecord> logTaskProgress({
     required String taskId,
     required DateTime workDate,
     String? staffId,
     String? unitId,
-    required num actualPlots,
+    bool createNewEntry = false,
+    num? actualPlots,
+    num? unitContribution,
+    List<ProductionTaskProgressProofInput> proofs = const [],
     String? quantityActivityType,
+    String? activityType,
     num? quantityAmount,
+    num? activityQuantity,
     String? quantityUnit,
     required String delayReason,
     required String notes,
@@ -782,9 +884,14 @@ class ProductionPlanActions {
       workDate: workDate,
       staffId: staffId,
       unitId: unitId,
+      createNewEntry: createNewEntry,
       actualPlots: actualPlots,
+      unitContribution: unitContribution,
+      proofs: proofs,
       quantityActivityType: quantityActivityType,
+      activityType: activityType,
       quantityAmount: quantityAmount,
+      activityQuantity: activityQuantity,
       quantityUnit: quantityUnit,
       delayReason: delayReason,
       notes: notes,

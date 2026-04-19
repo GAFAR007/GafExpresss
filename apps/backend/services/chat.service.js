@@ -99,6 +99,7 @@ const ROLE_TENANT = "tenant";
 const ROLE_CUSTOMER = "customer";
 const ROLE_ADMIN = "admin";
 const ROLE_SUPPORT = "support";
+const CHAT_CONTACT_ROLES = [ROLE_BUSINESS_OWNER, ROLE_STAFF, ROLE_TENANT];
 const SELLER_REQUEST_STAFF_ROLES = new Set([
   "farm_manager",
   "estate_manager",
@@ -115,6 +116,73 @@ const ACTOR_SELECT_FIELDS =
 // WHY: Keep participant lookups small while supporting profile summary.
 const PARTICIPANT_SELECT_FIELDS =
   "role businessId estateAssetId name email firstName middleName lastName companyName profileImageUrl";
+const GENERIC_UPLOAD_MIME_TYPES = new Set([
+  "",
+  "application/octet-stream",
+  "binary/octet-stream",
+]);
+const ATTACHMENT_MIME_BY_EXTENSION = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  webm: "audio/webm",
+};
+
+function resolveAttachmentMimeType({ explicitMimeType, file }) {
+  const candidateMimeTypes = [explicitMimeType, file?.mimetype];
+
+  for (const candidate of candidateMimeTypes) {
+    const normalized = (candidate || "").toString().trim().toLowerCase();
+    if (!GENERIC_UPLOAD_MIME_TYPES.has(normalized)) {
+      return normalized;
+    }
+  }
+
+  const originalName = (file?.originalname || "").toString().trim().toLowerCase();
+  const extension = originalName.includes(".")
+    ? originalName.split(".").pop()
+    : "";
+  return ATTACHMENT_MIME_BY_EXTENSION[extension] || "";
+}
+
+function resolveAttachmentType(mimeType) {
+  const normalized = (mimeType || "").toString().trim().toLowerCase();
+  if (
+    CHAT_ATTACHMENT_MIME_TYPES.IMAGE.includes(normalized) ||
+    normalized.startsWith("image/")
+  ) {
+    return CHAT_ATTACHMENT_TYPES.IMAGE;
+  }
+  if (
+    CHAT_ATTACHMENT_MIME_TYPES.AUDIO.includes(normalized) ||
+    normalized.startsWith("audio/")
+  ) {
+    return CHAT_ATTACHMENT_TYPES.AUDIO;
+  }
+  if (CHAT_ATTACHMENT_MIME_TYPES.DOCUMENT.includes(normalized)) {
+    return CHAT_ATTACHMENT_TYPES.DOCUMENT;
+  }
+  return "";
+}
+
+function resolveAttachmentMaxBytes(type) {
+  if (type === CHAT_ATTACHMENT_TYPES.IMAGE) {
+    return CHAT_LIMITS.MAX_IMAGE_BYTES;
+  }
+  if (type === CHAT_ATTACHMENT_TYPES.AUDIO) {
+    return CHAT_LIMITS.MAX_AUDIO_BYTES;
+  }
+  return CHAT_LIMITS.MAX_DOCUMENT_BYTES;
+}
 
 function logStep(step, context = {}) {
   // WHY: Avoid noisy logs unless context is provided.
@@ -809,7 +877,7 @@ async function listConversations({ userId, businessId, limit, context }) {
   const participantRowsForActor = await ChatParticipant.find({
     userId,
     isHidden: false,
-  }).select("conversationId");
+  }).select("conversationId joinedAt lastReadAt");
 
   const sellerRequestConversationIds = await loadSellerRequestConversationIds({
     userId,
@@ -824,6 +892,16 @@ async function listConversations({ userId, businessId, limit, context }) {
   if (conversationIds.length === 0) {
     return [];
   }
+
+  const actorReadStateMap = new Map();
+  participantRowsForActor.forEach((row) => {
+    if (row.conversationId) {
+      actorReadStateMap.set(row.conversationId.toString(), {
+        joinedAt: row.joinedAt || null,
+        lastReadAt: row.lastReadAt || null,
+      });
+    }
+  });
 
   const query = {
     _id: { $in: conversationIds },
@@ -840,10 +918,53 @@ async function listConversations({ userId, businessId, limit, context }) {
     .limit(limit || 50)
     .lean();
 
+  const visibleConversationIds = items.map((conversation) =>
+    conversation._id.toString(),
+  );
+  if (visibleConversationIds.length === 0) {
+    return [];
+  }
+
+  const cutoffTimestamps = [...actorReadStateMap.values()]
+    .map((state) => {
+      const rawCutoff = state.lastReadAt || state.joinedAt || null;
+      if (!rawCutoff) return null;
+      const cutoff = new Date(rawCutoff).getTime();
+      return Number.isFinite(cutoff) ? cutoff : null;
+    })
+    .filter((value) => value != null);
+  const unreadQuery = {
+    conversationId: { $in: visibleConversationIds },
+    senderUserId: { $ne: userId },
+  };
+  if (cutoffTimestamps.length > 0) {
+    unreadQuery.createdAt = {
+      $gt: new Date(Math.min(...cutoffTimestamps)),
+    };
+  }
+
+  const unreadMessageRows = await ChatMessage.find(unreadQuery)
+    .select("conversationId createdAt")
+    .lean();
+  const unreadCountMap = new Map();
+  unreadMessageRows.forEach((row) => {
+    if (!row?.conversationId) return;
+    const convoId = row.conversationId.toString();
+    const readState = actorReadStateMap.get(convoId);
+    const cutoff = readState?.lastReadAt || readState?.joinedAt || null;
+    const createdAt = row.createdAt ? new Date(row.createdAt) : null;
+    const cutoffTime = cutoff ? new Date(cutoff).getTime() : null;
+    const createdAtTime = createdAt ? createdAt.getTime() : null;
+    const isUnread =
+      cutoffTime == null || (createdAtTime != null && createdAtTime > cutoffTime);
+    if (!isUnread) return;
+    unreadCountMap.set(convoId, (unreadCountMap.get(convoId) || 0) + 1);
+  });
+
   // WHY: Load participants in bulk to avoid per-conversation queries.
   const participantRows = await ChatParticipant.find({
     conversationId: {
-      $in: conversationIds,
+      $in: visibleConversationIds,
     },
     isHidden: false,
   }).select("conversationId userId");
@@ -869,6 +990,7 @@ async function listConversations({ userId, businessId, limit, context }) {
     const participantsCount = participantIds.length;
     let displayName = "";
     let displayAvatar = "";
+    const unreadCount = unreadCountMap.get(convoId) || 0;
 
     if (conversation.type === CHAT_CONVERSATION_TYPES.DIRECT) {
       // WHY: Seller-side manager views should still surface the external buyer.
@@ -893,12 +1015,139 @@ async function listConversations({ userId, businessId, limit, context }) {
       displayName,
       displayAvatar,
       participantsCount,
+      unreadCount,
     };
   });
 
   logStep(LOG_STEPS.DB_QUERY_OK, context);
   logStep(LOG_STEPS.SERVICE_OK, context);
   return enriched;
+}
+
+function canActorListContacts(actor) {
+  return [ROLE_BUSINESS_OWNER, ROLE_STAFF].includes(actor?.role || "");
+}
+
+function canContactJoinGroup(userRole) {
+  return [ROLE_BUSINESS_OWNER, ROLE_STAFF].includes((userRole || "").trim());
+}
+
+async function listContacts({ actor, context }) {
+  logStep(LOG_STEPS.SERVICE_START, context);
+
+  if (!canActorListContacts(actor)) {
+    throw buildChatError({
+      message: "User is not allowed to load chat contacts",
+      classification: "AUTHENTICATION_ERROR",
+      errorCode: ERROR_CODES.ACCESS_FORBIDDEN,
+      resolutionHint: RESOLUTION_HINTS.ACCESS_FORBIDDEN,
+      httpStatus: HTTP_STATUS.FORBIDDEN,
+    });
+  }
+
+  const businessId = await resolveBusinessScope({
+    actor,
+    businessIdHint: null,
+    context,
+  });
+
+  logStep(LOG_STEPS.DB_QUERY_START, {
+    ...context,
+    businessId,
+  });
+
+  const users = await User.find({
+    businessId,
+    role: { $in: CHAT_CONTACT_ROLES },
+    _id: { $ne: actor._id },
+  }).select(PARTICIPANT_SELECT_FIELDS);
+
+  const staffUserIds = users
+    .filter((user) => user.role === ROLE_STAFF)
+    .map((user) => user._id.toString());
+  const staffProfiles = await BusinessStaffProfile.find({
+    businessId,
+    userId: { $in: staffUserIds },
+    status: "active",
+  }).select("userId estateAssetId staffRole");
+  const activeStaffUserIds = new Set(
+    staffProfiles.map((profile) => profile.userId?.toString()).filter(Boolean),
+  );
+  const staffProfileMap = new Map();
+  staffProfiles.forEach((profile) => {
+    if (!profile.userId) {
+      return;
+    }
+    staffProfileMap.set(profile.userId.toString(), {
+      estateAssetId: profile.estateAssetId?.toString() || "",
+      staffRole: profile.staffRole || "",
+    });
+  });
+
+  const visibleUsers = users.filter((user) => {
+    if (user.role !== ROLE_STAFF) {
+      return true;
+    }
+    return activeStaffUserIds.has(user._id.toString());
+  });
+
+  const businessNameMap = await loadBusinessNameMap([businessId]);
+  const estateIds = visibleUsers
+    .map((user) => {
+      const staffProfile = staffProfileMap.get(user._id.toString());
+      return (
+        staffProfile?.estateAssetId ||
+        user.estateAssetId?.toString() ||
+        ""
+      );
+    })
+    .filter(Boolean);
+  const estateNameMap = await loadEstateNameMap(estateIds);
+
+  const rolePriority = new Map([
+    [ROLE_BUSINESS_OWNER, 0],
+    [ROLE_STAFF, 1],
+    [ROLE_TENANT, 2],
+  ]);
+  const businessName = businessNameMap.get(businessId) || "";
+  const contacts = visibleUsers
+    .map((user) => {
+      const staffProfile = staffProfileMap.get(user._id.toString());
+      const estateId =
+        staffProfile?.estateAssetId || user.estateAssetId?.toString() || "";
+      return {
+        userId: user._id.toString(),
+        name: resolveDisplayName(user),
+        email: user.email || "",
+        profileImageUrl: user.profileImageUrl || "",
+        role: staffProfile?.staffRole || user.role || "",
+        accountRole: user.role || "",
+        businessId,
+        businessName,
+        estateAssetId: estateId,
+        estateName: estateId ? estateNameMap.get(estateId) || "" : "",
+        canJoinGroup: canContactJoinGroup(user.role),
+      };
+    })
+    .sort((left, right) => {
+      const leftPriority = rolePriority.get(left.accountRole) ?? 99;
+      const rightPriority = rolePriority.get(right.accountRole) ?? 99;
+      if (leftPriority != rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+  logStep(LOG_STEPS.DB_QUERY_OK, {
+    ...context,
+    businessId,
+    extra: { count: contacts.length },
+  });
+  logStep(LOG_STEPS.SERVICE_OK, {
+    ...context,
+    businessId,
+  });
+  return contacts;
 }
 
 async function createConversation({
@@ -1421,6 +1670,7 @@ async function uploadChatAttachment({
   businessId,
   conversationId,
   file,
+  mimeType,
   context,
 }) {
   logStep(LOG_STEPS.SERVICE_START, context);
@@ -1441,12 +1691,13 @@ async function uploadChatAttachment({
     });
   }
 
-  const isImage = CHAT_ATTACHMENT_MIME_TYPES.IMAGE.includes(file.mimetype);
-  const isDocument = CHAT_ATTACHMENT_MIME_TYPES.DOCUMENT.includes(
-    file.mimetype,
-  );
+  const resolvedMimeType = resolveAttachmentMimeType({
+    explicitMimeType: mimeType,
+    file,
+  });
+  const attachmentType = resolveAttachmentType(resolvedMimeType);
 
-  if (!isImage && !isDocument) {
+  if (!attachmentType) {
     throw buildChatError({
       message: "Unsupported attachment type",
       classification: "INVALID_INPUT",
@@ -1456,19 +1707,14 @@ async function uploadChatAttachment({
     });
   }
 
-  if (isImage && file.size > CHAT_LIMITS.MAX_IMAGE_BYTES) {
+  if (file.size > resolveAttachmentMaxBytes(attachmentType)) {
     throw buildChatError({
-      message: "Image exceeds max size",
-      classification: "INVALID_INPUT",
-      errorCode: ERROR_CODES.ATTACHMENT_INVALID,
-      resolutionHint: RESOLUTION_HINTS.ATTACHMENT_INVALID,
-      httpStatus: HTTP_STATUS.BAD_REQUEST,
-    });
-  }
-
-  if (isDocument && file.size > CHAT_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw buildChatError({
-      message: "Document exceeds max size",
+      message:
+        attachmentType === CHAT_ATTACHMENT_TYPES.IMAGE
+          ? "Image exceeds max size"
+          : attachmentType === CHAT_ATTACHMENT_TYPES.AUDIO
+            ? "Voice note exceeds max size"
+            : "Document exceeds max size",
       classification: "INVALID_INPUT",
       errorCode: ERROR_CODES.ATTACHMENT_INVALID,
       resolutionHint: RESOLUTION_HINTS.ATTACHMENT_INVALID,
@@ -1484,7 +1730,21 @@ async function uploadChatAttachment({
         {
           folder: `gafexpress/chat/${businessId}/${conversationId}`,
           resource_type: "auto",
-          allowed_formats: ["pdf", "png", "jpg", "jpeg", "webp", "docx"],
+          allowed_formats: [
+            "pdf",
+            "png",
+            "jpg",
+            "jpeg",
+            "webp",
+            "docx",
+            "wav",
+            "mp3",
+            "m4a",
+            "aac",
+            "ogg",
+            "oga",
+            "webm",
+          ],
         },
         (error, result) => {
           if (error) return reject(error);
@@ -1498,10 +1758,8 @@ async function uploadChatAttachment({
       conversationId,
       messageId: null,
       uploadedByUserId: actor._id,
-      type: isImage
-        ? CHAT_ATTACHMENT_TYPES.IMAGE
-        : CHAT_ATTACHMENT_TYPES.DOCUMENT,
-      mimeType: file.mimetype,
+      type: attachmentType,
+      mimeType: resolvedMimeType,
       sizeBytes: file.size,
       url: uploadResult.secure_url,
       publicId: uploadResult.public_id || "",
@@ -1531,6 +1789,7 @@ module.exports = {
   ensureConversationAccess,
   ensureParticipant,
   listConversations,
+  listContacts,
   createConversation,
   getConversationDetail,
   listMessages,

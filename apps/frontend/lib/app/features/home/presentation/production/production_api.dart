@@ -68,8 +68,11 @@ const String _intentPlanPreorder = "update production preorder state";
 const String _intentPreorderReservations = "list preorder reservations";
 const String _intentPreorderReconcile =
     "reconcile expired preorder reservations";
+const String _intentTaskCreate = "create production task";
+const String _intentTaskDelete = "delete production task";
 const String _intentTaskStatus = "update production task status";
 const String _intentTaskAssign = "assign production task staff profiles";
+const String _intentTaskResetHistory = "reset production task history";
 const String _intentTaskProgress = "log production task progress";
 const String _intentTaskProgressBatch = "batch log production task progress";
 const String _intentTaskProgressApprove = "approve production task progress";
@@ -99,8 +102,11 @@ const String _operationStaffCapacity = "fetchStaffCapacity";
 const String _operationPlanPreorder = "updatePlanPreorder";
 const String _operationPreorderReservations = "listPreorderReservations";
 const String _operationPreorderReconcile = "reconcileExpiredPreorders";
+const String _operationTaskCreate = "createTask";
+const String _operationTaskDelete = "deleteTask";
 const String _operationTaskStatus = "updateTaskStatus";
 const String _operationTaskAssign = "assignTaskStaffProfiles";
+const String _operationTaskResetHistory = "resetTaskHistory";
 const String _operationTaskProgress = "logTaskProgress";
 const String _operationTaskProgressBatch = "logTaskProgressBatch";
 const String _operationTaskProgressApprove = "approveTaskProgress";
@@ -130,9 +136,17 @@ const String _keyStaffId = "staffId";
 const String _keyUnitId = "unitId";
 const String _keyAssignedStaffProfileIds = "assignedStaffProfileIds";
 const String _keyActualPlots = "actualPlots";
+const String _keyActualPlotUnits = "actualPlotUnits";
+const String _keyUnitContribution = "unitContribution";
+const String _keyUnitContributionPlotUnits = "unitContributionPlotUnits";
+const String _keyCreateNewEntry = "createNewEntry";
+const String _keyProofs = "proofs";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
+const String _keyActivityQuantityUnit = "activityQuantityUnit";
+const String _keyActivityType = "activityType";
+const String _keyActivityQuantity = "activityQuantity";
 const String _keyDelayReason = "delayReason";
 const String _keyNotes = "notes";
 const String _keyNote = "note";
@@ -141,6 +155,8 @@ const String _keyTaskAdjustments = "taskAdjustments";
 const String _keySummary = "summary";
 const String _keyMessage = "message";
 const String _keyPlan = "plan";
+const String _keyPhaseId = "phaseId";
+const String _keyTitle = "title";
 const String _keyProductId = "productId";
 const String _keyStartDate = "startDate";
 const String _keyEndDate = "endDate";
@@ -224,12 +240,21 @@ const String _preorderReconcileSuccessMessage =
     "reconcileExpiredPreorders() success";
 const String _preorderReconcileFailureMessage =
     "reconcileExpiredPreorders() failed";
+const String _taskCreateStartMessage = "createTask() start";
+const String _taskCreateSuccessMessage = "createTask() success";
+const String _taskCreateFailureMessage = "createTask() failed";
+const String _taskDeleteStartMessage = "deleteTask() start";
+const String _taskDeleteSuccessMessage = "deleteTask() success";
+const String _taskDeleteFailureMessage = "deleteTask() failed";
 const String _taskStatusStartMessage = "updateTaskStatus() start";
 const String _taskStatusSuccessMessage = "updateTaskStatus() success";
 const String _taskStatusFailureMessage = "updateTaskStatus() failed";
 const String _taskAssignStartMessage = "assignTaskStaffProfiles() start";
 const String _taskAssignSuccessMessage = "assignTaskStaffProfiles() success";
 const String _taskAssignFailureMessage = "assignTaskStaffProfiles() failed";
+const String _taskResetHistoryStartMessage = "resetTaskHistory() start";
+const String _taskResetHistorySuccessMessage = "resetTaskHistory() success";
+const String _taskResetHistoryFailureMessage = "resetTaskHistory() failed";
 const String _taskProgressStartMessage = "logTaskProgress() start";
 const String _taskProgressSuccessMessage = "logTaskProgress() success";
 const String _taskProgressFailureMessage = "logTaskProgress() failed";
@@ -251,6 +276,11 @@ const String _taskApproveFailureMessage = "approveTask() failed";
 const String _taskRejectStartMessage = "rejectTask() start";
 const String _taskRejectSuccessMessage = "rejectTask() success";
 const String _taskRejectFailureMessage = "rejectTask() failed";
+
+int _toCanonicalProgressUnits(num value) {
+  return (value * 1000).round();
+}
+
 const String _deviationVarianceStartMessage = "acceptDeviationVariance() start";
 const String _deviationVarianceSuccessMessage =
     "acceptDeviationVariance() success";
@@ -273,6 +303,7 @@ const String _extraReasonKey = "reason";
 const String _extraCountKey = "count";
 const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
+const String _extraStaffIdKey = "staffId";
 const String _extraProgressIdKey = "progressId";
 const String _extraFromKey = "from";
 const String _extraToKey = "to";
@@ -1812,6 +1843,133 @@ class ProductionApi {
   }
 
   /// ------------------------------------------------------
+  /// CREATE TASK
+  /// ------------------------------------------------------
+  Future<ProductionTask> createTask({
+    required String? token,
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskCreateStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskCreate,
+        _extraIntentKey: _intentTaskCreate,
+        _extraPlanIdKey: planId,
+        _keyPhaseId: payload[_keyPhaseId]?.toString() ?? "",
+        _keyTitle: payload[_keyTitle]?.toString() ?? "",
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_plansPath/$planId/tasks",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final taskMap = (data[_keyTask] ?? {}) as Map<String, dynamic>;
+      final task = ProductionTask.fromJson(taskMap);
+
+      AppDebug.log(
+        _logTag,
+        _taskCreateSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskCreate,
+          _extraIntentKey: _intentTaskCreate,
+          _extraPlanIdKey: planId,
+          _extraTaskIdKey: task.id,
+        },
+      );
+
+      return task;
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskCreateFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskCreate,
+          _extraIntentKey: _intentTaskCreate,
+          _extraPlanIdKey: planId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<String> deleteTask({
+    required String? token,
+    required String taskId,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskDeleteStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskDelete,
+        _extraIntentKey: _intentTaskDelete,
+        _extraTaskIdKey: taskId,
+      },
+    );
+
+    try {
+      final resp = await _dio.delete(
+        "$_tasksPath/$taskId",
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final message = (data[_keyMessage] ?? "").toString().trim();
+
+      AppDebug.log(
+        _logTag,
+        _taskDeleteSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskDelete,
+          _extraIntentKey: _intentTaskDelete,
+          _extraTaskIdKey: taskId,
+        },
+      );
+
+      return message.isNotEmpty ? message : "Production task deleted.";
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskDeleteFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskDelete,
+          _extraIntentKey: _intentTaskDelete,
+          _extraTaskIdKey: taskId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  /// ------------------------------------------------------
   /// UPDATE TASK STATUS
   /// ------------------------------------------------------
   Future<ProductionTask> updateTaskStatus({
@@ -1936,6 +2094,80 @@ class ProductionApi {
     }
   }
 
+  Future<String> resetTaskHistory({
+    required String? token,
+    required String taskId,
+    required DateTime workDate,
+    required String staffId,
+    String? notes,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _taskResetHistoryStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationTaskResetHistory,
+        _extraIntentKey: _intentTaskResetHistory,
+        _extraTaskIdKey: taskId,
+        _extraStaffIdKey: staffId,
+      },
+    );
+
+    try {
+      final payload = <String, dynamic>{
+        _keyWorkDate: workDate.toIso8601String().split("T").first,
+        _keyStaffId: staffId.trim(),
+      };
+      final normalizedNotes = notes?.trim() ?? "";
+      if (normalizedNotes.isNotEmpty) {
+        payload[_keyNotes] = normalizedNotes;
+      }
+      final resp = await _dio.post(
+        "$_tasksPath/$taskId/reset-history",
+        data: payload,
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final message = (data[_keyMessage] ?? "").toString().trim();
+
+      AppDebug.log(
+        _logTag,
+        _taskResetHistorySuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskResetHistory,
+          _extraIntentKey: _intentTaskResetHistory,
+          _extraTaskIdKey: taskId,
+          _extraStaffIdKey: staffId,
+        },
+      );
+
+      return message.isNotEmpty ? message : "Production history reset.";
+    } on DioException catch (error) {
+      final statusCode = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _taskResetHistoryFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationTaskResetHistory,
+          _extraIntentKey: _intentTaskResetHistory,
+          _extraTaskIdKey: taskId,
+          _extraStaffIdKey: staffId,
+          _extraStatusKey: statusCode,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
   /// ------------------------------------------------------
   /// LOG TASK PROGRESS
   /// ------------------------------------------------------
@@ -1945,9 +2177,14 @@ class ProductionApi {
     required DateTime workDate,
     String? staffId,
     String? unitId,
-    required num actualPlots,
+    bool createNewEntry = false,
+    num? actualPlots,
+    num? unitContribution,
+    List<ProductionTaskProgressProofInput> proofs = const [],
     String? quantityActivityType,
+    String? activityType,
     num? quantityAmount,
+    num? activityQuantity,
     String? quantityUnit,
     required String delayReason,
     required String notes,
@@ -1966,14 +2203,27 @@ class ProductionApi {
     try {
       final normalizedStaffId = staffId?.trim() ?? "";
       final normalizedUnitId = unitId?.trim() ?? "";
-      final normalizedQuantityActivityType = quantityActivityType?.trim() ?? "";
+      final normalizedQuantityActivityType =
+          (activityType ?? quantityActivityType)?.trim() ?? "";
       final normalizedQuantityUnit = quantityUnit?.trim() ?? "";
+      final normalizedUnitContribution = unitContribution ?? actualPlots ?? 0;
+      final normalizedUnitContributionPlotUnits = _toCanonicalProgressUnits(
+        normalizedUnitContribution,
+      );
+      final normalizedActivityQuantity = activityQuantity ?? quantityAmount;
       final payload = <String, dynamic>{
         _keyWorkDate: workDate.toIso8601String().split("T").first,
-        _keyActualPlots: actualPlots,
         _keyDelayReason: delayReason,
         _keyNotes: notes,
       };
+      if (createNewEntry) {
+        payload[_keyCreateNewEntry] = true;
+      }
+      payload[_keyUnitContribution] = normalizedUnitContribution;
+      payload[_keyActualPlots] = normalizedUnitContribution;
+      payload[_keyUnitContributionPlotUnits] =
+          normalizedUnitContributionPlotUnits;
+      payload[_keyActualPlotUnits] = normalizedUnitContributionPlotUnits;
       if (normalizedStaffId.isNotEmpty) {
         payload[_keyStaffId] = normalizedStaffId;
       }
@@ -1981,19 +2231,50 @@ class ProductionApi {
         payload[_keyUnitId] = normalizedUnitId;
       }
       if (normalizedQuantityActivityType.isNotEmpty) {
+        payload[_keyActivityType] = normalizedQuantityActivityType;
         payload[_keyQuantityActivityType] = normalizedQuantityActivityType;
       }
-      if (quantityAmount != null) {
-        payload[_keyQuantityAmount] = quantityAmount;
+      if (normalizedActivityQuantity != null) {
+        payload[_keyActivityQuantity] = normalizedActivityQuantity;
+        payload[_keyQuantityAmount] = normalizedActivityQuantity;
       }
       if (normalizedQuantityUnit.isNotEmpty) {
         payload[_keyQuantityUnit] = normalizedQuantityUnit;
+        payload[_keyActivityQuantityUnit] = normalizedQuantityUnit;
       }
-      final resp = await _dio.post(
-        "$_tasksPath/$taskId/progress",
-        data: payload,
-        options: _authOptions(token),
-      );
+      final resp = proofs.isEmpty
+          ? await _dio.post(
+              "$_tasksPath/$taskId/progress",
+              data: payload,
+              options: _authOptions(token),
+            )
+          : await _dio.post(
+              "$_tasksPath/$taskId/progress",
+              data: () {
+                final formData = FormData();
+                for (final entry in payload.entries) {
+                  formData.fields.add(
+                    MapEntry(entry.key, entry.value.toString()),
+                  );
+                }
+                for (final proof in proofs) {
+                  formData.files.add(
+                    MapEntry(
+                      _keyProofs,
+                      MultipartFile.fromBytes(
+                        proof.bytes,
+                        filename: proof.filename,
+                      ),
+                    ),
+                  );
+                }
+                return formData;
+              }(),
+              options: Options(
+                headers: _authOptions(token).headers,
+                contentType: "multipart/form-data",
+              ),
+            );
 
       final data = resp.data as Map<String, dynamic>;
       final parsed = ProductionTaskProgressResponse.fromJson(data);

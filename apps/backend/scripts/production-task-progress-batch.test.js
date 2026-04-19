@@ -21,6 +21,9 @@ const assert = require("node:assert/strict");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
+const {
+  MongoMemoryReplSet,
+} = require("mongodb-memory-server");
 
 // WHY: Load backend env so test DB + JWT secret match runtime expectations.
 require("dotenv").config({
@@ -41,6 +44,8 @@ const BusinessStaffProfile = require("../models/BusinessStaffProfile");
 const ProductionPlan = require("../models/ProductionPlan");
 const ProductionPhase = require("../models/ProductionPhase");
 const ProductionTask = require("../models/ProductionTask");
+const ProductionTaskDayLedger = require("../models/ProductionTaskDayLedger");
+const StaffAttendance = require("../models/StaffAttendance");
 const TaskProgress = require("../models/TaskProgress");
 const {
   HUMANE_WORKLOAD_LIMITS,
@@ -65,7 +70,10 @@ const WORK_DATE_NORMALIZED = new Date(
 let server;
 let baseUrl = "";
 let testDbUri = "";
+let mongoReplSet = null;
 const RESET_MODELS = [
+  ProductionTaskDayLedger,
+  StaffAttendance,
   TaskProgress,
   ProductionTask,
   ProductionPhase,
@@ -74,21 +82,6 @@ const RESET_MODELS = [
   BusinessAsset,
   User,
 ];
-
-function buildTestDbUri(baseUri) {
-  const uri = (baseUri || "").trim();
-  if (!uri) {
-    throw new Error(
-      "MONGO_URI is required for batch endpoint tests",
-    );
-  }
-
-  // WHY: Isolate test writes in a throwaway database to protect shared data.
-  const parsed = new URL(uri);
-  const dbName = `tpb_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`;
-  parsed.pathname = `/${dbName}`;
-  return parsed.toString();
-}
 
 function buildBatchApp() {
   const app = express();
@@ -299,6 +292,7 @@ async function createTask({
   phaseId,
   title,
   assignedStaffId,
+  assignedStaffProfileIds = [],
   createdBy,
   weight = 2,
 }) {
@@ -309,6 +303,12 @@ async function createTask({
     title,
     roleRequired: STAFF_ROLE_FARMER,
     assignedStaffId,
+    assignedStaffProfileIds:
+      assignedStaffProfileIds.length > 0 ?
+        assignedStaffProfileIds
+      : assignedStaffId ?
+        [assignedStaffId]
+      : [],
     weight,
     startDate: new Date(
       "2026-03-01T00:00:00.000Z",
@@ -321,6 +321,121 @@ async function createTask({
     createdBy,
     assignedBy: createdBy,
     approvalStatus: "approved",
+  });
+}
+
+async function createCompletedAttendance({
+  staffProfileId,
+  planId,
+  taskId,
+  workDate,
+  actorId,
+}) {
+  const clockInAt = new Date(
+    `${workDate}T08:00:00.000Z`,
+  );
+  const clockOutAt = new Date(
+    `${workDate}T17:00:00.000Z`,
+  );
+  const proofs = Array.from(
+    { length: 10 },
+    (_, index) => ({
+      unitIndex: index + 1,
+      url: `https://example.test/attendance-proof-${index + 1}.jpg`,
+      publicId: `attendance-proof-${index + 1}`,
+      filename: `attendance-proof-${index + 1}.jpg`,
+      mimeType: "image/jpeg",
+      type: "image",
+      sizeBytes: 1024 + index,
+      uploadedAt: new Date(
+        `${workDate}T1${Math.min(index, 9)}:00:00.000Z`,
+      ),
+      uploadedBy: actorId,
+    }),
+  );
+  return StaffAttendance.create({
+    staffProfileId,
+    planId,
+    taskId,
+    workDate: new Date(
+      `${workDate}T00:00:00.000Z`,
+    ),
+    clockInAt,
+    clockOutAt,
+    durationMinutes: 540,
+    clockInBy: actorId,
+    clockOutBy: actorId,
+    notes: "seeded for batch test",
+    proofs,
+    requiredProofs: proofs.length,
+    proofStatus: "complete",
+    sessionStatus: "completed",
+    proofUrl: proofs[0].url,
+    proofPublicId: proofs[0].publicId,
+    proofFilename: proofs[0].filename,
+    proofMimeType: proofs[0].mimeType,
+    proofSizeBytes: proofs[0].sizeBytes,
+    proofUploadedAt: proofs[0].uploadedAt,
+    proofUploadedBy: proofs[0].uploadedBy,
+  });
+}
+
+async function createActiveAttendance({
+  staffProfileId,
+  planId,
+  taskId,
+  workDate,
+  actorId,
+}) {
+  const clockInAt = new Date(
+    `${workDate}T08:00:00.000Z`,
+  );
+  return StaffAttendance.create({
+    staffProfileId,
+    planId,
+    taskId,
+    workDate: new Date(
+      `${workDate}T00:00:00.000Z`,
+    ),
+    clockInAt,
+    clockOutAt: null,
+    durationMinutes: null,
+    clockInBy: actorId,
+    clockOutBy: null,
+    notes: "open session for batch test",
+    proofs: [],
+    requiredProofs: 0,
+    proofStatus: "not_required",
+    sessionStatus: "open",
+  });
+}
+
+async function createLegacyClosedAttendanceWithoutProof({
+  staffProfileId,
+  planId,
+  taskId,
+  workDate,
+  actorId,
+}) {
+  const clockInAt = new Date(
+    `${workDate}T08:00:00.000Z`,
+  );
+  const clockOutAt = new Date(
+    `${workDate}T17:00:00.000Z`,
+  );
+  return StaffAttendance.create({
+    staffProfileId,
+    planId,
+    taskId,
+    workDate: new Date(
+      `${workDate}T00:00:00.000Z`,
+    ),
+    clockInAt,
+    clockOutAt,
+    durationMinutes: 540,
+    clockInBy: actorId,
+    clockOutBy: actorId,
+    notes: "legacy closed attendance without proof",
   });
 }
 
@@ -441,8 +556,11 @@ async function seedScenario() {
     phaseId,
     title: "Task A",
     assignedStaffId: staffProfileAId,
+    assignedStaffProfileIds: [
+      staffProfileAId,
+    ],
     createdBy: ownerId,
-    weight: 2,
+    weight: 5,
   });
   await createTask({
     id: taskBId,
@@ -450,6 +568,9 @@ async function seedScenario() {
     phaseId,
     title: "Task B",
     assignedStaffId: staffProfileBId,
+    assignedStaffProfileIds: [
+      staffProfileBId,
+    ],
     createdBy: ownerId,
     weight: 3,
   });
@@ -460,9 +581,40 @@ async function seedScenario() {
     title: "Task Mismatch",
     assignedStaffId:
       staffProfileMismatchId,
+    assignedStaffProfileIds: [
+      staffProfileMismatchId,
+    ],
     createdBy: ownerId,
     weight: 2,
   });
+
+  await Promise.all([
+    createCompletedAttendance({
+      staffProfileId:
+        staffProfileAId,
+      planId,
+      taskId: taskAId,
+      workDate: WORK_DATE_STRING,
+      actorId: ownerId,
+    }),
+    createCompletedAttendance({
+      staffProfileId:
+        staffProfileBId,
+      planId,
+      taskId: taskBId,
+      workDate: WORK_DATE_STRING,
+      actorId: ownerId,
+    }),
+    createCompletedAttendance({
+      staffProfileId:
+        staffProfileMismatchId,
+      planId,
+      taskId:
+        taskMismatchId,
+      workDate: WORK_DATE_STRING,
+      actorId: ownerId,
+    }),
+  ]);
 
   return {
     ownerId,
@@ -494,16 +646,23 @@ test.before(async () => {
   process.env.JWT_SECRET =
     process.env.JWT_SECRET ||
     "test_jwt_secret";
-  testDbUri = buildTestDbUri(
-    process.env.MONGO_URI,
-  );
+  mongoReplSet =
+    await MongoMemoryReplSet.create({
+      replSet: {
+        count: 1,
+        storageEngine: "wiredTiger",
+      },
+    });
+  testDbUri =
+    mongoReplSet.getUri(
+      "production_task_progress_batch_test",
+    );
   debug(
     TEST_LOG_TAG,
     "Connecting test database",
     {
-      hasMongoUri: Boolean(
-        process.env.MONGO_URI,
-      ),
+      hasMongoUri:
+        testDbUri.trim().length > 0,
     },
   );
   await mongoose.connect(testDbUri);
@@ -538,6 +697,10 @@ test.after(async () => {
   }
   await purgeTestData();
   await mongoose.disconnect();
+  if (mongoReplSet) {
+    await mongoReplSet.stop();
+    mongoReplSet = null;
+  }
   debug(
     TEST_LOG_TAG,
     "Batch test server stopped",
@@ -603,7 +766,565 @@ test("all entries succeed and persist TaskProgress rows", async () => {
     await countProgressDocs(),
     2,
   );
+  const ledgers =
+    await ProductionTaskDayLedger.find({
+      planId: scenario.planId,
+    })
+      .sort({ taskId: 1 })
+      .lean();
+  assert.equal(ledgers.length, 2);
+  const taskALedger = ledgers.find(
+    (ledger) =>
+      ledger.taskId.toString() ===
+      scenario.taskAId.toString(),
+  );
+  assert.ok(taskALedger);
+  assert.equal(
+    taskALedger.unitTarget,
+    5,
+  );
+  assert.equal(
+    taskALedger.unitCompleted,
+    2,
+  );
+  assert.equal(
+    taskALedger.unitRemaining,
+    3,
+  );
 });
+
+test(
+  "submit rejects an open attendance session until proof is completed",
+  async () => {
+    const scenario = await seedScenario();
+    await StaffAttendance.deleteMany({
+      taskId: scenario.taskAId,
+      staffProfileId:
+        scenario.staffProfileAId,
+      workDate:
+        WORK_DATE_NORMALIZED,
+    });
+    const activeAttendance =
+      await createActiveAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: scenario.taskAId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      });
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes: "submit should auto clock out",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      0,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "ATTENDANCE_PROOF_REQUIRED",
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        activeAttendance._id,
+      ).lean();
+    assert.ok(savedAttendance);
+    assert.equal(
+      savedAttendance.clockOutAt,
+      null,
+    );
+
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.equal(
+      savedProgress,
+      null,
+    );
+  },
+);
+
+test(
+  "submit rejects an open attendance session from another task until proof is completed",
+  async () => {
+    const scenario = await seedScenario();
+    await StaffAttendance.deleteMany({
+      staffProfileId:
+        scenario.staffProfileAId,
+      workDate:
+        WORK_DATE_NORMALIZED,
+    });
+    const activeAttendance =
+      await createActiveAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: scenario.taskBId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      });
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 1,
+          delayReason: STATUS_NONE,
+          notes:
+            "submit should reuse open attendance from another task",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      0,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "ATTENDANCE_PROOF_REQUIRED",
+    );
+
+    const savedAttendance =
+      await StaffAttendance.findById(
+        activeAttendance._id,
+      ).lean();
+    assert.ok(savedAttendance);
+    assert.equal(
+      savedAttendance.clockOutAt,
+      null,
+    );
+    assert.equal(
+      savedAttendance.taskId.toString(),
+      scenario.taskBId.toString(),
+    );
+    assert.equal(
+      new Date(
+        savedAttendance.workDate,
+      ).toISOString(),
+      WORK_DATE_NORMALIZED.toISOString(),
+    );
+
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.equal(
+      savedProgress,
+      null,
+    );
+  },
+);
+
+test(
+  "batch cannot reuse a proofless closed attendance record",
+  async () => {
+    const scenario = await seedScenario();
+    await StaffAttendance.deleteMany({
+      taskId: scenario.taskAId,
+      staffProfileId:
+        scenario.staffProfileAId,
+      workDate:
+        WORK_DATE_NORMALIZED,
+    });
+    await createLegacyClosedAttendanceWithoutProof({
+      staffProfileId:
+        scenario.staffProfileAId,
+      planId: scenario.planId,
+      taskId: scenario.taskAId,
+      workDate: WORK_DATE_STRING,
+      actorId: scenario.ownerId,
+    });
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes:
+            "legacy proofless attendance should not batch",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      0,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "ATTENDANCE_PROOF_REQUIRED",
+    );
+    assert.equal(
+      await TaskProgress.countDocuments({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }),
+      0,
+    );
+  },
+);
+
+test(
+  "shared task-day ledger aggregates multiple staff submissions on the same day",
+  async () => {
+    const scenario = await seedScenario();
+    const sharedTaskId =
+      new mongoose.Types.ObjectId();
+    await createTask({
+      id: sharedTaskId,
+      planId: scenario.planId,
+      phaseId: scenario.phaseId,
+      title: "Shared Task",
+      assignedStaffId:
+        scenario.staffProfileAId,
+      assignedStaffProfileIds: [
+        scenario.staffProfileAId,
+        scenario.staffProfileBId,
+      ],
+      createdBy: scenario.ownerId,
+      weight: 5,
+    });
+    await Promise.all([
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileBId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+    ]);
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 3.5,
+          delayReason: STATUS_NONE,
+          notes: "shared worker a",
+        },
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileBId.toString(),
+          actualPlots: 1.5,
+          delayReason: STATUS_NONE,
+          notes: "shared worker b",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      2,
+    );
+    const ledger =
+      await ProductionTaskDayLedger.findOne({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(ledger);
+    assert.equal(
+      ledger.unitCompleted,
+      5,
+    );
+    assert.equal(
+      ledger.unitRemaining,
+      0,
+    );
+    const taskProgressRows =
+      await TaskProgress.find({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.equal(
+      taskProgressRows.length,
+      2,
+    );
+    assert.ok(
+      taskProgressRows.every((row) =>
+        row.taskDayLedgerId &&
+        row.taskDayLedgerId
+          .toString() ===
+          ledger._id.toString(),
+      ),
+    );
+  },
+);
+
+test(
+  "shared task-day ledger prevents oversubmission after an earlier batch entry consumes the remaining target",
+  async () => {
+    const scenario = await seedScenario();
+    const sharedTaskId =
+      new mongoose.Types.ObjectId();
+    await createTask({
+      id: sharedTaskId,
+      planId: scenario.planId,
+      phaseId: scenario.phaseId,
+      title: "Shared Cap Task",
+      assignedStaffId:
+        scenario.staffProfileAId,
+      assignedStaffProfileIds: [
+        scenario.staffProfileAId,
+        scenario.staffProfileBId,
+      ],
+      createdBy: scenario.ownerId,
+      weight: 5,
+    });
+    await Promise.all([
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileAId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+      createCompletedAttendance({
+        staffProfileId:
+          scenario.staffProfileBId,
+        planId: scenario.planId,
+        taskId: sharedTaskId,
+        workDate: WORK_DATE_STRING,
+        actorId: scenario.ownerId,
+      }),
+    ]);
+
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 4,
+          delayReason: STATUS_NONE,
+          notes: "consumed most of the shared target",
+        },
+        {
+          taskId:
+            sharedTaskId.toString(),
+          staffId:
+            scenario.staffProfileBId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes: "tries to exceed the shared balance",
+        },
+      ],
+    });
+
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      1,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      1,
+    );
+    assert.equal(
+      response.body.errors[0]?.errorCode,
+      "TARGET_EXCEEDED",
+    );
+
+    const ledger =
+      await ProductionTaskDayLedger.findOne({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(ledger);
+    assert.equal(
+      ledger.unitCompleted,
+      4,
+    );
+    assert.equal(
+      ledger.unitRemaining,
+      1,
+    );
+
+    const savedRows =
+      await TaskProgress.find({
+        taskId: sharedTaskId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.equal(
+      savedRows.length,
+      1,
+    );
+    assert.equal(
+      savedRows[0].staffId.toString(),
+      scenario.staffProfileAId.toString(),
+    );
+  },
+);
+
+test(
+  "next-day batch logging creates a separate ledger for the same task",
+  async () => {
+    const scenario = await seedScenario();
+    const nextDay =
+      "2026-03-11";
+    await createCompletedAttendance({
+      staffProfileId:
+        scenario.staffProfileAId,
+      planId: scenario.planId,
+      taskId: scenario.taskAId,
+      workDate: nextDay,
+      actorId: scenario.ownerId,
+    });
+
+    await postBatch({
+      token: scenario.token,
+      workDate: WORK_DATE_STRING,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 2,
+          delayReason: STATUS_NONE,
+          notes: "day one",
+        },
+      ],
+    });
+    await postBatch({
+      token: scenario.token,
+      workDate: nextDay,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: 1,
+          delayReason: STATUS_NONE,
+          notes: "day two",
+        },
+      ],
+    });
+
+    const ledgers =
+      await ProductionTaskDayLedger.find({
+        taskId:
+          scenario.taskAId,
+      })
+        .sort({ workDate: 1 })
+        .lean();
+    assert.equal(
+      ledgers.length,
+      2,
+    );
+    assert.equal(
+      new Date(
+        ledgers[0].workDate,
+      ).toISOString(),
+      WORK_DATE_NORMALIZED.toISOString(),
+    );
+    assert.equal(
+      ledgers[0].unitCompleted,
+      2,
+    );
+    assert.equal(
+      new Date(
+        ledgers[1].workDate,
+      ).toISOString(),
+      new Date(
+        "2026-03-11T00:00:00.000Z",
+      ).toISOString(),
+    );
+    assert.equal(
+      ledgers[1].unitCompleted,
+      1,
+    );
+  },
+);
 
 test("mixed success + failure persists only successful entries", async () => {
   const scenario = await seedScenario();
@@ -772,42 +1493,66 @@ test("estate mismatch yields STAFF_SCOPE_INVALID", async () => {
   );
 });
 
-test("humane limit exceeded yields HUMANE_LIMIT_EXCEEDED", async () => {
-  const scenario = await seedScenario();
-  const response = await postBatch({
-    token: scenario.token,
-    entries: [
-      {
-        taskId:
-          scenario.taskAId.toString(),
-        staffId:
-          scenario.staffProfileAId.toString(),
-        actualPlots:
-          HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay + 1,
-        delayReason: STATUS_NONE,
-        notes: "over limit",
-      },
-    ],
-  });
-  debug(
-    TEST_LOG_TAG,
-    "humane limit response",
-    response,
-  );
+test(
+  "progress above the former humane limit succeeds when the task target allows it",
+  async () => {
+    const scenario = await seedScenario();
+    const allowedPlots =
+      HUMANE_WORKLOAD_LIMITS.maxPlotsPerFarmerPerDay + 1;
+    const response = await postBatch({
+      token: scenario.token,
+      entries: [
+        {
+          taskId:
+            scenario.taskAId.toString(),
+          staffId:
+            scenario.staffProfileAId.toString(),
+          actualPlots: allowedPlots,
+          delayReason: STATUS_NONE,
+          notes: "over limit",
+        },
+      ],
+    });
+    debug(
+      TEST_LOG_TAG,
+      "unit cap response",
+      response,
+    );
 
-  assert.equal(
-    response.statusCode,
-    HTTP_OK,
-  );
-  assert.equal(
-    response.body.summary.errorCount,
-    1,
-  );
-  assert.equal(
-    response.body.errors[0]?.errorCode,
-    "HUMANE_LIMIT_EXCEEDED",
-  );
-});
+    assert.equal(
+      response.statusCode,
+      HTTP_OK,
+    );
+    assert.equal(
+      response.body.summary.successCount,
+      1,
+    );
+    assert.equal(
+      response.body.summary.errorCount,
+      0,
+    );
+    assert.equal(
+      response.body.successes[0]?.progress.actualPlots,
+      allowedPlots,
+    );
+    const savedProgress =
+      await TaskProgress.findOne({
+        taskId: scenario.taskAId,
+        staffId:
+          scenario.staffProfileAId,
+        workDate:
+          WORK_DATE_NORMALIZED,
+      }).lean();
+    assert.ok(savedProgress);
+    assert.equal(
+      savedProgress.expectedPlots,
+      allowedPlots,
+    );
+    assert.equal(
+      savedProgress.actualPlots,
+      allowedPlots,
+    );
+  });
 
 test("zero-output without delay reason yields ZERO_OUTPUT_DELAY_REQUIRED", async () => {
   const scenario = await seedScenario();
@@ -860,7 +1605,11 @@ test("upsert updates existing row and preserves approval fields", async () => {
       workDate:
         WORK_DATE_NORMALIZED,
       expectedPlots: 2,
+      expectedPlotUnits: 2000,
       actualPlots: 1,
+      actualPlotUnits: 1000,
+      unitContribution: 1,
+      unitContributionPlotUnits: 1000,
       delayReason: STATUS_RAIN,
       notes: "initial log",
       createdBy: scenario.ownerId,

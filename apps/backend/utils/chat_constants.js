@@ -26,16 +26,34 @@ const CHAT_MESSAGE_TYPES = {
   SYSTEM: 'system',
 };
 
+// WHY: Keep call media modes ready for audio now and video later.
+const CHAT_CALL_MEDIA_MODES = {
+  AUDIO: 'audio',
+  VIDEO: 'video',
+};
+
+// WHY: Shared call session states keep backend + frontend aligned.
+const CHAT_CALL_STATES = {
+  RINGING: 'ringing',
+  ACTIVE: 'active',
+  DECLINED: 'declined',
+  ENDED: 'ended',
+  MISSED: 'missed',
+  CANCELLED: 'cancelled',
+};
+
 // WHY: Keep attachment type names consistent for validation.
 const CHAT_ATTACHMENT_TYPES = {
   IMAGE: 'image',
   DOCUMENT: 'document',
+  AUDIO: 'audio',
 };
 
 // WHY: Centralize size limits to avoid inline magic numbers.
 const CHAT_LIMITS = {
   MAX_IMAGE_BYTES: 10 * 1024 * 1024,
   MAX_DOCUMENT_BYTES: 20 * 1024 * 1024,
+  MAX_AUDIO_BYTES: 16 * 1024 * 1024,
   MAX_TEXT_LENGTH: 4000,
   MAX_TITLE_LENGTH: 120,
 };
@@ -47,6 +65,18 @@ const CHAT_ATTACHMENT_MIME_TYPES = {
     'application/pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   ],
+  AUDIO: [
+    'audio/wav',
+    'audio/x-wav',
+    'audio/wave',
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/ogg',
+    'audio/webm',
+  ],
 };
 
 // WHY: Keep event names in one place to avoid typos.
@@ -55,12 +85,18 @@ const CHAT_SOCKET_EVENTS = {
   MESSAGE_READ: 'message:read',
   CONVERSATION_JOIN: 'conversation:join',
   CONVERSATION_LEAVE: 'conversation:leave',
+  CALL_INCOMING: 'call:incoming',
+  CALL_UPDATED: 'call:updated',
+  CALL_SIGNAL: 'call:signal',
+  CALL_ENDED: 'call:ended',
   ERROR: 'chat:error',
 };
 
 module.exports = {
   CHAT_CONVERSATION_TYPES,
   CHAT_MESSAGE_TYPES,
+  CHAT_CALL_MEDIA_MODES,
+  CHAT_CALL_STATES,
   CHAT_ATTACHMENT_TYPES,
   CHAT_ATTACHMENT_MIME_TYPES,
   CHAT_LIMITS,

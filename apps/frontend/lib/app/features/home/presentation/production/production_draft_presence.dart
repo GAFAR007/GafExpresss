@@ -20,6 +20,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import 'package:frontend/app/core/constants/app_constants.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/core/formatters/date_formatter.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 
@@ -28,6 +29,7 @@ const String draftPresenceEventJoin = "production:draft:presence:join";
 const String draftPresenceEventLeave = "production:draft:presence:leave";
 const String draftPresenceEventUpdate = "production:draft:presence:update";
 const String draftPresenceEventError = "production:draft:presence:error";
+const String draftPresenceRoomPrefix = "production:draft:";
 
 // WHY: Keep logs easy to grep when presence rooms misbehave.
 const String _logTag = "DRAFT_PRESENCE_SOCKET";
@@ -69,12 +71,61 @@ String formatDraftPresenceRoleLabel(
       .join(" ");
 }
 
+String formatDraftPresenceDurationLabel(int seconds) {
+  final safeSeconds = seconds < 0 ? 0 : seconds;
+  if (safeSeconds == 0) {
+    return "0s";
+  }
+
+  final duration = Duration(seconds: safeSeconds);
+  final days = duration.inDays;
+  final hours = duration.inHours.remainder(24);
+  final minutes = duration.inMinutes.remainder(60);
+  final remainingSeconds = duration.inSeconds.remainder(60);
+  final parts = <String>[];
+
+  if (days > 0) {
+    parts.add("${days}d");
+  }
+  if (hours > 0 || parts.isNotEmpty) {
+    parts.add("${hours}h");
+  }
+  if (minutes > 0 || parts.isNotEmpty) {
+    parts.add("${minutes}m");
+  }
+  if (parts.isEmpty || remainingSeconds > 0) {
+    parts.add("${remainingSeconds}s");
+  }
+
+  return parts.join(" ");
+}
+
+String draftPresenceRoomIdForPlanId(String planId) {
+  final normalizedPlanId = planId.trim();
+  if (normalizedPlanId.isEmpty) {
+    return "";
+  }
+  return "$draftPresenceRoomPrefix$normalizedPlanId";
+}
+
 class ProductionDraftPresenceViewer {
   final String userId;
   final String displayName;
   final String email;
   final String accountRole;
   final String? staffRole;
+  final DateTime? enteredAt;
+  final DateTime? lastSeenAt;
+  final DateTime? leftAt;
+  final int activeSocketCount;
+  final int currentSessionSeconds;
+  final int durationSeconds;
+  final int todaySeconds;
+  final int weekSeconds;
+  final int monthSeconds;
+  final int yearSeconds;
+  final int totalSeconds;
+  final int sessionCount;
 
   const ProductionDraftPresenceViewer({
     required this.userId,
@@ -82,6 +133,18 @@ class ProductionDraftPresenceViewer {
     required this.email,
     required this.accountRole,
     required this.staffRole,
+    required this.enteredAt,
+    required this.lastSeenAt,
+    required this.leftAt,
+    required this.activeSocketCount,
+    required this.currentSessionSeconds,
+    required this.durationSeconds,
+    required this.todaySeconds,
+    required this.weekSeconds,
+    required this.monthSeconds,
+    required this.yearSeconds,
+    required this.totalSeconds,
+    required this.sessionCount,
   });
 
   String get resolvedDisplayName {
@@ -112,6 +175,165 @@ class ProductionDraftPresenceViewer {
     return formatDraftPresenceRoleLabel(roleKey);
   }
 
+  bool get hasPresenceMetrics {
+    return enteredAt != null ||
+        currentSessionSeconds > 0 ||
+        todaySeconds > 0 ||
+        weekSeconds > 0 ||
+        monthSeconds > 0 ||
+        yearSeconds > 0 ||
+        totalSeconds > 0 ||
+        sessionCount > 0;
+  }
+
+  String get enteredAtLabel {
+    return formatDateTimeLabel(enteredAt, fallback: "");
+  }
+
+  String get currentSessionDurationLabel {
+    return formatDraftPresenceDurationLabel(currentSessionSeconds);
+  }
+
+  String get todayDurationLabel {
+    return formatDraftPresenceDurationLabel(todaySeconds);
+  }
+
+  String get weekDurationLabel {
+    return formatDraftPresenceDurationLabel(weekSeconds);
+  }
+
+  String get monthDurationLabel {
+    return formatDraftPresenceDurationLabel(monthSeconds);
+  }
+
+  String get yearDurationLabel {
+    return formatDraftPresenceDurationLabel(yearSeconds);
+  }
+
+  int _liveElapsedSinceSnapshotSeconds({
+    required DateTime referenceTime,
+    DateTime? snapshotAt,
+  }) {
+    final effectiveSnapshot = snapshotAt ?? referenceTime;
+    final deltaSeconds = referenceTime.difference(effectiveSnapshot).inSeconds;
+    return deltaSeconds < 0 ? 0 : deltaSeconds;
+  }
+
+  int liveCurrentSessionSeconds({
+    required DateTime referenceTime,
+    DateTime? snapshotAt,
+  }) {
+    if (leftAt != null || enteredAt == null) {
+      return currentSessionSeconds;
+    }
+
+    return currentSessionSeconds +
+        _liveElapsedSinceSnapshotSeconds(
+          referenceTime: referenceTime,
+          snapshotAt: snapshotAt,
+        );
+  }
+
+  int liveTodaySeconds({
+    required DateTime referenceTime,
+    DateTime? snapshotAt,
+  }) {
+    if (leftAt != null || enteredAt == null) {
+      return todaySeconds;
+    }
+
+    return todaySeconds +
+        _liveElapsedSinceSnapshotSeconds(
+          referenceTime: referenceTime,
+          snapshotAt: snapshotAt,
+        );
+  }
+
+  int liveMonthSeconds({
+    required DateTime referenceTime,
+    DateTime? snapshotAt,
+  }) {
+    if (leftAt != null || enteredAt == null) {
+      return monthSeconds;
+    }
+
+    return monthSeconds +
+        _liveElapsedSinceSnapshotSeconds(
+          referenceTime: referenceTime,
+          snapshotAt: snapshotAt,
+        );
+  }
+
+  int liveWeekSeconds({required DateTime referenceTime, DateTime? snapshotAt}) {
+    if (leftAt != null || enteredAt == null) {
+      return weekSeconds;
+    }
+
+    return weekSeconds +
+        _liveElapsedSinceSnapshotSeconds(
+          referenceTime: referenceTime,
+          snapshotAt: snapshotAt,
+        );
+  }
+
+  int liveYearSeconds({required DateTime referenceTime, DateTime? snapshotAt}) {
+    if (leftAt != null || enteredAt == null) {
+      return yearSeconds;
+    }
+
+    return yearSeconds +
+        _liveElapsedSinceSnapshotSeconds(
+          referenceTime: referenceTime,
+          snapshotAt: snapshotAt,
+        );
+  }
+
+  String presenceSummaryLabel({
+    required DateTime referenceTime,
+    DateTime? snapshotAt,
+  }) {
+    final enteredLabel = enteredAtLabel;
+    if (enteredLabel.isEmpty && !hasPresenceMetrics) {
+      return "";
+    }
+
+    final liveCurrentSeconds = liveCurrentSessionSeconds(
+      referenceTime: referenceTime,
+      snapshotAt: snapshotAt,
+    );
+    final liveTodaySecondsValue = liveTodaySeconds(
+      referenceTime: referenceTime,
+      snapshotAt: snapshotAt,
+    );
+    final liveWeekSecondsValue = liveWeekSeconds(
+      referenceTime: referenceTime,
+      snapshotAt: snapshotAt,
+    );
+    final liveMonthSecondsValue = liveMonthSeconds(
+      referenceTime: referenceTime,
+      snapshotAt: snapshotAt,
+    );
+    final liveYearSecondsValue = liveYearSeconds(
+      referenceTime: referenceTime,
+      snapshotAt: snapshotAt,
+    );
+    final lines = <String>[];
+
+    if (enteredLabel.isNotEmpty) {
+      lines.add("Entered $enteredLabel");
+    }
+    lines.add(
+      [
+        "Current ${formatDraftPresenceDurationLabel(liveCurrentSeconds)}",
+        "Today ${formatDraftPresenceDurationLabel(liveTodaySecondsValue)}",
+        "Week ${formatDraftPresenceDurationLabel(liveWeekSecondsValue)}",
+        "Month ${formatDraftPresenceDurationLabel(liveMonthSecondsValue)}",
+        "Year ${formatDraftPresenceDurationLabel(liveYearSecondsValue)}",
+      ].join(" · "),
+    );
+    return lines.join("\n");
+  }
+
   factory ProductionDraftPresenceViewer.fromJson(Map<String, dynamic> json) {
     return ProductionDraftPresenceViewer(
       userId: (json["userId"] ?? json["id"] ?? "").toString(),
@@ -121,6 +343,20 @@ class ProductionDraftPresenceViewer {
         (json["accountRole"] ?? json["role"] ?? "").toString(),
       ),
       staffRole: _nullIfBlank(json["staffRole"]),
+      enteredAt: _parseDateTime(json["enteredAt"]),
+      lastSeenAt: _parseDateTime(json["lastSeenAt"]),
+      leftAt: _parseDateTime(json["leftAt"]),
+      activeSocketCount: _parseNonNegativeInt(json["activeSocketCount"]),
+      currentSessionSeconds: _parseNonNegativeInt(
+        json["currentSessionSeconds"],
+      ),
+      durationSeconds: _parseNonNegativeInt(json["durationSeconds"]),
+      todaySeconds: _parseNonNegativeInt(json["todaySeconds"]),
+      weekSeconds: _parseNonNegativeInt(json["weekSeconds"]),
+      monthSeconds: _parseNonNegativeInt(json["monthSeconds"]),
+      yearSeconds: _parseNonNegativeInt(json["yearSeconds"]),
+      totalSeconds: _parseNonNegativeInt(json["totalSeconds"]),
+      sessionCount: _parseNonNegativeInt(json["sessionCount"]),
     );
   }
 }
@@ -427,4 +663,23 @@ String? _nullIfBlank(dynamic value) {
   }
   final text = value.toString().trim();
   return text.isEmpty ? null : text;
+}
+
+DateTime? _parseDateTime(dynamic value) {
+  final text = _nullIfBlank(value);
+  if (text == null) {
+    return null;
+  }
+  return DateTime.tryParse(text);
+}
+
+int _parseNonNegativeInt(dynamic value) {
+  if (value == null) {
+    return 0;
+  }
+  final parsed = int.tryParse(value.toString());
+  if (parsed == null || parsed < 0) {
+    return 0;
+  }
+  return parsed;
 }
