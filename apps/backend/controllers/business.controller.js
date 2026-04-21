@@ -100,9 +100,13 @@ const { DEFAULT_PRODUCTION_PHASES } = require("../utils/production_defaults");
 const {
   reconcileExpiredPreorderReservations,
 } = require("../services/preorder_reservation_reconciler.service");
+const { sendEmail } = require("../services/email.service");
 const {
   buildPreorderCapConfidenceSummary,
 } = require("../services/preorder_cap_confidence.service");
+const {
+  buildProductionProgressReport,
+} = require("../services/production_progress_report.service");
 const {
   CONFIDENCE_RECOMPUTE_TRIGGERS,
   CONFIDENCE_ACTIVE_PLAN_STATUSES,
@@ -177,6 +181,7 @@ const PAYMENT_STATUS_LABELS = {
   pending: "PENDING",
 };
 const PAYMENT_STATUS_UNKNOWN = "UNKNOWN";
+const EMAIL_ADDRESS_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // WHY: Allow safe default when country headers are missing.
 const COUNTRY_HEADER_KEY = "x-country";
 const DEFAULT_COUNTRY = "unknown";
@@ -17299,6 +17304,121 @@ async function getProductionPortfolioConfidence(req, res) {
  * GET /business/production/plans/:id
  * Staff + owner: plan detail with phases/tasks/outputs.
  */
+async function captureProductionPlanDetailPayload(req) {
+  let statusCode = 200;
+  let payload = {};
+  const responseCapture = {
+    status(code) {
+      statusCode = Number(code || 200);
+      return this;
+    },
+    json(body) {
+      payload = body && typeof body === "object" ? body : {};
+      return body;
+    },
+  };
+
+  // WHY: Export/email report payload must exactly match the guarded detail view.
+  await getProductionPlanDetail(req, responseCapture);
+  return {
+    statusCode,
+    payload,
+  };
+}
+
+async function getProductionPlanProgressReport(req, res) {
+  debug("BUSINESS CONTROLLER: getProductionPlanProgressReport - entry", {
+    actorId: req.user?.sub,
+    planId: req.params?.id,
+    routePath: req.query?.routePath,
+  });
+
+  try {
+    const detailResult = await captureProductionPlanDetailPayload(req);
+    if (detailResult.statusCode !== 200) {
+      return res.status(detailResult.statusCode).json(detailResult.payload);
+    }
+
+    const detailPayload = detailResult.payload;
+    const report = buildProductionProgressReport({
+      detailPayload,
+      routePath: req.query?.routePath,
+    });
+
+    debug("BUSINESS CONTROLLER: getProductionPlanProgressReport - success", {
+      actorId: req.user?.sub,
+      planId: req.params?.id,
+      routePath: report.routePath,
+    });
+
+    return res.status(200).json({
+      message: "Production progress report ready",
+      ...report,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: getProductionPlanProgressReport - error",
+      err.message,
+    );
+    return res.status(400).json({ error: err.message });
+  }
+}
+
+async function emailProductionPlanProgressReport(req, res) {
+  debug("BUSINESS CONTROLLER: emailProductionPlanProgressReport - entry", {
+    actorId: req.user?.sub,
+    planId: req.params?.id,
+    routePath: req.body?.routePath,
+  });
+
+  try {
+    const toEmail = (req.body?.toEmail || "").toString().trim();
+    if (!EMAIL_ADDRESS_REGEX.test(toEmail)) {
+      return res.status(400).json({
+        error: "Valid recipient email is required",
+      });
+    }
+
+    const detailResult = await captureProductionPlanDetailPayload(req);
+    if (detailResult.statusCode !== 200) {
+      return res.status(detailResult.statusCode).json(detailResult.payload);
+    }
+
+    const detailPayload = detailResult.payload;
+    const report = buildProductionProgressReport({
+      detailPayload,
+      routePath: req.body?.routePath,
+    });
+
+    await sendEmail({
+      toEmail,
+      subject: report.subject,
+      html: report.html,
+      text: report.text,
+    });
+
+    debug("BUSINESS CONTROLLER: emailProductionPlanProgressReport - success", {
+      actorId: req.user?.sub,
+      planId: req.params?.id,
+      toEmail,
+      routePath: report.routePath,
+    });
+
+    return res.status(200).json({
+      message: "Production progress report sent",
+      toEmail,
+      routePath: report.routePath,
+      reportUrl: report.reportUrl,
+    });
+  } catch (err) {
+    debug(
+      "BUSINESS CONTROLLER: emailProductionPlanProgressReport - error",
+      err.message,
+    );
+    return res.status(400).json({ error: err.message });
+  }
+}
+
 async function getProductionPlanDetail(req, res) {
   debug("BUSINESS CONTROLLER: getProductionPlanDetail - entry", {
     actorId: req.user?.sub,
@@ -24080,6 +24200,8 @@ module.exports = {
   listProductionPlanDeviationAlerts,
   acceptProductionPlanDeviationVariance,
   replanProductionPlanDeviationUnit,
+  getProductionPlanProgressReport,
+  emailProductionPlanProgressReport,
   getProductionPlanDetail,
   updateProductionPlanPreorder,
   reserveProductionPlanPreorder,

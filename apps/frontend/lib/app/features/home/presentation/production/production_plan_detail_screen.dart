@@ -15,16 +15,19 @@ library;
 
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/text_file_download.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
 import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_progress_report_dialogs.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
@@ -54,6 +57,11 @@ const String _overviewViewTitle = "Overview";
 const String _executionViewTitle = "Execution";
 const String _peopleViewTitle = "People";
 const String _riskViewTitle = "Risk";
+const String _downloadProgressLabel = "Download progress";
+const String _emailProgressLabel = "Email progress";
+const String _downloadProgressSuccess = "Progress report downloaded.";
+const String _downloadProgressFailure = "Unable to download progress report.";
+const String _emailProgressFailure = "Unable to email progress report.";
 const String _kpiTitle = "KPIs";
 const String _attendanceImpactTitle = "HR impact KPIs";
 const String _dailyRollupTitle = "Daily execution rollup";
@@ -222,16 +230,18 @@ const String _rejectionCancel = "Cancel";
 const String _progressRejectPrompt = "Reason for progress review";
 const String _progressRejectHint = "Add a short review reason";
 const String _progressRejectSubmit = "Mark for review";
-const String _kpiTotalTasks = "Total tasks";
-const String _kpiCompleted = "Completed";
-const String _kpiOnTime = "On time";
-const String _kpiAvgDelay = "Avg delay";
+const String _kpiCompletedToDate = "Completed to date";
+const String _kpiIncompleteToDate = "Incomplete to date";
+const String _kpiDaysPassed = "Days passed";
+const String _kpiDaysRemaining = "Days remaining";
+const String _kpiTasksRemaining = "Tasks remaining";
+const String _kpiRequiredTasksPerDay = "Required tasks/day";
+const String _kpiScheduleStatus = "Schedule status";
 const String _kpiAttendanceCoverage = "Attendance cover";
 const String _kpiAbsenteeImpact = "Absentee impact";
 const String _kpiLinkedProgress = "Progress linked";
 const String _kpiPlotsPerHour = "Plots/attended hr";
 const String _kpiTrackedDays = "Tracked days";
-const String _phaseCompletionLabel = "Completion";
 const String _dailyRollupBlocksLabel = "Blocks";
 const String _dailyRollupAssignedLabel = "Assigned";
 const String _dailyRollupAttendedAssignedLabel = "Attended(assign)";
@@ -355,6 +365,16 @@ const String _progressApprovalNeedsReview = "needs_review";
 
 enum _DetailViewMode { overview, execution, people, risk }
 
+enum _ExecutionScheduleState {
+  scheduleMissing,
+  notStarted,
+  onTrack,
+  ahead,
+  behind,
+  overdue,
+  completed,
+}
+
 class ProductionPlanDetailScreen extends ConsumerWidget {
   final String planId;
 
@@ -378,6 +398,71 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
       role: actorRole,
       staffRole: selfStaffRole,
     );
+    final preferredEmail =
+        (profileAsync.valueOrNull?.email ?? session?.user.email ?? "").trim();
+
+    Future<void> downloadProgressReport() async {
+      try {
+        final report = await ref
+            .read(productionPlanActionsProvider)
+            .fetchPlanProgressReport(
+              planId: planId,
+              routePath: productionPlanInsightsPath(planId),
+            );
+        await downloadPlainTextFile(
+          fileName: report.fileName,
+          contents: report.html,
+          mimeType: "text/html",
+        );
+        if (context.mounted) {
+          _showSnack(context, _downloadProgressSuccess);
+        }
+      } catch (error) {
+        if (context.mounted) {
+          _showSnack(
+            context,
+            _resolveProductionDetailErrorMessage(
+              error,
+              fallback: _downloadProgressFailure,
+            ),
+          );
+        }
+      }
+    }
+
+    Future<void> emailProgressReport() async {
+      final toEmail = await showProductionProgressReportEmailDialog(
+        context,
+        initialEmail: preferredEmail,
+      );
+      if (toEmail == null || toEmail.trim().isEmpty) {
+        return;
+      }
+
+      try {
+        final response = await ref
+            .read(productionPlanActionsProvider)
+            .emailPlanProgressReport(
+              planId: planId,
+              toEmail: toEmail.trim(),
+              routePath: productionPlanInsightsPath(planId),
+            );
+        if (context.mounted) {
+          _showSnack(context, "${response.message} to ${response.toEmail}.");
+        }
+      } catch (error) {
+        if (context.mounted) {
+          _showSnack(
+            context,
+            _resolveProductionDetailErrorMessage(
+              error,
+              fallback: _emailProgressFailure,
+            ),
+          );
+        }
+      }
+    }
+
     ref.listen<ProductionDraftPresenceState>(
       productionDraftPresenceProvider(planId),
       (previous, next) {
@@ -574,6 +659,8 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
                   _showSnack(context, _preorderUpdateFailure);
                 }
               },
+              onDownloadProgressReport: downloadProgressReport,
+              onEmailProgressReport: emailProgressReport,
               onStatusChange: (taskId, status) async {
                 AppDebug.log(
                   _logTag,
@@ -803,6 +890,8 @@ class _PlanDetailBody extends StatefulWidget {
   onReplanDeviationUnit;
   final Future<void> Function() onReconcilePreorders;
   final Future<void> Function(Map<String, dynamic> payload) onUpdatePreorder;
+  final Future<void> Function() onDownloadProgressReport;
+  final Future<void> Function() onEmailProgressReport;
   final Future<void> Function(String taskId, String status) onStatusChange;
   final Future<void> Function(
     DateTime workDate,
@@ -843,6 +932,8 @@ class _PlanDetailBody extends StatefulWidget {
     required this.onReplanDeviationUnit,
     required this.onReconcilePreorders,
     required this.onUpdatePreorder,
+    required this.onDownloadProgressReport,
+    required this.onEmailProgressReport,
     required this.onStatusChange,
     required this.onBatchLogProgress,
     required this.onApproveProgress,
@@ -858,6 +949,35 @@ class _PlanDetailBody extends StatefulWidget {
 
 class _PlanDetailBodyState extends State<_PlanDetailBody> {
   _DetailViewMode _viewMode = _DetailViewMode.overview;
+  Timer? _dayRefreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleDayRefresh();
+  }
+
+  @override
+  void dispose() {
+    _dayRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleDayRefresh() {
+    _dayRefreshTimer?.cancel();
+    final now = DateTime.now();
+    final nextLocalMidnight = DateTime(now.year, now.month, now.day + 1);
+    _dayRefreshTimer = Timer(
+      nextLocalMidnight.difference(now) + const Duration(seconds: 1),
+      () {
+        if (!mounted) {
+          return;
+        }
+        setState(() {});
+        _scheduleDayRefresh();
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -889,6 +1009,8 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
                   planUnitsHasError: widget.planUnitsHasError,
                   onReconcilePreorders: widget.onReconcilePreorders,
                   onUpdatePreorder: widget.onUpdatePreorder,
+                  onDownloadProgressReport: widget.onDownloadProgressReport,
+                  onEmailProgressReport: widget.onEmailProgressReport,
                 ),
                 const SizedBox(height: _sectionSpacing),
                 _DetailViewModePicker(
@@ -917,13 +1039,14 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
   }
 
   List<Widget> _buildOverviewSections(BuildContext context) {
+    final today = _normalizePlanDay(DateTime.now());
     final overviewSections = <Widget>[
       _ResponsiveSplit(
         left: _buildSectionPane(
           title: _kpiTitle,
           subtitle:
-              "A fast operational read of completion, pace, and delay risk.",
-          child: _KpiRow(kpis: widget.detail.kpis),
+              "A fast operational read of completion, pace, and date-aware schedule status as of ${_formatReadableDate(today)}.",
+          child: _KpiRow(plan: widget.detail.plan, tasks: widget.detail.tasks),
         ),
         right: _buildSectionPane(
           title: "Output snapshot",
@@ -1728,6 +1851,8 @@ class _PlanSummaryCard extends StatelessWidget {
   final bool planUnitsHasError;
   final Future<void> Function() onReconcilePreorders;
   final Future<void> Function(Map<String, dynamic> payload) onUpdatePreorder;
+  final Future<void> Function() onDownloadProgressReport;
+  final Future<void> Function() onEmailProgressReport;
 
   const _PlanSummaryCard({
     required this.plan,
@@ -1740,6 +1865,8 @@ class _PlanSummaryCard extends StatelessWidget {
     required this.planUnitsHasError,
     required this.onReconcilePreorders,
     required this.onUpdatePreorder,
+    required this.onDownloadProgressReport,
+    required this.onEmailProgressReport,
   });
 
   @override
@@ -1804,35 +1931,52 @@ class _PlanSummaryCard extends StatelessWidget {
       plan.endDate,
     );
     final durationLabel = _formatPlanDuration(plan.startDate, plan.endDate);
-    final summaryActions = preorderSummary != null && isOwner
-        ? Wrap(
-            spacing: _summaryMetaSpacing,
-            runSpacing: _summaryMetaSpacing,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final payload = await _showPreorderConfigDialog(
-                    context,
-                    summary: preorderSummary,
-                  );
-                  if (payload == null) {
-                    return;
-                  }
-                  await onUpdatePreorder(payload);
-                },
-                icon: const Icon(Icons.tune),
-                label: const Text(_configurePreorderButtonLabel),
-              ),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  await onReconcilePreorders();
-                },
-                icon: const Icon(Icons.restore_from_trash_outlined),
-                label: const Text(_reconcileButtonLabel),
-              ),
-            ],
-          )
-        : null;
+    final summaryActionChildren = <Widget>[
+      OutlinedButton.icon(
+        onPressed: () async {
+          await onDownloadProgressReport();
+        },
+        icon: const Icon(Icons.download_outlined),
+        label: const Text(_downloadProgressLabel),
+      ),
+      OutlinedButton.icon(
+        onPressed: () async {
+          await onEmailProgressReport();
+        },
+        icon: const Icon(Icons.mail_outline),
+        label: const Text(_emailProgressLabel),
+      ),
+    ];
+    if (preorderSummary != null && isOwner) {
+      summaryActionChildren.addAll([
+        OutlinedButton.icon(
+          onPressed: () async {
+            final payload = await _showPreorderConfigDialog(
+              context,
+              summary: preorderSummary,
+            );
+            if (payload == null) {
+              return;
+            }
+            await onUpdatePreorder(payload);
+          },
+          icon: const Icon(Icons.tune),
+          label: const Text(_configurePreorderButtonLabel),
+        ),
+        OutlinedButton.icon(
+          onPressed: () async {
+            await onReconcilePreorders();
+          },
+          icon: const Icon(Icons.restore_from_trash_outlined),
+          label: const Text(_reconcileButtonLabel),
+        ),
+      ]);
+    }
+    final summaryActions = Wrap(
+      spacing: _summaryMetaSpacing,
+      runSpacing: _summaryMetaSpacing,
+      children: summaryActionChildren,
+    );
 
     return Container(
       padding: const EdgeInsets.all(_summaryCardPadding),
@@ -1985,10 +2129,8 @@ class _PlanSummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 leadColumn,
-                if (summaryActions != null) ...[
-                  const SizedBox(height: _sectionSpacing),
-                  summaryActions,
-                ],
+                const SizedBox(height: _sectionSpacing),
+                summaryActions,
               ],
             );
           }
@@ -1998,30 +2140,29 @@ class _PlanSummaryCard extends StatelessWidget {
             children: [
               Expanded(flex: 3, child: leadColumn),
               const SizedBox(width: _sectionSpacing),
-              if (summaryActions != null)
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Owner actions",
-                        style: textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Plan actions",
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
-                      const SizedBox(height: _summaryTitleSpacing),
-                      Text(
-                        "Keep pre-order controls and expired hold clean-up in one place.",
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                    ),
+                    const SizedBox(height: _summaryTitleSpacing),
+                    Text(
+                      "Download or email this progress report, and manage pre-order controls when available.",
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
                       ),
-                      const SizedBox(height: _cardSpacing),
-                      summaryActions,
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: _cardSpacing),
+                    summaryActions,
+                  ],
                 ),
+              ),
             ],
           );
         },
@@ -2030,24 +2171,62 @@ class _PlanSummaryCard extends StatelessWidget {
   }
 }
 
-class _KpiRow extends StatelessWidget {
-  final ProductionKpis? kpis;
+class _PlanExecutionSnapshot {
+  final int totalTasks;
+  final int completedToDate;
+  final int incompleteToDate;
+  final int expectedCompletedToDate;
+  final int tasksRemaining;
+  final int daysPassed;
+  final int daysRemaining;
+  final double? requiredTasksPerDay;
+  final _ExecutionScheduleState scheduleState;
+  final int variance;
+  final DateTime today;
+  final DateTime? startDate;
+  final DateTime? endDate;
 
-  const _KpiRow({required this.kpis});
+  const _PlanExecutionSnapshot({
+    required this.totalTasks,
+    required this.completedToDate,
+    required this.incompleteToDate,
+    required this.expectedCompletedToDate,
+    required this.tasksRemaining,
+    required this.daysPassed,
+    required this.daysRemaining,
+    required this.requiredTasksPerDay,
+    required this.scheduleState,
+    required this.variance,
+    required this.today,
+    required this.startDate,
+    required this.endDate,
+  });
+}
+
+class _KpiRow extends StatelessWidget {
+  final ProductionPlan plan;
+  final List<ProductionTask> tasks;
+
+  const _KpiRow({required this.plan, required this.tasks});
 
   @override
   Widget build(BuildContext context) {
-    if (kpis == null) {
+    if (tasks.isEmpty) {
       return const _InlineEmptyState(
         title: _kpiEmptyTitle,
         message: _kpiEmptyMessage,
       );
     }
 
-    final completion = "${_formatPercent(kpis!.completionRate)}$_percentSuffix";
-    final onTime = "${_formatPercent(kpis!.onTimeRate)}$_percentSuffix";
-    final avgDelay =
-        "${kpis!.avgDelayDays.toStringAsFixed(_delayFixedDigits)} $_daysSuffix";
+    final snapshot = _buildPlanExecutionSnapshot(
+      plan: plan,
+      tasks: tasks,
+      today: _normalizePlanDay(DateTime.now()),
+    );
+    final statusTone = _resolveExecutionScheduleTone(
+      Theme.of(context).colorScheme,
+      snapshot.scheduleState,
+    );
 
     return _DetailPanel(
       child: Wrap(
@@ -2055,20 +2234,293 @@ class _KpiRow extends StatelessWidget {
         runSpacing: _cardSpacing,
         children: [
           ProductionKpiCard(
-            label: _kpiTotalTasks,
-            value: "${kpis!.totalTasks}",
+            label: _kpiCompletedToDate,
+            value: "${snapshot.completedToDate}",
+            helper: "${snapshot.totalTasks} total tasks in plan",
           ),
           ProductionKpiCard(
-            label: _kpiCompleted,
-            value: "${kpis!.completedTasks}",
+            label: _kpiIncompleteToDate,
+            value: "${snapshot.incompleteToDate}",
+            helper: snapshot.expectedCompletedToDate > 0
+                ? "${snapshot.expectedCompletedToDate} expected complete by today"
+                : "No tasks are due yet",
           ),
-          ProductionKpiCard(label: _kpiOnTime, value: onTime),
-          ProductionKpiCard(label: _kpiAvgDelay, value: avgDelay),
-          ProductionKpiCard(label: _phaseCompletionLabel, value: completion),
+          ProductionKpiCard(
+            label: _kpiDaysPassed,
+            value: "${snapshot.daysPassed}",
+            helper: snapshot.startDate == null
+                ? "Plan start date missing"
+                : "Since ${_formatReadableDate(snapshot.startDate)}",
+          ),
+          ProductionKpiCard(
+            label: _kpiDaysRemaining,
+            value: "${snapshot.daysRemaining}",
+            helper: snapshot.endDate == null
+                ? "Plan end date missing"
+                : "Until ${_formatReadableDate(snapshot.endDate)}",
+          ),
+          ProductionKpiCard(
+            label: _kpiTasksRemaining,
+            value: "${snapshot.tasksRemaining}",
+            helper:
+                "${snapshot.completedToDate}/${snapshot.totalTasks} closed so far",
+          ),
+          ProductionKpiCard(
+            label: _kpiRequiredTasksPerDay,
+            value: _formatRequiredTasksPerDay(snapshot),
+            helper: _buildRequiredTasksPerDayHelper(snapshot),
+          ),
+          ProductionKpiCard(
+            label: _kpiScheduleStatus,
+            value: _formatExecutionScheduleState(snapshot.scheduleState),
+            helper: _buildScheduleStatusHelper(snapshot),
+            backgroundColor: statusTone.background,
+            borderColor: statusTone.border,
+            labelColor: statusTone.value,
+            valueColor: statusTone.value,
+            helperColor: statusTone.value.withValues(alpha: 0.82),
+          ),
         ],
       ),
     );
   }
+}
+
+class _ExecutionScheduleTone {
+  final Color background;
+  final Color border;
+  final Color value;
+
+  const _ExecutionScheduleTone({
+    required this.background,
+    required this.border,
+    required this.value,
+  });
+}
+
+DateTime _normalizePlanDay(DateTime value) {
+  final local = value.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+DateTime? _normalizeNullablePlanDay(DateTime? value) {
+  if (value == null) {
+    return null;
+  }
+  return _normalizePlanDay(value);
+}
+
+bool _isTaskCompleted(ProductionTask task) {
+  return task.status.trim().toLowerCase() == _taskStatusDone ||
+      task.completedAt != null;
+}
+
+bool _isTaskCompletedByDate(ProductionTask task, DateTime day) {
+  final completedAt = _normalizeNullablePlanDay(task.completedAt);
+  if (completedAt != null) {
+    return !completedAt.isAfter(day);
+  }
+  return _isTaskCompleted(task);
+}
+
+bool _isTaskDueOnOrBefore(ProductionTask task, DateTime day) {
+  final dueDate =
+      _normalizeNullablePlanDay(task.dueDate) ??
+      _normalizeNullablePlanDay(task.startDate);
+  if (dueDate == null) {
+    return false;
+  }
+  return !dueDate.isAfter(day);
+}
+
+_PlanExecutionSnapshot _buildPlanExecutionSnapshot({
+  required ProductionPlan plan,
+  required List<ProductionTask> tasks,
+  required DateTime today,
+}) {
+  final normalizedToday = _normalizePlanDay(today);
+  final startDate = _normalizeNullablePlanDay(plan.startDate);
+  final endDate = _normalizeNullablePlanDay(plan.endDate);
+  final totalTasks = tasks.length;
+  final completedToDate = tasks
+      .where((task) => _isTaskCompletedByDate(task, normalizedToday))
+      .length;
+  final tasksRemaining = (totalTasks - completedToDate).clamp(0, totalTasks);
+  final expectedComparisonDay =
+      endDate != null && normalizedToday.isAfter(endDate)
+      ? endDate
+      : normalizedToday;
+  final expectedCompletedToDate =
+      startDate != null && expectedComparisonDay.isBefore(startDate)
+      ? 0
+      : tasks
+            .where((task) => _isTaskDueOnOrBefore(task, expectedComparisonDay))
+            .length;
+  final incompleteToDate = tasks
+      .where((task) => _isTaskDueOnOrBefore(task, expectedComparisonDay))
+      .where((task) => !_isTaskCompletedByDate(task, normalizedToday))
+      .length;
+  final daysPassed = startDate == null || normalizedToday.isBefore(startDate)
+      ? 0
+      : normalizedToday.difference(startDate).inDays;
+  final daysRemaining = endDate == null || !endDate.isAfter(normalizedToday)
+      ? 0
+      : endDate.difference(normalizedToday).inDays;
+
+  double? requiredTasksPerDay;
+  if (tasksRemaining <= 0) {
+    requiredTasksPerDay = 0;
+  } else if (endDate == null || normalizedToday.isAfter(endDate)) {
+    requiredTasksPerDay = null;
+  } else {
+    final paceDays = endDate.difference(normalizedToday).inDays;
+    requiredTasksPerDay = tasksRemaining / (paceDays <= 0 ? 1 : paceDays);
+  }
+
+  final variance = completedToDate - expectedCompletedToDate;
+  late final _ExecutionScheduleState scheduleState;
+  if (tasksRemaining <= 0 && totalTasks > 0) {
+    scheduleState = _ExecutionScheduleState.completed;
+  } else if (startDate == null || endDate == null) {
+    scheduleState = _ExecutionScheduleState.scheduleMissing;
+  } else if (normalizedToday.isBefore(startDate)) {
+    scheduleState = _ExecutionScheduleState.notStarted;
+  } else if (normalizedToday.isAfter(endDate)) {
+    scheduleState = _ExecutionScheduleState.overdue;
+  } else if (variance > 0) {
+    scheduleState = _ExecutionScheduleState.ahead;
+  } else if (variance < 0) {
+    scheduleState = _ExecutionScheduleState.behind;
+  } else {
+    scheduleState = _ExecutionScheduleState.onTrack;
+  }
+
+  return _PlanExecutionSnapshot(
+    totalTasks: totalTasks,
+    completedToDate: completedToDate,
+    incompleteToDate: incompleteToDate,
+    expectedCompletedToDate: expectedCompletedToDate,
+    tasksRemaining: tasksRemaining,
+    daysPassed: daysPassed,
+    daysRemaining: daysRemaining,
+    requiredTasksPerDay: requiredTasksPerDay,
+    scheduleState: scheduleState,
+    variance: variance,
+    today: normalizedToday,
+    startDate: startDate,
+    endDate: endDate,
+  );
+}
+
+String _formatExecutionScheduleState(_ExecutionScheduleState state) {
+  return switch (state) {
+    _ExecutionScheduleState.scheduleMissing => "Schedule missing",
+    _ExecutionScheduleState.notStarted => "Not started",
+    _ExecutionScheduleState.onTrack => "On track",
+    _ExecutionScheduleState.ahead => "Ahead",
+    _ExecutionScheduleState.behind => "Behind",
+    _ExecutionScheduleState.overdue => "Overdue",
+    _ExecutionScheduleState.completed => "Completed",
+  };
+}
+
+String _formatRequiredTasksPerDay(_PlanExecutionSnapshot snapshot) {
+  if (snapshot.tasksRemaining <= 0) {
+    return "0 / day";
+  }
+  if (snapshot.requiredTasksPerDay == null) {
+    return snapshot.scheduleState == _ExecutionScheduleState.overdue
+        ? "Overdue"
+        : _dash;
+  }
+  final value = snapshot.requiredTasksPerDay!;
+  final label = value.toStringAsFixed(value >= 10 ? 1 : 1);
+  final compact = label.endsWith(".0")
+      ? label.substring(0, label.length - 2)
+      : label;
+  return "$compact / day";
+}
+
+String _buildRequiredTasksPerDayHelper(_PlanExecutionSnapshot snapshot) {
+  if (snapshot.tasksRemaining <= 0) {
+    return "All tasks are already complete.";
+  }
+  if (snapshot.endDate == null) {
+    return "Add a plan end date to calculate finish pace.";
+  }
+  if (snapshot.scheduleState == _ExecutionScheduleState.overdue) {
+    return "Past due since ${_formatReadableDate(snapshot.endDate)}.";
+  }
+  if (snapshot.daysRemaining <= 0) {
+    return "${snapshot.tasksRemaining} task(s) still need to close today.";
+  }
+  return "${snapshot.tasksRemaining} task(s) left across ${snapshot.daysRemaining} day(s).";
+}
+
+String _buildScheduleStatusHelper(_PlanExecutionSnapshot snapshot) {
+  switch (snapshot.scheduleState) {
+    case _ExecutionScheduleState.scheduleMissing:
+      return "Add both start and end dates to evaluate execution pace.";
+    case _ExecutionScheduleState.notStarted:
+      return snapshot.startDate == null
+          ? "Plan start date is missing."
+          : "Plan opens on ${_formatReadableDate(snapshot.startDate)}.";
+    case _ExecutionScheduleState.completed:
+      return "All ${snapshot.totalTasks} task(s) are complete.";
+    case _ExecutionScheduleState.overdue:
+      return snapshot.endDate == null
+          ? "Plan end date is missing."
+          : "Expected ${snapshot.expectedCompletedToDate}, actual ${snapshot.completedToDate} by ${_formatReadableDate(snapshot.endDate)}.";
+    case _ExecutionScheduleState.onTrack:
+      return "Expected ${snapshot.expectedCompletedToDate}, actual ${snapshot.completedToDate} by today.";
+    case _ExecutionScheduleState.ahead:
+      return "Expected ${snapshot.expectedCompletedToDate}, actual ${snapshot.completedToDate} by today • ${snapshot.variance} ahead.";
+    case _ExecutionScheduleState.behind:
+      return "Expected ${snapshot.expectedCompletedToDate}, actual ${snapshot.completedToDate} by today • ${snapshot.variance.abs()} behind.";
+  }
+}
+
+_ExecutionScheduleTone _resolveExecutionScheduleTone(
+  ColorScheme colorScheme,
+  _ExecutionScheduleState state,
+) {
+  return switch (state) {
+    _ExecutionScheduleState.scheduleMissing => _ExecutionScheduleTone(
+      background: colorScheme.surfaceContainerHighest,
+      border: colorScheme.outlineVariant,
+      value: colorScheme.onSurface,
+    ),
+    _ExecutionScheduleState.notStarted => _ExecutionScheduleTone(
+      background: colorScheme.tertiaryContainer,
+      border: colorScheme.tertiary.withValues(alpha: 0.34),
+      value: colorScheme.onTertiaryContainer,
+    ),
+    _ExecutionScheduleState.onTrack => _ExecutionScheduleTone(
+      background: colorScheme.primaryContainer,
+      border: colorScheme.primary.withValues(alpha: 0.32),
+      value: colorScheme.onPrimaryContainer,
+    ),
+    _ExecutionScheduleState.ahead => _ExecutionScheduleTone(
+      background: colorScheme.secondaryContainer,
+      border: colorScheme.secondary.withValues(alpha: 0.32),
+      value: colorScheme.onSecondaryContainer,
+    ),
+    _ExecutionScheduleState.behind => _ExecutionScheduleTone(
+      background: colorScheme.tertiaryContainer,
+      border: colorScheme.tertiary.withValues(alpha: 0.34),
+      value: colorScheme.onTertiaryContainer,
+    ),
+    _ExecutionScheduleState.overdue => _ExecutionScheduleTone(
+      background: colorScheme.errorContainer,
+      border: colorScheme.error.withValues(alpha: 0.32),
+      value: colorScheme.onErrorContainer,
+    ),
+    _ExecutionScheduleState.completed => _ExecutionScheduleTone(
+      background: colorScheme.secondaryContainer,
+      border: colorScheme.secondary.withValues(alpha: 0.32),
+      value: colorScheme.onSecondaryContainer,
+    ),
+  };
 }
 
 class _AttendanceImpactSection extends StatelessWidget {
@@ -5471,6 +5923,28 @@ Future<void> _showReconcileSummaryDialog(
       );
     },
   );
+}
+
+String _resolveProductionDetailErrorMessage(
+  Object error, {
+  required String fallback,
+}) {
+  final dioError = error is DioException ? error : null;
+  final responseData = dioError?.response?.data;
+  final responseMap = responseData is Map<String, dynamic>
+      ? responseData
+      : const <String, dynamic>{};
+  final backendError = (responseMap["error"] ?? responseMap["message"] ?? "")
+      .toString()
+      .trim();
+  if (backendError.isNotEmpty) {
+    return backendError;
+  }
+  final rawMessage = error.toString().trim();
+  if (rawMessage.isNotEmpty && rawMessage != "Exception") {
+    return rawMessage;
+  }
+  return fallback;
 }
 
 void _showSnack(BuildContext context, String message) {

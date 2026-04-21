@@ -73,8 +73,8 @@ class AppColors {
   // WHY: Dark mode should feel vivid and sharp, not greyed out.
   static const Color darkBackground = Color(0xFF09111F);
   static const Color darkSurface = Color(0xFF101A2C);
-  static const Color darkSurfaceAlt = Color(0xFF172339);
-  static const Color darkSurfaceMuted = Color(0xFF1F2E49);
+  static const Color darkSurfaceAlt = Color(0xFF142031);
+  static const Color darkSurfaceMuted = Color(0xFF18253A);
   static const Color darkPrimary = Color(0xFF87A8FF);
   static const Color darkPrimaryContainer = Color(0xFF25355F);
   static const Color darkSecondaryContainer = Color(0xFF22365A);
@@ -95,9 +95,9 @@ class AppColors {
   static const Color businessAccent = Color(0xFFE0A64D);
   static const Color businessBackground = Color(0xFF09111B);
   static const Color businessSurface = Color(0xFF101A2A);
-  static const Color businessSurfaceAlt = Color(0xFF162235);
-  static const Color businessCard = Color(0xFF1C2B43);
-  static const Color businessPrimaryContainer = Color(0xFF20365B);
+  static const Color businessSurfaceAlt = Color(0xFF131F30);
+  static const Color businessCard = Color(0xFF17263A);
+  static const Color businessPrimaryContainer = Color(0xFF1D3151);
   static const Color businessSecondaryContainer = Color(0xFF5A4020);
   static const Color businessTertiaryContainer = Color(0xFF1E3D69);
   static const Color businessTextPrimary = Color(0xFFF4F7FD);

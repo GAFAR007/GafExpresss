@@ -23,6 +23,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/text_file_download.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -30,6 +31,7 @@ import 'package:frontend/app/features/home/presentation/production/production_dr
 import 'package:frontend/app/features/home/presentation/production/production_calendar_visuals.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
+import 'package:frontend/app/features/home/presentation/production/production_progress_report_dialogs.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
@@ -69,6 +71,8 @@ const String _monthEmptyTitle = "No scheduled work this month";
 const String _monthEmptyMessage =
     "Move to another month or start assigning tasks from the selected day.";
 const String _viewInsightsLabel = "View insights";
+const String _downloadProgressLabel = "Download progress";
+const String _emailProgressLabel = "Email progress";
 const String _openDraftLabel = "Open draft";
 const String _returnToDraftLabel = "Return to draft";
 const String _viewInsightsTooltip = "Open plan insights";
@@ -79,6 +83,9 @@ const String _returnToDraftConfirmTitle = "Return this plan to draft?";
 const String _returnToDraftConfirmMessage =
     "This stops the live production lifecycle and reopens the same plan in draft mode so you can edit the saved schedule directly.";
 const String _returnToDraftConfirmLabel = "Return to draft";
+const String _downloadProgressSuccess = "Progress report downloaded.";
+const String _downloadProgressFailure = "Unable to download progress report.";
+const String _emailProgressFailure = "Unable to email progress report.";
 const String _todayLabel = "Today";
 const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
@@ -486,6 +493,65 @@ class _ProductionPlanWorkspaceScreenState
     _showSnack(context, message);
   }
 
+  String _resolveViewerEmail() {
+    final profile = ref.read(userProfileProvider).valueOrNull;
+    final session = ref.read(authSessionProvider);
+    final directEmail = (profile?.email ?? "").trim();
+    if (directEmail.isNotEmpty) {
+      return directEmail;
+    }
+    return (session?.user.email ?? "").trim();
+  }
+
+  Future<void> _downloadProgressReport({required String routePath}) async {
+    try {
+      final report = await ref
+          .read(productionPlanActionsProvider)
+          .fetchPlanProgressReport(planId: widget.planId, routePath: routePath);
+      await downloadPlainTextFile(
+        fileName: report.fileName,
+        contents: report.html,
+        mimeType: "text/html",
+      );
+      _showSnackSafe(_downloadProgressSuccess);
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _downloadProgressFailure,
+        ),
+      );
+    }
+  }
+
+  Future<void> _emailProgressReport({required String routePath}) async {
+    final toEmail = await showProductionProgressReportEmailDialog(
+      context,
+      initialEmail: _resolveViewerEmail(),
+    );
+    if (toEmail == null || toEmail.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final response = await ref
+          .read(productionPlanActionsProvider)
+          .emailPlanProgressReport(
+            planId: widget.planId,
+            toEmail: toEmail.trim(),
+            routePath: routePath,
+          );
+      _showSnackSafe("${response.message} to ${response.toEmail}.");
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _emailProgressFailure,
+        ),
+      );
+    }
+  }
+
   Future<bool> _confirmAction({
     required String title,
     required String message,
@@ -822,6 +888,16 @@ class _ProductionPlanWorkspaceScreenState
                   },
                   onViewInsights: () {
                     context.push(productionPlanInsightsPath(widget.planId));
+                  },
+                  onDownloadProgress: () async {
+                    await _downloadProgressReport(
+                      routePath: productionPlanDetailPath(widget.planId),
+                    );
+                  },
+                  onEmailProgress: () async {
+                    await _emailProgressReport(
+                      routePath: productionPlanDetailPath(widget.planId),
+                    );
                   },
                   onReturnToDraft:
                       canManageLifecycle &&
@@ -1957,6 +2033,8 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   final List<ProductionTimelineRow> timelineRows;
   final VoidCallback onOpenDraft;
   final VoidCallback onViewInsights;
+  final VoidCallback onDownloadProgress;
+  final VoidCallback onEmailProgress;
   final VoidCallback? onReturnToDraft;
 
   const _WorkspaceSummaryCard({
@@ -1970,6 +2048,8 @@ class _WorkspaceSummaryCard extends StatelessWidget {
     required this.timelineRows,
     required this.onOpenDraft,
     required this.onViewInsights,
+    required this.onDownloadProgress,
+    required this.onEmailProgress,
     this.onReturnToDraft,
   });
 
@@ -2289,6 +2369,24 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 onPressed: onViewInsights,
                 icon: const Icon(Icons.insights_outlined),
                 label: const Text(_viewInsightsLabel),
+              ),
+              OutlinedButton.icon(
+                style: _workspaceActionButtonStyle(
+                  context,
+                  accentColor: _workspaceTeal,
+                ),
+                onPressed: onDownloadProgress,
+                icon: const Icon(Icons.download_outlined),
+                label: const Text(_downloadProgressLabel),
+              ),
+              OutlinedButton.icon(
+                style: _workspaceActionButtonStyle(
+                  context,
+                  accentColor: _workspaceNavy,
+                ),
+                onPressed: onEmailProgress,
+                icon: const Icon(Icons.mail_outline),
+                label: const Text(_emailProgressLabel),
               ),
             ],
           ),
@@ -2618,9 +2716,7 @@ class _MonthCalendarCard extends StatelessWidget {
       accentColor: palette.accent,
       lightTintAlpha: 0.04,
       darkTintAlpha: 0.12,
-      baseColor: isDark
-          ? colorScheme.surfaceContainerLow
-          : colorScheme.surface,
+      baseColor: isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
     );
     final shellForeground = _workspacePrimaryContentColor(colorScheme);
     final shellMuted = _workspaceSecondaryContentColor(colorScheme);
@@ -2844,8 +2940,7 @@ class _MonthWeekdayHeader extends StatelessWidget {
             ),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color:
-              borderColor ?? colorScheme.primary.withValues(alpha: 0.12),
+          color: borderColor ?? colorScheme.primary.withValues(alpha: 0.12),
         ),
       ),
       child: Row(
@@ -3302,7 +3397,9 @@ class _MonthDayTile extends StatelessWidget {
                       width: compact ? 8 : 10,
                       height: compact ? 8 : 10,
                       decoration: BoxDecoration(
-                        color: selected ? palette.badgeForeground : palette.accent,
+                        color: selected
+                            ? palette.badgeForeground
+                            : palette.accent,
                         shape: BoxShape.circle,
                       ),
                     )
@@ -3974,8 +4071,8 @@ class _AgendaTaskCard extends StatelessWidget {
         ];
 
     return Container(
-                        padding: const EdgeInsets.all(_agendaCardPadding),
-                        decoration: BoxDecoration(
+      padding: const EdgeInsets.all(_agendaCardPadding),
+      decoration: BoxDecoration(
         color: _workspaceToneSurface(
           colorScheme: colorScheme,
           accentColor: _workspaceBlue,
@@ -5286,10 +5383,24 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: _workspaceSoftAmber,
+                color: _workspaceToneSurface(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceAmber,
+                  lightColor: _workspaceSoftAmber,
+                  lightTintAlpha: 0.0,
+                  darkTintAlpha: 0.16,
+                  baseColor: isDark
+                      ? colorScheme.surfaceContainerHigh
+                      : colorScheme.surface,
+                ),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: _workspaceAmber.withValues(alpha: 0.18),
+                  color: _workspaceToneBorder(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceAmber,
+                    lightAlpha: 0.18,
+                    darkAlpha: 0.3,
+                  ),
                 ),
               ),
               child: Row(
@@ -5315,12 +5426,28 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: Color.alphaBlend(
-                actualSoft.withValues(alpha: 0.92),
-                colorScheme.surface,
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: actualAccent,
+                lightColor: Color.alphaBlend(
+                  actualSoft.withValues(alpha: 0.74),
+                  colorScheme.surface,
+                ),
+                lightTintAlpha: 0.02,
+                darkTintAlpha: 0.12,
+                baseColor: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
               ),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: actualAccent.withValues(alpha: 0.14)),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: actualAccent,
+                  lightAlpha: 0.14,
+                  darkAlpha: 0.26,
+                ),
+              ),
             ),
             child: Text(
               attendanceHint,
@@ -5585,8 +5712,17 @@ class _TimelineLogRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.05,
+          darkTintAlpha: 0.12,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

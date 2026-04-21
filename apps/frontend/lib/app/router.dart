@@ -144,8 +144,13 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
-        AppDebug.log("ROUTER", "redirect -> /login", extra: {"from": path});
-        return '/login';
+        final nextTarget = state.uri.toString();
+        AppDebug.log(
+          "ROUTER",
+          "redirect -> /login",
+          extra: {"from": path, "next": nextTarget},
+        );
+        return '/login?next=${Uri.encodeComponent(nextTarget)}';
       }
 
       // WHY: If logged in, keep user out of auth screens.

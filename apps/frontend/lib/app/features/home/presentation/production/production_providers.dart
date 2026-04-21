@@ -52,6 +52,10 @@ const String _reasonPlanStatusMissing =
     "production_plan_status_session_missing";
 const String _reasonPlanDeleteMissing =
     "production_plan_delete_session_missing";
+const String _reasonPlanProgressReportMissing =
+    "production_plan_progress_report_session_missing";
+const String _reasonPlanProgressReportEmailMissing =
+    "production_plan_progress_report_email_session_missing";
 const String _reasonSchedulePolicyMissing =
     "production_schedule_policy_session_missing";
 const String _reasonSchedulePolicyUpdateMissing =
@@ -501,6 +505,60 @@ class ProductionPlanActions {
     final api = _ref.read(productionApiProvider);
     // WHY: AI drafts are read-only and do not affect caches.
     return api.generatePlanDraft(token: session.token, payload: payload);
+  }
+
+  Future<ProductionProgressReportResponse> fetchPlanProgressReport({
+    required String planId,
+    required String routePath,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonPlanProgressReportMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    return api.fetchPlanProgressReport(
+      token: session.token,
+      planId: planId,
+      routePath: routePath,
+    );
+  }
+
+  Future<ProductionProgressReportEmailResponse> emailPlanProgressReport({
+    required String planId,
+    required String toEmail,
+    required String routePath,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonPlanProgressReportEmailMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    return api.emailPlanProgressReport(
+      token: session.token,
+      planId: planId,
+      toEmail: toEmail,
+      routePath: routePath,
+    );
   }
 
   Future<ProductionPlan> updatePlanStatus({

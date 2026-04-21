@@ -55,6 +55,14 @@ const String _keyCreatedAt = "createdAt";
 const String _keyUpdatedAt = "updatedAt";
 const String _keyError = "error";
 const String _keyMessage = "message";
+const String _keyFileName = "fileName";
+const String _keySubject = "subject";
+const String _keyHtml = "html";
+const String _keyText = "text";
+const String _keyRoutePath = "routePath";
+const String _keyReportUrl = "reportUrl";
+const String _keyLivePageUrl = "livePageUrl";
+const String _keyToEmail = "toEmail";
 const String _keyPage = "page";
 const String _keyLimit = "limit";
 const String _keyPlanId = "planId";
@@ -2018,6 +2026,66 @@ class ProductionPlanDetail {
           .whereType<Map<String, dynamic>>()
           .map(ProductionDeviationAlert.fromJson)
           .toList(),
+    );
+  }
+}
+
+class ProductionProgressReportResponse {
+  final String message;
+  final String fileName;
+  final String subject;
+  final String routePath;
+  final String reportUrl;
+  final String livePageUrl;
+  final String html;
+  final String text;
+
+  const ProductionProgressReportResponse({
+    required this.message,
+    required this.fileName,
+    required this.subject,
+    required this.routePath,
+    required this.reportUrl,
+    required this.livePageUrl,
+    required this.html,
+    required this.text,
+  });
+
+  factory ProductionProgressReportResponse.fromJson(Map<String, dynamic> json) {
+    return ProductionProgressReportResponse(
+      message: _parseString(json[_keyMessage]),
+      fileName: _parseString(json[_keyFileName]),
+      subject: _parseString(json[_keySubject]),
+      routePath: _parseString(json[_keyRoutePath]),
+      reportUrl: _parseString(json[_keyReportUrl]),
+      livePageUrl: _parseString(json[_keyLivePageUrl]),
+      html: _parseString(json[_keyHtml]),
+      text: _parseString(json[_keyText]),
+    );
+  }
+}
+
+class ProductionProgressReportEmailResponse {
+  final String message;
+  final String toEmail;
+  final String routePath;
+  final String reportUrl;
+
+  const ProductionProgressReportEmailResponse({
+    required this.message,
+    required this.toEmail,
+    required this.routePath,
+    required this.reportUrl,
+  });
+
+  factory ProductionProgressReportEmailResponse.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return ProductionProgressReportEmailResponse(
+      message: _parseString(json[_keyMessage]),
+      toEmail: _parseString(json[_keyToEmail]),
+      routePath: _parseString(json[_keyRoutePath]),
+      reportUrl: _parseString(json[_keyReportUrl]),
     );
   }
 }

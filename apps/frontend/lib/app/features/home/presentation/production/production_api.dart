@@ -36,6 +36,8 @@ const String _tasksPath = "/business/production/tasks";
 const String _taskProgressPath = "/business/production/task-progress";
 const String _portfolioConfidencePath =
     "/business/production/confidence/portfolio";
+const String _progressReportSuffix = "/progress-report";
+const String _progressReportEmailSuffix = "/progress-report/email";
 const String _preorderReconcilePath =
     "/business/preorder/reservations/reconcile-expired";
 const String _preorderReservationsPath = "/business/preorder/reservations";
@@ -53,6 +55,9 @@ const String _intentAssistantCropSearch =
 const String _intentAssistantCropLifecycle =
     "resolve selected crop lifecycle through planner backend";
 const String _intentPlanDetail = "load production plan detail";
+const String _intentPlanProgressReport = "load production progress report";
+const String _intentPlanProgressReportEmail =
+    "email production progress report";
 const String _intentPlanUnits = "load production plan units";
 const String _intentPortfolioConfidence =
     "load production confidence portfolio";
@@ -89,6 +94,8 @@ const String _operationAssistantTurn = "assistantTurn";
 const String _operationAssistantCropSearch = "searchAssistantCrops";
 const String _operationAssistantCropLifecycle = "previewAssistantCropLifecycle";
 const String _operationPlanDetail = "fetchPlanDetail";
+const String _operationPlanProgressReport = "fetchPlanProgressReport";
+const String _operationPlanProgressReportEmail = "emailPlanProgressReport";
 const String _operationPlanUnits = "fetchPlanUnits";
 const String _operationPortfolioConfidence = "fetchPortfolioConfidence";
 const String _operationPlanCreate = "createPlan";
@@ -126,6 +133,8 @@ const String _authHeaderKey = "Authorization";
 const String _keyFrom = "from";
 const String _keyTo = "to";
 const String _keyTask = "task";
+const String _keyToEmail = "toEmail";
+const String _keyRoutePath = "routePath";
 const String _keyStaff = "staff";
 const String _keyStatus = "status";
 const String _keyReason = "reason";
@@ -190,6 +199,18 @@ const String _assistantCropLifecycleFailureMessage =
 const String _planDetailStartMessage = "fetchPlanDetail() start";
 const String _planDetailSuccessMessage = "fetchPlanDetail() success";
 const String _planDetailFailureMessage = "fetchPlanDetail() failed";
+const String _planProgressReportStartMessage =
+    "fetchPlanProgressReport() start";
+const String _planProgressReportSuccessMessage =
+    "fetchPlanProgressReport() success";
+const String _planProgressReportFailureMessage =
+    "fetchPlanProgressReport() failed";
+const String _planProgressReportEmailStartMessage =
+    "emailPlanProgressReport() start";
+const String _planProgressReportEmailSuccessMessage =
+    "emailPlanProgressReport() success";
+const String _planProgressReportEmailFailureMessage =
+    "emailPlanProgressReport() failed";
 const String _portfolioConfidenceStartMessage =
     "fetchPortfolioConfidence() start";
 const String _portfolioConfidenceSuccessMessage =
@@ -779,6 +800,129 @@ class ProductionApi {
           _extraServiceKey: _serviceName,
           _extraOperationKey: _operationPlanDetail,
           _extraIntentKey: _intentPlanDetail,
+          _extraPlanIdKey: planId,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ProductionProgressReportResponse> fetchPlanProgressReport({
+    required String? token,
+    required String planId,
+    required String routePath,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _planProgressReportStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationPlanProgressReport,
+        _extraIntentKey: _intentPlanProgressReport,
+        _extraPlanIdKey: planId,
+      },
+    );
+
+    try {
+      final resp = await _dio.get(
+        "$_plansPath/$planId$_progressReportSuffix",
+        queryParameters: {_keyRoutePath: routePath},
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final report = ProductionProgressReportResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _planProgressReportSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanProgressReport,
+          _extraIntentKey: _intentPlanProgressReport,
+          _extraPlanIdKey: planId,
+        },
+      );
+
+      return report;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _planProgressReportFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanProgressReport,
+          _extraIntentKey: _intentPlanProgressReport,
+          _extraPlanIdKey: planId,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ProductionProgressReportEmailResponse> emailPlanProgressReport({
+    required String? token,
+    required String planId,
+    required String toEmail,
+    required String routePath,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _planProgressReportEmailStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationPlanProgressReportEmail,
+        _extraIntentKey: _intentPlanProgressReportEmail,
+        _extraPlanIdKey: planId,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_plansPath/$planId$_progressReportEmailSuffix",
+        data: {_keyToEmail: toEmail, _keyRoutePath: routePath},
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final result = ProductionProgressReportEmailResponse.fromJson(data);
+
+      AppDebug.log(
+        _logTag,
+        _planProgressReportEmailSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanProgressReportEmail,
+          _extraIntentKey: _intentPlanProgressReportEmail,
+          _extraPlanIdKey: planId,
+        },
+      );
+
+      return result;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _planProgressReportEmailFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationPlanProgressReportEmail,
+          _extraIntentKey: _intentPlanProgressReportEmail,
           _extraPlanIdKey: planId,
           _extraStatusKey: status,
           _extraReasonKey: reason,

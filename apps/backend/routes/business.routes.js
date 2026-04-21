@@ -496,6 +496,20 @@ router.get(
 );
 
 router.get(
+  "/production/plans/:id/progress-report",
+  requireAuth,
+  requireAnyRole(["business_owner", "staff"]),
+  businessController.getProductionPlanProgressReport,
+);
+
+router.post(
+  "/production/plans/:id/progress-report/email",
+  requireAuth,
+  requireAnyRole(["business_owner", "staff"]),
+  businessController.emailProductionPlanProgressReport,
+);
+
+router.get(
   "/production/plans/:planId/units",
   requireAuth,
   requireAnyRole(["business_owner", "staff"]),

@@ -79,11 +79,23 @@ class ProductionSectionHeader extends StatelessWidget {
 class ProductionKpiCard extends StatelessWidget {
   final String label;
   final String value;
+  final String? helper;
+  final Color? backgroundColor;
+  final Color? borderColor;
+  final Color? labelColor;
+  final Color? valueColor;
+  final Color? helperColor;
 
   const ProductionKpiCard({
     super.key,
     required this.label,
     required this.value,
+    this.helper,
+    this.backgroundColor,
+    this.borderColor,
+    this.labelColor,
+    this.valueColor,
+    this.helperColor,
   });
 
   @override
@@ -94,9 +106,9 @@ class ProductionKpiCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(_kpiCardPadding),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: backgroundColor ?? colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(_kpiCardRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(color: borderColor ?? colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -105,14 +117,26 @@ class ProductionKpiCard extends StatelessWidget {
           Text(
             label,
             style: textTheme.labelSmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: labelColor ?? colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: _kpiValueSpacing),
           Text(
             value,
-            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: textTheme.titleMedium?.copyWith(
+              color: valueColor,
+              fontWeight: FontWeight.w700,
+            ),
           ),
+          if (helper != null && helper!.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              helper!,
+              style: textTheme.bodySmall?.copyWith(
+                color: helperColor ?? colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );
