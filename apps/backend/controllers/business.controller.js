@@ -17331,6 +17331,7 @@ async function getProductionPlanProgressReport(req, res) {
     actorId: req.user?.sub,
     planId: req.params?.id,
     routePath: req.query?.routePath,
+    toEmail: req.query?.toEmail,
   });
 
   try {
@@ -17343,6 +17344,7 @@ async function getProductionPlanProgressReport(req, res) {
     const report = buildProductionProgressReport({
       detailPayload,
       routePath: req.query?.routePath,
+      toEmail: req.query?.toEmail,
     });
 
     debug("BUSINESS CONTROLLER: getProductionPlanProgressReport - success", {
@@ -17369,6 +17371,7 @@ async function emailProductionPlanProgressReport(req, res) {
     actorId: req.user?.sub,
     planId: req.params?.id,
     routePath: req.body?.routePath,
+    toEmail: req.body?.toEmail,
   });
 
   try {
@@ -17388,6 +17391,7 @@ async function emailProductionPlanProgressReport(req, res) {
     const report = buildProductionProgressReport({
       detailPayload,
       routePath: req.body?.routePath,
+      toEmail,
     });
 
     await sendEmail({
@@ -17409,6 +17413,7 @@ async function emailProductionPlanProgressReport(req, res) {
       toEmail,
       routePath: report.routePath,
       reportUrl: report.reportUrl,
+      livePageUrl: report.livePageUrl,
     });
   } catch (err) {
     debug(

@@ -510,6 +510,7 @@ class ProductionPlanActions {
   Future<ProductionProgressReportResponse> fetchPlanProgressReport({
     required String planId,
     required String routePath,
+    String? toEmail,
   }) async {
     final session = _ref.read(authSessionProvider);
     if (session == null || !session.isTokenValid) {
@@ -530,6 +531,7 @@ class ProductionPlanActions {
       token: session.token,
       planId: planId,
       routePath: routePath,
+      toEmail: toEmail,
     );
   }
 

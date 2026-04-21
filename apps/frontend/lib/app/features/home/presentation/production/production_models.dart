@@ -2070,12 +2070,14 @@ class ProductionProgressReportEmailResponse {
   final String toEmail;
   final String routePath;
   final String reportUrl;
+  final String livePageUrl;
 
   const ProductionProgressReportEmailResponse({
     required this.message,
     required this.toEmail,
     required this.routePath,
     required this.reportUrl,
+    required this.livePageUrl,
   });
 
   factory ProductionProgressReportEmailResponse.fromJson(
@@ -2086,6 +2088,7 @@ class ProductionProgressReportEmailResponse {
       toEmail: _parseString(json[_keyToEmail]),
       routePath: _parseString(json[_keyRoutePath]),
       reportUrl: _parseString(json[_keyReportUrl]),
+      livePageUrl: _parseString(json[_keyLivePageUrl]),
     );
   }
 }

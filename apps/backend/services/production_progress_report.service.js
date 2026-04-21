@@ -41,8 +41,22 @@ function normalizeProductionProgressRoutePath({ routePath, planId }) {
   return normalizedRoutePath;
 }
 
-function buildProductionProgressLoginUrl(routePath) {
-  return `${FRONTEND_BASE_URL}/#/login?next=${encodeURIComponent(routePath)}`;
+function normalizeRecipientEmail(value) {
+  const normalized = (value || "").toString().trim();
+  if (!normalized || normalized.includes(" ") || !normalized.includes("@")) {
+    return "";
+  }
+  return normalized;
+}
+
+function buildProductionProgressLoginUrl(routePath, recipientEmail) {
+  const searchParams = new URLSearchParams();
+  const normalizedEmail = normalizeRecipientEmail(recipientEmail);
+  if (normalizedEmail) {
+    searchParams.set("email", normalizedEmail);
+  }
+  searchParams.set("next", routePath);
+  return `${FRONTEND_BASE_URL}/#/login?${searchParams.toString()}`;
 }
 
 function buildProductionProgressLiveUrl(routePath) {
@@ -234,7 +248,7 @@ function buildOutputRowHtml([unitLabel, quantity]) {
   `;
 }
 
-function buildProductionProgressReport({ detailPayload, routePath }) {
+function buildProductionProgressReport({ detailPayload, routePath, toEmail }) {
   const safeDetailPayload =
     detailPayload && typeof detailPayload === "object" ? detailPayload : {};
   const plan = safeDetailPayload.plan || {};
@@ -251,7 +265,10 @@ function buildProductionProgressReport({ detailPayload, routePath }) {
     routePath,
     planId: plan?._id || plan?.id,
   });
-  const reportUrl = buildProductionProgressLoginUrl(normalizedRoutePath);
+  const reportUrl = buildProductionProgressLoginUrl(
+    normalizedRoutePath,
+    toEmail,
+  );
   const livePageUrl = buildProductionProgressLiveUrl(normalizedRoutePath);
   const generatedAt = new Date();
   const safePlanTitle = plan?.title?.trim() || "Untitled production plan";
@@ -482,6 +499,53 @@ function buildProductionProgressReport({ detailPayload, routePath }) {
         text-decoration: none;
         font-weight: 600;
         opacity: 0.9;
+      }
+
+      .copy-panel {
+        margin-top: 18px;
+        padding: 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+      }
+
+      .copy-title {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-weight: 700;
+        opacity: 0.86;
+      }
+
+      .copy-grid {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .copy-item {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(5, 22, 21, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+      }
+
+      .copy-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+        opacity: 0.82;
+      }
+
+      .copy-value {
+        margin-top: 8px;
+        color: #ffffff;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        word-break: break-all;
+        overflow-wrap: anywhere;
       }
 
       .report-grid {
@@ -778,6 +842,19 @@ function buildProductionProgressReport({ detailPayload, routePath }) {
           <a class="cta-button" href="${escapeHtml(reportUrl)}">Open this page after login</a>
           <a class="cta-link" href="${escapeHtml(livePageUrl)}">Direct live page</a>
         </div>
+        <div class="copy-panel">
+          <div class="copy-title">Copyable links</div>
+          <div class="copy-grid">
+            <div class="copy-item">
+              <div class="copy-label">Open after login</div>
+              <div class="copy-value">${escapeHtml(reportUrl)}</div>
+            </div>
+            <div class="copy-item">
+              <div class="copy-label">Direct live page</div>
+              <div class="copy-value">${escapeHtml(livePageUrl)}</div>
+            </div>
+          </div>
+        </div>
       </header>
 
       <main class="report-grid">
@@ -891,6 +968,7 @@ function buildProductionProgressReport({ detailPayload, routePath }) {
     `Recent activity rows: ${formatNumber(timelineRows.length)}`,
     "",
     `Open after login: ${reportUrl}`,
+    `Direct live page: ${livePageUrl}`,
   ];
 
   return {

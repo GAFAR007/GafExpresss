@@ -814,6 +814,7 @@ class ProductionApi {
     required String? token,
     required String planId,
     required String routePath,
+    String? toEmail,
   }) async {
     AppDebug.log(
       _logTag,
@@ -829,7 +830,10 @@ class ProductionApi {
     try {
       final resp = await _dio.get(
         "$_plansPath/$planId$_progressReportSuffix",
-        queryParameters: {_keyRoutePath: routePath},
+        queryParameters: {
+          _keyRoutePath: routePath,
+          if ((toEmail ?? "").trim().isNotEmpty) _keyToEmail: toEmail!.trim(),
+        },
         options: _authOptions(token),
       );
 

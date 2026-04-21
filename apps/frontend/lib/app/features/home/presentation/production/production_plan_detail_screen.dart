@@ -17,6 +17,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -63,6 +64,8 @@ const String _emailProgressLabel = "Email progress";
 const String _downloadProgressSuccess = "Progress report downloaded.";
 const String _downloadProgressFailure = "Unable to download progress report.";
 const String _emailProgressFailure = "Unable to email progress report.";
+const String _copyProgressLinkSuccess = "View link copied.";
+const String _copyProgressLinkFailure = "Unable to copy view link.";
 const String _kpiTitle = "KPIs";
 const String _attendanceImpactTitle = "HR impact KPIs";
 const String _dailyRollupTitle = "Daily execution rollup";
@@ -419,11 +422,39 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
     }
 
     Future<void> emailProgressReport() async {
-      final toEmail = await showProductionProgressReportEmailDialog(
+      final result = await showProductionProgressReportEmailDialog(
         context,
         initialEmail: preferredEmail,
       );
-      if (toEmail == null || toEmail.trim().isEmpty) {
+      if (result == null || result.email.trim().isEmpty) {
+        return;
+      }
+      final toEmail = result.email.trim();
+
+      if (result.action == ProductionProgressReportDialogAction.copyViewLink) {
+        try {
+          final report = await ref
+              .read(productionPlanActionsProvider)
+              .fetchPlanProgressReport(
+                planId: planId,
+                routePath: productionPlanInsightsPath(planId),
+                toEmail: toEmail,
+              );
+          await Clipboard.setData(ClipboardData(text: report.reportUrl));
+          if (context.mounted) {
+            _showSnack(context, "$_copyProgressLinkSuccess for $toEmail.");
+          }
+        } catch (error) {
+          if (context.mounted) {
+            _showSnack(
+              context,
+              _resolveProductionDetailErrorMessage(
+                error,
+                fallback: _copyProgressLinkFailure,
+              ),
+            );
+          }
+        }
         return;
       }
 
@@ -432,7 +463,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             .read(productionPlanActionsProvider)
             .emailPlanProgressReport(
               planId: planId,
-              toEmail: toEmail.trim(),
+              toEmail: toEmail,
               routePath: productionPlanInsightsPath(planId),
             );
         if (context.mounted) {
