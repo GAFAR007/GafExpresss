@@ -14,6 +14,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:frontend/app/theme/app_radius.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 // WHY: Consistent spacing keeps card layouts readable.
 const double _kpiCardPadding = 12;
@@ -150,47 +151,56 @@ class ProductionStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final normalized = label.trim().toLowerCase();
-    final backgroundColor = switch (normalized) {
-      "active" => colorScheme.primaryContainer,
-      "paused" => colorScheme.tertiaryContainer,
-      "completed" => colorScheme.secondaryContainer,
-      "archived" => colorScheme.surfaceContainerHighest,
-      "done" => colorScheme.secondaryContainer,
-      "in_progress" => colorScheme.primaryContainer,
-      "rejected" => colorScheme.errorContainer,
-      "pending_approval" => colorScheme.tertiaryContainer,
-      _ => colorScheme.secondaryContainer,
-    };
-    final foregroundColor = switch (normalized) {
-      "active" => colorScheme.onPrimaryContainer,
-      "paused" => colorScheme.onTertiaryContainer,
-      "completed" => colorScheme.onSecondaryContainer,
-      "archived" => colorScheme.onSurfaceVariant,
-      "done" => colorScheme.onSecondaryContainer,
-      "in_progress" => colorScheme.onPrimaryContainer,
-      "rejected" => colorScheme.onErrorContainer,
-      "pending_approval" => colorScheme.onTertiaryContainer,
-      _ => colorScheme.onSecondaryContainer,
-    };
+    final badgeColors = AppStatusBadgeColors.fromTheme(
+      theme: Theme.of(context),
+      tone: _statusTone(label),
+    );
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: _statusPillPaddingHorizontal,
         vertical: _statusPillPaddingVertical,
       ),
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: badgeColors.background,
         borderRadius: BorderRadius.circular(_statusPillRadius),
+        border: Border.all(
+          color: badgeColors.foreground.withValues(alpha: 0.18),
+        ),
       ),
       child: Text(
         formatProductionStatusLabel(label),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: foregroundColor,
+          color: badgeColors.foreground,
           fontWeight: FontWeight.w600,
         ),
       ),
     );
+  }
+}
+
+AppStatusTone _statusTone(String rawLabel) {
+  switch (rawLabel.trim().toLowerCase()) {
+    case "completed":
+    case "done":
+    case "approved":
+      return AppStatusTone.success;
+    case "active":
+    case "in_progress":
+    case "on_track":
+      return AppStatusTone.info;
+    case "pending":
+    case "pending_approval":
+    case "needs_review":
+    case "paused":
+      return AppStatusTone.warning;
+    case "blocked":
+    case "rejected":
+    case "delayed":
+    case "overdue":
+    case "archived":
+      return AppStatusTone.danger;
+    default:
+      return AppStatusTone.neutral;
   }
 }
 

@@ -164,6 +164,7 @@ class AppTheme {
       palette: palette,
       isDark: isDark,
     );
+    final resolvedTheme = baseTheme.copyWith(textTheme: textTheme);
     final subtleShadow = palette.shadow.withValues(alpha: isDark ? 0.34 : 0.08);
     final deepShadow = palette.shadow.withValues(alpha: isDark ? 0.46 : 0.14);
 
@@ -338,58 +339,27 @@ class AppTheme {
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: palette.textPrimary,
-          backgroundColor: isDark
-              ? Color.alphaBlend(
-                  palette.primary.withValues(alpha: 0.12),
-                  palette.surfaceAlt,
-                )
-              : palette.surface.withValues(alpha: 0.88),
-          side: BorderSide(
-            color: isDark
-                ? Color.alphaBlend(
-                    palette.primary.withValues(alpha: 0.18),
-                    palette.border,
-                  )
-                : palette.border,
-          ),
-          minimumSize: const Size(0, 50),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-          ),
+        style: AppButtonStyles.outlined(
+          theme: resolvedTheme,
+          tone: AppStatusTone.info,
           textStyle: textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: palette.primary,
-          minimumSize: const Size(0, 40),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-          ),
+        style: AppButtonStyles.text(
+          theme: resolvedTheme,
+          tone: AppStatusTone.info,
           textStyle: textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(
-          foregroundColor: palette.textPrimary,
-          backgroundColor: palette.surfaceAlt.withValues(
-            alpha: isDark ? 0.8 : 0.92,
-          ),
-          minimumSize: const Size(40, 40),
-          padding: const EdgeInsets.all(10),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            side: BorderSide(color: palette.outlineVariant),
-          ),
+        style: AppButtonStyles.icon(
+          theme: resolvedTheme,
+          tone: AppStatusTone.neutral,
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
@@ -768,6 +738,206 @@ class AppStatusBadgeColors {
     return AppStatusBadgeColors(
       background: base.withValues(alpha: isDark ? 0.24 : 0.14),
       foreground: base.withValues(alpha: isDark ? 0.96 : 0.92),
+    );
+  }
+}
+
+class AppButtonStyles {
+  AppButtonStyles._();
+
+  static ButtonStyle filled({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 52),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 18,
+      vertical: 14,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return FilledButton.styleFrom(
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      backgroundColor: palette.fill,
+      foregroundColor: palette.onFill,
+      disabledBackgroundColor: theme.colorScheme.surfaceContainerHigh,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    );
+  }
+
+  static ButtonStyle tonal({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 52),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 18,
+      vertical: 14,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return FilledButton.styleFrom(
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      backgroundColor: palette.surface,
+      foregroundColor: palette.accent,
+      disabledBackgroundColor: theme.colorScheme.surfaceContainerHigh,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: palette.border),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    );
+  }
+
+  static ButtonStyle outlined({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 50),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 14,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return OutlinedButton.styleFrom(
+      foregroundColor: palette.accent,
+      backgroundColor: palette.surface,
+      disabledBackgroundColor: theme.colorScheme.surfaceContainerHigh,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      side: BorderSide(color: palette.border),
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+
+  static ButtonStyle text({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 40),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 10,
+      vertical: 6,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return TextButton.styleFrom(
+      foregroundColor: palette.accent,
+      backgroundColor: tone == AppStatusTone.neutral ? null : palette.surface,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+
+  static ButtonStyle icon({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(40, 40),
+    EdgeInsetsGeometry padding = const EdgeInsets.all(10),
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return IconButton.styleFrom(
+      foregroundColor: palette.accent,
+      backgroundColor: palette.surface,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: palette.border),
+      ),
+    );
+  }
+
+  static Color accentColor({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+  }) {
+    return _AppButtonPalette.resolve(theme: theme, tone: tone).accent;
+  }
+}
+
+class _AppButtonPalette {
+  final Color accent;
+  final Color surface;
+  final Color border;
+  final Color fill;
+  final Color onFill;
+
+  const _AppButtonPalette({
+    required this.accent,
+    required this.surface,
+    required this.border,
+    required this.fill,
+    required this.onFill,
+  });
+
+  static _AppButtonPalette resolve({
+    required ThemeData theme,
+    required AppStatusTone tone,
+  }) {
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    if (tone == AppStatusTone.neutral) {
+      final neutralFill = colorScheme.surfaceContainerHigh;
+      return _AppButtonPalette(
+        accent: colorScheme.onSurface,
+        surface: colorScheme.surfaceContainerLow,
+        border: colorScheme.outlineVariant,
+        fill: neutralFill,
+        onFill: colorScheme.onSurface,
+      );
+    }
+
+    final Color base = switch (tone) {
+      AppStatusTone.success => AppColors.success,
+      AppStatusTone.info => AppColors.analyticsAccent,
+      AppStatusTone.warning => AppColors.warning,
+      AppStatusTone.danger => AppColors.error,
+      AppStatusTone.neutral => colorScheme.onSurfaceVariant,
+    };
+    final fill = base;
+    final onFill = ThemeData.estimateBrightnessForColor(fill) == Brightness.dark
+        ? Colors.white
+        : colorScheme.onSurface;
+
+    return _AppButtonPalette(
+      accent: base.withValues(alpha: isDark ? 0.98 : 0.9),
+      surface: base.withValues(alpha: isDark ? 0.22 : 0.1),
+      border: base.withValues(alpha: isDark ? 0.4 : 0.22),
+      fill: fill,
+      onFill: onFill,
     );
   }
 }

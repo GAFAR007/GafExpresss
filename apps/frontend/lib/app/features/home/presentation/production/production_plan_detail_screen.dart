@@ -34,6 +34,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pr
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
 import 'package:frontend/app/features/home/presentation/role_access.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "PRODUCTION_DETAIL";
 const String _buildMessage = "build()";
@@ -1049,7 +1050,10 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
         left: _buildSectionPane(
           title: _phaseTitle,
           subtitle: "Which phases are moving and which ones are stalled.",
-          child: _PhaseProgressList(kpis: widget.detail.kpis),
+          child: _PhaseProgressList(
+            planId: widget.detail.plan.id,
+            kpis: widget.detail.kpis,
+          ),
         ),
         right: _buildSectionPane(
           title: widget.showPlanConfidence
@@ -2561,9 +2565,10 @@ class _StaffProgressList extends StatelessWidget {
 }
 
 class _PhaseProgressList extends StatelessWidget {
+  final String planId;
   final ProductionKpis? kpis;
 
-  const _PhaseProgressList({required this.kpis});
+  const _PhaseProgressList({required this.planId, required this.kpis});
 
   @override
   Widget build(BuildContext context) {
@@ -2578,6 +2583,7 @@ class _PhaseProgressList extends StatelessWidget {
     return _DetailPanel(
       child: Column(
         children: phaseCompletion.map((phase) {
+          final colorScheme = Theme.of(context).colorScheme;
           final progressValue = phase.completionRate
               .clamp(_progressMin, _progressMax)
               .toDouble();
@@ -2585,26 +2591,64 @@ class _PhaseProgressList extends StatelessWidget {
               "${_formatPercent(phase.completionRate)}$_percentSuffix";
           return Padding(
             padding: const EdgeInsets.only(bottom: _cardSpacing),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  phase.name,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(_summaryCardRadius),
+                onTap: () {
+                  context.push(
+                    productionPlanPhaseDetailPath(
+                      planId: planId,
+                      phaseId: phase.phaseId,
+                    ),
+                  );
+                },
+                child: Ink(
+                  padding: const EdgeInsets.all(_cardSpacing),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(_summaryCardRadius),
+                    border: Border.all(color: colorScheme.outlineVariant),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              phase.name,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: _phaseProgressSpacing),
+                      LinearProgressIndicator(
+                        value: progressValue,
+                        minHeight: _progressIndicatorHeight,
+                      ),
+                      const SizedBox(height: _phaseProgressSpacing),
+                      Text(
+                        "${phase.completedTasks}/${phase.totalTasks} ($percent)",
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Open ${phase.name} tasks, proof, and remaining work.",
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: _phaseProgressSpacing),
-                LinearProgressIndicator(
-                  value: progressValue,
-                  minHeight: _progressIndicatorHeight,
-                ),
-                const SizedBox(height: _phaseProgressSpacing),
-                Text(
-                  "${phase.completedTasks}/${phase.totalTasks} ($percent)",
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ],
+              ),
             ),
           );
         }).toList(),
@@ -3470,6 +3514,10 @@ class _TimelineTaskTable extends StatelessWidget {
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton.icon(
+                                style: AppButtonStyles.text(
+                                  theme: Theme.of(context),
+                                  tone: AppStatusTone.info,
+                                ),
                                 onPressed: () {
                                   showProductionTaskProgressProofBrowser(
                                     context,
@@ -3489,6 +3537,10 @@ class _TimelineTaskTable extends StatelessWidget {
                               runSpacing: _cardSpacing,
                               children: [
                                 OutlinedButton.icon(
+                                  style: AppButtonStyles.outlined(
+                                    theme: Theme.of(context),
+                                    tone: AppStatusTone.success,
+                                  ),
                                   onPressed: () async {
                                     await onApproveProgress(row.id);
                                   },
@@ -3496,6 +3548,10 @@ class _TimelineTaskTable extends StatelessWidget {
                                   label: const Text(_approveLabel),
                                 ),
                                 OutlinedButton.icon(
+                                  style: AppButtonStyles.outlined(
+                                    theme: Theme.of(context),
+                                    tone: AppStatusTone.warning,
+                                  ),
                                   onPressed: () async {
                                     await _showProgressRejectDialog(
                                       context,
@@ -3713,6 +3769,10 @@ class _TaskCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: _approvalTopSpacing),
               child: OutlinedButton.icon(
+                style: AppButtonStyles.outlined(
+                  theme: Theme.of(context),
+                  tone: AppStatusTone.info,
+                ),
                 onPressed: () async {
                   final input = await _showLogProgressDialog(
                     context,
@@ -3820,8 +3880,22 @@ class _ApprovalActions extends StatelessWidget {
       child: Wrap(
         spacing: _taskActionsSpacing,
         children: [
-          TextButton(onPressed: onApprove, child: const Text(_approveLabel)),
-          TextButton(onPressed: onReject, child: const Text(_rejectLabel)),
+          TextButton(
+            onPressed: onApprove,
+            style: AppButtonStyles.text(
+              theme: Theme.of(context),
+              tone: AppStatusTone.success,
+            ),
+            child: const Text(_approveLabel),
+          ),
+          TextButton(
+            onPressed: onReject,
+            style: AppButtonStyles.text(
+              theme: Theme.of(context),
+              tone: AppStatusTone.danger,
+            ),
+            child: const Text(_rejectLabel),
+          ),
         ],
       ),
     );

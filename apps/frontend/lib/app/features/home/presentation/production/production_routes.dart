@@ -18,6 +18,8 @@ const String productionPlanDraftStudioRoute =
     "/business-production/draft-studio";
 const String productionPlanDetailRoute = "/business-production/:id";
 const String productionPlanInsightsRoute = "/business-production/:id/insights";
+const String productionPlanPhaseDetailRoute =
+    "/business-production/:id/phase/:phaseId";
 const String productionPlanPresenceStatsRoute =
     "/business-production/:id/presence-stats";
 const String productionCalendarRoute = "/business-production/calendar";
@@ -33,6 +35,14 @@ String productionPlanDetailPath(String id) {
 String productionPlanInsightsPath(String id) {
   // WHY: Insights live on a separate route so the plan workspace can stay calendar-first.
   return "/business-production/$id/insights";
+}
+
+String productionPlanPhaseDetailPath({
+  required String planId,
+  required String phaseId,
+}) {
+  // WHY: Phase detail routes need both plan and phase ids to deep-link directly into lifecycle sections.
+  return "/business-production/$planId/phase/$phaseId";
 }
 
 String productionPlanPresenceStatsPath(String id) {

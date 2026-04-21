@@ -67,10 +67,7 @@ class SettingsAddressSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: SettingsSectionHeader(
-                title: title,
-                subtitle: subtitle,
-              ),
+              child: SettingsSectionHeader(title: title, subtitle: subtitle),
             ),
             _AddressVerifyButton(
               isVerified: isVerified,
@@ -151,10 +148,7 @@ class _AddressStatusLine extends StatelessWidget {
   final String text;
   final AddressStatusTone tone;
 
-  const _AddressStatusLine({
-    required this.text,
-    required this.tone,
-  });
+  const _AddressStatusLine({required this.text, required this.tone});
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +218,10 @@ class _AddressVerifyButton extends StatelessWidget {
     // WHY: Disable verify until required fields are present.
     return OutlinedButton(
       onPressed: canVerify ? onTap : null,
+      style: AppButtonStyles.outlined(
+        theme: Theme.of(context),
+        tone: AppStatusTone.info,
+      ),
       child: const Text("Verify"),
     );
   }

@@ -72,6 +72,7 @@ import 'package:frontend/app/features/home/presentation/production/production_ca
 import 'package:frontend/app/features/home/presentation/production/production_plan_assistant_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft_editor_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_insights_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_phase_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_presence_stats_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
@@ -81,6 +82,7 @@ import 'package:frontend/app/theme/business_theme_wrapper.dart';
 // WHY: Keep route keys centralized for payment history navigation extras.
 const String _tenantNameExtraKey = "tenantName";
 const String _productionPlanIdParam = "id";
+const String _productionPhaseIdParam = "phaseId";
 const String _staffProfileIdParam = "id";
 const String _routeProductionListLog = "-> /business-production";
 const String _routeProductionArchiveLog = "-> /business-production/archive";
@@ -94,6 +96,8 @@ const String _routeProductionPreorderReservationsLog =
     "-> /business-production/preorder-reservations";
 const String _routeProductionInsightsLog =
     "-> /business-production/:id/insights";
+const String _routeProductionPhaseDetailLog =
+    "-> /business-production/:id/phase/:phaseId";
 const String _routeProductionPresenceStatsLog =
     "-> /business-production/:id/presence-stats";
 const String _routeProductionDetailLog = "-> /business-production/:id";
@@ -673,6 +677,27 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           return BusinessThemeWrapper(
             child: ProductionPresenceStatsScreen(planId: planId),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanPhaseDetailRoute,
+        builder: (context, state) {
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          final phaseId = state.pathParameters[_productionPhaseIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionPhaseDetailLog,
+            extra: {
+              _productionPlanIdParam: planId,
+              _productionPhaseIdParam: phaseId,
+            },
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPhaseDetailScreen(
+              planId: planId,
+              phaseId: phaseId,
+            ),
           );
         },
       ),

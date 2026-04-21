@@ -43,6 +43,7 @@ import 'package:frontend/app/features/home/presentation/staff_attendance_model.d
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 import 'package:frontend/app/features/home/presentation/role_access.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "PRODUCTION_PLAN_WORKSPACE";
 const String _logBuild = "build()";
@@ -4599,11 +4600,19 @@ class _AgendaTaskCard extends StatelessWidget {
                 ),
               if (isOwner && task.approvalStatus == "pending_approval")
                 FilledButton.tonal(
+                  style: AppButtonStyles.tonal(
+                    theme: theme,
+                    tone: AppStatusTone.success,
+                  ),
                   onPressed: onApproveTask,
                   child: const Text(_taskApproveLabel),
                 ),
               if (isOwner && task.approvalStatus == "pending_approval")
                 TextButton(
+                  style: AppButtonStyles.text(
+                    theme: theme,
+                    tone: AppStatusTone.danger,
+                  ),
                   onPressed: onRejectTask,
                   child: const Text(_taskRejectLabel),
                 ),
@@ -5799,6 +5808,10 @@ class _TimelineLogRow extends StatelessWidget {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
+                style: AppButtonStyles.text(
+                  theme: Theme.of(context),
+                  tone: AppStatusTone.info,
+                ),
                 onPressed: onViewProof,
                 icon: const Icon(Icons.visibility_outlined),
                 label: const Text(_viewProofLabel),
@@ -5813,10 +5826,18 @@ class _TimelineLogRow extends StatelessWidget {
               spacing: 8,
               children: [
                 TextButton(
+                  style: AppButtonStyles.text(
+                    theme: Theme.of(context),
+                    tone: AppStatusTone.success,
+                  ),
                   onPressed: onApprove,
                   child: const Text(_progressApproveLabel),
                 ),
                 TextButton(
+                  style: AppButtonStyles.text(
+                    theme: Theme.of(context),
+                    tone: AppStatusTone.warning,
+                  ),
                   onPressed: onReject,
                   child: const Text(_progressRejectLabel),
                 ),
