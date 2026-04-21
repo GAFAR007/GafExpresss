@@ -24,6 +24,31 @@ const EMAIL_FROM =
 const EMAIL_FROM_NAME =
   process.env.EMAIL_FROM_NAME || 'Office Store';
 
+async function readBrevoErrorPayload(response) {
+  try {
+    const raw = await response.text();
+    if (!raw) {
+      return '';
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      return (
+        parsed?.message ||
+        parsed?.code ||
+        parsed?.error ||
+        raw
+      )
+        .toString()
+        .trim();
+    } catch (_) {
+      return raw.toString().trim();
+    }
+  } catch (_) {
+    return '';
+  }
+}
+
 async function sendEmail({
   toEmail,
   subject,
@@ -76,13 +101,31 @@ async function sendEmail({
     },
   );
 
+  const brevoError = response.ok
+    ? ''
+    : await readBrevoErrorPayload(response);
+
   debug('EMAIL: Brevo status', {
     status: response.status,
+    providerMessage: brevoError || undefined,
     toEmail,
   });
 
   if (!response.ok) {
-    throw new Error('Brevo email send failed');
+    if (response.status === 401) {
+      throw new Error(
+        'Brevo authentication failed. Check BREVO_API_KEY in Render.',
+      );
+    }
+    if (response.status === 403) {
+      throw new Error(
+        'Brevo sender not authorized. Check EMAIL_FROM is verified in Brevo.',
+      );
+    }
+    if (brevoError) {
+      throw new Error(`Brevo email send failed: ${brevoError}`);
+    }
+    throw new Error(`Brevo email send failed with status ${response.status}`);
   }
 
   return { status: response.status };

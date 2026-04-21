@@ -38,6 +38,7 @@ Set these explicit production values in Render:
 
 ```env
 NODE_ENV=production
+EMAIL_PROVIDER=brevo
 CLIENT_ORIGIN=https://gafarsexpress.gafarstechnologies.com
 FRONTEND_BASE_URL=https://gafarsexpress.gafarstechnologies.com
 ```

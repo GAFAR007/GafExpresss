@@ -195,10 +195,14 @@ class ProductionPhaseDetailScreen extends ConsumerWidget {
                       ProductionKpiCard(
                         label: _phaseTotalLabel,
                         value: "$totalTasks",
+                        icon: Icons.format_list_numbered_rounded,
+                        tone: AppStatusTone.info,
                       ),
                       ProductionKpiCard(
                         label: _phaseDoneLabel,
                         value: "$completedTasks",
+                        icon: Icons.check_circle_outline_rounded,
+                        tone: AppStatusTone.success,
                         helper: phaseKpi == null
                             ? "Phase KPI is not available for this viewer."
                             : "${_formatPercent(phaseKpi.completionRate)}%",
@@ -206,16 +210,28 @@ class ProductionPhaseDetailScreen extends ConsumerWidget {
                       ProductionKpiCard(
                         label: _phaseLeftLabel,
                         value: "$remainingTasks",
+                        icon: Icons.pending_actions_outlined,
+                        tone: remainingTasks > 0
+                            ? AppStatusTone.warning
+                            : AppStatusTone.success,
                         helper: "Left according to backend phase progress.",
                       ),
                       ProductionKpiCard(
                         label: _phaseProofTaskLabel,
                         value: "$proofTaskCount",
+                        icon: Icons.task_alt_outlined,
+                        tone: proofTaskCount > 0
+                            ? AppStatusTone.info
+                            : AppStatusTone.neutral,
                         helper: "Tasks in this phase with saved proof rows.",
                       ),
                       ProductionKpiCard(
                         label: _phaseProofLogLabel,
                         value: "${proofRows.length}",
+                        icon: Icons.photo_library_outlined,
+                        tone: proofRows.isNotEmpty
+                            ? AppStatusTone.info
+                            : AppStatusTone.neutral,
                       ),
                     ],
                   ),

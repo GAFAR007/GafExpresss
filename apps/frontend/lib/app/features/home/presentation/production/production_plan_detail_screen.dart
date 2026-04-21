@@ -465,6 +465,10 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text(_screenTitle),
         leading: IconButton(
+          style: AppButtonStyles.icon(
+            theme: Theme.of(context),
+            tone: AppStatusTone.neutral,
+          ),
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
             AppDebug.log(_logTag, _backTap);
@@ -477,6 +481,10 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            style: AppButtonStyles.icon(
+              theme: Theme.of(context),
+              tone: AppStatusTone.info,
+            ),
             icon: const Icon(Icons.refresh),
             onPressed: () {
               AppDebug.log(_logTag, _refreshAction);
@@ -1112,6 +1120,10 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
               "Clean task-by-task activity for approvals and progress review.",
           action: widget.canLogProgress
               ? OutlinedButton.icon(
+                  style: AppButtonStyles.outlined(
+                    theme: Theme.of(context),
+                    tone: AppStatusTone.warning,
+                  ),
                   onPressed: () async {
                     final batchInput = await _showBatchLogProgressDialog(
                       context,
@@ -1373,19 +1385,33 @@ class _DetailViewModePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final options = <(_DetailViewMode, IconData, String)>[
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final options = <(_DetailViewMode, IconData, String, AppStatusTone)>[
       (
         _DetailViewMode.overview,
         Icons.dashboard_customize_outlined,
         _overviewViewTitle,
+        AppStatusTone.info,
       ),
       (
         _DetailViewMode.execution,
         Icons.playlist_play_outlined,
         _executionViewTitle,
+        AppStatusTone.warning,
       ),
-      (_DetailViewMode.people, Icons.groups_2_outlined, _peopleViewTitle),
-      (_DetailViewMode.risk, Icons.shield_outlined, _riskViewTitle),
+      (
+        _DetailViewMode.people,
+        Icons.groups_2_outlined,
+        _peopleViewTitle,
+        AppStatusTone.success,
+      ),
+      (
+        _DetailViewMode.risk,
+        Icons.shield_outlined,
+        _riskViewTitle,
+        AppStatusTone.danger,
+      ),
     ];
 
     return Wrap(
@@ -1393,14 +1419,42 @@ class _DetailViewModePicker extends StatelessWidget {
       runSpacing: _cardSpacing,
       children: options.map((option) {
         final isSelected = selectedMode == option.$1;
+        final tone = option.$4;
+        final badgeColors = AppStatusBadgeColors.fromTheme(
+          theme: theme,
+          tone: tone,
+        );
+        final accent = tone == AppStatusTone.neutral
+            ? colorScheme.onSurfaceVariant
+            : AppButtonStyles.accentColor(theme: theme, tone: tone);
         return ChoiceChip(
           selected: isSelected,
+          showCheckmark: false,
+          selectedColor: tone == AppStatusTone.neutral
+              ? colorScheme.surfaceContainerHigh
+              : badgeColors.background,
+          backgroundColor: colorScheme.surface,
+          side: BorderSide(
+            color: isSelected
+                ? accent.withValues(alpha: 0.26)
+                : colorScheme.outlineVariant,
+          ),
           label: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(option.$2, size: 18),
+              Icon(
+                option.$2,
+                size: 18,
+                color: isSelected ? accent : colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 8),
-              Text(option.$3),
+              Text(
+                option.$3,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: isSelected ? accent : colorScheme.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
           onSelected: (_) => onChanged(option.$1),
@@ -1519,34 +1573,122 @@ class _ResponsiveSplit extends StatelessWidget {
   }
 }
 
+AppStatusBadgeColors _toneBadgeColors(
+  BuildContext context,
+  AppStatusTone tone,
+) {
+  return AppStatusBadgeColors.fromTheme(theme: Theme.of(context), tone: tone);
+}
+
+Color _toneAccentColor(BuildContext context, AppStatusTone tone) {
+  final theme = Theme.of(context);
+  if (tone == AppStatusTone.neutral) {
+    return theme.colorScheme.primary;
+  }
+  return AppButtonStyles.accentColor(theme: theme, tone: tone);
+}
+
+AppStatusTone _progressTone(double value) {
+  if (value >= 1) {
+    return AppStatusTone.success;
+  }
+  if (value > 0) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.neutral;
+}
+
+AppStatusTone _ratioTone(double value) {
+  if (value >= 0.75) {
+    return AppStatusTone.success;
+  }
+  if (value >= 0.3) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.danger;
+}
+
+AppStatusTone _inverseRatioTone(double value) {
+  if (value <= 0.05) {
+    return AppStatusTone.success;
+  }
+  if (value <= 0.2) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.danger;
+}
+
+AppStatusTone _delayTone(double value) {
+  if (value <= 0.25) {
+    return AppStatusTone.success;
+  }
+  if (value <= 1) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.danger;
+}
+
+AppStatusTone _severityTone(String severity) {
+  switch (severity.trim().toLowerCase()) {
+    case "critical":
+    case "high":
+      return AppStatusTone.danger;
+    case "medium":
+      return AppStatusTone.warning;
+    case "low":
+      return AppStatusTone.info;
+    default:
+      return AppStatusTone.neutral;
+  }
+}
+
 class _InfoPill extends StatelessWidget {
   final IconData? icon;
   final String label;
+  final AppStatusTone tone;
 
-  const _InfoPill({required this.label, this.icon});
+  const _InfoPill({
+    required this.label,
+    this.icon,
+    this.tone = AppStatusTone.neutral,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+    final usesTone = tone != AppStatusTone.neutral;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: usesTone
+            ? badgeColors.background
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: usesTone
+              ? badgeColors.foreground.withValues(alpha: 0.18)
+              : colorScheme.outlineVariant,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 16, color: colorScheme.primary),
+            Icon(
+              icon,
+              size: 16,
+              color: usesTone ? badgeColors.foreground : colorScheme.primary,
+            ),
             const SizedBox(width: 6),
           ],
           Text(
             label,
             style: textTheme.labelMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: usesTone
+                  ? badgeColors.foreground
+                  : colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -1559,27 +1701,32 @@ class _InfoPill extends StatelessWidget {
 class _MiniMetricCard extends StatelessWidget {
   final String label;
   final String value;
-  final Color? accentColor;
+  final AppStatusTone tone;
 
   const _MiniMetricCard({
     required this.label,
     required this.value,
-    this.accentColor,
+    this.tone = AppStatusTone.neutral,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final resolvedAccent = tone == AppStatusTone.neutral
+        ? null
+        : _toneAccentColor(context, tone);
     return Container(
       constraints: const BoxConstraints(minWidth: 120),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: resolvedAccent == null
+            ? colorScheme.surfaceContainerHighest
+            : resolvedAccent.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color:
-              accentColor?.withValues(alpha: 0.18) ??
+              resolvedAccent?.withValues(alpha: 0.22) ??
               colorScheme.outlineVariant,
         ),
       ),
@@ -1589,7 +1736,9 @@ class _MiniMetricCard extends StatelessWidget {
           Text(
             label,
             style: textTheme.labelSmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color:
+                  resolvedAccent?.withValues(alpha: 0.88) ??
+                  colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 6),
@@ -1597,7 +1746,7 @@ class _MiniMetricCard extends StatelessWidget {
             value,
             style: textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
-              color: accentColor,
+              color: resolvedAccent,
             ),
           ),
         ],
@@ -1640,8 +1789,15 @@ class _OutputSummarySection extends StatelessWidget {
               _MiniMetricCard(
                 label: "Output records",
                 value: "${outputs.length}",
+                tone: AppStatusTone.info,
               ),
-              _MiniMetricCard(label: "Ready for sale", value: "$readyCount"),
+              _MiniMetricCard(
+                label: "Ready for sale",
+                value: "$readyCount",
+                tone: readyCount > 0
+                    ? AppStatusTone.success
+                    : AppStatusTone.neutral,
+              ),
             ],
           ),
           if (entries.isNotEmpty) ...[
@@ -1654,6 +1810,7 @@ class _OutputSummarySection extends StatelessWidget {
                     (entry) => _InfoPill(
                       icon: Icons.inventory_2_outlined,
                       label: "${entry.value} ${entry.key}",
+                      tone: AppStatusTone.info,
                     ),
                   )
                   .toList(),
@@ -1724,6 +1881,7 @@ class _AttendanceRecordSection extends StatelessWidget {
                     _InfoPill(
                       icon: Icons.schedule_outlined,
                       label: "${record.durationMinutes} mins",
+                      tone: AppStatusTone.info,
                     ),
                   ],
                 ),
@@ -1923,6 +2081,10 @@ class _PlanSummaryCard extends StatelessWidget {
     final durationLabel = _formatPlanDuration(plan.startDate, plan.endDate);
     final summaryActionChildren = <Widget>[
       OutlinedButton.icon(
+        style: AppButtonStyles.outlined(
+          theme: Theme.of(context),
+          tone: AppStatusTone.info,
+        ),
         onPressed: () async {
           await onDownloadProgressReport();
         },
@@ -1930,6 +2092,10 @@ class _PlanSummaryCard extends StatelessWidget {
         label: const Text(_downloadProgressLabel),
       ),
       OutlinedButton.icon(
+        style: AppButtonStyles.outlined(
+          theme: Theme.of(context),
+          tone: AppStatusTone.success,
+        ),
         onPressed: () async {
           await onEmailProgressReport();
         },
@@ -1940,6 +2106,10 @@ class _PlanSummaryCard extends StatelessWidget {
     if (preorderSummary != null && isOwner) {
       summaryActionChildren.addAll([
         OutlinedButton.icon(
+          style: AppButtonStyles.outlined(
+            theme: Theme.of(context),
+            tone: AppStatusTone.warning,
+          ),
           onPressed: () async {
             final payload = await _showPreorderConfigDialog(
               context,
@@ -1954,6 +2124,10 @@ class _PlanSummaryCard extends StatelessWidget {
           label: const Text(_configurePreorderButtonLabel),
         ),
         OutlinedButton.icon(
+          style: AppButtonStyles.outlined(
+            theme: Theme.of(context),
+            tone: AppStatusTone.danger,
+          ),
           onPressed: () async {
             await onReconcilePreorders();
           },
@@ -1986,16 +2160,19 @@ class _PlanSummaryCard extends StatelessWidget {
                 icon: Icons.category_outlined,
                 label: "Context",
                 value: domainLabel,
+                tone: AppStatusTone.success,
               ),
               _SummarySignalTile(
                 icon: Icons.date_range_outlined,
                 label: "Window",
                 value: scheduleRange,
+                tone: AppStatusTone.info,
               ),
               _SummarySignalTile(
                 icon: Icons.timelapse_outlined,
                 label: "Duration",
                 value: durationLabel,
+                tone: AppStatusTone.warning,
               ),
               if (plantingTargets?.isConfigured == true)
                 _SummarySignalTile(
@@ -2005,12 +2182,18 @@ class _PlanSummaryCard extends StatelessWidget {
                       "${formatTargetNumber(plantingTargets!.plannedPlantingQuantity)} ${plantingTargets.plannedPlantingUnit} (${formatMaterialLabel(plantingTargets.materialType)})",
                   helper:
                       "Harvest est. ${formatTargetNumber(plantingTargets.estimatedHarvestQuantity)} ${plantingTargets.estimatedHarvestUnit}",
+                  tone: AppStatusTone.success,
                 ),
               if (showPlanUnits)
                 _SummarySignalTile(
                   icon: Icons.grid_view_outlined,
                   label: _planUnitsLabel,
                   value: planUnitsValue,
+                  tone: planUnitsHasError
+                      ? AppStatusTone.danger
+                      : planUnitsLoading
+                      ? AppStatusTone.warning
+                      : AppStatusTone.info,
                 ),
               _SummarySignalTile(
                 icon: Icons.inventory_2_outlined,
@@ -2018,6 +2201,9 @@ class _PlanSummaryCard extends StatelessWidget {
                 value: preorderSummary?.productionState.isNotEmpty == true
                     ? preorderSummary!.productionState
                     : _dash,
+                tone: preorderSummary?.productionState.isNotEmpty == true
+                    ? productionStatusTone(preorderSummary!.productionState)
+                    : AppStatusTone.neutral,
               ),
               _SummarySignalTile(
                 icon: Icons.sell_outlined,
@@ -2025,24 +2211,32 @@ class _PlanSummaryCard extends StatelessWidget {
                 value: preorderSummary?.preorderEnabled == true
                     ? _preorderEnabledLabel
                     : _preorderDisabledLabel,
+                tone: preorderSummary?.preorderEnabled == true
+                    ? AppStatusTone.warning
+                    : AppStatusTone.neutral,
               ),
               if (preorderSummary != null)
                 _SummarySignalTile(
                   icon: Icons.stacked_bar_chart_outlined,
                   label: _preorderCapLabel,
                   value: "${preorderSummary!.preorderCapQuantity}",
+                  tone: AppStatusTone.warning,
                 ),
               if (preorderSummary != null)
                 _SummarySignalTile(
                   icon: Icons.precision_manufacturing_outlined,
                   label: _effectiveCapLabel,
                   value: "${preorderSummary!.effectiveCap}",
+                  tone: AppStatusTone.info,
                 ),
               if (preorderSummary != null)
                 _SummarySignalTile(
                   icon: Icons.shopping_bag_outlined,
                   label: _preorderRemainingLabel,
                   value: "${preorderSummary!.preorderRemainingQuantity}",
+                  tone: preorderSummary!.preorderRemainingQuantity > 0
+                      ? AppStatusTone.warning
+                      : AppStatusTone.success,
                 ),
               if (showPlanConfidence && preorderSummary != null)
                 _SummarySignalTile(
@@ -2050,6 +2244,11 @@ class _PlanSummaryCard extends StatelessWidget {
                   label: _confidenceLabel,
                   value: "$confidencePercent%",
                   helper: "Coverage $coveragePercent%",
+                  tone: confidencePercent >= 85
+                      ? AppStatusTone.success
+                      : confidencePercent >= 60
+                      ? AppStatusTone.warning
+                      : AppStatusTone.danger,
                 ),
             ],
           );
@@ -2085,20 +2284,24 @@ class _PlanSummaryCard extends StatelessWidget {
                             _InfoPill(
                               icon: Icons.spa_outlined,
                               label: domainLabel,
+                              tone: AppStatusTone.success,
                             ),
                             _InfoPill(
                               icon: Icons.event_available_outlined,
                               label: scheduleRange,
+                              tone: AppStatusTone.info,
                             ),
                             _InfoPill(
                               icon: Icons.history_toggle_off_outlined,
                               label: durationLabel,
+                              tone: AppStatusTone.warning,
                             ),
                             if (plantingTargets?.isConfigured == true)
                               _InfoPill(
                                 icon: Icons.grass_outlined,
                                 label:
                                     "${formatTargetNumber(plantingTargets!.plannedPlantingQuantity)} ${plantingTargets.plannedPlantingUnit} (${formatMaterialLabel(plantingTargets.materialType)})",
+                                tone: AppStatusTone.success,
                               ),
                           ],
                         ),
@@ -2183,19 +2386,27 @@ class _KpiRow extends StatelessWidget {
           ProductionKpiCard(
             label: _kpiTotalTasks,
             value: "${kpis!.totalTasks}",
+            icon: Icons.format_list_numbered_rounded,
+            tone: AppStatusTone.info,
           ),
           ProductionKpiCard(
             label: _kpiCompleted,
             value: "${kpis!.completedTasks}",
+            icon: Icons.check_circle_outline_rounded,
+            tone: AppStatusTone.success,
           ),
           ProductionKpiCard(
             label: _kpiOnTime,
             value: "${_formatPercent(kpis!.onTimeRate)}$_percentSuffix",
+            icon: Icons.schedule_rounded,
+            tone: _ratioTone(kpis!.onTimeRate),
           ),
           ProductionKpiCard(
             label: _kpiAvgDelay,
             value:
                 "${kpis!.avgDelayDays.toStringAsFixed(_delayFixedDigits)} $_daysSuffix",
+            icon: Icons.timelapse_rounded,
+            tone: _delayTone(kpis!.avgDelayDays),
           ),
         ],
       ),
@@ -2232,14 +2443,36 @@ class _AttendanceImpactSection extends StatelessWidget {
         spacing: _cardSpacing,
         runSpacing: _cardSpacing,
         children: [
-          ProductionKpiCard(label: _kpiAttendanceCoverage, value: coverage),
-          ProductionKpiCard(label: _kpiAbsenteeImpact, value: absenteeImpact),
-          ProductionKpiCard(label: _kpiLinkedProgress, value: linkedProgress),
-          ProductionKpiCard(label: _kpiPlotsPerHour, value: plotsPerHour),
+          ProductionKpiCard(
+            label: _kpiAttendanceCoverage,
+            value: coverage,
+            icon: Icons.groups_rounded,
+            tone: _ratioTone(attendanceImpact!.attendanceCoverageRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiAbsenteeImpact,
+            value: absenteeImpact,
+            icon: Icons.person_off_rounded,
+            tone: _inverseRatioTone(attendanceImpact!.absenteeImpactRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiLinkedProgress,
+            value: linkedProgress,
+            icon: Icons.link_rounded,
+            tone: _ratioTone(attendanceImpact!.attendanceLinkedProgressRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiPlotsPerHour,
+            value: plotsPerHour,
+            icon: Icons.speed_rounded,
+            tone: AppStatusTone.info,
+          ),
           ProductionKpiCard(
             label: _kpiTrackedDays,
             value:
                 "${attendanceImpact!.scheduledDays}/${attendanceImpact!.totalRollupDays}",
+            icon: Icons.event_note_rounded,
+            tone: AppStatusTone.info,
           ),
         ],
       ),
@@ -2313,18 +2546,24 @@ class _DailyRollupTable extends StatelessWidget {
                     _MiniMetricCard(
                       label: _dailyRollupBlocksLabel,
                       value: "${rollup.scheduledTaskBlocks}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAssignedLabel,
                       value: "${rollup.assignedStaffCount}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAttendedAssignedLabel,
                       value: "${rollup.attendedAssignedStaffCount}",
+                      tone: AppStatusTone.success,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAbsentLabel,
                       value: "${rollup.absentAssignedStaffCount}",
+                      tone: rollup.absentAssignedStaffCount > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2337,26 +2576,34 @@ class _DailyRollupTable extends StatelessWidget {
                       icon: Icons.track_changes_outlined,
                       label:
                           "$_dailyRollupExpectedLabel: ${rollup.expectedPlots}",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.done_all_outlined,
                       label: "$_dailyRollupActualLabel: ${rollup.actualPlots}",
+                      tone: rollup.actualPlots > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _InfoPill(
                       icon: Icons.groups_outlined,
                       label: "$_dailyRollupCoverageLabel: $coverage",
+                      tone: _ratioTone(rollup.attendanceCoverageRate),
                     ),
                     _InfoPill(
                       icon: Icons.speed_outlined,
                       label: "$_dailyRollupPlotsPerHourLabel: $plotsPerHour",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.event_note_outlined,
                       label: "${rollup.rowsLogged} logs",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.flag_outlined,
                       label: "$_dailyRollupCompletionLabel: $completion",
+                      tone: _ratioTone(rollup.completionRate),
                     ),
                   ],
                 ),
@@ -2436,18 +2683,24 @@ class _PeriodRollupTable extends StatelessWidget {
                     _MiniMetricCard(
                       label: _dailyRollupBlocksLabel,
                       value: "${rollup.scheduledTaskBlocks}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAssignedLabel,
                       value: "${rollup.assignedStaffCount}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAttendedAssignedLabel,
                       value: "${rollup.attendedAssignedStaffCount}",
+                      tone: AppStatusTone.success,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAbsentLabel,
                       value: "${rollup.absentAssignedStaffCount}",
+                      tone: rollup.absentAssignedStaffCount > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2460,26 +2713,34 @@ class _PeriodRollupTable extends StatelessWidget {
                       icon: Icons.track_changes_outlined,
                       label:
                           "$_dailyRollupExpectedLabel: ${rollup.expectedPlots}",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.done_all_outlined,
                       label: "$_dailyRollupActualLabel: ${rollup.actualPlots}",
+                      tone: rollup.actualPlots > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _InfoPill(
                       icon: Icons.groups_outlined,
                       label: "$_dailyRollupCoverageLabel: $coverage",
+                      tone: _ratioTone(rollup.attendanceCoverageRate),
                     ),
                     _InfoPill(
                       icon: Icons.speed_outlined,
                       label: "$_dailyRollupPlotsPerHourLabel: $plotsPerHour",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.event_note_outlined,
                       label: "${rollup.rowsLogged} logs",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.flag_outlined,
                       label: "$_dailyRollupCompletionLabel: $completion",
+                      tone: _ratioTone(rollup.completionRate),
                     ),
                   ],
                 ),
@@ -2544,14 +2805,19 @@ class _StaffProgressList extends StatelessWidget {
                     _MiniMetricCard(
                       label: "Expected",
                       value: "${score.totalExpected}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: "Actual",
                       value: "${score.totalActual}",
+                      tone: score.totalActual > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _MiniMetricCard(
                       label: "Completion",
                       value: "$percent$_percentSuffix",
+                      tone: _ratioTone(score.completionRatio),
                     ),
                   ],
                 ),
@@ -2587,6 +2853,10 @@ class _PhaseProgressList extends StatelessWidget {
           final progressValue = phase.completionRate
               .clamp(_progressMin, _progressMax)
               .toDouble();
+          final tone = _progressTone(progressValue);
+          final accent = tone == AppStatusTone.neutral
+              ? colorScheme.outline
+              : _toneAccentColor(context, tone);
           final percent =
               "${_formatPercent(phase.completionRate)}$_percentSuffix";
           return Padding(
@@ -2608,7 +2878,11 @@ class _PhaseProgressList extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: colorScheme.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(_summaryCardRadius),
-                    border: Border.all(color: colorScheme.outlineVariant),
+                    border: Border.all(
+                      color: tone == AppStatusTone.neutral
+                          ? colorScheme.outlineVariant
+                          : accent.withValues(alpha: 0.18),
+                    ),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2624,7 +2898,9 @@ class _PhaseProgressList extends StatelessWidget {
                           ),
                           Icon(
                             Icons.chevron_right,
-                            color: colorScheme.onSurfaceVariant,
+                            color: tone == AppStatusTone.neutral
+                                ? colorScheme.onSurfaceVariant
+                                : accent,
                           ),
                         ],
                       ),
@@ -2632,11 +2908,16 @@ class _PhaseProgressList extends StatelessWidget {
                       LinearProgressIndicator(
                         value: progressValue,
                         minHeight: _progressIndicatorHeight,
+                        color: accent,
+                        backgroundColor: colorScheme.surfaceContainerHighest,
                       ),
                       const SizedBox(height: _phaseProgressSpacing),
                       Text(
                         "${phase.completedTasks}/${phase.totalTasks} ($percent)",
-                        style: Theme.of(context).textTheme.labelSmall,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: tone == AppStatusTone.neutral ? null : accent,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -2693,6 +2974,7 @@ class _PhaseUnitProgressTable extends StatelessWidget {
                       const _InfoPill(
                         icon: Icons.lock_outline,
                         label: _deviationLockedTag,
+                        tone: AppStatusTone.danger,
                       ),
                   ],
                 ),
@@ -2704,14 +2986,21 @@ class _PhaseUnitProgressTable extends StatelessWidget {
                     _MiniMetricCard(
                       label: _phaseUnitRequiredLabel,
                       value: "${row.requiredUnits}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _phaseUnitCompletedLabel,
                       value: "${row.completedUnitCount}",
+                      tone: row.completedUnitCount > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _MiniMetricCard(
                       label: _phaseUnitRemainingLabel,
                       value: "${row.remainingUnits}",
+                      tone: row.remainingUnits > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2771,6 +3060,7 @@ class _UnitDivergenceSection extends StatelessWidget {
                       _InfoPill(
                         icon: Icons.update_outlined,
                         label: formatDateLabel(row.updatedAt),
+                        tone: AppStatusTone.info,
                       ),
                   ],
                 ),
@@ -2782,17 +3072,23 @@ class _UnitDivergenceSection extends StatelessWidget {
                     _MiniMetricCard(
                       label: _unitDivergenceDelayLabel,
                       value: "${row.delayedByDays}",
-                      accentColor: row.delayedByDays > 0
-                          ? Theme.of(context).colorScheme.error
-                          : null,
+                      tone: row.delayedByDays > 0
+                          ? AppStatusTone.danger
+                          : AppStatusTone.success,
                     ),
                     _MiniMetricCard(
                       label: _unitDivergenceShiftedTasksLabel,
                       value: "${row.shiftedTaskCount}",
+                      tone: row.shiftedTaskCount > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.neutral,
                     ),
                     _MiniMetricCard(
                       label: _unitDivergenceWarningCountLabel,
                       value: "${row.warningCount}",
+                      tone: row.warningCount > 0
+                          ? AppStatusTone.danger
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2849,6 +3145,7 @@ class _UnitWarningList extends StatelessWidget {
                     _InfoPill(
                       icon: Icons.warning_amber_rounded,
                       label: "${warning.severity} • ${warning.warningType}",
+                      tone: _severityTone(warning.severity),
                     ),
                   ],
                 ),
@@ -2874,10 +3171,14 @@ class _UnitWarningList extends StatelessWidget {
                     _InfoPill(
                       icon: Icons.swap_horiz_outlined,
                       label: "${warning.shiftDays} $_daysSuffix",
+                      tone: warning.shiftDays > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.neutral,
                     ),
                     _InfoPill(
                       icon: Icons.event_outlined,
                       label: formatDateLabel(warning.createdAt),
+                      tone: AppStatusTone.info,
                     ),
                   ],
                 ),
@@ -2946,14 +3247,23 @@ class _DeviationGovernanceSection extends StatelessWidget {
               _DeviationMetricCard(
                 title: _deviationSummaryTotalAlerts,
                 value: "${summary!.totalAlerts}",
+                tone: summary!.totalAlerts > 0
+                    ? AppStatusTone.info
+                    : AppStatusTone.neutral,
               ),
               _DeviationMetricCard(
                 title: _deviationSummaryOpenAlerts,
                 value: "${summary!.openAlerts}",
+                tone: summary!.openAlerts > 0
+                    ? AppStatusTone.warning
+                    : AppStatusTone.success,
               ),
               _DeviationMetricCard(
                 title: _deviationSummaryLockedUnits,
                 value: "${summary!.lockedUnits}",
+                tone: summary!.lockedUnits > 0
+                    ? AppStatusTone.danger
+                    : AppStatusTone.success,
               ),
             ],
           ),
@@ -3012,12 +3322,18 @@ class _DeviationGovernanceSection extends StatelessWidget {
                               _InfoPill(
                                 icon: Icons.policy_outlined,
                                 label: statusLabel,
+                                tone: alert.status == "open"
+                                    ? AppStatusTone.warning
+                                    : AppStatusTone.success,
                               ),
                               _InfoPill(
                                 icon: alert.unitLocked
                                     ? Icons.lock_outline
                                     : Icons.lock_open_outlined,
                                 label: lockLabel,
+                                tone: alert.unitLocked
+                                    ? AppStatusTone.danger
+                                    : AppStatusTone.success,
                               ),
                             ],
                           ),
@@ -3037,10 +3353,14 @@ class _DeviationGovernanceSection extends StatelessWidget {
                             label: _deviationAlertDeviationLabel,
                             value:
                                 "${alert.cumulativeDeviationDays} $_daysSuffix",
+                            tone: alert.cumulativeDeviationDays > 0
+                                ? AppStatusTone.danger
+                                : AppStatusTone.success,
                           ),
                           _MiniMetricCard(
                             label: _deviationAlertThresholdLabel,
                             value: "${alert.thresholdDays} $_daysSuffix",
+                            tone: AppStatusTone.warning,
                           ),
                         ],
                       ),
@@ -3052,18 +3372,21 @@ class _DeviationGovernanceSection extends StatelessWidget {
                           _InfoPill(
                             icon: Icons.event_outlined,
                             label: formatDateLabel(alert.triggeredAt),
+                            tone: AppStatusTone.info,
                           ),
                           if (alert.resolvedAt != null)
                             _InfoPill(
                               icon: Icons.task_alt_outlined,
                               label:
                                   "Resolved ${formatDateLabel(alert.resolvedAt)}",
+                              tone: AppStatusTone.success,
                             ),
                           if (alert.unitLockedAt != null)
                             _InfoPill(
                               icon: Icons.schedule_outlined,
                               label:
                                   "Locked ${formatDateLabel(alert.unitLockedAt)}",
+                              tone: AppStatusTone.warning,
                             ),
                         ],
                       ),
@@ -3085,6 +3408,10 @@ class _DeviationGovernanceSection extends StatelessWidget {
                         runSpacing: _cardSpacing,
                         children: [
                           OutlinedButton.icon(
+                            style: AppButtonStyles.outlined(
+                              theme: Theme.of(context),
+                              tone: AppStatusTone.success,
+                            ),
                             onPressed: () async {
                               final note = await _showDeviationVarianceDialog(
                                 context,
@@ -3099,6 +3426,10 @@ class _DeviationGovernanceSection extends StatelessWidget {
                             label: const Text(_deviationAcceptLabel),
                           ),
                           OutlinedButton.icon(
+                            style: AppButtonStyles.outlined(
+                              theme: Theme.of(context),
+                              tone: AppStatusTone.warning,
+                            ),
                             onPressed: canReplan
                                 ? () async {
                                     final input =
@@ -3137,21 +3468,34 @@ class _DeviationGovernanceSection extends StatelessWidget {
 class _DeviationMetricCard extends StatelessWidget {
   final String title;
   final String value;
+  final AppStatusTone tone;
 
-  const _DeviationMetricCard({required this.title, required this.value});
+  const _DeviationMetricCard({
+    required this.title,
+    required this.value,
+    this.tone = AppStatusTone.neutral,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+    final usesTone = tone != AppStatusTone.neutral;
 
     return Container(
       width: 170,
       padding: const EdgeInsets.all(_summaryCardPadding),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: usesTone
+            ? badgeColors.background
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(_summaryCardRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: usesTone
+              ? badgeColors.foreground.withValues(alpha: 0.18)
+              : colorScheme.outlineVariant,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3159,13 +3503,18 @@ class _DeviationMetricCard extends StatelessWidget {
           Text(
             title,
             style: textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: usesTone
+                  ? badgeColors.foreground.withValues(alpha: 0.88)
+                  : colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: _summaryMetaSpacing),
           Text(
             value,
-            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: usesTone ? badgeColors.foreground : null,
+            ),
           ),
         ],
       ),
@@ -3178,39 +3527,50 @@ class _SummarySignalTile extends StatelessWidget {
   final String label;
   final String value;
   final String? helper;
+  final AppStatusTone tone;
 
   const _SummarySignalTile({
     required this.icon,
     required this.label,
     required this.value,
     this.helper,
+    this.tone = AppStatusTone.neutral,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+    final usesTone = tone != AppStatusTone.neutral;
+    final accent = usesTone ? badgeColors.foreground : colorScheme.primary;
 
     return Container(
       constraints: const BoxConstraints(minWidth: 150, maxWidth: 220),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        color: usesTone ? badgeColors.background : colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: usesTone
+              ? badgeColors.foreground.withValues(alpha: 0.18)
+              : colorScheme.outlineVariant,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 18, color: colorScheme.primary),
+              Icon(icon, size: 18, color: accent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   label,
                   style: textTheme.labelSmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
+                    color: usesTone
+                        ? badgeColors.foreground.withValues(alpha: 0.9)
+                        : colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -3219,14 +3579,19 @@ class _SummarySignalTile extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             value,
-            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: usesTone ? badgeColors.foreground : null,
+            ),
           ),
           if (helper != null && helper!.trim().isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
               helper!,
               style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+                color: usesTone
+                    ? badgeColors.foreground.withValues(alpha: 0.84)
+                    : colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -4718,6 +5083,10 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                         ),
                         const SizedBox(height: 10),
                         OutlinedButton.icon(
+                          style: AppButtonStyles.outlined(
+                            theme: Theme.of(dialogContext),
+                            tone: AppStatusTone.info,
+                          ),
                           onPressed: requiredProofCount == 0
                               ? null
                               : chooseProofs,

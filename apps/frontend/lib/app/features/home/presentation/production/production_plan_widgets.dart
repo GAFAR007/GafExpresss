@@ -81,6 +81,8 @@ class ProductionKpiCard extends StatelessWidget {
   final String label;
   final String value;
   final String? helper;
+  final IconData? icon;
+  final AppStatusTone tone;
   final Color? backgroundColor;
   final Color? borderColor;
   final Color? labelColor;
@@ -92,6 +94,8 @@ class ProductionKpiCard extends StatelessWidget {
     required this.label,
     required this.value,
     this.helper,
+    this.icon,
+    this.tone = AppStatusTone.neutral,
     this.backgroundColor,
     this.borderColor,
     this.labelColor,
@@ -101,31 +105,69 @@ class ProductionKpiCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final badgeColors = AppStatusBadgeColors.fromTheme(
+      theme: theme,
+      tone: tone,
+    );
+    final usesTone = tone != AppStatusTone.neutral;
+    final resolvedBackground =
+        backgroundColor ??
+        (usesTone
+            ? badgeColors.background
+            : colorScheme.surfaceContainerHighest);
+    final resolvedBorder =
+        borderColor ??
+        (usesTone
+            ? badgeColors.foreground.withValues(alpha: 0.18)
+            : colorScheme.outlineVariant);
+    final resolvedLabelColor =
+        labelColor ??
+        (usesTone
+            ? badgeColors.foreground.withValues(alpha: 0.92)
+            : colorScheme.onSurfaceVariant);
+    final resolvedValueColor =
+        valueColor ?? (usesTone ? badgeColors.foreground : null);
+    final resolvedHelperColor =
+        helperColor ??
+        (usesTone
+            ? badgeColors.foreground.withValues(alpha: 0.84)
+            : colorScheme.onSurfaceVariant);
 
     return Container(
       padding: const EdgeInsets.all(_kpiCardPadding),
       decoration: BoxDecoration(
-        color: backgroundColor ?? colorScheme.surfaceContainerHighest,
+        color: resolvedBackground,
         borderRadius: BorderRadius.circular(_kpiCardRadius),
-        border: Border.all(color: borderColor ?? colorScheme.outlineVariant),
+        border: Border.all(color: resolvedBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // WHY: Label uses subdued color to keep focus on the KPI value.
-          Text(
-            label,
-            style: textTheme.labelSmall?.copyWith(
-              color: labelColor ?? colorScheme.onSurfaceVariant,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 16, color: resolvedLabelColor),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: resolvedLabelColor,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: _kpiValueSpacing),
           Text(
             value,
             style: textTheme.titleMedium?.copyWith(
-              color: valueColor,
+              color: resolvedValueColor,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -133,9 +175,7 @@ class ProductionKpiCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               helper!,
-              style: textTheme.bodySmall?.copyWith(
-                color: helperColor ?? colorScheme.onSurfaceVariant,
-              ),
+              style: textTheme.bodySmall?.copyWith(color: resolvedHelperColor),
             ),
           ],
         ],
@@ -153,7 +193,7 @@ class ProductionStatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final badgeColors = AppStatusBadgeColors.fromTheme(
       theme: Theme.of(context),
-      tone: _statusTone(label),
+      tone: productionStatusTone(label),
     );
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -178,7 +218,7 @@ class ProductionStatusPill extends StatelessWidget {
   }
 }
 
-AppStatusTone _statusTone(String rawLabel) {
+AppStatusTone productionStatusTone(String rawLabel) {
   switch (rawLabel.trim().toLowerCase()) {
     case "completed":
     case "done":
@@ -186,8 +226,9 @@ AppStatusTone _statusTone(String rawLabel) {
       return AppStatusTone.success;
     case "active":
     case "in_progress":
+    case "in_production":
     case "on_track":
-      return AppStatusTone.info;
+      return AppStatusTone.warning;
     case "pending":
     case "pending_approval":
     case "needs_review":

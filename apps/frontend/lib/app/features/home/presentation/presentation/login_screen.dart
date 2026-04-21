@@ -44,8 +44,14 @@ import 'package:go_router/go_router.dart';
 class LoginScreen extends ConsumerStatefulWidget {
   final String? redirectTo;
   final String? initialEmail;
+  final bool useDirectSignIn;
 
-  const LoginScreen({super.key, this.redirectTo, this.initialEmail});
+  const LoginScreen({
+    super.key,
+    this.redirectTo,
+    this.initialEmail,
+    this.useDirectSignIn = false,
+  });
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -81,12 +87,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _selectedCategory != null ||
       _selectedSubcategory != null;
 
+  String? get _resolvedRedirectTarget {
+    final rawRedirect = widget.redirectTo;
+    if (rawRedirect == null || rawRedirect.trim().isEmpty) {
+      return null;
+    }
+
+    final decodedRedirect = Uri.decodeComponent(rawRedirect.trim());
+    return decodedRedirect.startsWith('/') ? decodedRedirect : null;
+  }
+
+  bool get _usesDirectSignIn =>
+      widget.useDirectSignIn || _resolvedRedirectTarget != null;
+
   @override
   void initState() {
     super.initState();
     _emailCtrl.addListener(_handleCredentialFieldChanged);
     _passwordCtrl.addListener(_handleCredentialFieldChanged);
-    _primeLoginAccountsFuture(_selectedShortcutRole);
+    if (!_usesDirectSignIn) {
+      _primeLoginAccountsFuture(_selectedShortcutRole);
+    }
     final initialEmail = (widget.initialEmail ?? "").trim();
     if (initialEmail.isNotEmpty) {
       _emailCtrl.text = initialEmail;
@@ -306,9 +327,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
   }
 
-  void _goToForgotPassword(BuildContext sheetContext) {
+  void _goToForgotPassword(
+    BuildContext sheetContext, {
+    bool closeCurrentView = true,
+  }) {
     AppDebug.log("LOGIN", "Forgot password tapped");
-    Navigator.of(sheetContext).pop();
+    if (closeCurrentView && Navigator.of(sheetContext).canPop()) {
+      Navigator.of(sheetContext).pop();
+    }
     final email = _emailCtrl.text.trim();
     if (email.isEmpty) {
       context.go("/forgot-password");
@@ -397,14 +423,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       TextInput.finishAutofillContext(shouldSave: true);
       await ref.read(authSessionProvider.notifier).setSession(session);
 
-      final rawRedirect = widget.redirectTo;
-      final decodedRedirect = rawRedirect == null || rawRedirect.trim().isEmpty
-          ? null
-          : Uri.decodeComponent(rawRedirect.trim());
-      String? redirectTarget =
-          decodedRedirect != null && decodedRedirect.startsWith('/')
-          ? decodedRedirect
-          : null;
+      String? redirectTarget = _resolvedRedirectTarget;
 
       if (redirectTarget == null) {
         final pendingInvite = await storage.readPendingInviteToken();
@@ -733,6 +752,354 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  _DirectLoginPresentation _resolveDirectLoginPresentation(ColorScheme scheme) {
+    final target = _resolvedRedirectTarget ?? '';
+    if (target.startsWith('/business-production')) {
+      return _DirectLoginPresentation(
+        badgeLabel: 'Production access',
+        destinationLabel: 'production workspace',
+        title: 'Sign in to open the production page',
+        description:
+            'This report link points to a protected production screen. Use your email and password and the app will continue straight to it after login.',
+        helper:
+            'Use an account with staff or business access to the linked production plan.',
+        icon: Icons.insights_rounded,
+        accent: scheme.secondary,
+        tone: AppStatusTone.info,
+      );
+    }
+
+    if (target.startsWith('/business-invite')) {
+      return _DirectLoginPresentation(
+        badgeLabel: 'Invite access',
+        destinationLabel: 'business invite',
+        title: 'Sign in to continue with the invite',
+        description:
+            'This link resumes a protected invite flow. Sign in first, then the invite page will open automatically.',
+        helper:
+            'Use the email that was invited so the workspace can match the account correctly.',
+        icon: Icons.group_add_rounded,
+        accent: scheme.tertiary,
+        tone: AppStatusTone.warning,
+      );
+    }
+
+    if (target.startsWith('/tenant-dashboard') ||
+        target.startsWith('/tenant-payments')) {
+      return _DirectLoginPresentation(
+        badgeLabel: 'Tenant access',
+        destinationLabel: 'tenant workspace',
+        title: 'Sign in to open your tenant page',
+        description:
+            'This link goes to a tenant-only page. After you sign in, the app will continue directly to your dashboard or payment view.',
+        helper: 'Use the tenant account linked to this workspace.',
+        icon: Icons.apartment_rounded,
+        accent: scheme.tertiary,
+        tone: AppStatusTone.success,
+      );
+    }
+
+    if (target.startsWith('/cart') || target.startsWith('/orders')) {
+      return _DirectLoginPresentation(
+        badgeLabel: 'Checkout access',
+        destinationLabel: 'checkout or orders',
+        title: 'Sign in to continue with checkout',
+        description:
+            'This page needs an authenticated customer session. Use your email and password and then continue with your cart or order history.',
+        helper:
+            'The app will return you to the same checkout flow after login.',
+        icon: Icons.shopping_bag_rounded,
+        accent: scheme.primary,
+        tone: AppStatusTone.warning,
+      );
+    }
+
+    return _DirectLoginPresentation(
+      badgeLabel: 'Protected page',
+      destinationLabel: 'requested page',
+      title: 'Sign in to continue',
+      description:
+          'This link opens a protected page. Use your email and password and the app will take you there immediately after login.',
+      helper: 'Your saved credentials on this device can still autofill here.',
+      icon: Icons.lock_open_rounded,
+      accent: scheme.primary,
+      tone: AppStatusTone.info,
+    );
+  }
+
+  Widget _buildDirectLoginScreen(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final presentation = _resolveDirectLoginPresentation(scheme);
+
+    final introCard = AppSectionCard(
+      tone: AppPanelTone.hero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppStatusChip(
+            label: presentation.badgeLabel,
+            tone: presentation.tone,
+            icon: presentation.icon,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          AppIconBadge(
+            icon: presentation.icon,
+            color: presentation.accent,
+            size: 24,
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            presentation.title,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              height: 1.08,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            presentation.description,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: scheme.onSurfaceVariant,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: presentation.accent.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(
+                color: presentation.accent.withValues(alpha: 0.18),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Next destination",
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: presentation.accent,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  presentation.destinationLabel,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  presentation.helper,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              AppStatusChip(
+                label: "Email + password",
+                tone: AppStatusTone.neutral,
+                icon: Icons.alternate_email_rounded,
+              ),
+              AppStatusChip(
+                label: "Redirect after sign in",
+                tone: presentation.tone,
+                icon: Icons.arrow_forward_rounded,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          TextButton.icon(
+            onPressed: () => context.go('/login'),
+            icon: const Icon(Icons.storefront_rounded),
+            label: const Text("Use storefront sign-in instead"),
+          ),
+        ],
+      ),
+    );
+
+    final formCard = AppSectionCard(
+      child: AutofillGroup(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Sign in",
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              "Use the account that can access this page.",
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            TextField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [
+                AutofillHints.username,
+                AutofillHints.email,
+              ],
+              textInputAction: TextInputAction.next,
+              autocorrect: false,
+              enableSuggestions: false,
+              onChanged: (value) {
+                _setLoginError(null);
+                _maybeApplyStoredPassword(
+                  email: value,
+                  overwrite: _passwordCtrl.text.isEmpty,
+                );
+              },
+              decoration: const InputDecoration(labelText: "Email"),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              key: ValueKey(
+                'direct-login-password-field-${_showPassword ? "visible" : "hidden"}',
+              ),
+              controller: _passwordCtrl,
+              keyboardType: TextInputType.visiblePassword,
+              obscureText: !_showPassword,
+              autocorrect: false,
+              enableSuggestions: false,
+              smartDashesType: SmartDashesType.disabled,
+              smartQuotesType: SmartQuotesType.disabled,
+              autofillHints: const [AutofillHints.password],
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _onLoginPressed(),
+              onChanged: (_) => _setLoginError(null),
+              decoration: InputDecoration(
+                labelText: "Password",
+                helperText:
+                    _storedCredentials.passwordFor(_emailCtrl.text) != null
+                    ? "Saved password available for this email on this device."
+                    : "After sign in, the app will open the linked page automatically.",
+                suffixIcon: IconButton(
+                  onPressed: () {
+                    AppDebug.log("LOGIN", "Toggle password visibility");
+                    final selection = _passwordCtrl.selection;
+                    setState(() => _showPassword = !_showPassword);
+
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) {
+                        return;
+                      }
+
+                      final fallbackSelection = TextSelection.collapsed(
+                        offset: _passwordCtrl.text.length,
+                      );
+                      _passwordCtrl.selection = selection.isValid
+                          ? selection
+                          : fallbackSelection;
+                    });
+                  },
+                  icon: Icon(
+                    _showPassword ? Icons.visibility_off : Icons.visibility,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            TextButton.icon(
+              onPressed: _isLoading
+                  ? null
+                  : () => _goToForgotPassword(context, closeCurrentView: false),
+              icon: const Icon(Icons.key_outlined, size: 16),
+              label: const Text("Forgot password?"),
+            ),
+            _buildLoginErrorCard(context),
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _isLoading ? null : () => _onLoginPressed(),
+                icon: Icon(
+                  _isLoading
+                      ? Icons.hourglass_top_rounded
+                      : Icons.login_rounded,
+                ),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.xl),
+                  ),
+                ),
+                label: Text(_isLoading ? "Signing in..." : "Sign in"),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              presentation.accent.withValues(alpha: 0.10),
+              scheme.surfaceContainerLow,
+              theme.scaffoldBackgroundColor,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.section),
+              child: AppResponsiveContent(
+                maxWidth: 960,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isCompact = constraints.maxWidth < 820;
+                    if (isCompact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          introCard,
+                          const SizedBox(height: AppSpacing.lg),
+                          formCard,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: introCard),
+                        const SizedBox(width: AppSpacing.xl),
+                        Expanded(child: formCard),
+                      ],
+                    );
+                  },
+                ),
+              ),
             ),
           ),
         ),
@@ -2144,6 +2511,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_usesDirectSignIn) {
+      AppDebug.log(
+        "LOGIN",
+        "build() direct",
+        extra: {"isLoading": _isLoading, "hasRedirect": true},
+      );
+      return _buildDirectLoginScreen(context);
+    }
+
     AppDebug.log("LOGIN", "build()", extra: {"isLoading": _isLoading});
     final productsAsync = ref.watch(product_providers.productsProvider);
 
@@ -2204,6 +2580,28 @@ extension on _LoginShortcutRole {
     _LoginShortcutRole.staff => Icons.badge_rounded,
     _LoginShortcutRole.admin => Icons.admin_panel_settings_rounded,
   };
+}
+
+class _DirectLoginPresentation {
+  final String badgeLabel;
+  final String destinationLabel;
+  final String title;
+  final String description;
+  final String helper;
+  final IconData icon;
+  final Color accent;
+  final AppStatusTone tone;
+
+  const _DirectLoginPresentation({
+    required this.badgeLabel,
+    required this.destinationLabel,
+    required this.title,
+    required this.description,
+    required this.helper,
+    required this.icon,
+    required this.accent,
+    required this.tone,
+  });
 }
 
 class _LoadingBlock extends StatelessWidget {

@@ -275,8 +275,18 @@ final routerProvider = Provider<GoRouter>((ref) {
               tokenParam.trim().isNotEmpty) {
             redirectTo = '/business-invite?token=${tokenParam.trim()}';
           }
-          AppDebug.log("ROUTER", "-> /login");
-          return LoginScreen(redirectTo: redirectTo, initialEmail: emailParam);
+          final useDirectSignIn =
+              redirectTo != null && redirectTo.trim().isNotEmpty;
+          AppDebug.log(
+            "ROUTER",
+            "-> /login",
+            extra: {"direct": useDirectSignIn},
+          );
+          return LoginScreen(
+            redirectTo: redirectTo,
+            initialEmail: emailParam,
+            useDirectSignIn: useDirectSignIn,
+          );
         },
       ),
       GoRoute(
