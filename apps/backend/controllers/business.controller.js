@@ -8990,26 +8990,101 @@ function normalizePersistedProductionTaskType(value) {
   return null;
 }
 
+function buildApprovedTaskCompletionIndex(progressRecords) {
+  const approvedCompletionByTaskId = new Map();
+
+  (Array.isArray(progressRecords) ? progressRecords : []).forEach((record) => {
+    const taskId = record?.taskId?.toString?.() || "";
+    if (!taskId) {
+      return;
+    }
+
+    const approvedAt =
+      record?.approvedAt ? new Date(record.approvedAt) : null;
+    const approvedBy =
+      record?.approvedBy?.toString?.().trim?.() || "";
+    if (!approvedAt && !approvedBy) {
+      return;
+    }
+
+    const fallbackCompletedAt =
+      record?.workDate ? new Date(record.workDate) : null;
+    const candidateCompletedAt =
+      approvedAt &&
+      !Number.isNaN(approvedAt.getTime())
+        ? approvedAt
+        : fallbackCompletedAt &&
+            !Number.isNaN(fallbackCompletedAt.getTime())
+          ? fallbackCompletedAt
+          : null;
+    const existing = approvedCompletionByTaskId.get(taskId);
+
+    if (
+      !existing ||
+      (candidateCompletedAt &&
+        (!existing.completedAt ||
+          candidateCompletedAt > existing.completedAt))
+    ) {
+      approvedCompletionByTaskId.set(taskId, {
+        completedAt: candidateCompletedAt,
+      });
+    }
+  });
+
+  return approvedCompletionByTaskId;
+}
+
 // WHY: Summarize task + output performance for KPI dashboards.
-function computeProductionKpis({ phases, tasks, outputs }) {
+function computeProductionKpis({
+  phases,
+  tasks,
+  outputs,
+  progressRecords = [],
+}) {
+  const approvedCompletionByTaskId =
+    buildApprovedTaskCompletionIndex(progressRecords);
+  const taskCompletionStates = tasks.map((task) => {
+    const taskId =
+      task?._id?.toString?.() ||
+      task?.id?.toString?.() ||
+      "";
+    const approvedCompletion =
+      taskId ?
+        approvedCompletionByTaskId.get(taskId)
+      : null;
+    const persistedCompletedAt =
+      task?.completedAt ? new Date(task.completedAt) : null;
+    const effectiveCompletedAt =
+      persistedCompletedAt &&
+      !Number.isNaN(persistedCompletedAt.getTime())
+        ? persistedCompletedAt
+        : approvedCompletion?.completedAt || null;
+    const completed =
+      task.status === PRODUCTION_TASK_STATUS_DONE ||
+      Boolean(task.completedAt) ||
+      Boolean(approvedCompletion);
+
+    return {
+      task,
+      completed,
+      completedAt: effectiveCompletedAt,
+    };
+  });
   const totalTasks = tasks.length;
-  const completedTasks = tasks.filter(
-    (task) =>
-      task.status === PRODUCTION_TASK_STATUS_DONE || Boolean(task.completedAt),
-  );
+  const completedTasks = taskCompletionStates.filter((state) => state.completed);
   const completedCount = completedTasks.length;
-  const onTimeCount = completedTasks.filter((task) => {
-    if (!task.completedAt || !task.dueDate) {
+  const onTimeCount = completedTasks.filter(({ task, completedAt }) => {
+    if (!completedAt || !task?.dueDate) {
       return false;
     }
-    return new Date(task.completedAt) <= new Date(task.dueDate);
+    return completedAt <= new Date(task.dueDate);
   }).length;
 
-  const totalDelayDays = completedTasks.reduce((sum, task) => {
-    if (!task.completedAt || !task.dueDate) {
+  const totalDelayDays = completedTasks.reduce((sum, { task, completedAt }) => {
+    if (!completedAt || !task?.dueDate) {
       return sum;
     }
-    const delayMs = new Date(task.completedAt) - new Date(task.dueDate);
+    const delayMs = completedAt - new Date(task.dueDate);
     const delayDays = Math.max(0, Math.floor(delayMs / MS_PER_DAY));
     return sum + delayDays;
   }, 0);
@@ -9018,23 +9093,24 @@ function computeProductionKpis({ phases, tasks, outputs }) {
     const phaseTasks = tasks.filter(
       (task) => task.phaseId?.toString() === phase._id?.toString(),
     );
-    const phaseDone = phaseTasks.filter(
-      (task) =>
-        task.status === PRODUCTION_TASK_STATUS_DONE ||
-        Boolean(task.completedAt),
+    const phaseDone = taskCompletionStates.filter(
+      ({ task, completed }) =>
+        completed &&
+        task.phaseId?.toString() === phase._id?.toString(),
     );
+    const phaseCompletedCount = phaseDone.length;
     return {
       phaseId: phase._id,
       name: phase.name,
       totalTasks: phaseTasks.length,
-      completedTasks: phaseDone.length,
+      completedTasks: phaseCompletedCount,
       completionRate:
-        phaseTasks.length > 0 ? phaseDone.length / phaseTasks.length : 0,
+        phaseTasks.length > 0 ? phaseCompletedCount / phaseTasks.length : 0,
     };
   });
 
   const staffPerformance = {};
-  completedTasks.forEach((task) => {
+  completedTasks.forEach(({ task, completedAt }) => {
     const staffId = task.assignedStaffId?.toString();
     if (!staffId) return;
     if (!staffPerformance[staffId]) {
@@ -9043,8 +9119,15 @@ function computeProductionKpis({ phases, tasks, outputs }) {
         totalDelayDays: 0,
       };
     }
+    const effectiveCompletedAt =
+      completedAt ||
+      (task.completedAt ? new Date(task.completedAt) : null);
+    const dueDate =
+      task.dueDate ? new Date(task.dueDate) : effectiveCompletedAt;
     const delayMs =
-      new Date(task.completedAt) - new Date(task.dueDate || task.completedAt);
+      effectiveCompletedAt && dueDate ?
+        effectiveCompletedAt - dueDate
+      : 0;
     const delayDays = Math.max(0, Math.floor(delayMs / MS_PER_DAY));
     staffPerformance[staffId].completedTasks += 1;
     staffPerformance[staffId].totalDelayDays += delayDays;
@@ -17378,6 +17461,7 @@ async function getProductionPlanDetail(req, res) {
       phases,
       tasks,
       outputs,
+      progressRecords,
     });
     const taskAssignedStaffIds = tasks.flatMap((task) =>
       resolveTaskAssignedStaffIds(task),

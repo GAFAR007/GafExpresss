@@ -11,6 +11,7 @@
 1. This is internet audio only. It does not place calls over the phone network.
 2. The current setup is STUN-only WebRTC. Before broad rollout, add TURN or move media handling to a managed provider such as LiveKit or Agora for better reliability on restrictive networks.
 3. Background ringing and push-notification handling are not included yet, so incoming calls currently depend on the app already being open and connected.
+4. The frontend now keeps voice calling off by default on hosted environments unless `ENABLE_CHAT_CALLING=true` is passed at build time. Turn it on only after the backend exposes `/chat/calls` in that environment.
 
 ## Before Rollout
 

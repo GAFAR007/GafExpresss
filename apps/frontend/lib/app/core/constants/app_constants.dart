@@ -25,6 +25,8 @@ class AppConstants {
   static const String _apiBaseUrlFromEnvironment = String.fromEnvironment(
     "API_BASE_URL",
   );
+  static const String _chatCallingEnabledFromEnvironment =
+      String.fromEnvironment("ENABLE_CHAT_CALLING");
   static const String _paystackCallbackBaseUrlFromEnvironment =
       String.fromEnvironment("PAYSTACK_CALLBACK_BASE_URL");
 
@@ -90,6 +92,30 @@ class AppConstants {
     return "https://gafarsexpress.gafarstechnologies.com";
   }
 
+  /// Voice calling rollout flag.
+  ///
+  /// WHY:
+  /// - Chat messaging is already live, but calling depends on `/chat/calls`
+  ///   being deployed on the target backend.
+  /// - Default to enabled for local/private API hosts so development keeps
+  ///   working, and require an explicit opt-in for hosted environments.
+  ///
+  /// NOTE:
+  /// - Override with:
+  ///   `--dart-define=ENABLE_CHAT_CALLING=true`
+  ///   `--dart-define=ENABLE_CHAT_CALLING=false`
+  static bool get chatCallingEnabled {
+    final configuredFlag = _parseOptionalBool(
+      _chatCallingEnabledFromEnvironment,
+    );
+    if (configuredFlag != null) {
+      return configuredFlag;
+    }
+
+    final apiHost = Uri.tryParse(apiBaseUrl)?.host.toLowerCase() ?? "";
+    return _isLocalOrPrivateHost(apiHost);
+  }
+
   /// Timeouts (safe defaults)
   static const int connectTimeoutMs = 15000;
   static const int receiveTimeoutMs = 20000;
@@ -98,5 +124,30 @@ class AppConstants {
     final normalized = value.trim();
     if (normalized.isEmpty) return "";
     return normalized.replaceFirst(RegExp(r"/+$"), "");
+  }
+
+  static bool? _parseOptionalBool(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    if (normalized == "true") return true;
+    if (normalized == "false") return false;
+    return null;
+  }
+
+  static bool _isLocalOrPrivateHost(String host) {
+    if (host.isEmpty) return false;
+    if (host == "localhost" ||
+        host == "127.0.0.1" ||
+        host == "0.0.0.0" ||
+        host == "10.0.2.2") {
+      return true;
+    }
+    if (host.startsWith("10.") || host.startsWith("192.168.")) {
+      return true;
+    }
+
+    final match = RegExp(r"^172\.(\d{1,2})\.").firstMatch(host);
+    final secondOctet = int.tryParse(match?.group(1) ?? "");
+    return secondOctet != null && secondOctet >= 16 && secondOctet <= 31;
   }
 }

@@ -308,6 +308,98 @@ const Color _workspaceSoftTeal = Color(0xFFE1F5EF);
 const Color _workspaceSoftAmber = Color(0xFFFFF0D9);
 const Color _workspaceSoftBerry = Color(0xFFF4E7FF);
 const Color _workspaceSoftSlate = Color(0xFFEEF4FC);
+
+bool _workspaceIsDark(ColorScheme colorScheme) =>
+    colorScheme.brightness == Brightness.dark;
+
+Color _workspaceToneSurface({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  Color? lightColor,
+  Color? baseColor,
+  double lightTintAlpha = 0.08,
+  double darkTintAlpha = 0.18,
+}) {
+  if (!_workspaceIsDark(colorScheme)) {
+    if (lightColor != null) {
+      return lightColor;
+    }
+    return Color.alphaBlend(
+      accentColor.withValues(alpha: lightTintAlpha),
+      baseColor ?? colorScheme.surface,
+    );
+  }
+
+  return Color.alphaBlend(
+    accentColor.withValues(alpha: darkTintAlpha),
+    baseColor ?? colorScheme.surfaceContainerHigh,
+  );
+}
+
+Color _workspaceToneBorder({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  double lightAlpha = 0.18,
+  double darkAlpha = 0.42,
+}) {
+  return accentColor.withValues(
+    alpha: _workspaceIsDark(colorScheme) ? darkAlpha : lightAlpha,
+  );
+}
+
+Color _workspaceToneForeground({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  double darkMix = 0.68,
+}) {
+  if (!_workspaceIsDark(colorScheme)) {
+    return accentColor;
+  }
+  return Color.lerp(colorScheme.onSurface, accentColor, darkMix) ?? accentColor;
+}
+
+Color _workspacePrimaryContentColor(ColorScheme colorScheme) {
+  return _workspaceIsDark(colorScheme) ? colorScheme.onSurface : _workspaceNavy;
+}
+
+Color _workspaceSecondaryContentColor(ColorScheme colorScheme) {
+  if (_workspaceIsDark(colorScheme)) {
+    return colorScheme.onSurfaceVariant;
+  }
+  return _workspaceNavy.withValues(alpha: 0.72);
+}
+
+ButtonStyle _workspaceActionButtonStyle(
+  BuildContext context, {
+  required Color accentColor,
+}) {
+  final colorScheme = Theme.of(context).colorScheme;
+  return OutlinedButton.styleFrom(
+    foregroundColor: _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.6,
+    ),
+    backgroundColor: _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      lightTintAlpha: 0.1,
+      darkTintAlpha: 0.2,
+      baseColor: _workspaceIsDark(colorScheme)
+          ? colorScheme.surfaceContainerHigh
+          : colorScheme.surface,
+    ),
+    side: BorderSide(
+      color: _workspaceToneBorder(
+        colorScheme: colorScheme,
+        accentColor: accentColor,
+        lightAlpha: 0.22,
+        darkAlpha: 0.46,
+      ),
+    ),
+  );
+}
+
 final RegExp _importedProjectDayPattern = RegExp(
   r"Project day\s+\d+\s+\((\d{4}-\d{2}-\d{2})\)\.",
   caseSensitive: false,
@@ -1891,30 +1983,36 @@ class _WorkspaceSummaryCard extends StatelessWidget {
       timelineRows: timelineRows,
     );
     final lastSavedLabel = plan.lastDraftSavedBy?.displayLabel ?? "";
+    final isDark = _workspaceIsDark(colorScheme);
 
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightColor: Color.alphaBlend(
+            _workspaceSoftBlue.withValues(alpha: 0.24),
             colorScheme.surface,
-            Color.alphaBlend(
-              _workspaceSoftBlue.withValues(alpha: 0.72),
-              colorScheme.surfaceContainerLow,
-            ),
-            Color.alphaBlend(
-              _workspaceSoftTeal.withValues(alpha: 0.42),
-              colorScheme.surfaceContainerLow,
-            ),
-          ],
+          ),
+          lightTintAlpha: 0.06,
+          darkTintAlpha: 0.14,
+          baseColor: isDark
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _workspaceBlue.withValues(alpha: 0.14)),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: _workspaceBlue,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: _workspaceNavy.withValues(alpha: 0.06),
+            color: _workspaceNavy.withValues(alpha: isDark ? 0.16 : 0.06),
             blurRadius: 28,
             offset: const Offset(0, 12),
           ),
@@ -2092,9 +2190,24 @@ class _WorkspaceSummaryCard extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: colorScheme.surface,
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightTintAlpha: 0.04,
+                darkTintAlpha: 0.14,
+                baseColor: isDark
+                    ? colorScheme.surfaceContainerLow
+                    : colorScheme.surface,
+              ),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colorScheme.outlineVariant),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  lightAlpha: 0.14,
+                  darkAlpha: 0.28,
+                ),
+              ),
             ),
             child: Text(
               plan.lastDraftSavedAt == null
@@ -2150,17 +2263,29 @@ class _WorkspaceSummaryCard extends StatelessWidget {
             runSpacing: 8,
             children: [
               OutlinedButton.icon(
+                style: _workspaceActionButtonStyle(
+                  context,
+                  accentColor: _workspaceBerry,
+                ),
                 onPressed: onOpenDraft,
                 icon: const Icon(Icons.edit_note_outlined),
                 label: const Text(_openDraftLabel),
               ),
               if (onReturnToDraft != null)
                 OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceAmber,
+                  ),
                   onPressed: onReturnToDraft,
                   icon: const Icon(Icons.edit_calendar_outlined),
                   label: const Text(_returnToDraftLabel),
                 ),
               OutlinedButton.icon(
+                style: _workspaceActionButtonStyle(
+                  context,
+                  accentColor: _workspaceBlue,
+                ),
                 onPressed: onViewInsights,
                 icon: const Icon(Icons.insights_outlined),
                 label: const Text(_viewInsightsLabel),
@@ -2194,25 +2319,39 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.66,
+    );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightColor: Color.alphaBlend(
+            softColor.withValues(alpha: 0.52),
             colorScheme.surface,
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.88),
-              colorScheme.surface,
-            ),
-          ],
+          ),
+          lightTintAlpha: 0.06,
+          darkTintAlpha: 0.12,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: 0.10),
+            color: accentColor.withValues(
+              alpha: _workspaceIsDark(colorScheme) ? 0.12 : 0.10,
+            ),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -2244,7 +2383,7 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: accentColor,
+                    color: accentForeground,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -2252,7 +2391,7 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
                 Text(
                   value,
                   style: theme.textTheme.headlineMedium?.copyWith(
-                    color: _workspaceNavy,
+                    color: _workspacePrimaryContentColor(colorScheme),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -2282,19 +2421,45 @@ class _SummaryPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final foregroundColor = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.52,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.05,
+          darkTintAlpha: 0.16,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerLow
+              : colorScheme.surface,
+        ),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: _workspaceBlue,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
+          ),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: colorScheme.primary),
+          Icon(icon, size: 16, color: foregroundColor),
           const SizedBox(width: 6),
-          Text(label),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: _workspacePrimaryContentColor(colorScheme),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );
@@ -2437,6 +2602,8 @@ class _MonthCalendarCard extends StatelessWidget {
       return workDate?.year == month.year && workDate?.month == month.month;
     }).toList();
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
     final completedCount = monthTasks
         .where((task) => task.status == _taskStatusDone)
         .length;
@@ -2446,11 +2613,33 @@ class _MonthCalendarCard extends StatelessWidget {
       completedCount: completedCount,
       warning: monthTasks.any(_workspaceTaskHasStaffGap),
     );
-    final shellColor = palette.badgeBackground;
-    final shellForeground = palette.badgeForeground;
-    final shellSurface = shellForeground.withValues(alpha: 0.12);
-    final shellBorder = shellForeground.withValues(alpha: 0.16);
-    final metricIconColor = shellForeground.withValues(alpha: 0.82);
+    final shellColor = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: palette.accent,
+      lightTintAlpha: 0.04,
+      darkTintAlpha: 0.12,
+      baseColor: isDark
+          ? colorScheme.surfaceContainerLow
+          : colorScheme.surface,
+    );
+    final shellForeground = _workspacePrimaryContentColor(colorScheme);
+    final shellMuted = _workspaceSecondaryContentColor(colorScheme);
+    final shellSurface = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: palette.accent,
+      lightTintAlpha: 0.05,
+      darkTintAlpha: 0.16,
+      baseColor: isDark
+          ? colorScheme.surfaceContainerHigh
+          : colorScheme.surface,
+    );
+    final shellBorder = _workspaceToneBorder(
+      colorScheme: colorScheme,
+      accentColor: palette.accent,
+      lightAlpha: 0.16,
+      darkAlpha: 0.3,
+    );
+    final metricIconColor = shellMuted;
     final completedMetricAccent = completedCount > 0
         ? ProductionCalendarVisuals.palette(
             theme: theme,
@@ -2462,27 +2651,13 @@ class _MonthCalendarCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
+        color: shellColor,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: shellBorder, width: 1.4),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(
-              shellForeground.withValues(alpha: 0.04),
-              shellColor,
-            ),
-            shellColor,
-            Color.alphaBlend(
-              palette.accent.withValues(alpha: 0.08),
-              shellColor,
-            ),
-          ],
-        ),
         boxShadow: [
           BoxShadow(
-            color: palette.shadow.withValues(alpha: 0.22),
-            blurRadius: 22,
+            color: palette.shadow.withValues(alpha: isDark ? 0.22 : 0.08),
+            blurRadius: 18,
             offset: const Offset(0, 10),
           ),
         ],
@@ -2521,53 +2696,29 @@ class _MonthCalendarCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Wrap(
-                            spacing: 12,
+                            spacing: 10,
                             runSpacing: 6,
                             children: [
-                              ProductionCalendarMetricPill(
+                              _MonthHeaderMetric(
                                 icon: Icons.checklist_rounded,
-                                value: "${monthTasks.length}",
-                                accent: shellForeground,
-                                compact: true,
-                                filled: false,
-                                padding: EdgeInsets.zero,
-                                foregroundColor: shellForeground,
-                                iconColor: metricIconColor,
-                                tooltip: "Tasks",
+                                label: "${monthTasks.length} tasks",
+                                foregroundColor: shellMuted,
                               ),
-                              ProductionCalendarMetricPill(
+                              _MonthHeaderMetric(
                                 icon: Icons.done_all_rounded,
-                                value: "$completedCount",
-                                accent: completedMetricAccent,
-                                compact: true,
-                                filled: false,
-                                padding: EdgeInsets.zero,
-                                foregroundColor: shellForeground,
-                                iconColor: completedMetricAccent,
-                                tooltip: "Completed",
+                                label: "$completedCount done",
+                                foregroundColor: completedMetricAccent,
                               ),
-                              ProductionCalendarMetricPill(
+                              _MonthHeaderMetric(
                                 icon: Icons.grid_view_rounded,
-                                value: workScopeSummary.countLabel,
-                                accent: shellForeground,
-                                compact: true,
-                                filled: false,
-                                padding: EdgeInsets.zero,
-                                foregroundColor: shellForeground,
-                                iconColor: metricIconColor,
-                                tooltip: "Draft work scope",
+                                label: workScopeSummary.countLabel,
+                                foregroundColor: shellMuted,
                               ),
                               if (timelineRows.isNotEmpty)
-                                ProductionCalendarMetricPill(
+                                _MonthHeaderMetric(
                                   icon: Icons.waterfall_chart_rounded,
-                                  value: "${monthRows.length}",
-                                  accent: shellForeground,
-                                  compact: true,
-                                  filled: false,
-                                  padding: EdgeInsets.zero,
-                                  foregroundColor: shellForeground,
-                                  iconColor: metricIconColor,
-                                  tooltip: "Logs",
+                                  label: "${monthRows.length} logs",
+                                  foregroundColor: shellMuted,
                                 ),
                             ],
                           ),
@@ -2625,10 +2776,10 @@ class _MonthCalendarCard extends StatelessWidget {
                     constraints.maxWidth - (_calendarSpacing * 6);
                 final cellWidth = usableWidth / 7;
                 final compact = cellWidth < 128;
-                final showPreview = cellWidth >= 136;
+                final showPreview = cellWidth >= 148;
                 final cellHeight = compact
-                    ? (cellWidth * 1.18).clamp(88.0, 112.0)
-                    : (cellWidth * 1.16).clamp(108.0, 138.0);
+                    ? (cellWidth * 1.02).clamp(76.0, 96.0)
+                    : (cellWidth * 1.08).clamp(100.0, 126.0);
                 return GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -2682,39 +2833,68 @@ class _MonthWeekdayHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    return Row(
-      children: _weekdayLabels
-          .map(
-            (label) => Expanded(
-              child: Container(
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  color:
-                      backgroundColor ??
-                      Color.alphaBlend(
-                        colorScheme.primary.withValues(alpha: 0.08),
-                        colorScheme.surfaceContainerHighest,
-                      ),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color:
-                        borderColor ??
-                        colorScheme.primary.withValues(alpha: 0.12),
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: textColor ?? colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color:
+            backgroundColor ??
+            Color.alphaBlend(
+              colorScheme.primary.withValues(alpha: 0.06),
+              colorScheme.surfaceContainerHigh,
+            ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color:
+              borderColor ?? colorScheme.primary.withValues(alpha: 0.12),
+        ),
+      ),
+      child: Row(
+        children: _weekdayLabels
+            .map(
+              (label) => Expanded(
+                child: Center(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: textColor ?? colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            ),
-          )
-          .toList(),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class _MonthHeaderMetric extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color foregroundColor;
+
+  const _MonthHeaderMetric({
+    required this.icon,
+    required this.label,
+    required this.foregroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: foregroundColor),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: foregroundColor,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3057,6 +3237,7 @@ class _MonthDayTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final completed = tasks
         .where((task) => task.status == _taskStatusDone)
         .length;
@@ -3070,17 +3251,27 @@ class _MonthDayTile extends StatelessWidget {
     );
     final previewTaskTitle = tasks.isNotEmpty ? tasks.first.title : null;
     final tilePadding = compact ? 6.0 : 8.0;
+    final today = _isSameDay(day, DateTime.now());
+    final hasWarning = tasks.any(_workspaceTaskHasStaffGap);
+    final statusIcon = hasWarning
+        ? Icons.warning_amber_rounded
+        : completed > 0
+        ? Icons.done_all_rounded
+        : (tasks.isNotEmpty
+              ? Icons.checklist_rounded
+              : (rows.isNotEmpty ? Icons.waterfall_chart_rounded : null));
+    final statusCount = tasks.isNotEmpty ? tasks.length : rows.length;
     final titleStyle = compact
         ? theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.onSurface,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           )
         : theme.textTheme.titleSmall?.copyWith(
-            color: theme.colorScheme.onSurface,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           );
     final previewStyle = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurface,
+      color: _workspacePrimaryContentColor(colorScheme),
       height: 1.15,
       fontWeight: FontWeight.w600,
     );
@@ -3106,7 +3297,16 @@ class _MonthDayTile extends StatelessWidget {
                 children: [
                   Text("${day.day}", style: titleStyle),
                   const Spacer(),
-                  if (rows.isNotEmpty)
+                  if (selected || today)
+                    Container(
+                      width: compact ? 8 : 10,
+                      height: compact ? 8 : 10,
+                      decoration: BoxDecoration(
+                        color: selected ? palette.badgeForeground : palette.accent,
+                        shape: BoxShape.circle,
+                      ),
+                    )
+                  else if (!compact && rows.isNotEmpty)
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -3119,7 +3319,7 @@ class _MonthDayTile extends StatelessWidget {
                         Text(
                           "${rows.length}",
                           style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurface,
+                            color: _workspaceSecondaryContentColor(colorScheme),
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -3128,7 +3328,30 @@ class _MonthDayTile extends StatelessWidget {
                 ],
               ),
               SizedBox(height: compact ? 4 : 6),
-              if (tasks.isNotEmpty) ...[
+              if (compact) ...[
+                const Spacer(),
+                if (statusIcon != null && statusCount > 0)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        statusIcon,
+                        size: 11,
+                        color: hasWarning
+                            ? theme.colorScheme.tertiary
+                            : palette.accent,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        "$statusCount",
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: _workspaceSecondaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+              ] else if (tasks.isNotEmpty) ...[
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -3141,11 +3364,11 @@ class _MonthDayTile extends StatelessWidget {
                     Text(
                       "${tasks.length}",
                       style: theme.textTheme.labelLarge?.copyWith(
-                        color: theme.colorScheme.onSurface,
+                        color: _workspacePrimaryContentColor(colorScheme),
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (tasks.any(_workspaceTaskHasStaffGap)) ...[
+                    if (hasWarning) ...[
                       const SizedBox(width: 6),
                       Icon(
                         Icons.warning_amber_rounded,
@@ -3176,9 +3399,14 @@ class _MonthDayTile extends StatelessWidget {
                     vertical: 7,
                   ),
                   decoration: BoxDecoration(
-                    color: Color.alphaBlend(
-                      palette.accent.withValues(alpha: 0.08),
-                      theme.colorScheme.surface,
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: palette.accent,
+                      lightTintAlpha: 0.06,
+                      darkTintAlpha: 0.12,
+                      baseColor: _workspaceIsDark(colorScheme)
+                          ? colorScheme.surfaceContainerHigh
+                          : colorScheme.surface,
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -3473,22 +3701,34 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.66,
+    );
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightColor: Color.alphaBlend(
+            softColor.withValues(alpha: 0.48),
             colorScheme.surface,
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.92),
-              colorScheme.surface,
-            ),
-          ],
+          ),
+          lightTintAlpha: 0.06,
+          darkTintAlpha: 0.12,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
             color: accentColor.withValues(alpha: 0.08),
@@ -3516,7 +3756,7 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: accentColor,
+                    color: accentForeground,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -3524,7 +3764,7 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
                 Text(
                   value,
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: _workspaceNavy,
+                    color: _workspacePrimaryContentColor(colorScheme),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -3734,25 +3974,36 @@ class _AgendaTaskCard extends StatelessWidget {
         ];
 
     return Container(
-      padding: const EdgeInsets.all(_agendaCardPadding),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
+                        padding: const EdgeInsets.all(_agendaCardPadding),
+                        decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightColor: Color.alphaBlend(
+            _workspaceSoftSlate.withValues(alpha: 0.48),
             colorScheme.surface,
-            Color.alphaBlend(
-              _workspaceSoftSlate.withValues(alpha: 0.96),
-              colorScheme.surface,
-            ),
-          ],
+          ),
+          lightTintAlpha: 0.04,
+          darkTintAlpha: 0.1,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerLow
+              : colorScheme.surface,
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _workspaceBlue.withValues(alpha: 0.14)),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: _workspaceBlue,
+            lightAlpha: 0.14,
+            darkAlpha: 0.3,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: _workspaceNavy.withValues(alpha: 0.06),
-            blurRadius: 22,
+            color: _workspaceNavy.withValues(
+              alpha: _workspaceIsDark(colorScheme) ? 0.16 : 0.06,
+            ),
+            blurRadius: 18,
             offset: const Offset(0, 10),
           ),
         ],
@@ -3770,7 +4021,7 @@ class _AgendaTaskCard extends StatelessWidget {
                     Text(
                       task.title,
                       style: theme.textTheme.titleLarge?.copyWith(
-                        color: _workspaceNavy,
+                        color: _workspacePrimaryContentColor(colorScheme),
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -3913,7 +4164,11 @@ class _AgendaTaskCard extends StatelessWidget {
               Text(
                 _assignedLabel,
                 style: theme.textTheme.labelLarge?.copyWith(
-                  color: _workspaceNavy,
+                  color: _workspaceToneForeground(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBlue,
+                    darkMix: 0.58,
+                  ),
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -4159,14 +4414,48 @@ class _AgendaTaskCard extends StatelessWidget {
                 Text(
                   _instructionsLabel,
                   style: theme.textTheme.labelLarge?.copyWith(
-                    color: _workspaceNavy,
+                    color: _workspaceToneForeground(
+                      colorScheme: colorScheme,
+                      accentColor: _workspaceBerry,
+                      darkMix: 0.58,
+                    ),
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(task.instructions),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _workspaceToneSurface(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBerry,
+                  lightTintAlpha: 0.06,
+                  darkTintAlpha: 0.12,
+                  baseColor: _workspaceIsDark(colorScheme)
+                      ? colorScheme.surfaceContainerHigh
+                      : colorScheme.surface,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _workspaceToneBorder(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBerry,
+                    lightAlpha: 0.14,
+                    darkAlpha: 0.28,
+                  ),
+                ),
+              ),
+              child: Text(
+                task.instructions,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: _workspaceSecondaryContentColor(colorScheme),
+                  height: 1.4,
+                ),
+              ),
+            ),
           ],
           const SizedBox(height: 12),
           Wrap(
@@ -4296,7 +4585,14 @@ class _InfoChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final resolvedForeground = foregroundColor ?? colorScheme.onSurfaceVariant;
+    final seedColor = foregroundColor ?? backgroundColor ?? colorScheme.primary;
+    final resolvedForeground = foregroundColor == null
+        ? colorScheme.onSurfaceVariant
+        : _workspaceToneForeground(
+            colorScheme: colorScheme,
+            accentColor: foregroundColor!,
+            darkMix: 0.56,
+          );
     final maxWidth = math.min(
       360.0,
       math.max(140.0, MediaQuery.of(context).size.width - 64),
@@ -4306,9 +4602,29 @@ class _InfoChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: backgroundColor ?? colorScheme.surfaceContainerHighest,
+          color: backgroundColor == null
+              ? colorScheme.surfaceContainerHighest
+              : _workspaceToneSurface(
+                  colorScheme: colorScheme,
+                  accentColor: seedColor,
+                  lightColor: backgroundColor,
+                  lightTintAlpha: 0.06,
+                  darkTintAlpha: 0.18,
+                  baseColor: _workspaceIsDark(colorScheme)
+                      ? colorScheme.surfaceContainerHigh
+                      : colorScheme.surface,
+                ),
           borderRadius: BorderRadius.circular(999),
-          border: borderColor == null ? null : Border.all(color: borderColor!),
+          border: borderColor == null
+              ? null
+              : Border.all(
+                  color: _workspaceToneBorder(
+                    colorScheme: colorScheme,
+                    accentColor: seedColor,
+                    lightAlpha: 0.18,
+                    darkAlpha: 0.38,
+                  ),
+                ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -4355,35 +4671,41 @@ class _TaskSnapshotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.66,
+    );
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(
-              accentColor.withValues(alpha: 0.16),
-              colorScheme.surface,
-            ),
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.98),
-              colorScheme.surface,
-            ),
-            Color.alphaBlend(
-              accentColor.withValues(alpha: 0.08),
-              colorScheme.surfaceContainerHigh,
-            ),
-          ],
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightColor: Color.alphaBlend(
+            softColor.withValues(alpha: 0.54),
+            colorScheme.surface,
+          ),
+          lightTintAlpha: 0.08,
+          darkTintAlpha: 0.14,
+          baseColor: isDark
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: accentColor.withValues(alpha: 0.34),
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.34,
+            darkAlpha: 0.44,
+          ),
           width: 1.4,
         ),
         boxShadow: [
           BoxShadow(
-            color: accentColor.withValues(alpha: 0.14),
+            color: accentColor.withValues(alpha: isDark ? 0.16 : 0.14),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -4429,16 +4751,29 @@ class _TaskSnapshotCard extends StatelessWidget {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.14),
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: accentColor,
+                      lightTintAlpha: 0.14,
+                      darkTintAlpha: 0.18,
+                      baseColor: isDark
+                          ? colorScheme.surfaceContainerHighest
+                          : colorScheme.surface,
+                    ),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: accentColor.withValues(alpha: 0.20),
+                      color: _workspaceToneBorder(
+                        colorScheme: colorScheme,
+                        accentColor: accentColor,
+                        lightAlpha: 0.2,
+                        darkAlpha: 0.34,
+                      ),
                     ),
                   ),
                   child: Text(
                     label,
                     style: theme.textTheme.labelMedium?.copyWith(
-                      color: accentColor,
+                      color: accentForeground,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.1,
                     ),
@@ -4452,16 +4787,28 @@ class _TaskSnapshotCard extends StatelessWidget {
                     vertical: 10,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.72),
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: accentColor,
+                      lightColor: Colors.white.withValues(alpha: 0.72),
+                      lightTintAlpha: 0.0,
+                      darkTintAlpha: 0.16,
+                      baseColor: colorScheme.surfaceContainerHigh,
+                    ),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: accentColor.withValues(alpha: 0.22),
+                      color: _workspaceToneBorder(
+                        colorScheme: colorScheme,
+                        accentColor: accentColor,
+                        lightAlpha: 0.22,
+                        darkAlpha: 0.36,
+                      ),
                     ),
                   ),
                   child: Text(
                     value,
                     style: theme.textTheme.titleLarge?.copyWith(
-                      color: _workspaceNavy,
+                      color: _workspacePrimaryContentColor(colorScheme),
                       fontWeight: FontWeight.w900,
                       height: 1.15,
                     ),
@@ -4471,7 +4818,7 @@ class _TaskSnapshotCard extends StatelessWidget {
                 Text(
                   helper,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: _workspaceNavy.withValues(alpha: 0.72),
+                    color: _workspaceSecondaryContentColor(colorScheme),
                     fontWeight: FontWeight.w700,
                     height: 1.3,
                   ),
@@ -4558,6 +4905,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
     final actualAccent = hasClockIn && hasClockOut
         ? _workspaceTeal
         : hasClockIn || hasClockOut
@@ -4634,23 +4982,32 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: actualAccent,
+          lightColor: Color.alphaBlend(
+            actualSoft.withValues(alpha: 0.4),
             colorScheme.surface,
-            Color.alphaBlend(
-              _workspaceSoftSlate.withValues(alpha: 0.96),
-              colorScheme.surface,
-            ),
-          ],
+          ),
+          lightTintAlpha: 0.04,
+          darkTintAlpha: 0.1,
+          baseColor: isDark
+              ? colorScheme.surfaceContainerLow
+              : colorScheme.surface,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: actualAccent.withValues(alpha: 0.16)),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: actualAccent,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
+          ),
+        ),
         boxShadow: [
           BoxShadow(
-            color: actualAccent.withValues(alpha: 0.07),
-            blurRadius: 16,
+            color: actualAccent.withValues(alpha: isDark ? 0.14 : 0.07),
+            blurRadius: 14,
             offset: const Offset(0, 8),
           ),
         ],
@@ -4668,12 +5025,25 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: _workspaceSoftBlue,
+                      color: _workspaceToneSurface(
+                        colorScheme: colorScheme,
+                        accentColor: _workspaceBlue,
+                        lightColor: _workspaceSoftBlue,
+                        lightTintAlpha: 0.0,
+                        darkTintAlpha: 0.18,
+                        baseColor: isDark
+                            ? colorScheme.surfaceContainerHigh
+                            : colorScheme.surface,
+                      ),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.person_outline,
-                      color: _workspaceBlue,
+                      color: _workspaceToneForeground(
+                        colorScheme: colorScheme,
+                        accentColor: _workspaceBlue,
+                        darkMix: 0.68,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -4686,7 +5056,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                           maxLines: stackActions ? 2 : 3,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleMedium?.copyWith(
-                            color: _workspaceNavy,
+                            color: _workspacePrimaryContentColor(colorScheme),
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -4856,7 +5226,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
             Text(
               "Proofs",
               style: theme.textTheme.labelLarge?.copyWith(
-                color: _workspaceNavy,
+                color: _workspacePrimaryContentColor(colorScheme),
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -4878,11 +5248,35 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
           ],
           if (personalNotes.trim().isNotEmpty) ...[
             const SizedBox(height: 10),
-            Text(
-              personalNotes,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                height: 1.35,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _workspaceToneSurface(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBerry,
+                  lightTintAlpha: 0.06,
+                  darkTintAlpha: 0.12,
+                  baseColor: isDark
+                      ? colorScheme.surfaceContainerHigh
+                      : colorScheme.surface,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _workspaceToneBorder(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBerry,
+                    lightAlpha: 0.14,
+                    darkAlpha: 0.26,
+                  ),
+                ),
+              ),
+              child: Text(
+                personalNotes,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.35,
+                ),
               ),
             ),
           ],
@@ -4957,6 +5351,7 @@ class _WorkspaceProofTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final filename = proof.filename.trim().isNotEmpty
         ? proof.filename.trim()
         : "Proof ${index + 1}";
@@ -4968,11 +5363,17 @@ class _WorkspaceProofTile extends StatelessWidget {
         width: 138,
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(
-            alpha: 0.58,
+          color: _workspaceToneSurface(
+            colorScheme: colorScheme,
+            accentColor: _workspaceBlue,
+            lightTintAlpha: 0.04,
+            darkTintAlpha: 0.12,
+            baseColor: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : colorScheme.surface,
           ),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
+          border: Border.all(color: colorScheme.outlineVariant),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -5005,7 +5406,7 @@ class _WorkspaceProofTile extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: _workspaceNavy,
+                color: _workspacePrimaryContentColor(colorScheme),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -5077,6 +5478,11 @@ class _AttendanceTimingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.66,
+    );
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -5086,19 +5492,28 @@ class _AttendanceTimingCard extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: accentColor,
+              lightColor: Color.alphaBlend(
+                softColor.withValues(alpha: 0.5),
                 colorScheme.surface,
-                Color.alphaBlend(
-                  softColor.withValues(alpha: 0.96),
-                  colorScheme.surface,
-                ),
-              ],
+              ),
+              lightTintAlpha: 0.08,
+              darkTintAlpha: 0.12,
+              baseColor: _workspaceIsDark(colorScheme)
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
             ),
             borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: accentColor.withValues(alpha: 0.20)),
+            border: Border.all(
+              color: _workspaceToneBorder(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightAlpha: 0.2,
+                darkAlpha: 0.38,
+              ),
+            ),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -5120,7 +5535,7 @@ class _AttendanceTimingCard extends StatelessWidget {
                     Text(
                       label,
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: accentColor,
+                        color: accentForeground,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 0.2,
                       ),
@@ -5129,7 +5544,7 @@ class _AttendanceTimingCard extends StatelessWidget {
                     Text(
                       value,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        color: _workspaceNavy,
+                        color: _workspacePrimaryContentColor(colorScheme),
                         fontWeight: FontWeight.w900,
                         height: 1.3,
                       ),

@@ -18,6 +18,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'package:frontend/app/core/constants/app_constants.dart';
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/features/auth/domain/models/auth_session.dart';
 import 'package:frontend/app/features/home/presentation/chat_api.dart';
@@ -34,6 +35,8 @@ const String _logAccept = "accept_call";
 const String _logEnd = "end_call";
 const String _logSignal = "signal_event";
 const String _logPeer = "peer_state";
+const String _callingUnavailableMessage =
+    "Voice calling is not available on this server yet.";
 
 enum ChatCallPhase { idle, incoming, outgoing, connecting, active }
 
@@ -150,6 +153,10 @@ class ChatCallController extends StateNotifier<ChatCallState> {
   }
 
   Future<String?> startOutgoingCall({required String conversationId}) async {
+    if (!AppConstants.chatCallingEnabled) {
+      return _callingUnavailableMessage;
+    }
+
     if (state.call != null && !(state.call?.isTerminal ?? false)) {
       return "Finish the current call before starting another one.";
     }
@@ -661,6 +668,9 @@ class ChatCallController extends StateNotifier<ChatCallState> {
           return message;
         }
       }
+      if (_isMissingCallRoute(error)) {
+        return _callingUnavailableMessage;
+      }
       final message = error.message?.toString().trim() ?? "";
       if (message.isNotEmpty) {
         return message;
@@ -672,6 +682,21 @@ class ChatCallController extends StateNotifier<ChatCallState> {
       return "Unable to complete the call action.";
     }
     return cleaned;
+  }
+
+  bool _isMissingCallRoute(DioException error) {
+    if (error.response?.statusCode != 404) {
+      return false;
+    }
+
+    final path = error.requestOptions.path.toString().trim();
+    if (path.startsWith("/chat/calls")) {
+      return true;
+    }
+
+    final responseText = error.response?.data?.toString().toLowerCase() ?? "";
+    return responseText.contains("cannot post /chat/calls") ||
+        responseText.contains("cannot get /chat/calls");
   }
 
   @override

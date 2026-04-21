@@ -3206,6 +3206,9 @@ class _TimelineTaskTable extends StatelessWidget {
                     final approvalLabel = _formatProgressApprovalLabel(
                       row.approvalState,
                     );
+                    final effectiveStatusLabel = _resolveTimelineStatusLabel(
+                      row,
+                    );
                     final canAction =
                         canReviewProgress &&
                         row.approvalState != _progressApprovalApproved;
@@ -3260,7 +3263,9 @@ class _TimelineTaskTable extends StatelessWidget {
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  ProductionStatusPill(label: row.status),
+                                  ProductionStatusPill(
+                                    label: effectiveStatusLabel,
+                                  ),
                                   const SizedBox(height: 8),
                                   _InfoPill(
                                     icon: Icons.verified_outlined,
@@ -5059,6 +5064,13 @@ String _formatProgressApprovalLabel(String approvalState) {
     return "Pending approval";
   }
   return "Pending approval";
+}
+
+String _resolveTimelineStatusLabel(ProductionTimelineRow row) {
+  if (row.approvalState == _progressApprovalApproved) {
+    return "completed";
+  }
+  return row.status;
 }
 
 String _formatDeviationStatus(String status) {

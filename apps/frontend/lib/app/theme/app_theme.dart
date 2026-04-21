@@ -67,7 +67,7 @@ class AppTheme {
       surface: AppColors.darkSurface,
       surfaceAlt: AppColors.darkSurfaceAlt,
       surfaceMuted: AppColors.darkSurfaceMuted,
-      surfaceTinted: Color(0xFF243455),
+      surfaceTinted: Color(0xFF1C2A43),
       textPrimary: AppColors.darkTextPrimary,
       textSecondary: AppColors.darkTextSecondary,
       border: AppColors.darkBorder,
@@ -95,7 +95,7 @@ class AppTheme {
       surface: AppColors.businessSurface,
       surfaceAlt: AppColors.businessSurfaceAlt,
       surfaceMuted: AppColors.businessCard,
-      surfaceTinted: Color(0xFF25385C),
+      surfaceTinted: Color(0xFF1A2A43),
       textPrimary: AppColors.businessTextPrimary,
       textSecondary: AppColors.businessTextSecondary,
       border: AppColors.businessBorder,
@@ -340,10 +340,20 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: palette.textPrimary,
-          backgroundColor: palette.surface.withValues(
-            alpha: isDark ? 0.14 : 0.88,
+          backgroundColor: isDark
+              ? Color.alphaBlend(
+                  palette.primary.withValues(alpha: 0.12),
+                  palette.surfaceAlt,
+                )
+              : palette.surface.withValues(alpha: 0.88),
+          side: BorderSide(
+            color: isDark
+                ? Color.alphaBlend(
+                    palette.primary.withValues(alpha: 0.18),
+                    palette.border,
+                  )
+                : palette.border,
           ),
-          side: BorderSide(color: palette.border),
           minimumSize: const Size(0, 50),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           shape: RoundedRectangleBorder(
