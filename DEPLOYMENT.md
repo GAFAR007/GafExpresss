@@ -8,15 +8,22 @@ This app deploys with the same pattern already used on your other projects:
 
 ## Frontend
 
-Build the Flutter web app from `apps/frontend` with the production URLs injected:
+Recommended terminal deploy from `apps/frontend`:
 
 ```bash
+flutter pub get
 flutter build web \
   --dart-define=API_BASE_URL=https://api.gafarsexpress.gafarstechnologies.com \
   --dart-define=PAYSTACK_CALLBACK_BASE_URL=https://gafarsexpress.gafarstechnologies.com
+netlify deploy --prod --dir=build/web --site=37d7355f-502b-47ff-b24a-0e2d7a58fa02
 ```
 
-Upload `apps/frontend/build/web` to Netlify Drop, then attach the custom domain:
+Manual fallback if CLI deploy is unavailable:
+
+- upload `apps/frontend/build/web` to Netlify Drop
+- or run `netlify link --id 37d7355f-502b-47ff-b24a-0e2d7a58fa02` once, then redeploy with the command above
+
+Netlify target details:
 
 - custom domain: `gafarsexpress.gafarstechnologies.com`
 - GoDaddy CNAME host: `gafarsexpress`
@@ -24,7 +31,17 @@ Upload `apps/frontend/build/web` to Netlify Drop, then attach the custom domain:
 
 ## Backend
 
-Create a new Render Node web service from:
+Render is configured from `render.yaml` and auto-deploys branch `chore/batched-push-2026-04-05`.
+
+Recommended terminal deploy from the repository root:
+
+```bash
+git add <files>
+git commit -m "Describe the fix"
+git push origin chore/batched-push-2026-04-05
+```
+
+Render service settings:
 
 - repo: `GAFAR007/GafExpresss`
 - branch: `chore/batched-push-2026-04-05`
@@ -70,6 +87,13 @@ After Netlify and Render generate their target hostnames, add these GoDaddy CNAM
 - `api.gafarsexpress` -> Render hostname
 
 ## Verification
+
+Run these after deployment:
+
+```bash
+curl https://api.gafarsexpress.gafarstechnologies.com/health
+curl -I https://gafarsexpress.gafarstechnologies.com
+```
 
 - frontend loads at `https://gafarsexpress.gafarstechnologies.com`
 - backend health responds at `https://api.gafarsexpress.gafarstechnologies.com/health`

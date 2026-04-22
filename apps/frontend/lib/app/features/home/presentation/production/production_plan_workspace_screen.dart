@@ -75,6 +75,7 @@ const String _monthEmptyMessage =
 const String _viewInsightsLabel = "View insights";
 const String _downloadProgressLabel = "Download progress";
 const String _emailProgressLabel = "Email progress";
+const String _copyProgressLinkLabel = "Copy view link";
 const String _openDraftLabel = "Open draft";
 const String _returnToDraftLabel = "Return to draft";
 const String _viewInsightsTooltip = "Open plan insights";
@@ -529,34 +530,11 @@ class _ProductionPlanWorkspaceScreenState
   }
 
   Future<void> _emailProgressReport({required String routePath}) async {
-    final result = await showProductionProgressReportEmailDialog(
+    final toEmail = await showProductionProgressReportEmailDialog(
       context,
       initialEmail: _resolveViewerEmail(),
     );
-    if (result == null || result.email.trim().isEmpty) {
-      return;
-    }
-    final toEmail = result.email.trim();
-
-    if (result.action == ProductionProgressReportDialogAction.copyViewLink) {
-      try {
-        final report = await ref
-            .read(productionPlanActionsProvider)
-            .fetchPlanProgressReport(
-              planId: widget.planId,
-              routePath: routePath,
-              toEmail: toEmail,
-            );
-        await Clipboard.setData(ClipboardData(text: report.reportUrl));
-        _showSnackSafe("$_copyProgressLinkSuccess for $toEmail.");
-      } catch (error) {
-        _showSnackSafe(
-          _resolveProductionWorkspaceErrorMessage(
-            error,
-            fallback: _copyProgressLinkFailure,
-          ),
-        );
-      }
+    if (toEmail == null || toEmail.trim().isEmpty) {
       return;
     }
 
@@ -565,7 +543,7 @@ class _ProductionPlanWorkspaceScreenState
           .read(productionPlanActionsProvider)
           .emailPlanProgressReport(
             planId: widget.planId,
-            toEmail: toEmail,
+            toEmail: toEmail.trim(),
             routePath: routePath,
           );
       _showSnackSafe("${response.message} to ${response.toEmail}.");
@@ -574,6 +552,35 @@ class _ProductionPlanWorkspaceScreenState
         _resolveProductionWorkspaceErrorMessage(
           error,
           fallback: _emailProgressFailure,
+        ),
+      );
+    }
+  }
+
+  Future<void> _copyProgressReportLink({required String routePath}) async {
+    final toEmail = await showProductionProgressReportLinkDialog(
+      context,
+      initialEmail: _resolveViewerEmail(),
+    );
+    if (toEmail == null || toEmail.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final report = await ref
+          .read(productionPlanActionsProvider)
+          .fetchPlanProgressReport(
+            planId: widget.planId,
+            routePath: routePath,
+            toEmail: toEmail.trim(),
+          );
+      await Clipboard.setData(ClipboardData(text: report.reportUrl));
+      _showSnackSafe("$_copyProgressLinkSuccess for ${toEmail.trim()}.");
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _copyProgressLinkFailure,
         ),
       );
     }
@@ -923,6 +930,11 @@ class _ProductionPlanWorkspaceScreenState
                   },
                   onEmailProgress: () async {
                     await _emailProgressReport(
+                      routePath: productionPlanDetailPath(widget.planId),
+                    );
+                  },
+                  onCopyProgressLink: () async {
+                    await _copyProgressReportLink(
                       routePath: productionPlanDetailPath(widget.planId),
                     );
                   },
@@ -2062,6 +2074,7 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   final VoidCallback onViewInsights;
   final VoidCallback onDownloadProgress;
   final VoidCallback onEmailProgress;
+  final VoidCallback onCopyProgressLink;
   final VoidCallback? onReturnToDraft;
 
   const _WorkspaceSummaryCard({
@@ -2077,6 +2090,7 @@ class _WorkspaceSummaryCard extends StatelessWidget {
     required this.onViewInsights,
     required this.onDownloadProgress,
     required this.onEmailProgress,
+    required this.onCopyProgressLink,
     this.onReturnToDraft,
   });
 
@@ -2414,6 +2428,15 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 onPressed: onEmailProgress,
                 icon: const Icon(Icons.mail_outline),
                 label: const Text(_emailProgressLabel),
+              ),
+              OutlinedButton.icon(
+                style: _workspaceActionButtonStyle(
+                  context,
+                  accentColor: _workspaceBerry,
+                ),
+                onPressed: onCopyProgressLink,
+                icon: const Icon(Icons.link_outlined),
+                label: const Text(_copyProgressLinkLabel),
               ),
             ],
           ),

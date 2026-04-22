@@ -61,6 +61,7 @@ const String _peopleViewTitle = "People";
 const String _riskViewTitle = "Risk";
 const String _downloadProgressLabel = "Download progress";
 const String _emailProgressLabel = "Email progress";
+const String _copyProgressLinkLabel = "Copy view link";
 const String _downloadProgressSuccess = "Progress report downloaded.";
 const String _downloadProgressFailure = "Unable to download progress report.";
 const String _emailProgressFailure = "Unable to email progress report.";
@@ -422,39 +423,11 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
     }
 
     Future<void> emailProgressReport() async {
-      final result = await showProductionProgressReportEmailDialog(
+      final toEmail = await showProductionProgressReportEmailDialog(
         context,
         initialEmail: preferredEmail,
       );
-      if (result == null || result.email.trim().isEmpty) {
-        return;
-      }
-      final toEmail = result.email.trim();
-
-      if (result.action == ProductionProgressReportDialogAction.copyViewLink) {
-        try {
-          final report = await ref
-              .read(productionPlanActionsProvider)
-              .fetchPlanProgressReport(
-                planId: planId,
-                routePath: productionPlanInsightsPath(planId),
-                toEmail: toEmail,
-              );
-          await Clipboard.setData(ClipboardData(text: report.reportUrl));
-          if (context.mounted) {
-            _showSnack(context, "$_copyProgressLinkSuccess for $toEmail.");
-          }
-        } catch (error) {
-          if (context.mounted) {
-            _showSnack(
-              context,
-              _resolveProductionDetailErrorMessage(
-                error,
-                fallback: _copyProgressLinkFailure,
-              ),
-            );
-          }
-        }
+      if (toEmail == null || toEmail.trim().isEmpty) {
         return;
       }
 
@@ -463,7 +436,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             .read(productionPlanActionsProvider)
             .emailPlanProgressReport(
               planId: planId,
-              toEmail: toEmail,
+              toEmail: toEmail.trim(),
               routePath: productionPlanInsightsPath(planId),
             );
         if (context.mounted) {
@@ -476,6 +449,43 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             _resolveProductionDetailErrorMessage(
               error,
               fallback: _emailProgressFailure,
+            ),
+          );
+        }
+      }
+    }
+
+    Future<void> copyProgressReportLink() async {
+      final toEmail = await showProductionProgressReportLinkDialog(
+        context,
+        initialEmail: preferredEmail,
+      );
+      if (toEmail == null || toEmail.trim().isEmpty) {
+        return;
+      }
+
+      try {
+        final report = await ref
+            .read(productionPlanActionsProvider)
+            .fetchPlanProgressReport(
+              planId: planId,
+              routePath: productionPlanInsightsPath(planId),
+              toEmail: toEmail.trim(),
+            );
+        await Clipboard.setData(ClipboardData(text: report.reportUrl));
+        if (context.mounted) {
+          _showSnack(
+            context,
+            "$_copyProgressLinkSuccess for ${toEmail.trim()}.",
+          );
+        }
+      } catch (error) {
+        if (context.mounted) {
+          _showSnack(
+            context,
+            _resolveProductionDetailErrorMessage(
+              error,
+              fallback: _copyProgressLinkFailure,
             ),
           );
         }
@@ -688,6 +698,7 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
               },
               onDownloadProgressReport: downloadProgressReport,
               onEmailProgressReport: emailProgressReport,
+              onCopyProgressReportLink: copyProgressReportLink,
               onStatusChange: (taskId, status) async {
                 AppDebug.log(
                   _logTag,
@@ -919,6 +930,7 @@ class _PlanDetailBody extends StatefulWidget {
   final Future<void> Function(Map<String, dynamic> payload) onUpdatePreorder;
   final Future<void> Function() onDownloadProgressReport;
   final Future<void> Function() onEmailProgressReport;
+  final Future<void> Function() onCopyProgressReportLink;
   final Future<void> Function(String taskId, String status) onStatusChange;
   final Future<void> Function(
     DateTime workDate,
@@ -961,6 +973,7 @@ class _PlanDetailBody extends StatefulWidget {
     required this.onUpdatePreorder,
     required this.onDownloadProgressReport,
     required this.onEmailProgressReport,
+    required this.onCopyProgressReportLink,
     required this.onStatusChange,
     required this.onBatchLogProgress,
     required this.onApproveProgress,
@@ -1038,6 +1051,7 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
                   onUpdatePreorder: widget.onUpdatePreorder,
                   onDownloadProgressReport: widget.onDownloadProgressReport,
                   onEmailProgressReport: widget.onEmailProgressReport,
+                  onCopyProgressReportLink: widget.onCopyProgressReportLink,
                 ),
                 const SizedBox(height: _sectionSpacing),
                 _DetailViewModePicker(
@@ -2032,6 +2046,7 @@ class _PlanSummaryCard extends StatelessWidget {
   final Future<void> Function(Map<String, dynamic> payload) onUpdatePreorder;
   final Future<void> Function() onDownloadProgressReport;
   final Future<void> Function() onEmailProgressReport;
+  final Future<void> Function() onCopyProgressReportLink;
 
   const _PlanSummaryCard({
     required this.plan,
@@ -2046,6 +2061,7 @@ class _PlanSummaryCard extends StatelessWidget {
     required this.onUpdatePreorder,
     required this.onDownloadProgressReport,
     required this.onEmailProgressReport,
+    required this.onCopyProgressReportLink,
   });
 
   @override
@@ -2132,6 +2148,17 @@ class _PlanSummaryCard extends StatelessWidget {
         },
         icon: const Icon(Icons.mail_outline),
         label: const Text(_emailProgressLabel),
+      ),
+      OutlinedButton.icon(
+        style: AppButtonStyles.outlined(
+          theme: Theme.of(context),
+          tone: AppStatusTone.neutral,
+        ),
+        onPressed: () async {
+          await onCopyProgressReportLink();
+        },
+        icon: const Icon(Icons.link_outlined),
+        label: const Text(_copyProgressLinkLabel),
       ),
     ];
     if (preorderSummary != null && isOwner) {
@@ -2377,7 +2404,7 @@ class _PlanSummaryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: _summaryTitleSpacing),
                     Text(
-                      "Download or email this progress report, and manage pre-order controls when available.",
+                      "Download, email, or copy a sign-in-ready view link for this progress report, and manage pre-order controls when available.",
                       style: textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),

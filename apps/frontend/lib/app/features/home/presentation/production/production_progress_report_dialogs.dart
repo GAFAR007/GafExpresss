@@ -5,38 +5,57 @@ import 'package:flutter/material.dart';
 const String _reportEmailDialogTitle = "Email progress report";
 const String _reportEmailDialogHint = "name@example.com";
 const String _reportEmailDialogHelper =
-    "Send the current progress report as a styled HTML email, or copy a view link with this email already filled at sign-in.";
+    "Send the current progress report as a styled HTML email.";
 const String _reportEmailDialogCancel = "Cancel";
 const String _reportEmailDialogSubmit = "Send";
-const String _reportEmailDialogCopy = "Copy view link";
+const String _reportLinkDialogTitle = "Copy view link";
+const String _reportLinkDialogHelper =
+    "Enter the email that should be prefilled on sign-in, then generate and copy the view link.";
+const String _reportLinkDialogSubmit = "Generate link";
 const String _reportEmailValidationMessage = "Enter a valid email address.";
 final RegExp _reportEmailPattern = RegExp(r"^[^\s@]+@[^\s@]+\.[^\s@]+$");
 
-enum ProductionProgressReportDialogAction { send, copyViewLink }
-
-class ProductionProgressReportDialogResult {
-  final String email;
-  final ProductionProgressReportDialogAction action;
-
-  const ProductionProgressReportDialogResult({
-    required this.email,
-    required this.action,
-  });
-}
-
-Future<ProductionProgressReportDialogResult?>
-showProductionProgressReportEmailDialog(
+Future<String?> showProductionProgressReportEmailDialog(
   BuildContext context, {
   String initialEmail = "",
 }) async {
+  return _showProductionProgressRecipientDialog(
+    context,
+    initialEmail: initialEmail,
+    title: _reportEmailDialogTitle,
+    helper: _reportEmailDialogHelper,
+    submitLabel: _reportEmailDialogSubmit,
+  );
+}
+
+Future<String?> showProductionProgressReportLinkDialog(
+  BuildContext context, {
+  String initialEmail = "",
+}) async {
+  return _showProductionProgressRecipientDialog(
+    context,
+    initialEmail: initialEmail,
+    title: _reportLinkDialogTitle,
+    helper: _reportLinkDialogHelper,
+    submitLabel: _reportLinkDialogSubmit,
+  );
+}
+
+Future<String?> _showProductionProgressRecipientDialog(
+  BuildContext context, {
+  required String initialEmail,
+  required String title,
+  required String helper,
+  required String submitLabel,
+}) async {
   final controller = TextEditingController(text: initialEmail.trim());
   String? validationMessage;
-  final result = await showDialog<ProductionProgressReportDialogResult>(
+  final result = await showDialog<String>(
     context: context,
     builder: (dialogContext) {
       return StatefulBuilder(
         builder: (context, setDialogState) {
-          void submit(ProductionProgressReportDialogAction action) {
+          void submit() {
             final value = controller.text.trim();
             if (!_reportEmailPattern.hasMatch(value)) {
               setDialogState(() {
@@ -44,21 +63,16 @@ showProductionProgressReportEmailDialog(
               });
               return;
             }
-            Navigator.of(dialogContext).pop(
-              ProductionProgressReportDialogResult(
-                email: value,
-                action: action,
-              ),
-            );
+            Navigator.of(dialogContext).pop(value);
           }
 
           return AlertDialog(
-            title: const Text(_reportEmailDialogTitle),
+            title: Text(title),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(_reportEmailDialogHelper),
+                Text(helper),
                 const SizedBox(height: 12),
                 TextField(
                   controller: controller,
@@ -68,8 +82,7 @@ showProductionProgressReportEmailDialog(
                     hintText: _reportEmailDialogHint,
                     errorText: validationMessage,
                   ),
-                  onSubmitted: (_) =>
-                      submit(ProductionProgressReportDialogAction.send),
+                  onSubmitted: (_) => submit(),
                 ),
               ],
             ),
@@ -78,16 +91,7 @@ showProductionProgressReportEmailDialog(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text(_reportEmailDialogCancel),
               ),
-              OutlinedButton(
-                onPressed: () =>
-                    submit(ProductionProgressReportDialogAction.copyViewLink),
-                child: const Text(_reportEmailDialogCopy),
-              ),
-              FilledButton(
-                onPressed: () =>
-                    submit(ProductionProgressReportDialogAction.send),
-                child: const Text(_reportEmailDialogSubmit),
-              ),
+              FilledButton(onPressed: submit, child: Text(submitLabel)),
             ],
           );
         },
