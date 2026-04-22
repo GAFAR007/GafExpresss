@@ -4905,7 +4905,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
               : requiredTaskProgressProofCount(parsedActualPlots);
           final proofCountMatches = requiredProofCount == 0
               ? selectedProofs.isEmpty
-              : selectedProofs.length == requiredProofCount;
+              : hasRequiredTaskProgressProofMix(selectedProofs);
           final remainingAfterSave = parsedActualPlots == null
               ? 0
               : (taskTargetPlots - parsedActualPlots) < 0
@@ -5120,7 +5120,7 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          "Proof images",
+                          "Proof media",
                           style: Theme.of(dialogContext).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
@@ -5129,8 +5129,8 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           requiredProofCount == 0
                               ? "Enter a positive actual amount to unlock proof uploads."
                               : proofCountMatches
-                              ? "Upload exactly $requiredProofCount proof image(s) before saving."
-                              : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s).",
+                              ? "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit before saving."
+                              : "Select exactly 1 photo and 1 video of the greenhouse, plot, or unit.",
                           style: Theme.of(dialogContext).textTheme.bodySmall
                               ?.copyWith(
                                 color: Theme.of(
@@ -5155,8 +5155,8 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           ),
                           label: Text(
                             selectedProofs.isEmpty
-                                ? "Add proof images"
-                                : "Replace proof images",
+                                ? "Add photo + video"
+                                : "Replace photo + video",
                           ),
                         ),
                         if (selectedProofs.isNotEmpty) ...[
@@ -5167,8 +5167,10 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                             children: selectedProofs
                                 .map(
                                   (proof) => ActionChip(
-                                    avatar: const Icon(
-                                      Icons.image_outlined,
+                                    avatar: Icon(
+                                      proof.isVideo
+                                          ? Icons.videocam_outlined
+                                          : Icons.image_outlined,
                                       size: 18,
                                     ),
                                     label: Text(proof.displayLabel),
@@ -5290,15 +5292,15 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                             selectedProofs.isNotEmpty) {
                           setDialogState(() {
                             validationMessage =
-                                "Proof images are not allowed when actual amount is 0.";
+                                "Proof uploads are not allowed when actual amount is 0.";
                           });
                           return;
                         }
                         if (requiredProofCount > 0 &&
-                            selectedProofs.length != requiredProofCount) {
+                            !hasRequiredTaskProgressProofMix(selectedProofs)) {
                           setDialogState(() {
                             validationMessage =
-                                "Upload exactly $requiredProofCount proof image(s).";
+                                "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit.";
                           });
                           return;
                         }

@@ -1,15 +1,15 @@
 /// lib/app/features/home/presentation/production/production_task_progress_proof_viewer.dart
 /// ----------------------------------------------------------------------------------------
 /// WHAT:
-/// - Proof image browser and preview helpers for production task progress.
+/// - Proof media browser and preview helpers for production task progress.
 ///
 /// WHY:
-/// - Managers need to review saved proof images directly from task logs.
-/// - Newly selected proof images should be inspectable before submission.
+/// - Managers need to review saved proof files directly from task logs.
+/// - Newly selected proof files should be inspectable before submission.
 ///
 /// HOW:
 /// - Uses a date-filtered browser for saved proof records.
-/// - Uses an interactive image preview for both saved and newly selected images.
+/// - Uses image preview for photos and a metadata dialog for videos/files.
 library;
 
 import 'dart:typed_data';
@@ -22,20 +22,23 @@ import 'package:frontend/app/features/home/presentation/production/production_mo
 
 const String _browserTitle = "View proof";
 const String _browserDateLabel = "Filter by date";
-const String _browserDateHint = "Pick another date to inspect proof images.";
-const String _browserEmptyTitle = "No proof images for this date";
+const String _browserDateHint = "Pick another date to inspect proof files.";
+const String _browserEmptyTitle = "No proof files for this date";
 const String _browserEmptyMessage =
-    "Select a different date to see saved proof images.";
+    "Select a different date to see saved proof files.";
 const String _browserCloseLabel = "Close";
 const String _browserOpenLabel = "View proof";
 const String _previewCloseLabel = "Close";
-const String _previewMissingLabel = "Proof image is unavailable.";
+const String _previewMissingLabel = "Proof file is unavailable.";
 const String _previewSizeLabel = "Size";
 const String _previewDateLabel = "Date";
 const String _previewByLabel = "By";
+const String _previewTypeLabel = "Type";
 const String _previewDocumentLabel = "Open file";
 const String _previewOpenFail = "Unable to open proof file.";
 const String _previewMissingUrl = "Proof file link is unavailable.";
+const String _previewVideoSelectedLabel =
+    "Video preview opens after upload. Review the filename below before saving.";
 
 Future<void> showProductionTaskProgressPickedProofPreview(
   BuildContext context, {
@@ -43,6 +46,17 @@ Future<void> showProductionTaskProgressPickedProofPreview(
 }) async {
   final bytes = proof.bytes.isEmpty ? null : Uint8List.fromList(proof.bytes);
   if (bytes == null) {
+    return;
+  }
+
+  if (proof.isVideo) {
+    await _showFilePreviewDialog(
+      context,
+      title: proof.displayLabel,
+      subtitle: _formatProofSize(proof.sizeBytes),
+      icon: Icons.videocam_outlined,
+      message: _previewVideoSelectedLabel,
+    );
     return;
   }
 
@@ -79,7 +93,7 @@ Future<void> showProductionTaskProgressProofBrowser(
           final proofRows = filteredRows
               .where((row) => row.proofs.isNotEmpty)
               .toList();
-          final proofImageCount = proofRows.fold<int>(
+          final proofFileCount = proofRows.fold<int>(
             0,
             (sum, row) => sum + row.proofCount,
           );
@@ -168,7 +182,7 @@ Future<void> showProductionTaskProgressProofBrowser(
                         ),
                         Chip(
                           avatar: const Icon(Icons.image_outlined, size: 18),
-                          label: Text("$proofImageCount proof image(s)"),
+                          label: Text("$proofFileCount proof file(s)"),
                         ),
                       ],
                     ),
@@ -297,6 +311,11 @@ String _buildNetworkProofSubtitle(ProductionTaskProgressProofRecord proof) {
   if (proof.uploadedAt != null) {
     parts.add("$_previewDateLabel: ${formatDateLabel(proof.uploadedAt)}");
   }
+  if (proof.isVideo) {
+    parts.add("$_previewTypeLabel: Video");
+  } else if (proof.isImage) {
+    parts.add("$_previewTypeLabel: Photo");
+  }
   if (proof.mimeType.trim().isNotEmpty) {
     parts.add(proof.mimeType.trim());
   }
@@ -401,6 +420,100 @@ Future<void> _showImagePreviewDialog(
   );
 }
 
+Future<void> _showFilePreviewDialog(
+  BuildContext context, {
+  required String title,
+  required IconData icon,
+  required String message,
+  String? subtitle,
+}) async {
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      final theme = Theme.of(dialogContext);
+      return Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (subtitle != null &&
+                              subtitle.trim().isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              subtitle.trim(),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text(_previewCloseLabel),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.45,
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(icon, size: 40, color: theme.colorScheme.primary),
+                      const SizedBox(height: 12),
+                      Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text(_previewCloseLabel),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 String _formatProofSize(int sizeBytes) {
   if (sizeBytes <= 0) {
     return "0 B";
@@ -425,18 +538,7 @@ bool _looksLikeObjectId(String value) {
 }
 
 bool _isImageProof(ProductionTaskProgressProofRecord proof) {
-  final mimeType = proof.mimeType.trim().toLowerCase();
-  if (mimeType.startsWith("image/")) {
-    return true;
-  }
-  final filename = proof.filename.trim().toLowerCase();
-  return filename.endsWith(".png") ||
-      filename.endsWith(".jpg") ||
-      filename.endsWith(".jpeg") ||
-      filename.endsWith(".gif") ||
-      filename.endsWith(".webp") ||
-      filename.endsWith(".bmp") ||
-      filename.endsWith(".heic");
+  return proof.isImage;
 }
 
 bool _looksLikeImageUrl(String value) {
@@ -454,9 +556,7 @@ bool _looksLikeImageUrl(String value) {
 }
 
 void _showProofMessage(BuildContext context, String message) {
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text(message)));
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
 
 String _proofRowTitle(ProductionTimelineRow row) {
@@ -686,7 +786,10 @@ class _ProofAssetFallback extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.insert_drive_file_outlined, color: theme.colorScheme.primary),
+            Icon(
+              Icons.insert_drive_file_outlined,
+              color: theme.colorScheme.primary,
+            ),
             const SizedBox(height: 6),
             Text(
               label,

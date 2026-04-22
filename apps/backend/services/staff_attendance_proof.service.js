@@ -9,7 +9,7 @@
  * - Keeps upload and validation logic out of the controller.
  *
  * HOW:
- * - Validates the file payload and MIME type.
+ * - Validates the file payload and MIME/extension.
  * - Streams the file to Cloudinary and returns proof metadata.
  */
 
@@ -28,7 +28,13 @@ const ALLOWED_MIME_TYPES = [
   "image/png",
   "image/jpg",
   "image/webp",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+  "video/x-m4v",
+  "application/octet-stream",
 ];
+const ALLOWED_FORMATS = ["pdf", "png", "jpg", "jpeg", "webp", "mp4", "mov", "webm", "m4v"];
 
 const SERVICE_NAME = "CLOUDINARY";
 const OPERATION_UPLOAD = "staff_attendance_proof_upload";
@@ -49,6 +55,57 @@ function resolveProofType(mimeType) {
     return "document";
   }
   return "";
+}
+
+function normalizeExtension(fileName) {
+  const normalized = (fileName || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  const parts = normalized.split(".");
+  return parts.length > 1 ? parts.pop().trim() : "";
+}
+
+function resolveProofMimeType(file) {
+  const mimetype = (file?.mimetype || "").toString().trim().toLowerCase();
+  if (mimetype && mimetype !== "application/octet-stream") {
+    return mimetype;
+  }
+  const extension = normalizeExtension(file?.originalname);
+  switch (extension) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "mp4":
+      return "video/mp4";
+    case "mov":
+      return "video/quicktime";
+    case "webm":
+      return "video/webm";
+    case "m4v":
+      return "video/x-m4v";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return mimetype || "";
+  }
+}
+
+function assertSupportedProofFile(file) {
+  const extension = normalizeExtension(file?.originalname);
+  const mimetype = (file?.mimetype || "").toString().trim().toLowerCase();
+  const hasAllowedMimeType = ALLOWED_MIME_TYPES.includes(mimetype);
+  const hasAllowedExtension = ALLOWED_FORMATS.includes(extension);
+  if (!hasAllowedMimeType && !hasAllowedExtension) {
+    throw new Error("Unsupported proof format");
+  }
 }
 
 function assertCloudinaryConfig() {
@@ -100,9 +157,7 @@ async function uploadStaffAttendanceProof({
     throw new Error("Proof file is required");
   }
 
-  if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-    throw new Error("Unsupported proof format");
-  }
+  assertSupportedProofFile(file);
 
   assertCloudinaryConfig();
 
@@ -112,7 +167,7 @@ async function uploadStaffAttendanceProof({
         {
           folder: `gafexpress/staff-attendance-proofs/${businessId}/${attendanceId}`,
           resource_type: "auto",
-          allowed_formats: ["pdf", "png", "jpg", "jpeg", "webp"],
+          allowed_formats: ALLOWED_FORMATS,
         },
         (error, result) => {
           if (error) return reject(error);
@@ -133,8 +188,8 @@ async function uploadStaffAttendanceProof({
       url: uploadResult.secure_url,
       publicId: uploadResult.public_id || "",
       filename: file.originalname || "",
-      mimeType: file.mimetype || "",
-      type: resolveProofType(file.mimetype),
+      mimeType: resolveProofMimeType(file),
+      type: resolveProofType(resolveProofMimeType(file)),
       sizeBytes: file.size || 0,
       uploadedAt: new Date(),
     };

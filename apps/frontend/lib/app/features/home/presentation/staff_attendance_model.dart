@@ -113,6 +113,30 @@ class StaffAttendanceProof {
   }
 
   bool get isUploaded => url.trim().isNotEmpty && filename.trim().isNotEmpty;
+
+  bool get isImage {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.startsWith("image/")) {
+      return true;
+    }
+    final normalizedFilename = filename.trim().toLowerCase();
+    return normalizedFilename.endsWith(".png") ||
+        normalizedFilename.endsWith(".jpg") ||
+        normalizedFilename.endsWith(".jpeg") ||
+        normalizedFilename.endsWith(".webp");
+  }
+
+  bool get isVideo {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.startsWith("video/")) {
+      return true;
+    }
+    final normalizedFilename = filename.trim().toLowerCase();
+    return normalizedFilename.endsWith(".mp4") ||
+        normalizedFilename.endsWith(".mov") ||
+        normalizedFilename.endsWith(".webm") ||
+        normalizedFilename.endsWith(".m4v");
+  }
 }
 
 class StaffAttendanceClockOutAudit {

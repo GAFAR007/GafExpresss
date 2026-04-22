@@ -1657,11 +1657,11 @@ class ProductionTaskProgressProofInput {
   });
 
   bool get isImage {
-    final normalized = filename.trim().toLowerCase();
-    return normalized.endsWith(".png") ||
-        normalized.endsWith(".jpg") ||
-        normalized.endsWith(".jpeg") ||
-        normalized.endsWith(".webp");
+    return isSupportedProductionProofImage(filename: filename, mimeType: "");
+  }
+
+  bool get isVideo {
+    return isSupportedProductionProofVideo(filename: filename, mimeType: "");
   }
 
   String get displayLabel {
@@ -1669,7 +1669,7 @@ class ProductionTaskProgressProofInput {
     if (label.isNotEmpty) {
       return label;
     }
-    return "Proof image";
+    return "Proof file";
   }
 }
 
@@ -2763,6 +2763,12 @@ class ProductionTaskProgressProofRecord {
   }
 
   bool get hasUrl => url.trim().isNotEmpty;
+
+  bool get isImage =>
+      isSupportedProductionProofImage(filename: filename, mimeType: mimeType);
+
+  bool get isVideo =>
+      isSupportedProductionProofVideo(filename: filename, mimeType: mimeType);
 }
 
 class ProductionTimelineRow {
@@ -3349,9 +3355,68 @@ num? _parseNullableNum(dynamic value) {
 int requiredTaskProgressProofCount(num actualPlots) {
   final normalizedActualPlots = actualPlots.toDouble();
   if (normalizedActualPlots <= 0) {
-    return 1;
+    return 0;
   }
-  return normalizedActualPlots.ceil();
+  return 2;
+}
+
+const List<String> _productionProofImageExtensions = <String>[
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+];
+const List<String> _productionProofVideoExtensions = <String>[
+  ".mp4",
+  ".mov",
+  ".webm",
+  ".m4v",
+];
+
+bool isSupportedProductionProofImage({
+  required String filename,
+  required String mimeType,
+}) {
+  final normalizedMimeType = mimeType.trim().toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) {
+    return true;
+  }
+  final normalizedFilename = filename.trim().toLowerCase();
+  return _productionProofImageExtensions.any(normalizedFilename.endsWith);
+}
+
+bool isSupportedProductionProofVideo({
+  required String filename,
+  required String mimeType,
+}) {
+  final normalizedMimeType = mimeType.trim().toLowerCase();
+  if (normalizedMimeType.startsWith("video/")) {
+    return true;
+  }
+  final normalizedFilename = filename.trim().toLowerCase();
+  return _productionProofVideoExtensions.any(normalizedFilename.endsWith);
+}
+
+bool hasRequiredTaskProgressProofMix(
+  List<ProductionTaskProgressProofInput> proofs,
+) {
+  if (proofs.length != 2) {
+    return false;
+  }
+  final imageCount = proofs.where((proof) => proof.isImage).length;
+  final videoCount = proofs.where((proof) => proof.isVideo).length;
+  return imageCount == 1 && videoCount == 1;
+}
+
+bool hasRequiredTaskProgressProofRecordMix(
+  List<ProductionTaskProgressProofRecord> proofs,
+) {
+  if (proofs.length != 2) {
+    return false;
+  }
+  final imageCount = proofs.where((proof) => proof.isImage).length;
+  final videoCount = proofs.where((proof) => proof.isVideo).length;
+  return imageCount == 1 && videoCount == 1;
 }
 
 Map<String, num> _parseOutputByUnit(dynamic value) {

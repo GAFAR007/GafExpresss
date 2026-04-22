@@ -197,8 +197,8 @@ const String _staffDialogEmptyLabel =
     "No staff profiles match this task role yet. Add staff first or broaden the role assignment.";
 const String _logDialogTitle = "Record daily progress";
 const String _logDialogSubmitLabel = "Submit";
-const String _logDialogUploadProofLabel = "Upload proof";
-const String _logDialogReplaceProofLabel = "Replace proof";
+const String _logDialogUploadProofLabel = "Add photo + video";
+const String _logDialogReplaceProofLabel = "Replace photo + video";
 const String _logDialogCancelLabel = "Cancel";
 const String _clockOutWizardTitle = "Clock out";
 const String _clockOutWizardContinueLabel = "Continue";
@@ -213,7 +213,11 @@ const String _clockOutWizardStepActivityTitle = "Step 3: Record activity";
 const String _clockOutWizardStepNotesTitle = "Step 4: Add notes";
 const String _clockOutWizardNoProofNeeded =
     "No proof is required when no primary unit contribution is entered.";
-const String _clockOutWizardProofPicking = "Selecting proof images...";
+const String _clockOutWizardProofPicking = "Selecting proof media...";
+const String _clockOutWizardProofRequired =
+    "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit.";
+const String _clockOutWizardProofNotAllowed =
+    "Proof uploads are not allowed when the completed amount is 0.";
 const String _clockOutWizardFinishSaving = "Finishing clock-out...";
 const String _clockOutWizardActiveSessionMissing =
     "No active production session was found for this staff.";
@@ -8335,16 +8339,6 @@ class _WorkspaceClockOutWizardState
       _existingSelectionRow?.actualPlots ??
       0;
 
-  int get _existingSelectionProofCount {
-    final existingRow = _existingSelectionRow;
-    if (existingRow == null) {
-      return 0;
-    }
-    return existingRow.proofCountUploaded > 0
-        ? existingRow.proofCountUploaded
-        : existingRow.proofCount;
-  }
-
   num get _sharedCompletedBeforeEdit =>
       _taskDayLedger?.unitCompleted ??
       _rowsForTaskOnWorkDate.fold<num>(0, (sum, row) => sum + row.actualPlots);
@@ -8368,9 +8362,19 @@ class _WorkspaceClockOutWizardState
   int get _requiredProofCount =>
       requiredTaskProgressProofCount(_primaryAmountValue);
 
-  int get _proofsProvidedCount => _selectedProofs.isNotEmpty
-      ? _selectedProofs.length
-      : _existingSelectionProofCount;
+  bool get _existingSelectionHasRequiredProofMix {
+    final existingRow = _existingSelectionRow;
+    if (existingRow == null) {
+      return false;
+    }
+    return hasRequiredTaskProgressProofRecordMix(existingRow.proofs);
+  }
+
+  bool get _proofRequirementSatisfied => _requiredProofCount == 0
+      ? _selectedProofs.isEmpty
+      : _selectedProofs.isNotEmpty
+      ? hasRequiredTaskProgressProofMix(_selectedProofs)
+      : _existingSelectionHasRequiredProofMix;
 
   num get _remainingAfterSave {
     final remaining =
@@ -8625,18 +8629,17 @@ class _WorkspaceClockOutWizardState
       if (_selectedProofs.isNotEmpty) {
         if (showError) {
           setState(() {
-            _inlineError =
-                "Proof images are not allowed when the completed amount is 0.";
+            _inlineError = _clockOutWizardProofNotAllowed;
           });
         }
         return false;
       }
       return true;
     }
-    if (_proofsProvidedCount != _requiredProofCount) {
+    if (!_proofRequirementSatisfied) {
       if (showError) {
         setState(() {
-          _inlineError = "Upload exactly $_requiredProofCount proof image(s).";
+          _inlineError = _clockOutWizardProofRequired;
         });
       }
       return false;
@@ -8777,7 +8780,7 @@ class _WorkspaceClockOutWizardState
       if (requiredProofCount != null) {
         message = requiredProofCount <= 0
             ? _clockOutWizardNoProofNeeded
-            : "Upload exactly ${requiredProofCount.toInt()} proof image(s).";
+            : _clockOutWizardProofRequired;
       }
     } else if (activityType.isNotEmpty && maxAllowedActivityQuantity != null) {
       _activityMaxOverrides[activityType] = maxAllowedActivityQuantity;
@@ -8889,7 +8892,7 @@ class _WorkspaceClockOutWizardState
         _InfoChip(
           label: _requiredProofCount == 0
               ? "Proofs: none required"
-              : "Proofs: $_proofsProvidedCount/$_requiredProofCount",
+              : "Proofs: ${_proofRequirementSatisfied ? "photo + video ready" : "photo + video missing"}",
           icon: Icons.photo_library_outlined,
           backgroundColor: _workspaceSoftBerry,
           foregroundColor: _workspaceBerry,
@@ -9079,12 +9082,34 @@ class _WorkspaceClockOutWizardState
     if (_requiredProofCount <= 0) {
       return const SizedBox.shrink();
     }
-    final completedSlots = _proofsProvidedCount;
+    final selectedHasImage = _selectedProofs.any((proof) => proof.isImage);
+    final selectedHasVideo = _selectedProofs.any((proof) => proof.isVideo);
+    final existingRow = _existingSelectionRow;
+    final existingHasImage =
+        existingRow?.proofs.any((proof) => proof.isImage) ?? false;
+    final existingHasVideo =
+        existingRow?.proofs.any((proof) => proof.isVideo) ?? false;
+    final slotStates = <({String label, bool filled, IconData icon})>[
+      (
+        label: "Photo",
+        filled: _selectedProofs.isNotEmpty
+            ? selectedHasImage
+            : existingHasImage,
+        icon: Icons.image_outlined,
+      ),
+      (
+        label: "Video",
+        filled: _selectedProofs.isNotEmpty
+            ? selectedHasVideo
+            : existingHasVideo,
+        icon: Icons.videocam_outlined,
+      ),
+    ];
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: List<Widget>.generate(_requiredProofCount, (index) {
-        final slotFilled = index < completedSlots;
+      children: slotStates.map((slot) {
+        final slotFilled = slot.filled;
         return Container(
           width: 72,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -9100,13 +9125,13 @@ class _WorkspaceClockOutWizardState
           child: Column(
             children: [
               Icon(
-                slotFilled ? Icons.check_circle_outline : Icons.image_outlined,
+                slotFilled ? Icons.check_circle_outline : slot.icon,
                 size: 20,
                 color: slotFilled ? _workspaceTeal : _workspaceNavy,
               ),
               const SizedBox(height: 6),
               Text(
-                "Proof ${index + 1}",
+                slot.label,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w700,
@@ -9116,7 +9141,7 @@ class _WorkspaceClockOutWizardState
             ],
           ),
         );
-      }),
+      }).toList(),
     );
   }
 
@@ -9124,12 +9149,9 @@ class _WorkspaceClockOutWizardState
     final theme = Theme.of(context);
     final proofStatusText = _requiredProofCount <= 0
         ? _clockOutWizardNoProofNeeded
-        : _selectedProofs.isNotEmpty
-        ? "${_selectedProofs.length} of $_requiredProofCount uploaded"
-        : _existingSelectionProofCount == _requiredProofCount &&
-              _existingSelectionProofCount > 0
-        ? "Saved proof complete"
-        : "$_proofsProvidedCount of $_requiredProofCount uploaded";
+        : _proofRequirementSatisfied
+        ? "Saved proof pair is ready."
+        : "1 photo and 1 video are required.";
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -9145,7 +9167,7 @@ class _WorkspaceClockOutWizardState
         Text(
           _requiredProofCount <= 0
               ? _clockOutWizardNoProofNeeded
-              : "$_requiredProofCount proof${_requiredProofCount == 1 ? "" : "s"} required",
+              : "Upload 1 photo and 1 video of the greenhouse, plot, or unit.",
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -9193,7 +9215,12 @@ class _WorkspaceClockOutWizardState
             children: _selectedProofs
                 .map(
                   (proof) => ActionChip(
-                    avatar: const Icon(Icons.image_outlined, size: 18),
+                    avatar: Icon(
+                      proof.isVideo
+                          ? Icons.videocam_outlined
+                          : Icons.image_outlined,
+                      size: 18,
+                    ),
                     label: Text(proof.displayLabel),
                     onPressed: () {
                       showProductionTaskProgressPickedProofPreview(
@@ -10113,18 +10140,22 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
           final proofCountMatchesSelectedAmount = requiredProofCount == 0
               ? selectedProofs.isEmpty
               : selectedProofs.isNotEmpty
-              ? selectedProofs.length == requiredProofCount
-              : existingSelectionProofCount == requiredProofCount;
+              ? hasRequiredTaskProgressProofMix(selectedProofs)
+              : existingSelectionProofCount == requiredProofCount &&
+                    existingSelectionRow != null &&
+                    hasRequiredTaskProgressProofRecordMix(
+                      existingSelectionRow.proofs,
+                    );
           final proofInstructionText = requiredProofCount == 0
               ? "Proof uploads are required only when a positive unit contribution is entered."
               : proofCountMatchesSelectedAmount
               ? selectedProofs.isEmpty
                     ? existingSelectionProofCount > 0 &&
                               existingSelectionProofCount == requiredProofCount
-                          ? "This staff/unit already has $existingSelectionProofCount proof image(s) saved."
-                          : "Upload exactly $requiredProofCount proof image(s) before submitting."
-                    : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s)."
-              : "Selected ${selectedProofs.length} of $requiredProofCount required proof image(s).";
+                          ? "This staff/unit already has the required photo and video saved."
+                          : _clockOutWizardProofRequired
+                    : "Selected photo + video pair is ready."
+              : _clockOutWizardProofRequired;
           final proofButtonLabel =
               selectedProofs.isNotEmpty || existingSelectionProofCount > 0
               ? _logDialogReplaceProofLabel
@@ -10868,7 +10899,7 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  "Proof images",
+                                  "Proof media",
                                   style: Theme.of(context).textTheme.titleSmall
                                       ?.copyWith(fontWeight: FontWeight.w800),
                                 ),
@@ -10891,8 +10922,10 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                                     children: selectedProofs
                                         .map(
                                           (proof) => ActionChip(
-                                            avatar: const Icon(
-                                              Icons.image_outlined,
+                                            avatar: Icon(
+                                              proof.isVideo
+                                                  ? Icons.videocam_outlined
+                                                  : Icons.image_outlined,
                                               size: 18,
                                             ),
                                             label: Text(proof.displayLabel),
@@ -11102,8 +11135,8 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
                         if (!proofCountMatchesSelectedAmount) {
                           setDialogState(() {
                             validationError = requiredProofCount == 0
-                                ? "Proof images are not allowed when actual amount is 0."
-                                : "Upload exactly $requiredProofCount proof image(s).";
+                                ? _clockOutWizardProofNotAllowed
+                                : _clockOutWizardProofRequired;
                           });
                           return;
                         }

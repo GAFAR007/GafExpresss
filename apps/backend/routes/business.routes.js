@@ -40,6 +40,12 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
 });
 
+// WHY: Proof uploads include short field videos, so the limit must be higher.
+const proofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB max
+});
+
 function parseTaskProgressProofUploads(req, res, next) {
   const contentType = (req.headers["content-type"] || "")
     .toString()
@@ -47,7 +53,7 @@ function parseTaskProgressProofUploads(req, res, next) {
   if (!contentType.includes("multipart/form-data")) {
     return next();
   }
-  return upload.array("proofs", 10)(req, res, next);
+  return proofUpload.array("proofs", 10)(req, res, next);
 }
 
 function parseAttendanceProofUploads(req, res, next) {
@@ -57,7 +63,7 @@ function parseAttendanceProofUploads(req, res, next) {
   if (!contentType.includes("multipart/form-data")) {
     return next();
   }
-  return upload.fields([
+  return proofUpload.fields([
     {
       name: "proof",
       maxCount: 1,

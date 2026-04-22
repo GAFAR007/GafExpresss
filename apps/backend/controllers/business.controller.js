@@ -444,18 +444,19 @@ const PRODUCTION_COPY = {
     "Activity quantity must be a valid non-negative number",
   TASK_PROGRESS_ACTIVITY_TARGET_EXCEEDED:
     "Activity quantity exceeds the remaining shared activity target",
-  TASK_PROGRESS_PROOFS_REQUIRED: "Upload proof images before logging progress",
+  TASK_PROGRESS_PROOFS_REQUIRED:
+    "Upload 1 photo and 1 video of the greenhouse, plot, or unit before logging progress",
   TASK_PROGRESS_PROOFS_COUNT_INVALID:
-    "Upload exactly the required number of proof images",
+    "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit",
   TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS:
-    "Proof images are not allowed when actual amount is zero",
+    "Proof uploads are not allowed when actual amount is zero",
   TASK_PROGRESS_DELAY_REASON_INVALID: "Delay reason is invalid",
   TASK_PROGRESS_ZERO_DELAY_REASON_REQUIRED:
     "Delay reason is required when actual amount is zero",
   TASK_PROGRESS_ATTENDANCE_REQUIRED:
     "Clock in before logging progress. Clock-out is captured when you save the production log.",
   TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED:
-    "Complete attendance proof before saving or batching production progress.",
+    "Complete attendance proof with 1 photo and 1 video before saving or batching production progress.",
   TASK_PROGRESS_STAFF_ID_INVALID: "Staff id is invalid",
   TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN:
     "staffId is required when multiple farmers are assigned",
@@ -3347,8 +3348,10 @@ function copyAttendanceProofsToTaskProgressProofs({
   const normalizedProofs = normalizeStaffAttendanceProofs(attendance);
   const requiredProofCount = parseNonNegativeIntegerInput(requiredProofs);
   const proofsToCopy =
-    requiredProofCount == null || requiredProofCount <= 0
+    requiredProofCount == null
       ? normalizedProofs
+      : requiredProofCount <= 0
+      ? []
       : normalizedProofs
           .filter((proof) => proof.unitIndex <= requiredProofCount)
           .slice(0, requiredProofCount);
@@ -3733,9 +3736,122 @@ function resolveTaskProgressTargetPlotUnits(
 function resolveTaskProgressProofCount(actualPlots) {
   const normalizedActualPlots = Math.max(0, Number(actualPlots || 0));
   if (!Number.isFinite(normalizedActualPlots) || normalizedActualPlots <= 0) {
-    return 1;
+    return 0;
   }
-  return Math.ceil(normalizedActualPlots);
+  return 2;
+}
+
+function isTaskProgressImageProofAsset({ filename = "", mimeType = "" }) {
+  const normalizedMimeType = (mimeType || "").toString().trim().toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) {
+    return true;
+  }
+  const normalizedFilename = (filename || "").toString().trim().toLowerCase();
+  return (
+    normalizedFilename.endsWith(".png") ||
+    normalizedFilename.endsWith(".jpg") ||
+    normalizedFilename.endsWith(".jpeg") ||
+    normalizedFilename.endsWith(".webp")
+  );
+}
+
+function isTaskProgressVideoProofAsset({ filename = "", mimeType = "" }) {
+  const normalizedMimeType = (mimeType || "").toString().trim().toLowerCase();
+  if (normalizedMimeType.startsWith("video/")) {
+    return true;
+  }
+  const normalizedFilename = (filename || "").toString().trim().toLowerCase();
+  return (
+    normalizedFilename.endsWith(".mp4") ||
+    normalizedFilename.endsWith(".mov") ||
+    normalizedFilename.endsWith(".webm") ||
+    normalizedFilename.endsWith(".m4v")
+  );
+}
+
+function summarizeTaskProgressProofAssets(assets = []) {
+  const summary = {
+    providedProofCount: 0,
+    providedPhotoCount: 0,
+    providedVideoCount: 0,
+  };
+  if (!Array.isArray(assets)) {
+    return summary;
+  }
+  assets.forEach((asset) => {
+    if (!asset) {
+      return;
+    }
+    summary.providedProofCount += 1;
+    if (
+      isTaskProgressImageProofAsset({
+        filename: asset.filename || asset.originalname || "",
+        mimeType: asset.mimeType || asset.mimetype || "",
+      })
+    ) {
+      summary.providedPhotoCount += 1;
+    }
+    if (
+      isTaskProgressVideoProofAsset({
+        filename: asset.filename || asset.originalname || "",
+        mimeType: asset.mimeType || asset.mimetype || "",
+      })
+    ) {
+      summary.providedVideoCount += 1;
+    }
+  });
+  return summary;
+}
+
+function hasRequiredTaskProgressProofMix(summary = {}) {
+  return (
+    Number(summary.providedProofCount || 0) === 2 &&
+    Number(summary.providedPhotoCount || 0) === 1 &&
+    Number(summary.providedVideoCount || 0) === 1
+  );
+}
+
+function buildTaskProgressProofRequirementPayload(summary = {}) {
+  return {
+    requiredProofCount: 2,
+    requiredPhotoCount: 1,
+    requiredVideoCount: 1,
+    providedProofCount: Number(summary.providedProofCount || 0),
+    providedPhotoCount: Number(summary.providedPhotoCount || 0),
+    providedVideoCount: Number(summary.providedVideoCount || 0),
+  };
+}
+
+function isProductionTaskLinkedAttendance({
+  attendance = null,
+  planId = "",
+  taskId = "",
+} = {}) {
+  const normalizedPlanId = normalizeStaffIdInput(planId || attendance?.planId);
+  const normalizedTaskId = normalizeStaffIdInput(taskId || attendance?.taskId);
+  return Boolean(normalizedPlanId && normalizedTaskId);
+}
+
+function resolveAttendanceProofRequirementCount({
+  attendance = null,
+  planId = "",
+  taskId = "",
+  fallbackRequiredProofs = null,
+} = {}) {
+  const requestedProofs = parseNonNegativeIntegerInput(fallbackRequiredProofs);
+  if (requestedProofs != null && requestedProofs > 0) {
+    return requestedProofs;
+  }
+  if (
+    isProductionTaskLinkedAttendance({
+      attendance,
+      planId,
+      taskId,
+    })
+  ) {
+    return 2;
+  }
+  return 1;
 }
 
 function normalizeTaskProgressProofFiles(files) {
@@ -11629,10 +11745,12 @@ async function clockOutStaff(req, res) {
     if (auditNote) {
       attendance.notes = auditNote;
     }
-    const minimumRequiredProofs =
-      requestedRequiredProofs == null
-        ? 1
-        : Math.max(1, requestedRequiredProofs);
+    const minimumRequiredProofs = resolveAttendanceProofRequirementCount({
+      attendance,
+      planId: relatedPlanId,
+      taskId: relatedTaskId,
+      fallbackRequiredProofs: requestedRequiredProofs,
+    });
     const clockOutAudit = buildStaffAttendanceClockOutAudit({
       attendance,
       rawAudit: req.body?.clockOutAudit,
@@ -11839,8 +11957,12 @@ async function clockOutStaffWithProof(req, res) {
     const auditWorkDate =
       requestedWorkDate || normalizeWorkDateToDayStart(attendance.clockInAt);
     const minimumRequiredProofs = Math.max(
-      1,
-      requestedRequiredProofs || 0,
+      resolveAttendanceProofRequirementCount({
+        attendance,
+        planId: relatedPlanId,
+        taskId: relatedTaskId,
+        fallbackRequiredProofs: requestedRequiredProofs,
+      }),
       proofFiles.length,
     );
 
@@ -11877,6 +11999,21 @@ async function clockOutStaffWithProof(req, res) {
       fallbackRequiredProofs: minimumRequiredProofs,
       minimumRequiredProofs: minimumRequiredProofs,
     });
+    const mergedProofSummary = summarizeTaskProgressProofAssets(mergedProofs);
+    if (
+      isProductionTaskLinkedAttendance({
+        attendance,
+        planId: relatedPlanId,
+        taskId: relatedTaskId,
+      }) &&
+      mergedProofs.length >= minimumRequiredProofs &&
+      !hasRequiredTaskProgressProofMix(mergedProofSummary)
+    ) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
+        ...buildTaskProgressProofRequirementPayload(mergedProofSummary),
+      });
+    }
     if (
       canonicalFields.sessionStatus !==
       STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED
@@ -12066,16 +12203,33 @@ async function uploadStaffAttendanceProof(req, res) {
       notes: auditNote || attendance.notes || "",
       requiredProofs: requestedRequiredProofs,
     });
+    const minimumRequiredProofs = resolveAttendanceProofRequirementCount({
+      attendance,
+      planId: relatedPlanId,
+      taskId: relatedTaskId,
+      fallbackRequiredProofs: requestedRequiredProofs,
+    });
     const canonicalFields = applyStaffAttendanceCanonicalFields(attendance, {
       proofs: mergedProofs,
       clockOutAudit,
-      fallbackRequiredProofs: Math.max(
-        requestedRequiredProofs || 0,
-        proofFiles.length,
-        1,
-      ),
-      minimumRequiredProofs: 1,
+      fallbackRequiredProofs: Math.max(minimumRequiredProofs, proofFiles.length),
+      minimumRequiredProofs,
     });
+    const mergedProofSummary = summarizeTaskProgressProofAssets(mergedProofs);
+    if (
+      isProductionTaskLinkedAttendance({
+        attendance,
+        planId: relatedPlanId,
+        taskId: relatedTaskId,
+      }) &&
+      mergedProofs.length >= minimumRequiredProofs &&
+      !hasRequiredTaskProgressProofMix(mergedProofSummary)
+    ) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
+        ...buildTaskProgressProofRequirementPayload(mergedProofSummary),
+      });
+    }
     if (auditNote) {
       attendance.notes = auditNote;
     }
@@ -19828,19 +19982,25 @@ async function logProductionTaskProgress(req, res) {
 
     const expectedPlots = Math.max(0, Number(ledgerConfig.unitTarget || 0));
     const expectedPlotUnits = convertPlotsToPlotUnits(expectedPlots) || 0;
-    const requiredProofCount = Math.max(
-      1,
-      resolveTaskProgressProofCount(actualPlots),
-    );
+    const requiredProofCount = resolveTaskProgressProofCount(actualPlots);
     const uploadedProofFiles = normalizeTaskProgressProofFiles(req.files);
+    const uploadedProofSummary = summarizeTaskProgressProofAssets(
+      uploadedProofFiles,
+    );
+    if (requiredProofCount <= 0 && uploadedProofFiles.length > 0) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS,
+        ...buildTaskProgressProofRequirementPayload(uploadedProofSummary),
+      });
+    }
     if (
+      requiredProofCount > 0 &&
       uploadedProofFiles.length > 0 &&
-      uploadedProofFiles.length !== requiredProofCount
+      !hasRequiredTaskProgressProofMix(uploadedProofSummary)
     ) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
-        requiredProofCount,
-        providedProofCount: uploadedProofFiles.length,
+        ...buildTaskProgressProofRequirementPayload(uploadedProofSummary),
       });
     }
     const resolvedQuantityUnit =
@@ -20011,16 +20171,18 @@ async function logProductionTaskProgress(req, res) {
         let attendanceForProgress = completedAttendance;
         if (activeAttendance) {
           if (
+            requiredProofCount > 0 &&
             uploadedProofFiles.length > 0 &&
-            uploadedProofFiles.length !== requiredProofCount
+            !hasRequiredTaskProgressProofMix(uploadedProofSummary)
           ) {
             throw Object.assign(
               new Error(PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID),
               {
                 statusCode: 400,
                 payload: {
-                  requiredProofCount,
-                  providedProofCount: uploadedProofFiles.length,
+                  ...buildTaskProgressProofRequirementPayload(
+                    uploadedProofSummary,
+                  ),
                   attendanceId: activeAttendance._id,
                 },
               },
@@ -20088,6 +20250,26 @@ async function logProductionTaskProgress(req, res) {
               minimumRequiredProofs: requiredProofCount,
             },
           );
+          const activeAttendanceProofSummary = summarizeTaskProgressProofAssets(
+            activeAttendanceProofs,
+          );
+          if (
+            requiredProofCount > 0 &&
+            !hasRequiredTaskProgressProofMix(activeAttendanceProofSummary)
+          ) {
+            throw Object.assign(
+              new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
+              {
+                statusCode: 400,
+                payload: {
+                  ...buildTaskProgressProofRequirementPayload(
+                    activeAttendanceProofSummary,
+                  ),
+                  attendanceId: activeAttendance._id,
+                },
+              },
+            );
+          }
           if (
             activeAttendanceState.sessionStatus !==
             STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED
@@ -20149,6 +20331,25 @@ async function logProductionTaskProgress(req, res) {
               minimumRequiredProofs: requiredProofCount,
             },
           );
+          const completedAttendanceProofSummary =
+            summarizeTaskProgressProofAssets(attendanceProofsForState);
+          if (
+            requiredProofCount > 0 &&
+            !hasRequiredTaskProgressProofMix(completedAttendanceProofSummary)
+          ) {
+            throw Object.assign(
+              new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
+              {
+                statusCode: 400,
+                payload: {
+                  ...buildTaskProgressProofRequirementPayload(
+                    completedAttendanceProofSummary,
+                  ),
+                  attendanceId: completedAttendance._id,
+                },
+              },
+            );
+          }
           if (
             completedAttendanceState.sessionStatus !==
               STAFF_ATTENDANCE_SESSION_STATUS_COMPLETED ||
@@ -20180,14 +20381,35 @@ async function logProductionTaskProgress(req, res) {
           attendance: attendanceForProgress,
           requiredProofs: requiredProofCount,
         });
+        const proofsToPersistSummary = summarizeTaskProgressProofAssets(
+          proofsToPersist,
+        );
         if (proofsToPersist.length < requiredProofCount) {
           throw Object.assign(
             new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
             {
               statusCode: 400,
               payload: {
-                requiredProofCount,
-                providedProofCount: proofsToPersist.length,
+                ...buildTaskProgressProofRequirementPayload(
+                  proofsToPersistSummary,
+                ),
+                attendanceId: attendanceForProgress?._id || null,
+              },
+            },
+          );
+        }
+        if (
+          requiredProofCount > 0 &&
+          !hasRequiredTaskProgressProofMix(proofsToPersistSummary)
+        ) {
+          throw Object.assign(
+            new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
+            {
+              statusCode: 400,
+              payload: {
+                ...buildTaskProgressProofRequirementPayload(
+                  proofsToPersistSummary,
+                ),
                 attendanceId: attendanceForProgress?._id || null,
               },
             },
@@ -20915,15 +21137,25 @@ async function logProductionTaskProgressBatch(req, res) {
       }
 
       try {
-        const requiredProofCount = Math.max(
-          1,
-          resolveTaskProgressProofCount(actualPlots),
-        );
+        const requiredProofCount = resolveTaskProgressProofCount(actualPlots);
         const proofsToPersist = copyAttendanceProofsToTaskProgressProofs({
           attendance: attendanceRecord,
           requiredProofs: requiredProofCount,
         });
+        const proofsToPersistSummary = summarizeTaskProgressProofAssets(
+          proofsToPersist,
+        );
         if (proofsToPersist.length < requiredProofCount) {
+          pushEntryError({
+            errorCode: TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_PROOF_REQUIRED,
+            error: PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
+          });
+          continue;
+        }
+        if (
+          requiredProofCount > 0 &&
+          !hasRequiredTaskProgressProofMix(proofsToPersistSummary)
+        ) {
           pushEntryError({
             errorCode: TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_PROOF_REQUIRED,
             error: PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED,
