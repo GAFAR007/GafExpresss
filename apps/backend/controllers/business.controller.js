@@ -3733,12 +3733,34 @@ function resolveTaskProgressTargetPlotUnits(
   );
 }
 
-function resolveTaskProgressProofCount(actualPlots) {
+function resolveTaskProgressProofMediaCount(actualPlots) {
   const normalizedActualPlots = Math.max(0, Number(actualPlots || 0));
   if (!Number.isFinite(normalizedActualPlots) || normalizedActualPlots <= 0) {
     return 0;
   }
   return Math.max(1, Math.ceil(normalizedActualPlots));
+}
+
+function resolveTaskProgressProofCount(actualPlots) {
+  const requiredMediaCount = resolveTaskProgressProofMediaCount(actualPlots);
+  if (requiredMediaCount <= 0) {
+    return 0;
+  }
+  return requiredMediaCount * 2;
+}
+
+function resolveTaskProgressProofMediaCountFromTotal(requiredProofCount = 0) {
+  const normalizedRequiredProofCount = Math.max(
+    0,
+    Number(requiredProofCount || 0),
+  );
+  if (
+    !Number.isFinite(normalizedRequiredProofCount) ||
+    normalizedRequiredProofCount <= 0
+  ) {
+    return 0;
+  }
+  return Math.ceil(normalizedRequiredProofCount / 2);
 }
 
 function isTaskProgressImageProofAsset({ filename = "", mimeType = "" }) {
@@ -3809,7 +3831,15 @@ function hasRequiredTaskProgressProofMix(summary = {}, requiredProofCount = 0) {
   if (!Number.isFinite(requiredCount) || requiredCount <= 0) {
     return providedProofCount === 0;
   }
-  return providedProofCount >= requiredCount;
+  const requiredMediaCount =
+    resolveTaskProgressProofMediaCountFromTotal(requiredCount);
+  const providedPhotoCount = Number(summary.providedPhotoCount || 0);
+  const providedVideoCount = Number(summary.providedVideoCount || 0);
+  return (
+    providedProofCount === requiredCount &&
+    providedPhotoCount === requiredMediaCount &&
+    providedVideoCount === requiredMediaCount
+  );
 }
 
 function buildTaskProgressProofRequirementPayload(
@@ -3822,8 +3852,12 @@ function buildTaskProgressProofRequirementPayload(
   );
   return {
     requiredProofCount: resolvedRequiredProofCount,
-    requiredPhotoCount: 0,
-    requiredVideoCount: 0,
+    requiredPhotoCount: resolveTaskProgressProofMediaCountFromTotal(
+      resolvedRequiredProofCount,
+    ),
+    requiredVideoCount: resolveTaskProgressProofMediaCountFromTotal(
+      resolvedRequiredProofCount,
+    ),
     providedProofCount: Number(summary.providedProofCount || 0),
     providedPhotoCount: Number(summary.providedPhotoCount || 0),
     providedVideoCount: Number(summary.providedVideoCount || 0),
