@@ -445,9 +445,9 @@ const PRODUCTION_COPY = {
   TASK_PROGRESS_ACTIVITY_TARGET_EXCEEDED:
     "Activity quantity exceeds the remaining shared activity target",
   TASK_PROGRESS_PROOFS_REQUIRED:
-    "Upload 1 photo and 1 video of the greenhouse, plot, or unit before logging progress",
+    "Upload the required proof files of the greenhouse, plot, or unit before logging progress",
   TASK_PROGRESS_PROOFS_COUNT_INVALID:
-    "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit",
+    "Upload all required proof files of the greenhouse, plot, or unit",
   TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS:
     "Proof uploads are not allowed when actual amount is zero",
   TASK_PROGRESS_DELAY_REASON_INVALID: "Delay reason is invalid",
@@ -456,7 +456,7 @@ const PRODUCTION_COPY = {
   TASK_PROGRESS_ATTENDANCE_REQUIRED:
     "Clock in before logging progress. Clock-out is captured when you save the production log.",
   TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED:
-    "Complete attendance proof with 1 photo and 1 video before saving or batching production progress.",
+    "Complete attendance proof before saving or batching production progress.",
   TASK_PROGRESS_STAFF_ID_INVALID: "Staff id is invalid",
   TASK_PROGRESS_STAFF_REQUIRED_FOR_MULTI_ASSIGN:
     "staffId is required when multiple farmers are assigned",
@@ -3351,7 +3351,7 @@ function copyAttendanceProofsToTaskProgressProofs({
     requiredProofCount == null
       ? normalizedProofs
       : requiredProofCount <= 0
-      ? []
+      ? normalizedProofs
       : normalizedProofs
           .filter((proof) => proof.unitIndex <= requiredProofCount)
           .slice(0, requiredProofCount);
@@ -3738,7 +3738,7 @@ function resolveTaskProgressProofCount(actualPlots) {
   if (!Number.isFinite(normalizedActualPlots) || normalizedActualPlots <= 0) {
     return 0;
   }
-  return 2;
+  return Math.max(1, Math.ceil(normalizedActualPlots));
 }
 
 function isTaskProgressImageProofAsset({ filename = "", mimeType = "" }) {
@@ -3803,19 +3803,27 @@ function summarizeTaskProgressProofAssets(assets = []) {
   return summary;
 }
 
-function hasRequiredTaskProgressProofMix(summary = {}) {
-  return (
-    Number(summary.providedProofCount || 0) === 2 &&
-    Number(summary.providedPhotoCount || 0) === 1 &&
-    Number(summary.providedVideoCount || 0) === 1
-  );
+function hasRequiredTaskProgressProofMix(summary = {}, requiredProofCount = 0) {
+  const requiredCount = Math.max(0, Number(requiredProofCount || 0));
+  const providedProofCount = Number(summary.providedProofCount || 0);
+  if (!Number.isFinite(requiredCount) || requiredCount <= 0) {
+    return providedProofCount === 0;
+  }
+  return providedProofCount >= requiredCount;
 }
 
-function buildTaskProgressProofRequirementPayload(summary = {}) {
+function buildTaskProgressProofRequirementPayload(
+  summary = {},
+  requiredProofCount = 0,
+) {
+  const resolvedRequiredProofCount = Math.max(
+    0,
+    Number(requiredProofCount || 0),
+  );
   return {
-    requiredProofCount: 2,
-    requiredPhotoCount: 1,
-    requiredVideoCount: 1,
+    requiredProofCount: resolvedRequiredProofCount,
+    requiredPhotoCount: 0,
+    requiredVideoCount: 0,
     providedProofCount: Number(summary.providedProofCount || 0),
     providedPhotoCount: Number(summary.providedPhotoCount || 0),
     providedVideoCount: Number(summary.providedVideoCount || 0),
@@ -3842,6 +3850,12 @@ function resolveAttendanceProofRequirementCount({
   if (requestedProofs != null && requestedProofs > 0) {
     return requestedProofs;
   }
+  const attendanceRequiredProofs = parseNonNegativeIntegerInput(
+    attendance?.clockOutAudit?.requiredProofs ?? attendance?.requiredProofs,
+  );
+  if (attendanceRequiredProofs != null && attendanceRequiredProofs > 0) {
+    return attendanceRequiredProofs;
+  }
   if (
     isProductionTaskLinkedAttendance({
       attendance,
@@ -3849,7 +3863,10 @@ function resolveAttendanceProofRequirementCount({
       taskId,
     })
   ) {
-    return 2;
+    return resolveTaskProgressProofCount(
+      attendance?.clockOutAudit?.unitsCompleted ??
+        attendance?.numberOfUnitsCompleted,
+    );
   }
   return 1;
 }
@@ -12006,12 +12023,19 @@ async function clockOutStaffWithProof(req, res) {
         planId: relatedPlanId,
         taskId: relatedTaskId,
       }) &&
+      minimumRequiredProofs > 0 &&
       mergedProofs.length >= minimumRequiredProofs &&
-      !hasRequiredTaskProgressProofMix(mergedProofSummary)
+      !hasRequiredTaskProgressProofMix(
+        mergedProofSummary,
+        minimumRequiredProofs,
+      )
     ) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
-        ...buildTaskProgressProofRequirementPayload(mergedProofSummary),
+        ...buildTaskProgressProofRequirementPayload(
+          mergedProofSummary,
+          minimumRequiredProofs,
+        ),
       });
     }
     if (
@@ -12222,12 +12246,19 @@ async function uploadStaffAttendanceProof(req, res) {
         planId: relatedPlanId,
         taskId: relatedTaskId,
       }) &&
+      minimumRequiredProofs > 0 &&
       mergedProofs.length >= minimumRequiredProofs &&
-      !hasRequiredTaskProgressProofMix(mergedProofSummary)
+      !hasRequiredTaskProgressProofMix(
+        mergedProofSummary,
+        minimumRequiredProofs,
+      )
     ) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
-        ...buildTaskProgressProofRequirementPayload(mergedProofSummary),
+        ...buildTaskProgressProofRequirementPayload(
+          mergedProofSummary,
+          minimumRequiredProofs,
+        ),
       });
     }
     if (auditNote) {
@@ -19990,17 +20021,26 @@ async function logProductionTaskProgress(req, res) {
     if (requiredProofCount <= 0 && uploadedProofFiles.length > 0) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS,
-        ...buildTaskProgressProofRequirementPayload(uploadedProofSummary),
+        ...buildTaskProgressProofRequirementPayload(
+          uploadedProofSummary,
+          requiredProofCount,
+        ),
       });
     }
     if (
       requiredProofCount > 0 &&
       uploadedProofFiles.length > 0 &&
-      !hasRequiredTaskProgressProofMix(uploadedProofSummary)
+      !hasRequiredTaskProgressProofMix(
+        uploadedProofSummary,
+        requiredProofCount,
+      )
     ) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID,
-        ...buildTaskProgressProofRequirementPayload(uploadedProofSummary),
+        ...buildTaskProgressProofRequirementPayload(
+          uploadedProofSummary,
+          requiredProofCount,
+        ),
       });
     }
     const resolvedQuantityUnit =
@@ -20173,7 +20213,10 @@ async function logProductionTaskProgress(req, res) {
           if (
             requiredProofCount > 0 &&
             uploadedProofFiles.length > 0 &&
-            !hasRequiredTaskProgressProofMix(uploadedProofSummary)
+            !hasRequiredTaskProgressProofMix(
+              uploadedProofSummary,
+              requiredProofCount,
+            )
           ) {
             throw Object.assign(
               new Error(PRODUCTION_COPY.TASK_PROGRESS_PROOFS_COUNT_INVALID),
@@ -20182,6 +20225,7 @@ async function logProductionTaskProgress(req, res) {
                 payload: {
                   ...buildTaskProgressProofRequirementPayload(
                     uploadedProofSummary,
+                    requiredProofCount,
                   ),
                   attendanceId: activeAttendance._id,
                 },
@@ -20255,7 +20299,10 @@ async function logProductionTaskProgress(req, res) {
           );
           if (
             requiredProofCount > 0 &&
-            !hasRequiredTaskProgressProofMix(activeAttendanceProofSummary)
+            !hasRequiredTaskProgressProofMix(
+              activeAttendanceProofSummary,
+              requiredProofCount,
+            )
           ) {
             throw Object.assign(
               new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
@@ -20264,6 +20311,7 @@ async function logProductionTaskProgress(req, res) {
                 payload: {
                   ...buildTaskProgressProofRequirementPayload(
                     activeAttendanceProofSummary,
+                    requiredProofCount,
                   ),
                   attendanceId: activeAttendance._id,
                 },
@@ -20335,7 +20383,10 @@ async function logProductionTaskProgress(req, res) {
             summarizeTaskProgressProofAssets(attendanceProofsForState);
           if (
             requiredProofCount > 0 &&
-            !hasRequiredTaskProgressProofMix(completedAttendanceProofSummary)
+            !hasRequiredTaskProgressProofMix(
+              completedAttendanceProofSummary,
+              requiredProofCount,
+            )
           ) {
             throw Object.assign(
               new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
@@ -20344,6 +20395,7 @@ async function logProductionTaskProgress(req, res) {
                 payload: {
                   ...buildTaskProgressProofRequirementPayload(
                     completedAttendanceProofSummary,
+                    requiredProofCount,
                   ),
                   attendanceId: completedAttendance._id,
                 },
@@ -20392,6 +20444,7 @@ async function logProductionTaskProgress(req, res) {
               payload: {
                 ...buildTaskProgressProofRequirementPayload(
                   proofsToPersistSummary,
+                  requiredProofCount,
                 ),
                 attendanceId: attendanceForProgress?._id || null,
               },
@@ -20400,7 +20453,10 @@ async function logProductionTaskProgress(req, res) {
         }
         if (
           requiredProofCount > 0 &&
-          !hasRequiredTaskProgressProofMix(proofsToPersistSummary)
+          !hasRequiredTaskProgressProofMix(
+            proofsToPersistSummary,
+            requiredProofCount,
+          )
         ) {
           throw Object.assign(
             new Error(PRODUCTION_COPY.TASK_PROGRESS_ATTENDANCE_PROOF_REQUIRED),
@@ -20409,12 +20465,15 @@ async function logProductionTaskProgress(req, res) {
               payload: {
                 ...buildTaskProgressProofRequirementPayload(
                   proofsToPersistSummary,
+                  requiredProofCount,
                 ),
                 attendanceId: attendanceForProgress?._id || null,
               },
             },
           );
         }
+        const proofCountRequiredForPersist =
+          requiredProofCount > 0 ? requiredProofCount : proofsToPersist.length;
         const progressPayload = {
           ...progressScopeQuery,
           entryIndex: entryIndexForPersist,
@@ -20432,7 +20491,7 @@ async function logProductionTaskProgress(req, res) {
           quantityAmount: effectiveQuantityAmount,
           activityQuantity: effectiveQuantityAmount,
           quantityUnit: resolvedQuantityUnit,
-          proofCountRequired: requiredProofCount,
+          proofCountRequired: proofCountRequiredForPersist,
           proofCountUploaded: proofsToPersist.length,
           proofs: proofsToPersist,
           delayReason,
@@ -21154,7 +21213,10 @@ async function logProductionTaskProgressBatch(req, res) {
         }
         if (
           requiredProofCount > 0 &&
-          !hasRequiredTaskProgressProofMix(proofsToPersistSummary)
+          !hasRequiredTaskProgressProofMix(
+            proofsToPersistSummary,
+            requiredProofCount,
+          )
         ) {
           pushEntryError({
             errorCode: TASK_PROGRESS_BATCH_ENTRY_CODE_ATTENDANCE_PROOF_REQUIRED,
@@ -21162,6 +21224,8 @@ async function logProductionTaskProgressBatch(req, res) {
           });
           continue;
         }
+        const proofCountRequiredForPersist =
+          requiredProofCount > 0 ? requiredProofCount : proofsToPersist.length;
         const progressPayload = {
           ...buildTaskProgressScopeQuery({
             taskId: task._id,
@@ -21186,7 +21250,7 @@ async function logProductionTaskProgressBatch(req, res) {
           quantityAmount,
           activityQuantity: quantityAmount,
           quantityUnit,
-          proofCountRequired: requiredProofCount,
+          proofCountRequired: proofCountRequiredForPersist,
           proofCountUploaded: proofsToPersist.length,
           proofs: proofsToPersist,
           sessionStatus: "completed",

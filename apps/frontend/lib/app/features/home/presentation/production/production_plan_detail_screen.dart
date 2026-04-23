@@ -4905,7 +4905,11 @@ Future<_LogProgressInput?> _showLogProgressDialog(
               : requiredTaskProgressProofCount(parsedActualPlots);
           final proofCountMatches = requiredProofCount == 0
               ? selectedProofs.isEmpty
-              : hasRequiredTaskProgressProofMix(selectedProofs);
+              : hasRequiredTaskProgressProofMix(
+                  selectedProofs,
+                  requiredProofCount,
+                );
+          final readyProofCount = selectedProofs.length;
           final remainingAfterSave = parsedActualPlots == null
               ? 0
               : (taskTargetPlots - parsedActualPlots) < 0
@@ -5129,8 +5133,11 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           requiredProofCount == 0
                               ? "Enter a positive actual amount to unlock proof uploads."
                               : proofCountMatches
-                              ? "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit before saving."
-                              : "Select exactly 1 photo and 1 video of the greenhouse, plot, or unit.",
+                              ? "$readyProofCount / $requiredProofCount proofs ready."
+                              : buildTaskProgressProofRequirementText(
+                                  requiredProofCount,
+                                  exact: false,
+                                ),
                           style: Theme.of(dialogContext).textTheme.bodySmall
                               ?.copyWith(
                                 color: Theme.of(
@@ -5155,8 +5162,8 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           ),
                           label: Text(
                             selectedProofs.isEmpty
-                                ? "Add photo + video"
-                                : "Replace photo + video",
+                                ? "Add proofs"
+                                : "Replace proofs",
                           ),
                         ),
                         if (selectedProofs.isNotEmpty) ...[
@@ -5297,10 +5304,15 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                           return;
                         }
                         if (requiredProofCount > 0 &&
-                            !hasRequiredTaskProgressProofMix(selectedProofs)) {
+                            !hasRequiredTaskProgressProofMix(
+                              selectedProofs,
+                              requiredProofCount,
+                            )) {
                           setDialogState(() {
                             validationMessage =
-                                "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit.";
+                                buildTaskProgressProofRequirementText(
+                                  requiredProofCount,
+                                );
                           });
                           return;
                         }

@@ -50,6 +50,8 @@ const String _logTag = "PRODUCTION_PLAN_WORKSPACE";
 const String _logBuild = "build()";
 const String _logMonthChanged = "month_changed";
 const String _logDayChanged = "day_changed";
+const String _logCalendarToggle = "calendar_toggled";
+const String _logCalendarModeChanged = "calendar_mode_changed";
 const String _logAssignStaff = "assign_staff";
 const String _logCreateTask = "create_task";
 const String _logDeleteTask = "delete_task";
@@ -60,11 +62,16 @@ const String _logApproveTask = "approve_task";
 const String _logRejectTask = "reject_task";
 const String _logApproveProgress = "approve_progress";
 const String _logRejectProgress = "reject_progress";
+const String _logLiveRefreshStart = "live_detail_refresh_start";
+const String _logLiveRefreshSkipped = "live_detail_refresh_skipped";
+const String _logLiveRefreshFailure = "live_detail_refresh_failed";
 
 const String _screenTitle = "Production plan";
 const String _workspaceTitle = "Calendar workspace";
 const String _workspaceSubtitle =
     "Use the calendar to assign staff, remove staff, and track progress day by day.";
+const String _showCalendarTooltip = "Show calendar";
+const String _hideCalendarTooltip = "Hide calendar";
 const String _selectedDayTitle = "Selected day";
 const String _selectedDayEmptyTitle = "No scheduled work";
 const String _selectedDayEmptyMessage =
@@ -197,8 +204,8 @@ const String _staffDialogEmptyLabel =
     "No staff profiles match this task role yet. Add staff first or broaden the role assignment.";
 const String _logDialogTitle = "Record daily progress";
 const String _logDialogSubmitLabel = "Submit";
-const String _logDialogUploadProofLabel = "Add photo + video";
-const String _logDialogReplaceProofLabel = "Replace photo + video";
+const String _logDialogUploadProofLabel = "Add proofs";
+const String _logDialogReplaceProofLabel = "Replace proofs";
 const String _logDialogCancelLabel = "Cancel";
 const String _clockOutWizardTitle = "Clock out";
 const String _clockOutWizardContinueLabel = "Continue";
@@ -215,7 +222,7 @@ const String _clockOutWizardNoProofNeeded =
     "No proof is required when no primary unit contribution is entered.";
 const String _clockOutWizardProofPicking = "Selecting proof media...";
 const String _clockOutWizardProofRequired =
-    "Upload exactly 1 photo and 1 video of the greenhouse, plot, or unit.";
+    "Upload all required proof files for the completed units.";
 const String _clockOutWizardProofNotAllowed =
     "Proof uploads are not allowed when the completed amount is 0.";
 const String _clockOutWizardFinishSaving = "Finishing clock-out...";
@@ -439,8 +446,15 @@ class _ProductionPlanWorkspaceScreenState
 
   DateTime? _visibleMonth;
   DateTime? _selectedDay;
-  _WorkspaceCalendarMode _calendarMode = _WorkspaceCalendarMode.month;
+  // WHY: Managers should land on the day agenda first, then expand the
+  // calendar overview only when they need to change dates visually.
+  _WorkspaceCalendarMode _calendarMode = _WorkspaceCalendarMode.day;
+  // WHY: Reopen the same overview mode the user last used instead of always
+  // forcing month view after the calendar is collapsed.
+  _WorkspaceCalendarMode _lastExpandedCalendarMode =
+      _WorkspaceCalendarMode.month;
   Timer? _liveRefreshTimer;
+  bool _detailRefreshInFlight = false;
 
   @override
   void initState() {
@@ -481,18 +495,67 @@ class _ProductionPlanWorkspaceScreenState
         return;
       }
 
-      _triggerLivePlanDetailRefresh();
+      unawaited(_triggerLivePlanDetailRefresh(reason: "presence_timer"));
     });
   }
 
-  void _triggerLivePlanDetailRefresh() {
+  Future<void> _triggerLivePlanDetailRefresh({required String reason}) async {
     final planId = widget.planId.trim();
     if (planId.isEmpty || !mounted) {
       return;
     }
 
-    unawaited(ref.refresh(productionPlanDetailProvider(planId).future));
-    ref.invalidate(productionPlansProvider);
+    if (_detailRefreshInFlight) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": planId,
+          "reason": reason,
+          "skipReason": "detail_refresh_in_flight",
+        },
+      );
+      return;
+    }
+
+    final currentDetailState = ref.read(productionPlanDetailProvider(planId));
+    if (currentDetailState.isLoading) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": planId,
+          "reason": reason,
+          "skipReason": "detail_provider_loading",
+        },
+      );
+      return;
+    }
+
+    _detailRefreshInFlight = true;
+    AppDebug.log(
+      _logTag,
+      _logLiveRefreshStart,
+      extra: {"planId": planId, "reason": reason},
+    );
+    try {
+      final _ = await ref.refresh(productionPlanDetailProvider(planId).future);
+      ref.invalidate(productionPlansProvider);
+    } catch (error) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshFailure,
+        extra: {
+          "planId": planId,
+          "reason": reason,
+          "error": error.toString(),
+          "nextAction":
+              "Keep current detail data and retry from manual refresh",
+        },
+      );
+    } finally {
+      _detailRefreshInFlight = false;
+    }
   }
 
   void _showSnackSafe(String message) {
@@ -500,6 +563,47 @@ class _ProductionPlanWorkspaceScreenState
       return;
     }
     _showSnack(context, message);
+  }
+
+  void _toggleCalendarVisibility() {
+    final calendarVisible = _calendarMode != _WorkspaceCalendarMode.day;
+    final nextMode = calendarVisible
+        ? _WorkspaceCalendarMode.day
+        : (_lastExpandedCalendarMode == _WorkspaceCalendarMode.day
+              ? _WorkspaceCalendarMode.month
+              : _lastExpandedCalendarMode);
+    AppDebug.log(
+      _logTag,
+      _logCalendarToggle,
+      extra: {
+        "planId": widget.planId,
+        "calendarVisible": !calendarVisible,
+        "mode": nextMode.name,
+      },
+    );
+    setState(() {
+      if (_calendarMode != _WorkspaceCalendarMode.day) {
+        _lastExpandedCalendarMode = _calendarMode;
+      }
+      _calendarMode = nextMode;
+    });
+  }
+
+  void _updateCalendarMode(_WorkspaceCalendarMode mode) {
+    if (_calendarMode == mode) {
+      return;
+    }
+    AppDebug.log(
+      _logTag,
+      _logCalendarModeChanged,
+      extra: {"planId": widget.planId, "mode": mode.name},
+    );
+    setState(() {
+      _calendarMode = mode;
+      if (mode != _WorkspaceCalendarMode.day) {
+        _lastExpandedCalendarMode = mode;
+      }
+    });
   }
 
   String _resolveViewerEmail() {
@@ -636,7 +740,7 @@ class _ProductionPlanWorkspaceScreenState
         if (previous?.updatedAt == next.updatedAt) {
           return;
         }
-        _triggerLivePlanDetailRefresh();
+        unawaited(_triggerLivePlanDetailRefresh(reason: "presence_update"));
       },
     );
 
@@ -665,17 +769,14 @@ class _ProductionPlanWorkspaceScreenState
             tooltip: _refreshTooltip,
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              _triggerLivePlanDetailRefresh();
+              unawaited(_triggerLivePlanDetailRefresh(reason: "manual_button"));
             },
           ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          final refreshed = ref.refresh(
-            productionPlanDetailProvider(widget.planId).future,
-          );
-          await refreshed;
+          await _triggerLivePlanDetailRefresh(reason: "pull_to_refresh");
         },
         child: detailAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -752,6 +853,10 @@ class _ProductionPlanWorkspaceScreenState
               plan: detail.plan,
               planUnitsResponse: planUnitsResponse,
             );
+            // WHY: Keep the agenda as the default landing view while still
+            // letting the user reopen the same calendar overview on demand.
+            final showCalendarOverview =
+                _calendarMode != _WorkspaceCalendarMode.day;
             final tasksForDay = _tasksForDay(detail.tasks, selectedDay);
             final rowsForDay = _rowsForDay(detail.timelineRows, selectedDay);
             final phaseById = {
@@ -1002,139 +1107,140 @@ class _ProductionPlanWorkspaceScreenState
                         ),
                 ),
                 const SizedBox(height: _sectionSpacing),
-                ProductionSectionHeader(
+                _WorkspaceCalendarHeader(
                   title: _workspaceTitle,
                   subtitle:
                       "$_workspaceSubtitle Working on ${workScopeSummary.countLabel}.",
+                  calendarVisible: showCalendarOverview,
+                  onToggleCalendar: _toggleCalendarVisibility,
                 ),
                 const SizedBox(height: _cardSpacing),
-                _WorkspaceCalendarModeBar(
-                  mode: _calendarMode,
-                  onModeChanged: (mode) {
-                    setState(() {
-                      _calendarMode = mode;
-                    });
+                if (showCalendarOverview) ...[
+                  _WorkspaceCalendarModeBar(
+                    mode: _calendarMode,
+                    onModeChanged: _updateCalendarMode,
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  switch (_calendarMode) {
+                    _WorkspaceCalendarMode.day => const SizedBox.shrink(),
+                    _WorkspaceCalendarMode.month => _MonthCalendarCard(
+                      month: visibleMonth,
+                      selectedDay: selectedDay,
+                      plan: detail.plan,
+                      workScopeSummary: workScopeSummary,
+                      tasks: detail.tasks,
+                      timelineRows: detail.timelineRows,
+                      onPreviousMonth: () {
+                        final next = DateTime(
+                          visibleMonth.year,
+                          visibleMonth.month - 1,
+                          1,
+                        );
+                        AppDebug.log(
+                          _logTag,
+                          _logMonthChanged,
+                          extra: {"month": _monthTitle(next)},
+                        );
+                        setState(() {
+                          _visibleMonth = next;
+                        });
+                      },
+                      onNextMonth: () {
+                        final next = DateTime(
+                          visibleMonth.year,
+                          visibleMonth.month + 1,
+                          1,
+                        );
+                        AppDebug.log(
+                          _logTag,
+                          _logMonthChanged,
+                          extra: {"month": _monthTitle(next)},
+                        );
+                        setState(() {
+                          _visibleMonth = next;
+                        });
+                      },
+                      onToday: () {
+                        final next = _resolveInitialDay(detail.plan);
+                        AppDebug.log(
+                          _logTag,
+                          _logDayChanged,
+                          extra: {"day": formatDateInput(next)},
+                        );
+                        setState(() {
+                          _selectedDay = next;
+                          _visibleMonth = _firstDayOfMonth(next);
+                        });
+                      },
+                      onSelectDay: (day) {
+                        AppDebug.log(
+                          _logTag,
+                          _logDayChanged,
+                          extra: {"day": formatDateInput(day)},
+                        );
+                        setState(() {
+                          _selectedDay = day;
+                          _visibleMonth = _firstDayOfMonth(day);
+                        });
+                      },
+                    ),
+                    _WorkspaceCalendarMode.year => _YearCalendarCard(
+                      year: visibleMonth.year,
+                      selectedDay: selectedDay,
+                      workScopeSummary: workScopeSummary,
+                      tasks: detail.tasks,
+                      onPreviousYear: () {
+                        final next = DateTime(visibleMonth.year - 1, 1, 1);
+                        AppDebug.log(
+                          _logTag,
+                          _logMonthChanged,
+                          extra: {"month": _monthTitle(next)},
+                        );
+                        setState(() {
+                          _visibleMonth = next;
+                        });
+                      },
+                      onNextYear: () {
+                        final next = DateTime(visibleMonth.year + 1, 1, 1);
+                        AppDebug.log(
+                          _logTag,
+                          _logMonthChanged,
+                          extra: {"month": _monthTitle(next)},
+                        );
+                        setState(() {
+                          _visibleMonth = next;
+                        });
+                      },
+                      onToday: () {
+                        final next = _resolveInitialDay(detail.plan);
+                        AppDebug.log(
+                          _logTag,
+                          _logDayChanged,
+                          extra: {"day": formatDateInput(next)},
+                        );
+                        setState(() {
+                          _selectedDay = next;
+                          _visibleMonth = _firstDayOfMonth(next);
+                        });
+                      },
+                      onSelectDay: (day) {
+                        AppDebug.log(
+                          _logTag,
+                          _logDayChanged,
+                          extra: {"day": formatDateInput(day)},
+                        );
+                        setState(() {
+                          _selectedDay = day;
+                          _visibleMonth = _firstDayOfMonth(day);
+                          _calendarMode = _WorkspaceCalendarMode.month;
+                          _lastExpandedCalendarMode =
+                              _WorkspaceCalendarMode.month;
+                        });
+                      },
+                    ),
                   },
-                ),
-                const SizedBox(height: _cardSpacing),
-                switch (_calendarMode) {
-                  _WorkspaceCalendarMode.day => const SizedBox.shrink(),
-                  _WorkspaceCalendarMode.month => _MonthCalendarCard(
-                    month: visibleMonth,
-                    selectedDay: selectedDay,
-                    plan: detail.plan,
-                    workScopeSummary: workScopeSummary,
-                    tasks: detail.tasks,
-                    timelineRows: detail.timelineRows,
-                    onPreviousMonth: () {
-                      final next = DateTime(
-                        visibleMonth.year,
-                        visibleMonth.month - 1,
-                        1,
-                      );
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onNextMonth: () {
-                      final next = DateTime(
-                        visibleMonth.year,
-                        visibleMonth.month + 1,
-                        1,
-                      );
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onToday: () {
-                      final next = _resolveInitialDay(detail.plan);
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(next)},
-                      );
-                      setState(() {
-                        _selectedDay = next;
-                        _visibleMonth = _firstDayOfMonth(next);
-                      });
-                    },
-                    onSelectDay: (day) {
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(day)},
-                      );
-                      setState(() {
-                        _selectedDay = day;
-                        _visibleMonth = _firstDayOfMonth(day);
-                      });
-                    },
-                  ),
-                  _WorkspaceCalendarMode.year => _YearCalendarCard(
-                    year: visibleMonth.year,
-                    selectedDay: selectedDay,
-                    workScopeSummary: workScopeSummary,
-                    tasks: detail.tasks,
-                    onPreviousYear: () {
-                      final next = DateTime(visibleMonth.year - 1, 1, 1);
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onNextYear: () {
-                      final next = DateTime(visibleMonth.year + 1, 1, 1);
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onToday: () {
-                      final next = _resolveInitialDay(detail.plan);
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(next)},
-                      );
-                      setState(() {
-                        _selectedDay = next;
-                        _visibleMonth = _firstDayOfMonth(next);
-                      });
-                    },
-                    onSelectDay: (day) {
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(day)},
-                      );
-                      setState(() {
-                        _selectedDay = day;
-                        _visibleMonth = _firstDayOfMonth(day);
-                        _calendarMode = _WorkspaceCalendarMode.month;
-                      });
-                    },
-                  ),
-                },
-                if (_calendarMode != _WorkspaceCalendarMode.day)
                   const SizedBox(height: _sectionSpacing),
+                ],
                 _SelectedDaySectionHeader(
                   title: _selectedDayTitle,
                   subtitle: _formatSelectedDaySubtitle(
@@ -2655,6 +2761,53 @@ class _WorkspaceCalendarModeBar extends StatelessWidget {
         }
         onModeChanged(selection.first);
       },
+    );
+  }
+}
+
+class _WorkspaceCalendarHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool calendarVisible;
+  final VoidCallback onToggleCalendar;
+
+  const _WorkspaceCalendarHeader({
+    required this.title,
+    required this.subtitle,
+    required this.calendarVisible,
+    required this.onToggleCalendar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ProductionSectionHeader(title: title, subtitle: subtitle),
+        ),
+        const SizedBox(width: 12),
+        Tooltip(
+          message: calendarVisible
+              ? _hideCalendarTooltip
+              : _showCalendarTooltip,
+          child: IconButton(
+            onPressed: onToggleCalendar,
+            style: IconButton.styleFrom(
+              backgroundColor: colorScheme.surfaceContainerHigh,
+              foregroundColor: colorScheme.onSurface,
+            ),
+            icon: Icon(
+              calendarVisible
+                  ? Icons.calendar_view_day_outlined
+                  : Icons.calendar_month_outlined,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -8367,13 +8520,16 @@ class _WorkspaceClockOutWizardState
     if (existingRow == null) {
       return false;
     }
-    return hasRequiredTaskProgressProofRecordMix(existingRow.proofs);
+    return hasRequiredTaskProgressProofRecordMix(
+      existingRow.proofs,
+      _requiredProofCount,
+    );
   }
 
   bool get _proofRequirementSatisfied => _requiredProofCount == 0
       ? _selectedProofs.isEmpty
       : _selectedProofs.isNotEmpty
-      ? hasRequiredTaskProgressProofMix(_selectedProofs)
+      ? hasRequiredTaskProgressProofMix(_selectedProofs, _requiredProofCount)
       : _existingSelectionHasRequiredProofMix;
 
   num get _remainingAfterSave {
@@ -8888,11 +9044,14 @@ class _WorkspaceClockOutWizardState
       );
     }
     if (_currentStep.index > _WorkspaceClockOutWizardStep.proof.index) {
+      final readyProofCount = _selectedProofs.isNotEmpty
+          ? _selectedProofs.length
+          : (_existingSelectionRow?.proofs.length ?? 0);
       summaries.add(
         _InfoChip(
           label: _requiredProofCount == 0
               ? "Proofs: none required"
-              : "Proofs: ${_proofRequirementSatisfied ? "photo + video ready" : "photo + video missing"}",
+              : "Proofs: $readyProofCount / $_requiredProofCount ready",
           icon: Icons.photo_library_outlined,
           backgroundColor: _workspaceSoftBerry,
           foregroundColor: _workspaceBerry,
@@ -9082,34 +9241,21 @@ class _WorkspaceClockOutWizardState
     if (_requiredProofCount <= 0) {
       return const SizedBox.shrink();
     }
-    final selectedHasImage = _selectedProofs.any((proof) => proof.isImage);
     final selectedHasVideo = _selectedProofs.any((proof) => proof.isVideo);
     final existingRow = _existingSelectionRow;
-    final existingHasImage =
-        existingRow?.proofs.any((proof) => proof.isImage) ?? false;
-    final existingHasVideo =
-        existingRow?.proofs.any((proof) => proof.isVideo) ?? false;
-    final slotStates = <({String label, bool filled, IconData icon})>[
-      (
-        label: "Photo",
-        filled: _selectedProofs.isNotEmpty
-            ? selectedHasImage
-            : existingHasImage,
-        icon: Icons.image_outlined,
-      ),
-      (
-        label: "Video",
-        filled: _selectedProofs.isNotEmpty
-            ? selectedHasVideo
-            : existingHasVideo,
-        icon: Icons.videocam_outlined,
-      ),
-    ];
+    final readyProofCount = _selectedProofs.isNotEmpty
+        ? _selectedProofs.length
+        : existingRow?.proofs.length ?? 0;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: slotStates.map((slot) {
-        final slotFilled = slot.filled;
+      children: List.generate(_requiredProofCount, (index) {
+        final slotFilled = index < readyProofCount;
+        final label = "Proof ${index + 1}";
+        final icon =
+            slotFilled && selectedHasVideo && index == readyProofCount - 1
+            ? Icons.videocam_outlined
+            : Icons.photo_library_outlined;
         return Container(
           width: 72,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
@@ -9125,13 +9271,13 @@ class _WorkspaceClockOutWizardState
           child: Column(
             children: [
               Icon(
-                slotFilled ? Icons.check_circle_outline : slot.icon,
+                slotFilled ? Icons.check_circle_outline : icon,
                 size: 20,
                 color: slotFilled ? _workspaceTeal : _workspaceNavy,
               ),
               const SizedBox(height: 6),
               Text(
-                slot.label,
+                label,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontWeight: FontWeight.w700,
@@ -9141,17 +9287,20 @@ class _WorkspaceClockOutWizardState
             ],
           ),
         );
-      }).toList(),
+      }),
     );
   }
 
   Widget _buildProofStep(BuildContext context) {
     final theme = Theme.of(context);
+    final readyProofCount = _selectedProofs.isNotEmpty
+        ? _selectedProofs.length
+        : (_existingSelectionRow?.proofs.length ?? 0);
     final proofStatusText = _requiredProofCount <= 0
         ? _clockOutWizardNoProofNeeded
         : _proofRequirementSatisfied
-        ? "Saved proof pair is ready."
-        : "1 photo and 1 video are required.";
+        ? "$readyProofCount / $_requiredProofCount proofs ready."
+        : buildTaskProgressProofRequirementText(_requiredProofCount);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -9167,7 +9316,10 @@ class _WorkspaceClockOutWizardState
         Text(
           _requiredProofCount <= 0
               ? _clockOutWizardNoProofNeeded
-              : "Upload 1 photo and 1 video of the greenhouse, plot, or unit.",
+              : buildTaskProgressProofRequirementText(
+                  _requiredProofCount,
+                  exact: false,
+                ),
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -10140,22 +10292,32 @@ Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
           final proofCountMatchesSelectedAmount = requiredProofCount == 0
               ? selectedProofs.isEmpty
               : selectedProofs.isNotEmpty
-              ? hasRequiredTaskProgressProofMix(selectedProofs)
+              ? hasRequiredTaskProgressProofMix(
+                  selectedProofs,
+                  requiredProofCount,
+                )
               : existingSelectionProofCount == requiredProofCount &&
                     existingSelectionRow != null &&
                     hasRequiredTaskProgressProofRecordMix(
                       existingSelectionRow.proofs,
+                      requiredProofCount,
                     );
+          final readyProofCount = selectedProofs.isNotEmpty
+              ? selectedProofs.length
+              : existingSelectionProofCount;
           final proofInstructionText = requiredProofCount == 0
               ? "Proof uploads are required only when a positive unit contribution is entered."
               : proofCountMatchesSelectedAmount
               ? selectedProofs.isEmpty
                     ? existingSelectionProofCount > 0 &&
                               existingSelectionProofCount == requiredProofCount
-                          ? "This staff/unit already has the required photo and video saved."
+                          ? "This staff/unit already has ${formatTaskProgressProofCountLabel(requiredProofCount)} saved."
                           : _clockOutWizardProofRequired
-                    : "Selected photo + video pair is ready."
-              : _clockOutWizardProofRequired;
+                    : "$readyProofCount / $requiredProofCount proofs ready."
+              : buildTaskProgressProofRequirementText(
+                  requiredProofCount,
+                  exact: false,
+                );
           final proofButtonLabel =
               selectedProofs.isNotEmpty || existingSelectionProofCount > 0
               ? _logDialogReplaceProofLabel

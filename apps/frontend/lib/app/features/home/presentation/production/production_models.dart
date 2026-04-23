@@ -3357,7 +3357,23 @@ int requiredTaskProgressProofCount(num actualPlots) {
   if (normalizedActualPlots <= 0) {
     return 0;
   }
-  return 2;
+  return normalizedActualPlots.ceil();
+}
+
+String formatTaskProgressProofCountLabel(int count) {
+  return "$count proof${count == 1 ? "" : "s"}";
+}
+
+String buildTaskProgressProofRequirementText(
+  int requiredProofCount, {
+  bool exact = true,
+}) {
+  if (requiredProofCount <= 0) {
+    return "No proof is required when no completed unit contribution is entered.";
+  }
+  final proofLabel = formatTaskProgressProofCountLabel(requiredProofCount);
+  final verb = exact ? "Upload exactly" : "Select exactly";
+  return "$verb $proofLabel of the greenhouse, plot, or unit.";
 }
 
 const List<String> _productionProofImageExtensions = <String>[
@@ -3399,24 +3415,22 @@ bool isSupportedProductionProofVideo({
 
 bool hasRequiredTaskProgressProofMix(
   List<ProductionTaskProgressProofInput> proofs,
+  int requiredProofCount,
 ) {
-  if (proofs.length != 2) {
-    return false;
+  if (requiredProofCount <= 0) {
+    return proofs.isEmpty;
   }
-  final imageCount = proofs.where((proof) => proof.isImage).length;
-  final videoCount = proofs.where((proof) => proof.isVideo).length;
-  return imageCount == 1 && videoCount == 1;
+  return proofs.length == requiredProofCount;
 }
 
 bool hasRequiredTaskProgressProofRecordMix(
   List<ProductionTaskProgressProofRecord> proofs,
+  int requiredProofCount,
 ) {
-  if (proofs.length != 2) {
-    return false;
+  if (requiredProofCount <= 0) {
+    return proofs.isEmpty;
   }
-  final imageCount = proofs.where((proof) => proof.isImage).length;
-  final videoCount = proofs.where((proof) => proof.isVideo).length;
-  return imageCount == 1 && videoCount == 1;
+  return proofs.length == requiredProofCount;
 }
 
 Map<String, num> _parseOutputByUnit(dynamic value) {

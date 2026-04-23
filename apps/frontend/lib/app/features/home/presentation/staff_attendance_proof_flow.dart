@@ -26,14 +26,14 @@ const String _dialogTitle = "Upload proof";
 const String _dialogBody =
     "Upload a file or picture now for this attendance record. After proof is saved, continue the clock-out flow.";
 const String _productionDialogBody =
-    "Upload 1 photo and 1 short video of the greenhouse, plot, or unit for this attendance record. After proof is saved, continue the clock-out flow.";
+    "Upload the required proof files for this attendance record. After proof is saved, continue the clock-out flow.";
 const String _chooseFileLabel = "Upload proof";
 const String _replaceFileLabel = "Change proof";
 const String _submitLabel = "Submit";
 const String _allowedLabel =
     "Allowed: PDF, JPG, PNG, WEBP, MP4, MOV, WEBM, M4V. Max 25 MB.";
 const String _productionAllowedLabel =
-    "Required: 1 photo (JPG, PNG, WEBP) and 1 video (MP4, MOV, WEBM, M4V). Max 25 MB each.";
+    "Upload the required proof files. Allowed: JPG, PNG, WEBP, MP4, MOV, WEBM, M4V. Max 25 MB each.";
 const String _missingFileMessage = "Choose a proof file or picture first.";
 const String _tooLargeMessage = "Proof must be 25 MB or smaller.";
 const String _uploadFailedMessage = "Unable to upload proof. Try another file.";
@@ -195,17 +195,14 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                 final uploadedProof = uploadedProofsByUnitIndex[unitIndex];
                 if (pickedFile == null && uploadedProof == null) {
                   setDialogState(() {
-                    errorText = requiresPhotoVideoPair
-                        ? "Upload the required photo and video before clock-out."
-                        : "Upload all $requiredProofs required proof${requiredProofs == 1 ? "" : "s"} before clock-out.";
+                    errorText =
+                        "Upload all $requiredProofs required proof${requiredProofs == 1 ? "" : "s"} before clock-out.";
                   });
                   return;
                 }
                 if (pickedFile != null && pickedFile.bytes.length > _maxBytes) {
                   setDialogState(() {
-                    errorText = requiresPhotoVideoPair
-                        ? "${unitIndex == 1 ? "Photo" : "Video"} proof: $_tooLargeMessage"
-                        : "Proof $unitIndex: $_tooLargeMessage";
+                    errorText = "Proof $unitIndex: $_tooLargeMessage";
                   });
                   return;
                 }
@@ -258,9 +255,7 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
                 }
                 if (uploadedProofsByUnitIndex.length != requiredProofs) {
                   throw Exception(
-                    requiresPhotoVideoPair
-                        ? "Upload the required photo and video before clock-out."
-                        : "Upload all $requiredProofs required proof${requiredProofs == 1 ? "" : "s"} before clock-out.",
+                    "Upload all $requiredProofs required proof${requiredProofs == 1 ? "" : "s"} before clock-out.",
                   );
                 }
                 if (!dialogContext.mounted) {
@@ -306,12 +301,8 @@ Future<StaffAttendanceRecord> requireAttendanceProofUpload({
               unitKey: "progressUnitLabel",
             );
             final proofRequirementLabel = unitsCompleted == null
-                ? (requiresPhotoVideoPair
-                      ? "1 photo + 1 video required"
-                      : "$requiredProofs proof${requiredProofs == 1 ? "" : "s"} required")
-                : (requiresPhotoVideoPair
-                      ? "${_formatAuditAmount(unitsCompleted)} unit${unitsCompleted == 1 ? "" : "s"} completed • 1 photo + 1 video required"
-                      : "${_formatAuditAmount(unitsCompleted)} unit${unitsCompleted == 1 ? "" : "s"} completed • $requiredProofs proof${requiredProofs == 1 ? "" : "s"} required");
+                ? "$requiredProofs proof${requiredProofs == 1 ? "" : "s"} required"
+                : "${_formatAuditAmount(unitsCompleted)} unit${unitsCompleted == 1 ? "" : "s"} completed • $requiredProofs proof${requiredProofs == 1 ? "" : "s"} required";
             final uploadedProofCount = uploadedProofsByUnitIndex.length;
             final readyProofCount = List.generate(requiredProofs, (index) {
               final unitIndex = index + 1;
@@ -740,12 +731,6 @@ int _resolveRequiredProofCount({
   if (auditRequiredProofs != null && auditRequiredProofs >= 0) {
     return auditRequiredProofs;
   }
-  if (_requiresPhotoVideoPair(
-    attendance: attendance,
-    clockOutAuditPayload: clockOutAuditPayload,
-  )) {
-    return 2;
-  }
   final unitsCompleted = _resolveUnitsCompleted(
     attendance: attendance,
     clockOutAuditPayload: clockOutAuditPayload,
@@ -761,23 +746,7 @@ bool _requiresPhotoVideoPair({
   required StaffAttendanceRecord attendance,
   required Map<String, dynamic>? clockOutAuditPayload,
 }) {
-  final payloadTaskId =
-      clockOutAuditPayload?["taskId"]?.toString().trim() ?? "";
-  final payloadPlanId =
-      clockOutAuditPayload?["planId"]?.toString().trim() ?? "";
-  final attendanceTaskId = attendance.taskId?.trim() ?? "";
-  final attendancePlanId = attendance.planId?.trim() ?? "";
-  final resolvedRequiredProofs =
-      _parseInt(clockOutAuditPayload?["requiredProofs"]) ??
-      attendance.clockOutAudit?.requiredProofs ??
-      attendance.requiredProofs;
-  if (resolvedRequiredProofs == 2) {
-    return true;
-  }
-  return payloadTaskId.isNotEmpty ||
-      payloadPlanId.isNotEmpty ||
-      attendanceTaskId.isNotEmpty ||
-      attendancePlanId.isNotEmpty;
+  return false;
 }
 
 num? _resolveUnitsCompleted({
