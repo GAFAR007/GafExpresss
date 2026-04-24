@@ -3825,6 +3825,33 @@ function summarizeTaskProgressProofAssets(assets = []) {
   return summary;
 }
 
+function resolveBalancedTaskProgressCompletedUnitsFromProofSummary(summary = {}) {
+  const providedProofCount = Number(summary.providedProofCount || 0);
+  const providedPhotoCount = Number(summary.providedPhotoCount || 0);
+  const providedVideoCount = Number(summary.providedVideoCount || 0);
+  if (
+    !Number.isFinite(providedProofCount) ||
+    !Number.isFinite(providedPhotoCount) ||
+    !Number.isFinite(providedVideoCount)
+  ) {
+    return 0;
+  }
+  if (
+    providedProofCount <= 0 ||
+    providedPhotoCount <= 0 ||
+    providedVideoCount <= 0
+  ) {
+    return 0;
+  }
+  if (providedProofCount !== providedPhotoCount + providedVideoCount) {
+    return 0;
+  }
+  if (providedPhotoCount !== providedVideoCount) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(providedPhotoCount));
+}
+
 function hasRequiredTaskProgressProofMix(summary = {}, requiredProofCount = 0) {
   const requiredCount = Math.max(0, Number(requiredProofCount || 0));
   const providedProofCount = Number(summary.providedProofCount || 0);
@@ -19847,6 +19874,34 @@ async function logProductionTaskProgress(req, res) {
     }
     let actualPlots = resolvedProgressInput.actualPlots;
     let actualPlotUnits = resolvedProgressInput.actualPlotUnits;
+    const uploadedProofFiles = normalizeTaskProgressProofFiles(req.files);
+    const uploadedProofSummary = summarizeTaskProgressProofAssets(
+      uploadedProofFiles,
+    );
+    const balancedProofBackedCompletedUnits =
+      resolveBalancedTaskProgressCompletedUnitsFromProofSummary(
+        uploadedProofSummary,
+      );
+    if (balancedProofBackedCompletedUnits > actualPlots) {
+      const balancedProofBackedPlotUnits = convertPlotsToPlotUnits(
+        balancedProofBackedCompletedUnits,
+      );
+      if (balancedProofBackedPlotUnits != null) {
+        debug(
+          "BUSINESS CONTROLLER: logProductionTaskProgress - proof-backed units promoted",
+          {
+            taskId,
+            submittedActualPlots: actualPlots,
+            promotedActualPlots: balancedProofBackedCompletedUnits,
+            providedProofCount: uploadedProofSummary.providedProofCount,
+            providedPhotoCount: uploadedProofSummary.providedPhotoCount,
+            providedVideoCount: uploadedProofSummary.providedVideoCount,
+          },
+        );
+        actualPlots = balancedProofBackedCompletedUnits;
+        actualPlotUnits = balancedProofBackedPlotUnits;
+      }
+    }
     let effectiveQuantityAmount = quantityAmount || 0;
     if (quantityActivityType === PRODUCTION_QUANTITY_ACTIVITY_NONE) {
       effectiveQuantityAmount = 0;
@@ -20048,10 +20103,6 @@ async function logProductionTaskProgress(req, res) {
     const expectedPlots = Math.max(0, Number(ledgerConfig.unitTarget || 0));
     const expectedPlotUnits = convertPlotsToPlotUnits(expectedPlots) || 0;
     const requiredProofCount = resolveTaskProgressProofCount(actualPlots);
-    const uploadedProofFiles = normalizeTaskProgressProofFiles(req.files);
-    const uploadedProofSummary = summarizeTaskProgressProofAssets(
-      uploadedProofFiles,
-    );
     if (requiredProofCount <= 0 && uploadedProofFiles.length > 0) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_PROGRESS_PROOFS_NOT_ALLOWED_FOR_ZERO_PROGRESS,

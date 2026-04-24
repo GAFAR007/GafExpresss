@@ -1190,6 +1190,69 @@ test("production progress proof upload and quick clock-out-with-proof end in the
   });
 });
 
+test("balanced proof uploads promote stale multipart unit contribution before clock-out save", async () => {
+  const scenario = await seedScenario();
+  const clockInResponse = await postClockIn({
+    token: scenario.token,
+    payload: {
+      staffProfileId: scenario.staffProfileBId.toString(),
+      workDate: WORK_DATE_STRING,
+      planId: scenario.planId.toString(),
+      taskId: scenario.taskId.toString(),
+      notes: "clocked in for balanced proof promotion test",
+    },
+  });
+  const attendanceId = clockInResponse.body.attendance?._id;
+  assert.ok(attendanceId);
+
+  const response = await postProgressMultipart({
+    token: scenario.token,
+    taskId: scenario.taskId.toString(),
+    fields: {
+      workDate: WORK_DATE_STRING,
+      staffId: scenario.staffProfileBId.toString(),
+      unitContribution: 1,
+      activityType: "none",
+      delayReason: STATUS_NONE,
+      notes: "balanced proof bundle should promote completed units",
+    },
+    files: [
+      ...Array.from({ length: 5 }, (_, index) => ({
+        fieldName: "proofs",
+        filename: `promotion-image-${index + 1}.jpg`,
+        contentType: "image/jpeg",
+      })),
+      ...Array.from({ length: 5 }, (_, index) => ({
+        fieldName: "proofs",
+        filename: `promotion-video-${index + 1}.mp4`,
+        contentType: "video/mp4",
+      })),
+    ],
+  });
+
+  assert.equal(response.statusCode, HTTP_OK);
+
+  const savedProgress = await TaskProgress.findOne({
+    taskId: scenario.taskId,
+    staffId: scenario.staffProfileBId,
+    workDate: WORK_DATE_NORMALIZED,
+  }).lean();
+  const savedAttendance = await StaffAttendance.findById(attendanceId).lean();
+
+  assert.ok(savedProgress);
+  assert.ok(savedAttendance);
+  assert.equal(savedProgress?.actualPlots, 5);
+  assert.equal(savedProgress?.actualPlotUnits, toPlotUnits(5));
+  assert.equal(savedProgress?.unitContribution, 5);
+  assert.equal(savedProgress?.proofCountRequired, 10);
+  assert.equal(savedProgress?.proofCountUploaded, 10);
+  assert.equal(savedProgress?.proofs?.length, 10);
+  assert.equal(savedAttendance?.requiredProofs, 10);
+  assert.equal(savedAttendance?.proofs?.length, 10);
+  assert.equal(savedAttendance?.sessionStatus, "completed");
+  assert.equal(savedAttendance?.proofStatus, "complete");
+});
+
 test("positive unit contribution without proofs is rejected and leaves the shared ledger untouched", async () => {
   const scenario = await seedScenario();
   await createActiveAttendance({
