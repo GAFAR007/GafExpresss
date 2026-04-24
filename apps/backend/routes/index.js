@@ -44,6 +44,7 @@ const ROUTE_GROUPS = [
   ["/orders", orderRoutes],
   ["/payments", paymentRoutes],
 ];
+const BACKEND_BUILD_TAG = "proof-backed-clockout-v2";
 
 module.exports = (app) => {
   debug("Routes module loaded", {
@@ -61,6 +62,7 @@ module.exports = (app) => {
       message: databaseStatus.isReady
         ? "Backend is alive"
         : "Backend is alive but database is unavailable",
+      buildTag: BACKEND_BUILD_TAG,
       database: {
         isReady: databaseStatus.isReady,
         readyState: databaseStatus.readyState,
@@ -80,6 +82,7 @@ module.exports = (app) => {
       message: databaseStatus.isReady
         ? "Backend is ready"
         : "Backend is alive but database is unavailable",
+      buildTag: BACKEND_BUILD_TAG,
       database: {
         isReady: databaseStatus.isReady,
         readyState: databaseStatus.readyState,
