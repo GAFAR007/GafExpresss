@@ -68,6 +68,7 @@ const String _logLiveRefreshFailure = "live_detail_refresh_failed";
 const String _logClockOutQuantitySelection = "clock_out_quantity_selection";
 const String _logClockOutPrimaryPromotion = "clock_out_primary_promotion";
 const String _logClockOutSubmitFailure = "clock_out_submit_failed";
+const String _logClockOutWizardOpen = "clock_out_wizard_open";
 
 const String _screenTitle = "Production plan";
 const String _workspaceTitle = "Calendar workspace";
@@ -1668,45 +1669,80 @@ class _ProductionPlanWorkspaceScreenState
                         String staffProfileId, {
                         required bool createNewEntry,
                       }) async {
-                        try {
-                          final latestDetail = await loadLatestDetail();
-                          if (!mounted || !context.mounted) {
-                            return;
-                          }
-                          final latestActiveAttendance =
+                        Future<bool> openClockOutWizardFromDetail(
+                          ProductionPlanDetail sourceDetail, {
+                          required String source,
+                        }) async {
+                          final activeAttendance =
                               resolveProductionWorkspaceActiveClockOutAttendance(
                                 attendanceRecords:
-                                    latestDetail.attendanceRecords,
+                                    sourceDetail.attendanceRecords,
                                 staffProfileId: staffProfileId,
                                 day: selectedDay,
                                 taskId: task.id,
                               );
-                          if (!createNewEntry &&
-                              latestActiveAttendance != null &&
-                              latestActiveAttendance.clockInAt != null &&
-                              latestActiveAttendance.clockOutAt == null) {
-                            final completed =
-                                await _showWorkspaceClockOutWizard(
-                                  context,
-                                  workDate: selectedDay,
-                                  task: task,
-                                  plan: latestDetail.plan,
-                                  timelineRows: latestDetail.timelineRows,
-                                  taskDayLedgers: latestDetail.taskDayLedgers,
-                                  attendanceRecords:
-                                      latestDetail.attendanceRecords,
-                                  staffMap: staffMap,
-                                  planUnitLabelById: planUnitLabelById,
-                                  fallbackTotalUnits:
-                                      workScopeSummary.totalUnits,
-                                  fallbackWorkUnitLabel:
-                                      workScopeSummary.singularLabel,
-                                  staffId: staffProfileId,
-                                  onSubmit: submitProgressInput,
+                          if (activeAttendance == null ||
+                              activeAttendance.clockInAt == null ||
+                              activeAttendance.clockOutAt != null) {
+                            return false;
+                          }
+                          AppDebug.log(
+                            _logTag,
+                            _logClockOutWizardOpen,
+                            extra: {
+                              "planId": widget.planId,
+                              "taskId": task.id,
+                              "staffId": staffProfileId,
+                              "source": source,
+                            },
+                          );
+                          final completed = await _showWorkspaceClockOutWizard(
+                            context,
+                            workDate: selectedDay,
+                            task: task,
+                            plan: sourceDetail.plan,
+                            timelineRows: sourceDetail.timelineRows,
+                            taskDayLedgers: sourceDetail.taskDayLedgers,
+                            attendanceRecords: sourceDetail.attendanceRecords,
+                            staffMap: staffMap,
+                            planUnitLabelById: planUnitLabelById,
+                            fallbackTotalUnits: workScopeSummary.totalUnits,
+                            fallbackWorkUnitLabel:
+                                workScopeSummary.singularLabel,
+                            staffId: staffProfileId,
+                            onSubmit: submitProgressInput,
+                          );
+                          if (completed) {
+                            _showSnackSafe(_clockOutWizardSuccess);
+                          }
+                          return true;
+                        }
+
+                        try {
+                          if (!createNewEntry) {
+                            final openedFromCurrentDetail =
+                                await openClockOutWizardFromDetail(
+                                  detail,
+                                  source: "current_detail",
                                 );
-                            if (completed) {
-                              _showSnackSafe(_clockOutWizardSuccess);
+                            if (openedFromCurrentDetail ||
+                                !mounted ||
+                                !context.mounted) {
+                              return;
                             }
+                          }
+                          final latestDetail = await loadLatestDetail();
+                          if (!mounted || !context.mounted) {
+                            return;
+                          }
+                          if (!createNewEntry &&
+                              await openClockOutWizardFromDetail(
+                                latestDetail,
+                                source: "refreshed_detail",
+                              )) {
+                            return;
+                          }
+                          if (!mounted || !context.mounted) {
                             return;
                           }
                           final input = await _showWorkspaceLogDialog(
