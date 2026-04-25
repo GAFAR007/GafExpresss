@@ -1,22 +1,58 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 
+ProductionTaskProgressProofInput _proof(String filename) {
+  return ProductionTaskProgressProofInput(
+    bytes: const [1, 2, 3],
+    filename: filename,
+    sizeBytes: 3,
+  );
+}
+
 void main() {
   group('requiredTaskProgressProofCount', () {
     test('returns zero for zero or negative contributions', () {
+      expect(requiredTaskProgressProofMediaCount(0), 0);
       expect(requiredTaskProgressProofCount(0), 0);
       expect(requiredTaskProgressProofCount(-1), 0);
     });
 
     test(
-      'rounds positive decimal contributions up to the next whole proof',
+      'requires one picture and one video for each rounded-up contribution',
       () {
-        expect(requiredTaskProgressProofCount(1), 1);
-        expect(requiredTaskProgressProofCount(1.5), 2);
-        expect(requiredTaskProgressProofCount(2.5), 3);
-        expect(requiredTaskProgressProofCount(3.5), 4);
+        expect(requiredTaskProgressProofMediaCount(1), 1);
+        expect(requiredTaskProgressProofCount(1), 2);
+        expect(requiredTaskProgressProofCount(1.5), 4);
+        expect(requiredTaskProgressProofCount(2.5), 6);
+        expect(requiredTaskProgressProofCount(3.5), 8);
       },
     );
+  });
+
+  group('hasRequiredTaskProgressProofMix', () {
+    test('accepts the required picture and video split', () {
+      expect(
+        hasRequiredTaskProgressProofMix([
+          _proof('proof-1.jpg'),
+          _proof('proof-1.mp4'),
+          _proof('proof-2.jpg'),
+          _proof('proof-2.mov'),
+        ], 4),
+        isTrue,
+      );
+    });
+
+    test('rejects proofs when the picture and video mix is incomplete', () {
+      expect(
+        hasRequiredTaskProgressProofMix([
+          _proof('proof-1.jpg'),
+          _proof('proof-2.jpg'),
+          _proof('proof-3.jpg'),
+          _proof('proof-1.mp4'),
+        ], 4),
+        isFalse,
+      );
+    });
   });
 
   group('ProductionTaskDayLedger.fromJson', () {
@@ -62,6 +98,24 @@ void main() {
       expect(ledger.activityRemaining.transplanted, 1500);
       expect(ledger.activityUnits.transplanted, 'seeds');
       expect(ledger.status, 'in_progress');
+    });
+  });
+
+  group('ProductionTimelineRow.fromJson', () {
+    test('preserves calendar work dates for UTC midnight payloads', () {
+      final row = ProductionTimelineRow.fromJson({
+        'id': 'row-1',
+        'planId': 'plan-1',
+        'taskId': 'task-1',
+        'workDate': '2026-04-24T00:00:00.000Z',
+        'taskTitle': 'Transplant block A',
+      });
+
+      expect(row.workDate, isNotNull);
+      expect(row.workDate!.isUtc, isFalse);
+      expect(row.workDate!.year, 2026);
+      expect(row.workDate!.month, 4);
+      expect(row.workDate!.day, 24);
     });
   });
 }

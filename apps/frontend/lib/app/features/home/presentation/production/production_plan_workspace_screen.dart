@@ -65,6 +65,9 @@ const String _logRejectProgress = "reject_progress";
 const String _logLiveRefreshStart = "live_detail_refresh_start";
 const String _logLiveRefreshSkipped = "live_detail_refresh_skipped";
 const String _logLiveRefreshFailure = "live_detail_refresh_failed";
+const String _logClockOutQuantitySelection = "clock_out_quantity_selection";
+const String _logClockOutPrimaryPromotion = "clock_out_primary_promotion";
+const String _logClockOutSubmitFailure = "clock_out_submit_failed";
 
 const String _screenTitle = "Production plan";
 const String _workspaceTitle = "Calendar workspace";
@@ -164,6 +167,9 @@ const String _daySummaryUnitsTouchedLabel = "Units";
 const String _daySummaryProgressLabel = "Progress";
 const String _daySummaryFirstClockInLabel = "First in";
 const String _daySummaryLastClockOutLabel = "Last out";
+const String _daySummaryPanelLabel = "Day stats";
+const String _daySummaryPanelShowLabel = "Show day stats";
+const String _daySummaryPanelHideLabel = "Hide day stats";
 const String _dayQuantityPlantingLabel = "Planting";
 const String _dayQuantityTransplantLabel = "Transplant";
 const String _dayQuantityHarvestLabel = "Harvest";
@@ -222,19 +228,24 @@ const String _clockOutWizardNoProofNeeded =
     "No proof is required when no primary unit contribution is entered.";
 const String _clockOutWizardProofPicking = "Selecting proof media...";
 const String _clockOutWizardProofRequired =
-    "Upload all required proof files for the completed units.";
+    "Upload every required picture and video for the completed units.";
 const String _clockOutWizardProofNotAllowed =
     "Proof uploads are not allowed when the completed amount is 0.";
 const String _clockOutWizardFinishSaving = "Finishing clock-out...";
 const String _clockOutWizardActiveSessionMissing =
     "No active production session was found for this staff.";
-const String _clockOutWizardPrimaryInvalid = "Enter a valid completed amount.";
+const String _clockOutWizardPrimaryInvalid = "Select a valid completed amount.";
 const String _clockOutWizardPrimaryRequired =
-    "Enter the completed amount before you continue.";
+    "Select the completed amount before you continue.";
 const String _clockOutWizardActivityRequired =
     "Choose the activity type before you continue.";
 const String _clockOutWizardActivityQuantityInvalid =
-    "Enter a valid activity quantity.";
+    "Select a valid activity quantity.";
+const String _clockOutWizardActivityPresetLabel = "Preset quantity";
+const String _clockOutWizardActivityCustomLabel = "Custom quantity";
+const String _clockOutWizardActivityCustomHelper =
+    "Numbers only. Use this when the exact quantity is not in the quick picks.";
+const String _clockOutWizardActivityApplyLabel = "Use number";
 const String _clockOutWizardDelayRequired =
     "Choose a delay reason when no units or activity were completed.";
 const String _clockOutWizardStalePrimaryTemplate =
@@ -455,6 +466,7 @@ class _ProductionPlanWorkspaceScreenState
       _WorkspaceCalendarMode.month;
   Timer? _liveRefreshTimer;
   bool _detailRefreshInFlight = false;
+  bool _selectedDaySummaryExpanded = false;
 
   @override
   void initState() {
@@ -725,6 +737,18 @@ class _ProductionPlanWorkspaceScreenState
   Widget build(BuildContext context) {
     AppDebug.log(_logTag, _logBuild, extra: {"planId": widget.planId});
     final detailAsync = ref.watch(productionPlanDetailProvider(widget.planId));
+    final cachedDetail = ref.watch(
+      productionPlanDetailSnapshotProvider.select(
+        (snapshots) => snapshots[widget.planId],
+      ),
+    );
+    final displayDetailAsync =
+        detailAsync.valueOrNull == null && cachedDetail != null
+        ? AsyncValue<ProductionPlanDetail>.data(cachedDetail)
+        : detailAsync;
+    final isRefreshingDetail =
+        detailAsync.isLoading &&
+        (detailAsync.valueOrNull != null || cachedDetail != null);
     final staffAsync = ref.watch(productionStaffProvider);
     final session = ref.watch(authSessionProvider);
     final profileAsync = ref.watch(userProfileProvider);
@@ -778,8 +802,10 @@ class _ProductionPlanWorkspaceScreenState
         onRefresh: () async {
           await _triggerLivePlanDetailRefresh(reason: "pull_to_refresh");
         },
-        child: detailAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
+        child: displayDetailAsync.when(
+          skipError: cachedDetail != null,
+          skipLoadingOnReload: true,
+          loading: () => const ProductionLoadingState(),
           error: (error, _) => Center(
             child: Padding(
               padding: const EdgeInsets.all(_pagePadding),
@@ -1012,1079 +1038,1107 @@ class _ProductionPlanWorkspaceScreenState
               }
             }
 
-            return ListView(
-              padding: const EdgeInsets.all(_pagePadding),
-              children: [
-                _WorkspaceSummaryCard(
-                  detail: detail,
-                  plan: detail.plan,
-                  workScopeSummary: workScopeSummary,
-                  selectedEstateName: selectedEstateName,
-                  selectedProductName: selectedProductName,
-                  selectedDay: selectedDay,
-                  scheduledTaskCount: tasksForDay.length,
-                  timelineRows: detail.timelineRows,
-                  onOpenDraft: () {
-                    context.push(
-                      productionPlanDraftStudioPath(planId: widget.planId),
-                    );
-                  },
-                  onViewInsights: () {
-                    context.push(productionPlanInsightsPath(widget.planId));
-                  },
-                  onDownloadProgress: () async {
-                    await _downloadProgressReport(
-                      routePath: productionPlanDetailPath(widget.planId),
-                    );
-                  },
-                  onEmailProgress: () async {
-                    await _emailProgressReport(
-                      routePath: productionPlanDetailPath(widget.planId),
-                    );
-                  },
-                  onCopyProgressLink: () async {
-                    await _copyProgressReportLink(
-                      routePath: productionPlanDetailPath(widget.planId),
-                    );
-                  },
-                  onReturnToDraft:
-                      canManageLifecycle &&
-                          (detail.plan.status == "active" ||
-                              detail.plan.status == "paused")
-                      ? () async {
-                          final confirmed = await _confirmAction(
-                            title: _returnToDraftConfirmTitle,
-                            message: _returnToDraftConfirmMessage,
-                            confirmLabel: _returnToDraftConfirmLabel,
-                          );
-                          if (!confirmed) {
-                            return;
-                          }
-                          try {
-                            await ref
-                                .read(productionPlanActionsProvider)
-                                .updatePlanStatus(
-                                  planId: widget.planId,
-                                  status: "draft",
-                                );
-                            if (!mounted || !this.context.mounted) {
+            return ProductionRefreshOverlay(
+              isRefreshing: isRefreshingDetail,
+              child: ListView(
+                padding: const EdgeInsets.all(_pagePadding),
+                children: [
+                  _WorkspaceSummaryCard(
+                    detail: detail,
+                    plan: detail.plan,
+                    workScopeSummary: workScopeSummary,
+                    selectedEstateName: selectedEstateName,
+                    selectedProductName: selectedProductName,
+                    selectedDay: selectedDay,
+                    scheduledTaskCount: tasksForDay.length,
+                    timelineRows: detail.timelineRows,
+                    onOpenDraft: () {
+                      context.push(
+                        productionPlanDraftStudioPath(planId: widget.planId),
+                      );
+                    },
+                    onViewInsights: () {
+                      context.push(productionPlanInsightsPath(widget.planId));
+                    },
+                    onDownloadProgress: () async {
+                      await _downloadProgressReport(
+                        routePath: productionPlanDetailPath(widget.planId),
+                      );
+                    },
+                    onEmailProgress: () async {
+                      await _emailProgressReport(
+                        routePath: productionPlanDetailPath(widget.planId),
+                      );
+                    },
+                    onCopyProgressLink: () async {
+                      await _copyProgressReportLink(
+                        routePath: productionPlanDetailPath(widget.planId),
+                      );
+                    },
+                    onReturnToDraft:
+                        canManageLifecycle &&
+                            (detail.plan.status == "active" ||
+                                detail.plan.status == "paused")
+                        ? () async {
+                            final confirmed = await _confirmAction(
+                              title: _returnToDraftConfirmTitle,
+                              message: _returnToDraftConfirmMessage,
+                              confirmLabel: _returnToDraftConfirmLabel,
+                            );
+                            if (!confirmed) {
                               return;
                             }
-                            setState(() {
-                              _visibleMonth = null;
-                              _selectedDay = null;
-                            });
-                            _showSnackSafe(_returnToDraftSuccess);
-                            GoRouter.of(this.context).go(
-                              productionPlanDraftStudioPath(
-                                planId: widget.planId,
-                              ),
-                            );
-                          } catch (error) {
-                            _showSnackSafe(
-                              _resolveProductionWorkspaceErrorMessage(
-                                error,
-                                fallback: _returnToDraftFailure,
-                              ),
-                            );
-                          }
-                        }
-                      : null,
-                ),
-                const SizedBox(height: _sectionSpacing),
-                ProductionPresenceBanner(
-                  currentViewer: currentViewer,
-                  remoteViewers: presenceState.viewers,
-                  isConnected: presenceState.isConnected,
-                  isSharedRoom: widget.planId.trim().isNotEmpty,
-                  errorMessage: presenceState.error,
-                  planId: widget.planId,
-                  snapshotAt: presenceState.updatedAt,
-                  onOpenStats: widget.planId.trim().isEmpty
-                      ? null
-                      : () => context.push(
-                          productionPlanPresenceStatsPath(widget.planId),
-                        ),
-                ),
-                const SizedBox(height: _sectionSpacing),
-                _WorkspaceCalendarHeader(
-                  title: _workspaceTitle,
-                  subtitle:
-                      "$_workspaceSubtitle Working on ${workScopeSummary.countLabel}.",
-                  calendarVisible: showCalendarOverview,
-                  onToggleCalendar: _toggleCalendarVisibility,
-                ),
-                const SizedBox(height: _cardSpacing),
-                if (showCalendarOverview) ...[
-                  _WorkspaceCalendarModeBar(
-                    mode: _calendarMode,
-                    onModeChanged: _updateCalendarMode,
-                  ),
-                  const SizedBox(height: _cardSpacing),
-                  switch (_calendarMode) {
-                    _WorkspaceCalendarMode.day => const SizedBox.shrink(),
-                    _WorkspaceCalendarMode.month => _MonthCalendarCard(
-                      month: visibleMonth,
-                      selectedDay: selectedDay,
-                      plan: detail.plan,
-                      workScopeSummary: workScopeSummary,
-                      tasks: detail.tasks,
-                      timelineRows: detail.timelineRows,
-                      onPreviousMonth: () {
-                        final next = DateTime(
-                          visibleMonth.year,
-                          visibleMonth.month - 1,
-                          1,
-                        );
-                        AppDebug.log(
-                          _logTag,
-                          _logMonthChanged,
-                          extra: {"month": _monthTitle(next)},
-                        );
-                        setState(() {
-                          _visibleMonth = next;
-                        });
-                      },
-                      onNextMonth: () {
-                        final next = DateTime(
-                          visibleMonth.year,
-                          visibleMonth.month + 1,
-                          1,
-                        );
-                        AppDebug.log(
-                          _logTag,
-                          _logMonthChanged,
-                          extra: {"month": _monthTitle(next)},
-                        );
-                        setState(() {
-                          _visibleMonth = next;
-                        });
-                      },
-                      onToday: () {
-                        final next = _resolveInitialDay(detail.plan);
-                        AppDebug.log(
-                          _logTag,
-                          _logDayChanged,
-                          extra: {"day": formatDateInput(next)},
-                        );
-                        setState(() {
-                          _selectedDay = next;
-                          _visibleMonth = _firstDayOfMonth(next);
-                        });
-                      },
-                      onSelectDay: (day) {
-                        AppDebug.log(
-                          _logTag,
-                          _logDayChanged,
-                          extra: {"day": formatDateInput(day)},
-                        );
-                        setState(() {
-                          _selectedDay = day;
-                          _visibleMonth = _firstDayOfMonth(day);
-                        });
-                      },
-                    ),
-                    _WorkspaceCalendarMode.year => _YearCalendarCard(
-                      year: visibleMonth.year,
-                      selectedDay: selectedDay,
-                      workScopeSummary: workScopeSummary,
-                      tasks: detail.tasks,
-                      onPreviousYear: () {
-                        final next = DateTime(visibleMonth.year - 1, 1, 1);
-                        AppDebug.log(
-                          _logTag,
-                          _logMonthChanged,
-                          extra: {"month": _monthTitle(next)},
-                        );
-                        setState(() {
-                          _visibleMonth = next;
-                        });
-                      },
-                      onNextYear: () {
-                        final next = DateTime(visibleMonth.year + 1, 1, 1);
-                        AppDebug.log(
-                          _logTag,
-                          _logMonthChanged,
-                          extra: {"month": _monthTitle(next)},
-                        );
-                        setState(() {
-                          _visibleMonth = next;
-                        });
-                      },
-                      onToday: () {
-                        final next = _resolveInitialDay(detail.plan);
-                        AppDebug.log(
-                          _logTag,
-                          _logDayChanged,
-                          extra: {"day": formatDateInput(next)},
-                        );
-                        setState(() {
-                          _selectedDay = next;
-                          _visibleMonth = _firstDayOfMonth(next);
-                        });
-                      },
-                      onSelectDay: (day) {
-                        AppDebug.log(
-                          _logTag,
-                          _logDayChanged,
-                          extra: {"day": formatDateInput(day)},
-                        );
-                        setState(() {
-                          _selectedDay = day;
-                          _visibleMonth = _firstDayOfMonth(day);
-                          _calendarMode = _WorkspaceCalendarMode.month;
-                          _lastExpandedCalendarMode =
-                              _WorkspaceCalendarMode.month;
-                        });
-                      },
-                    ),
-                  },
-                  const SizedBox(height: _sectionSpacing),
-                ],
-                _SelectedDaySectionHeader(
-                  title: _selectedDayTitle,
-                  subtitle: _formatSelectedDaySubtitle(
-                    day: selectedDay,
-                    taskCount: tasksForDay.length,
-                    logCount: rowsForDay.length,
-                    workScopeSummary: workScopeSummary,
-                  ),
-                  showDayNavigation:
-                      _calendarMode == _WorkspaceCalendarMode.day,
-                  onPreviousDay: () {
-                    selectDay(selectedDay.subtract(const Duration(days: 1)));
-                  },
-                  onToday: () {
-                    selectDay(_resolveInitialDay(detail.plan));
-                  },
-                  onNextDay: () {
-                    selectDay(selectedDay.add(const Duration(days: 1)));
-                  },
-                ),
-                const SizedBox(height: _cardSpacing),
-                if (canManageCalendar) ...[
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.tonalIcon(
-                      onPressed: createTaskForSelectedDay,
-                      icon: const Icon(Icons.add_task_outlined),
-                      label: const Text(_addTaskLabel),
-                    ),
-                  ),
-                  const SizedBox(height: _cardSpacing),
-                ],
-                _SelectedDayMetricsRow(
-                  plan: detail.plan,
-                  selectedDay: selectedDay,
-                  workScopeSummary: workScopeSummary,
-                  tasks: tasksForDay,
-                  rows: rowsForDay,
-                  timelineRows: detail.timelineRows,
-                  taskDayLedgers: detail.taskDayLedgers,
-                  attendanceRecords: detail.attendanceRecords,
-                ),
-                const SizedBox(height: _cardSpacing),
-                if (tasksForDay.isEmpty)
-                  const ProductionEmptyState(
-                    title: _selectedDayEmptyTitle,
-                    message: _selectedDayEmptyMessage,
-                  )
-                else
-                  ...tasksForDay.map((task) {
-                    final rowsForTask = rowsForDay
-                        .where((row) => row.taskId == task.id)
-                        .toList();
-                    final assignedStaffIdsForTask = _resolveAssignedStaffIds(
-                      task,
-                    );
-                    final canLogProgressForTask =
-                        assignedStaffIdsForTask.isNotEmpty &&
-                        (canManageCalendar ||
-                            (canSubmitOwnProgress &&
-                                assignedStaffIdsForTask.contains(selfStaffId)));
-                    final progressEnabledStaffIds = canManageCalendar
-                        ? assignedStaffIdsForTask.toSet()
-                        : (canSubmitOwnProgress &&
-                              selfStaffId.trim().isNotEmpty &&
-                              assignedStaffIdsForTask.contains(selfStaffId))
-                        ? <String>{selfStaffId}
-                        : <String>{};
-                    final attendanceActions = StaffAttendanceActions(ref);
-
-                    Future<ProductionAttendanceRecord?>
-                    setAttendanceForTaskStaff(
-                      String staffProfileId,
-                      ProductionAttendanceRecord? existingAttendance,
-                    ) async {
-                      final staffLabel = _resolveStaffDisplayLabel(
-                        staffProfileId,
-                        staffMap,
-                        fallbackRole: task.roleRequired,
-                      );
-                      final input = await _showAttendanceDialog(
-                        context,
-                        staffLabel: staffLabel,
-                        taskTitle: task.title,
-                        workDate: selectedDay,
-                        existingAttendance: existingAttendance,
-                      );
-                      if (input == null) {
-                        return null;
-                      }
-                      try {
-                        final note = "Updated from production workspace";
-                        StaffAttendanceRecord attendanceRecord;
-                        final existingClockInAt = existingAttendance?.clockInAt
-                            ?.toLocal();
-                        final existingClockOutAt = existingAttendance
-                            ?.clockOutAt
-                            ?.toLocal();
-                        final shouldSetClockOutFirst =
-                            existingAttendance != null &&
-                            input.clockOutAt != null &&
-                            existingClockOutAt != null &&
-                            input.clockInAt.isAfter(existingClockOutAt) &&
-                            !(existingClockInAt != null &&
-                                input.clockOutAt!.isBefore(existingClockInAt));
-                        if (shouldSetClockOutFirst) {
-                          final updatedClockOut = await attendanceActions
-                              .clockOut(
-                                staffProfileId: staffProfileId,
-                                attendanceId: existingAttendance.id,
-                                clockOutAt: input.clockOutAt,
-                                workDate: selectedDay,
-                                planId: widget.planId,
-                                taskId: task.id,
-                                notes: note,
+                            try {
+                              await ref
+                                  .read(productionPlanActionsProvider)
+                                  .updatePlanStatus(
+                                    planId: widget.planId,
+                                    status: "draft",
+                                  );
+                              if (!mounted || !this.context.mounted) {
+                                return;
+                              }
+                              setState(() {
+                                _visibleMonth = null;
+                                _selectedDay = null;
+                              });
+                              _showSnackSafe(_returnToDraftSuccess);
+                              GoRouter.of(this.context).go(
+                                productionPlanDraftStudioPath(
+                                  planId: widget.planId,
+                                ),
                               );
-                          if (!mounted || !context.mounted) {
-                            return null;
+                            } catch (error) {
+                              _showSnackSafe(
+                                _resolveProductionWorkspaceErrorMessage(
+                                  error,
+                                  fallback: _returnToDraftFailure,
+                                ),
+                              );
+                            }
                           }
-                          await requireAttendanceProofUpload(
-                            context: context,
-                            ref: ref,
-                            attendance: updatedClockOut,
-                            subjectLabel: staffLabel,
-                            taskLabel: task.title,
+                        : null,
+                  ),
+                  const SizedBox(height: _sectionSpacing),
+                  ProductionPresenceBanner(
+                    currentViewer: currentViewer,
+                    remoteViewers: presenceState.viewers,
+                    isConnected: presenceState.isConnected,
+                    isSharedRoom: widget.planId.trim().isNotEmpty,
+                    errorMessage: presenceState.error,
+                    planId: widget.planId,
+                    snapshotAt: presenceState.updatedAt,
+                    onOpenStats: widget.planId.trim().isEmpty
+                        ? null
+                        : () => context.push(
+                            productionPlanPresenceStatsPath(widget.planId),
+                          ),
+                  ),
+                  const SizedBox(height: _sectionSpacing),
+                  _WorkspaceCalendarHeader(
+                    title: _workspaceTitle,
+                    subtitle:
+                        "$_workspaceSubtitle Working on ${workScopeSummary.countLabel}.",
+                    calendarVisible: showCalendarOverview,
+                    onToggleCalendar: _toggleCalendarVisibility,
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  if (showCalendarOverview) ...[
+                    _WorkspaceCalendarModeBar(
+                      mode: _calendarMode,
+                      onModeChanged: _updateCalendarMode,
+                    ),
+                    const SizedBox(height: _cardSpacing),
+                    switch (_calendarMode) {
+                      _WorkspaceCalendarMode.day => const SizedBox.shrink(),
+                      _WorkspaceCalendarMode.month => _MonthCalendarCard(
+                        month: visibleMonth,
+                        selectedDay: selectedDay,
+                        plan: detail.plan,
+                        workScopeSummary: workScopeSummary,
+                        tasks: detail.tasks,
+                        timelineRows: detail.timelineRows,
+                        onPreviousMonth: () {
+                          final next = DateTime(
+                            visibleMonth.year,
+                            visibleMonth.month - 1,
+                            1,
                           );
-                          attendanceRecord = await attendanceActions.clockIn(
-                            staffProfileId: staffProfileId,
-                            attendanceId: updatedClockOut.id,
-                            clockInAt: input.clockInAt,
-                            workDate: selectedDay,
-                            planId: widget.planId,
-                            taskId: task.id,
-                            notes: note,
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
                           );
-                        } else {
-                          attendanceRecord = await attendanceActions.clockIn(
-                            staffProfileId: staffProfileId,
-                            attendanceId: existingAttendance?.id,
-                            clockInAt: input.clockInAt,
-                            workDate: selectedDay,
-                            planId: widget.planId,
-                            taskId: task.id,
-                            notes: note,
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onNextMonth: () {
+                          final next = DateTime(
+                            visibleMonth.year,
+                            visibleMonth.month + 1,
+                            1,
                           );
-                          if (input.clockOutAt != null) {
-                            attendanceRecord = await attendanceActions.clockOut(
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onToday: () {
+                          final next = _resolveInitialDay(detail.plan);
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(next)},
+                          );
+                          setState(() {
+                            _selectedDay = next;
+                            _visibleMonth = _firstDayOfMonth(next);
+                          });
+                        },
+                        onSelectDay: (day) {
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(day)},
+                          );
+                          setState(() {
+                            _selectedDay = day;
+                            _visibleMonth = _firstDayOfMonth(day);
+                          });
+                        },
+                      ),
+                      _WorkspaceCalendarMode.year => _YearCalendarCard(
+                        year: visibleMonth.year,
+                        selectedDay: selectedDay,
+                        workScopeSummary: workScopeSummary,
+                        tasks: detail.tasks,
+                        onPreviousYear: () {
+                          final next = DateTime(visibleMonth.year - 1, 1, 1);
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onNextYear: () {
+                          final next = DateTime(visibleMonth.year + 1, 1, 1);
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onToday: () {
+                          final next = _resolveInitialDay(detail.plan);
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(next)},
+                          );
+                          setState(() {
+                            _selectedDay = next;
+                            _visibleMonth = _firstDayOfMonth(next);
+                          });
+                        },
+                        onSelectDay: (day) {
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(day)},
+                          );
+                          setState(() {
+                            _selectedDay = day;
+                            _visibleMonth = _firstDayOfMonth(day);
+                            _calendarMode = _WorkspaceCalendarMode.month;
+                            _lastExpandedCalendarMode =
+                                _WorkspaceCalendarMode.month;
+                          });
+                        },
+                      ),
+                    },
+                    const SizedBox(height: _sectionSpacing),
+                  ],
+                  _SelectedDaySectionHeader(
+                    title: _selectedDayTitle,
+                    subtitle: _formatSelectedDaySubtitle(
+                      day: selectedDay,
+                      taskCount: tasksForDay.length,
+                      logCount: rowsForDay.length,
+                      workScopeSummary: workScopeSummary,
+                    ),
+                    showDayNavigation:
+                        _calendarMode == _WorkspaceCalendarMode.day,
+                    onPreviousDay: () {
+                      selectDay(selectedDay.subtract(const Duration(days: 1)));
+                    },
+                    onToday: () {
+                      selectDay(_resolveInitialDay(detail.plan));
+                    },
+                    onNextDay: () {
+                      selectDay(selectedDay.add(const Duration(days: 1)));
+                    },
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  if (canManageCalendar) ...[
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.tonalIcon(
+                        onPressed: createTaskForSelectedDay,
+                        icon: const Icon(Icons.add_task_outlined),
+                        label: const Text(_addTaskLabel),
+                      ),
+                    ),
+                    const SizedBox(height: _cardSpacing),
+                  ],
+                  _SelectedDayMetricsRow(
+                    plan: detail.plan,
+                    selectedDay: selectedDay,
+                    workScopeSummary: workScopeSummary,
+                    tasks: tasksForDay,
+                    rows: rowsForDay,
+                    timelineRows: detail.timelineRows,
+                    taskDayLedgers: detail.taskDayLedgers,
+                    attendanceRecords: detail.attendanceRecords,
+                    isSummaryExpanded: _selectedDaySummaryExpanded,
+                    onToggleSummaryExpanded: () {
+                      setState(() {
+                        _selectedDaySummaryExpanded =
+                            !_selectedDaySummaryExpanded;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  if (tasksForDay.isEmpty)
+                    const ProductionEmptyState(
+                      title: _selectedDayEmptyTitle,
+                      message: _selectedDayEmptyMessage,
+                    )
+                  else
+                    ...tasksForDay.map((task) {
+                      final rowsForTask = rowsForDay
+                          .where((row) => row.taskId == task.id)
+                          .toList();
+                      final assignedStaffIdsForTask = _resolveAssignedStaffIds(
+                        task,
+                      );
+                      final canLogProgressForTask =
+                          assignedStaffIdsForTask.isNotEmpty &&
+                          (canManageCalendar ||
+                              (canSubmitOwnProgress &&
+                                  assignedStaffIdsForTask.contains(
+                                    selfStaffId,
+                                  )));
+                      final progressEnabledStaffIds = canManageCalendar
+                          ? assignedStaffIdsForTask.toSet()
+                          : (canSubmitOwnProgress &&
+                                selfStaffId.trim().isNotEmpty &&
+                                assignedStaffIdsForTask.contains(selfStaffId))
+                          ? <String>{selfStaffId}
+                          : <String>{};
+                      final attendanceActions = StaffAttendanceActions(ref);
+
+                      Future<ProductionAttendanceRecord?>
+                      setAttendanceForTaskStaff(
+                        String staffProfileId,
+                        ProductionAttendanceRecord? existingAttendance,
+                      ) async {
+                        final staffLabel = _resolveStaffDisplayLabel(
+                          staffProfileId,
+                          staffMap,
+                          fallbackRole: task.roleRequired,
+                        );
+                        final input = await _showAttendanceDialog(
+                          context,
+                          staffLabel: staffLabel,
+                          taskTitle: task.title,
+                          workDate: selectedDay,
+                          existingAttendance: existingAttendance,
+                        );
+                        if (input == null) {
+                          return null;
+                        }
+                        try {
+                          final note = "Updated from production workspace";
+                          StaffAttendanceRecord attendanceRecord;
+                          final existingClockInAt = existingAttendance
+                              ?.clockInAt
+                              ?.toLocal();
+                          final existingClockOutAt = existingAttendance
+                              ?.clockOutAt
+                              ?.toLocal();
+                          final shouldSetClockOutFirst =
+                              existingAttendance != null &&
+                              input.clockOutAt != null &&
+                              existingClockOutAt != null &&
+                              input.clockInAt.isAfter(existingClockOutAt) &&
+                              !(existingClockInAt != null &&
+                                  input.clockOutAt!.isBefore(
+                                    existingClockInAt,
+                                  ));
+                          if (shouldSetClockOutFirst) {
+                            final updatedClockOut = await attendanceActions
+                                .clockOut(
+                                  staffProfileId: staffProfileId,
+                                  attendanceId: existingAttendance.id,
+                                  clockOutAt: input.clockOutAt,
+                                  workDate: selectedDay,
+                                  planId: widget.planId,
+                                  taskId: task.id,
+                                  notes: note,
+                                );
+                            if (!mounted || !context.mounted) {
+                              return null;
+                            }
+                            await requireAttendanceProofUpload(
+                              context: context,
+                              ref: ref,
+                              attendance: updatedClockOut,
+                              subjectLabel: staffLabel,
+                              taskLabel: task.title,
+                            );
+                            attendanceRecord = await attendanceActions.clockIn(
                               staffProfileId: staffProfileId,
-                              attendanceId: attendanceRecord.id,
-                              clockOutAt: input.clockOutAt,
+                              attendanceId: updatedClockOut.id,
+                              clockInAt: input.clockInAt,
                               workDate: selectedDay,
                               planId: widget.planId,
                               taskId: task.id,
                               notes: note,
                             );
-                            if (!mounted || !context.mounted) {
-                              return null;
-                            }
-                            attendanceRecord =
-                                await requireAttendanceProofUpload(
-                                  context: context,
-                                  ref: ref,
-                                  attendance: attendanceRecord,
-                                  subjectLabel: staffLabel,
-                                  taskLabel: task.title,
-                                );
-                          }
-                        }
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                        _showSnackSafe(_attendanceUpdateSuccess);
-                        return _toProductionAttendanceRecord(attendanceRecord);
-                      } catch (_) {
-                        _showSnackSafe(_attendanceUpdateFailure);
-                        return null;
-                      }
-                    }
-
-                    Future<ProductionAttendanceRecord?>
-                    quickClockInForTaskStaff(
-                      String staffProfileId,
-                      ProductionAttendanceRecord? existingAttendance,
-                    ) async {
-                      if (existingAttendance != null) {
-                        return null;
-                      }
-                      try {
-                        final clockInAt = _resolveQuickAttendanceTime(
-                          selectedDay,
-                        );
-                        final attendanceRecord = await attendanceActions
-                            .clockIn(
+                          } else {
+                            attendanceRecord = await attendanceActions.clockIn(
                               staffProfileId: staffProfileId,
-                              clockInAt: clockInAt,
+                              attendanceId: existingAttendance?.id,
+                              clockInAt: input.clockInAt,
                               workDate: selectedDay,
                               planId: widget.planId,
                               taskId: task.id,
-                              notes: "Clocked in from production workspace",
+                              notes: note,
                             );
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                        _showSnackSafe(_attendanceQuickClockInSuccess);
-                        return _toProductionAttendanceRecord(attendanceRecord);
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _attendanceUpdateFailure,
-                          ),
-                        );
-                        return null;
-                      }
-                    }
-
-                    Future<ProductionAttendanceRecord?>
-                    quickClockOutForTaskStaff(
-                      String staffProfileId,
-                      ProductionAttendanceRecord? existingAttendance,
-                    ) async {
-                      final openAttendance = existingAttendance;
-                      if (openAttendance == null ||
-                          openAttendance.clockOutAt != null) {
-                        return null;
-                      }
-                      final clockInAt = openAttendance.clockInAt?.toLocal();
-                      if (clockInAt == null) {
-                        return null;
-                      }
-                      try {
-                        final scopedWorkDate =
-                            (openAttendance.workDate ??
-                                    openAttendance.clockInAt)
-                                ?.toLocal() ??
-                            selectedDay;
-                        final scopedPlanId =
-                            openAttendance.planId.trim().isNotEmpty
-                            ? openAttendance.planId
-                            : widget.planId;
-                        final scopedTaskId =
-                            openAttendance.taskId.trim().isNotEmpty
-                            ? openAttendance.taskId
-                            : task.id;
-                        final clockOutAt = _resolveQuickClockOutTime(
-                          workDate: scopedWorkDate,
-                          clockInAt: clockInAt,
-                        );
-                        final attendanceRecord = await attendanceActions
-                            .clockOut(
-                              staffProfileId: staffProfileId,
-                              attendanceId: openAttendance.id,
-                              clockOutAt: clockOutAt,
-                              workDate: scopedWorkDate,
-                              planId: scopedPlanId,
-                              taskId: scopedTaskId,
-                              notes: "Clocked out from production workspace",
-                            );
-                        if (!mounted || !context.mounted) {
+                            if (input.clockOutAt != null) {
+                              attendanceRecord = await attendanceActions
+                                  .clockOut(
+                                    staffProfileId: staffProfileId,
+                                    attendanceId: attendanceRecord.id,
+                                    clockOutAt: input.clockOutAt,
+                                    workDate: selectedDay,
+                                    planId: widget.planId,
+                                    taskId: task.id,
+                                    notes: note,
+                                  );
+                              if (!mounted || !context.mounted) {
+                                return null;
+                              }
+                              attendanceRecord =
+                                  await requireAttendanceProofUpload(
+                                    context: context,
+                                    ref: ref,
+                                    attendance: attendanceRecord,
+                                    subjectLabel: staffLabel,
+                                    taskLabel: task.title,
+                                  );
+                            }
+                          }
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          _showSnackSafe(_attendanceUpdateSuccess);
+                          return _toProductionAttendanceRecord(
+                            attendanceRecord,
+                          );
+                        } catch (_) {
+                          _showSnackSafe(_attendanceUpdateFailure);
                           return null;
                         }
-                        final attendanceWithProof =
-                            await requireAttendanceProofUpload(
-                              context: context,
-                              ref: ref,
-                              attendance: attendanceRecord,
-                              subjectLabel: _resolveStaffDisplayLabel(
-                                staffProfileId,
-                                staffMap,
-                                fallbackRole: task.roleRequired,
-                              ),
-                              taskLabel: task.title,
-                            );
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                        _showSnackSafe(_attendanceQuickClockOutSuccess);
-                        return _toProductionAttendanceRecord(
-                          attendanceWithProof,
-                        );
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _attendanceUpdateFailure,
-                          ),
-                        );
-                        return null;
                       }
-                    }
 
-                    Future<void> resetTaskHistoryForStaff(
-                      String staffProfileId,
-                    ) async {
-                      final staffLabel = _resolveStaffDisplayLabel(
-                        staffProfileId,
-                        staffMap,
-                        fallbackRole: task.roleRequired,
-                      );
-                      final confirmed = await _confirmAction(
-                        title: _taskResetHistoryConfirmTitle,
-                        message:
-                            "This clears today’s clock-in, clock-out, proofs, and saved progress for $staffLabel on ${task.title}. Audit logs stay.",
-                        confirmLabel: _taskResetHistoryConfirmLabel,
-                      );
-                      if (!confirmed) {
-                        return;
-                      }
-                      AppDebug.log(
-                        _logTag,
-                        _logResetHistory,
-                        extra: {
-                          "planId": widget.planId,
-                          "taskId": task.id,
-                          "staffId": staffProfileId,
-                          "workDate": formatDateInput(selectedDay),
-                        },
-                      );
-                      try {
-                        final message = await ref
-                            .read(productionPlanActionsProvider)
-                            .resetTaskHistory(
-                              taskId: task.id,
-                              workDate: selectedDay,
-                              staffId: staffProfileId,
-                              planId: widget.planId,
-                              notes: "Reset from production workspace",
-                            );
-                        _showSnackSafe(
-                          message.trim().isNotEmpty
-                              ? message
-                              : _taskResetHistorySuccess,
-                        );
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _taskResetHistoryFailure,
-                          ),
-                        );
-                      }
-                    }
-
-                    Future<void> submitProgressInput(
-                      ProductionTaskLogProgressInput input,
-                    ) async {
-                      await ref
-                          .read(productionPlanActionsProvider)
-                          .logTaskProgress(
-                            taskId: task.id,
-                            workDate: selectedDay,
-                            staffId: input.staffId,
-                            unitId: input.unitId,
-                            createNewEntry: input.createNewEntry,
-                            unitContribution: input.unitContribution,
-                            actualPlots: input.actualPlots,
-                            activityType: input.activityType,
-                            quantityActivityType: input.quantityActivityType,
-                            activityQuantity: input.activityQuantity,
-                            quantityAmount: input.quantityAmount,
-                            quantityUnit: input.quantityUnit,
-                            proofs: input.proofs,
-                            delayReason: input.delayReason,
-                            notes: input.notes,
-                            planId: widget.planId,
-                          );
-                    }
-
-                    Future<ProductionPlanDetail> loadLatestDetail() async {
-                      try {
-                        return await ref.refresh(
-                          productionPlanDetailProvider(widget.planId).future,
-                        );
-                      } catch (_) {
-                        return detail;
-                      }
-                    }
-
-                    Future<void> openLogProgressFlowForStaff(
-                      String staffProfileId, {
-                      required bool createNewEntry,
-                    }) async {
-                      try {
-                        final latestDetail = await loadLatestDetail();
-                        if (!mounted || !context.mounted) {
-                          return;
+                      Future<ProductionAttendanceRecord?>
+                      quickClockInForTaskStaff(
+                        String staffProfileId,
+                        ProductionAttendanceRecord? existingAttendance,
+                      ) async {
+                        if (existingAttendance != null) {
+                          return null;
                         }
-                        final latestActiveAttendance =
-                            resolveProductionWorkspaceActiveClockOutAttendance(
-                              attendanceRecords: latestDetail.attendanceRecords,
-                              staffProfileId: staffProfileId,
-                              day: selectedDay,
-                              taskId: task.id,
-                            );
-                        if (!createNewEntry &&
-                            latestActiveAttendance != null &&
-                            latestActiveAttendance.clockInAt != null &&
-                            latestActiveAttendance.clockOutAt == null) {
-                          final completed = await _showWorkspaceClockOutWizard(
-                            context,
-                            workDate: selectedDay,
-                            task: task,
-                            plan: latestDetail.plan,
-                            timelineRows: latestDetail.timelineRows,
-                            taskDayLedgers: latestDetail.taskDayLedgers,
-                            attendanceRecords: latestDetail.attendanceRecords,
-                            staffMap: staffMap,
-                            planUnitLabelById: planUnitLabelById,
-                            fallbackTotalUnits: workScopeSummary.totalUnits,
-                            fallbackWorkUnitLabel:
-                                workScopeSummary.singularLabel,
-                            staffId: staffProfileId,
-                            onSubmit: submitProgressInput,
+                        try {
+                          final clockInAt = _resolveQuickAttendanceTime(
+                            selectedDay,
                           );
-                          if (completed) {
-                            _showSnackSafe(_clockOutWizardSuccess);
+                          final attendanceRecord = await attendanceActions
+                              .clockIn(
+                                staffProfileId: staffProfileId,
+                                clockInAt: clockInAt,
+                                workDate: selectedDay,
+                                planId: widget.planId,
+                                taskId: task.id,
+                                notes: "Clocked in from production workspace",
+                              );
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          _showSnackSafe(_attendanceQuickClockInSuccess);
+                          return _toProductionAttendanceRecord(
+                            attendanceRecord,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _attendanceUpdateFailure,
+                            ),
+                          );
+                          return null;
+                        }
+                      }
+
+                      Future<ProductionAttendanceRecord?>
+                      quickClockOutForTaskStaff(
+                        String staffProfileId,
+                        ProductionAttendanceRecord? existingAttendance,
+                      ) async {
+                        final openAttendance = existingAttendance;
+                        if (openAttendance == null ||
+                            openAttendance.clockOutAt != null) {
+                          return null;
+                        }
+                        final clockInAt = openAttendance.clockInAt?.toLocal();
+                        if (clockInAt == null) {
+                          return null;
+                        }
+                        try {
+                          final scopedWorkDate =
+                              (openAttendance.workDate ??
+                                      openAttendance.clockInAt)
+                                  ?.toLocal() ??
+                              selectedDay;
+                          final scopedPlanId =
+                              openAttendance.planId.trim().isNotEmpty
+                              ? openAttendance.planId
+                              : widget.planId;
+                          final scopedTaskId =
+                              openAttendance.taskId.trim().isNotEmpty
+                              ? openAttendance.taskId
+                              : task.id;
+                          final clockOutAt = _resolveQuickClockOutTime(
+                            workDate: scopedWorkDate,
+                            clockInAt: clockInAt,
+                          );
+                          final attendanceRecord = await attendanceActions
+                              .clockOut(
+                                staffProfileId: staffProfileId,
+                                attendanceId: openAttendance.id,
+                                clockOutAt: clockOutAt,
+                                workDate: scopedWorkDate,
+                                planId: scopedPlanId,
+                                taskId: scopedTaskId,
+                                notes: "Clocked out from production workspace",
+                              );
+                          if (!mounted || !context.mounted) {
+                            return null;
                           }
-                          return;
+                          final attendanceWithProof =
+                              await requireAttendanceProofUpload(
+                                context: context,
+                                ref: ref,
+                                attendance: attendanceRecord,
+                                subjectLabel: _resolveStaffDisplayLabel(
+                                  staffProfileId,
+                                  staffMap,
+                                  fallbackRole: task.roleRequired,
+                                ),
+                                taskLabel: task.title,
+                              );
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          _showSnackSafe(_attendanceQuickClockOutSuccess);
+                          return _toProductionAttendanceRecord(
+                            attendanceWithProof,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _attendanceUpdateFailure,
+                            ),
+                          );
+                          return null;
                         }
-                        final input = await _showWorkspaceLogDialog(
-                          context,
-                          workDate: selectedDay,
-                          task: task,
-                          plan: latestDetail.plan,
-                          timelineRows: latestDetail.timelineRows,
-                          taskDayLedgers: latestDetail.taskDayLedgers,
-                          staffMap: staffMap,
-                          planUnitLabelById: planUnitLabelById,
-                          fallbackTotalUnits: workScopeSummary.totalUnits,
-                          fallbackWorkUnitLabel: workScopeSummary.singularLabel,
-                          attendanceRecords: latestDetail.attendanceRecords,
-                          actorStaffId: selfStaffId.trim().isEmpty
-                              ? null
-                              : selfStaffId,
-                          canPickAnyAssignedStaff: canManageCalendar,
-                          canManageAttendance: canManageTaskAttendance,
-                          onSetAttendanceForStaff:
-                              (canManageTaskAttendance ||
-                                  selfStaffId.trim().isNotEmpty)
-                              ? setAttendanceForTaskStaff
-                              : null,
-                          onQuickClockInForStaff:
-                              canManageTaskAttendance ||
-                                  selfStaffId.trim().isNotEmpty
-                              ? quickClockInForTaskStaff
-                              : null,
-                          onQuickClockOutForStaff: null,
-                          initialStaffId: staffProfileId,
-                          lockSelectedStaff: true,
-                          createNewEntry: createNewEntry,
+                      }
+
+                      Future<void> resetTaskHistoryForStaff(
+                        String staffProfileId,
+                      ) async {
+                        final staffLabel = _resolveStaffDisplayLabel(
+                          staffProfileId,
+                          staffMap,
+                          fallbackRole: task.roleRequired,
                         );
-                        if (input == null) {
+                        final confirmed = await _confirmAction(
+                          title: _taskResetHistoryConfirmTitle,
+                          message:
+                              "This clears today’s clock-in, clock-out, proofs, and saved progress for $staffLabel on ${task.title}. Audit logs stay.",
+                          confirmLabel: _taskResetHistoryConfirmLabel,
+                        );
+                        if (!confirmed) {
                           return;
                         }
                         AppDebug.log(
                           _logTag,
-                          _logProgress,
+                          _logResetHistory,
                           extra: {
                             "planId": widget.planId,
                             "taskId": task.id,
-                            "staffId": input.staffId,
-                            "createNewEntry": input.createNewEntry,
+                            "staffId": staffProfileId,
+                            "workDate": formatDateInput(selectedDay),
                           },
                         );
-                        await submitProgressInput(input);
-                        _showSnackSafe(
-                          input.createNewEntry
-                              ? _newCountSuccess
-                              : _taskProgressSuccess,
-                        );
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _taskProgressFailure,
-                          ),
-                        );
+                        try {
+                          final message = await ref
+                              .read(productionPlanActionsProvider)
+                              .resetTaskHistory(
+                                taskId: task.id,
+                                workDate: selectedDay,
+                                staffId: staffProfileId,
+                                planId: widget.planId,
+                                notes: "Reset from production workspace",
+                              );
+                          _showSnackSafe(
+                            message.trim().isNotEmpty
+                                ? message
+                                : _taskResetHistorySuccess,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _taskResetHistoryFailure,
+                            ),
+                          );
+                        }
                       }
-                    }
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: _cardSpacing),
-                      child: _AgendaTaskCard(
-                        task: task,
-                        phaseName:
-                            phaseById[task.phaseId]?.name ?? task.phaseId,
-                        staffMap: staffMap,
-                        currentActorStaffId: selfStaffId,
-                        planUnitLabelById: planUnitLabelById,
-                        fallbackTotalUnits: workScopeSummary.totalUnits,
-                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
-                        planContextText:
-                            "${detail.plan.title} ${detail.plan.notes}",
-                        selectedDay: selectedDay,
-                        attendanceRecords: detail.attendanceRecords,
-                        timelineRows: detail.timelineRows,
-                        taskDayLedgers: detail.taskDayLedgers,
-                        rowsForDay: rowsForTask,
-                        canManageCalendar: canManageCalendar,
-                        canManageTaskAttendance: canManageTaskAttendance,
-                        canReviewProgress: canReviewProgress,
-                        isOwner: canUseBusinessOwnerEquivalentAccess(
-                          role: actorRole,
-                          staffRole: selfStaffRole,
-                        ),
-                        progressEnabledStaffIds: progressEnabledStaffIds,
-                        onManageStaff: canManageCalendar
-                            ? () async {
-                                final selectedIds =
-                                    await _showTaskAssignmentDialog(
-                                      context,
-                                      task: task,
-                                      staffList: staffList,
-                                      staffMap: staffMap,
-                                    );
-                                if (selectedIds == null) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logAssignStaff,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                    "assignedCount": selectedIds.length,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .assignTaskStaffProfiles(
-                                        taskId: task.id,
-                                        planId: widget.planId,
-                                        assignedStaffProfileIds: selectedIds,
-                                      );
-                                  _showSnackSafe(_taskAssignmentSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_taskAssignmentFailure);
-                                }
-                              }
-                            : null,
-                        onDeleteTask: canManageCalendar
-                            ? () async {
-                                final confirmed = await _confirmAction(
-                                  title: _taskDeleteConfirmTitle,
-                                  message: _taskDeleteConfirmMessage,
-                                  confirmLabel: _taskDeleteConfirmLabel,
-                                );
-                                if (!confirmed) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logDeleteTask,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  final message = await ref
-                                      .read(productionPlanActionsProvider)
-                                      .deleteTask(
-                                        taskId: task.id,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(
-                                    message.trim().isNotEmpty
-                                        ? message
-                                        : _taskDeleteSuccess,
-                                  );
-                                } catch (error) {
-                                  _showSnackSafe(
-                                    _resolveProductionWorkspaceErrorMessage(
-                                      error,
-                                      fallback: _taskDeleteFailure,
-                                    ),
-                                  );
-                                }
-                              }
-                            : null,
-                        onSetAttendanceForStaff:
-                            (canManageTaskAttendance ||
-                                selfStaffId.trim().isNotEmpty)
-                            ? (staffProfileId, existingAttendance) async {
-                                await setAttendanceForTaskStaff(
-                                  staffProfileId,
-                                  existingAttendance,
-                                );
-                              }
-                            : null,
-                        onQuickClockInForStaff:
-                            (canManageTaskAttendance ||
-                                selfStaffId.trim().isNotEmpty)
-                            ? (staffProfileId, existingAttendance) async {
-                                await quickClockInForTaskStaff(
-                                  staffProfileId,
-                                  existingAttendance,
-                                );
-                              }
-                            : null,
-                        onQuickClockOutForStaff:
-                            (canManageTaskAttendance ||
-                                selfStaffId.trim().isNotEmpty)
-                            ? (staffProfileId, existingAttendance) async {
-                                await quickClockOutForTaskStaff(
-                                  staffProfileId,
-                                  existingAttendance,
-                                );
-                              }
-                            : null,
-                        onResetHistoryForStaff:
-                            (canManageTaskAttendance || canManageCalendar)
-                            ? (staffProfileId) async {
-                                await resetTaskHistoryForStaff(staffProfileId);
-                              }
-                            : null,
-                        onLogProgressForStaff: progressEnabledStaffIds.isEmpty
-                            ? null
-                            : (staffProfileId) async {
-                                await openLogProgressFlowForStaff(
-                                  staffProfileId,
-                                  createNewEntry: false,
-                                );
-                              },
-                        onAddProgressCountForStaff:
-                            progressEnabledStaffIds.isEmpty
-                            ? null
-                            : (staffProfileId) async {
-                                await openLogProgressFlowForStaff(
-                                  staffProfileId,
-                                  createNewEntry: true,
-                                );
-                              },
-                        onStatusSelected: canManageCalendar
-                            ? (status) async {
-                                if (status == task.status) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logTaskStatus,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                    "status": status,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .updateTaskStatus(
-                                        taskId: task.id,
-                                        status: status,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_taskStatusSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_taskStatusFailure);
-                                }
-                              }
-                            : null,
-                        onLogProgress: canLogProgressForTask
-                            ? () async {
-                                final input = await _showWorkspaceLogDialog(
+                      Future<void> submitProgressInput(
+                        ProductionTaskLogProgressInput input,
+                      ) async {
+                        await ref
+                            .read(productionPlanActionsProvider)
+                            .logTaskProgress(
+                              taskId: task.id,
+                              workDate: selectedDay,
+                              staffId: input.staffId,
+                              unitId: input.unitId,
+                              createNewEntry: input.createNewEntry,
+                              unitContribution: input.unitContribution,
+                              actualPlots: input.actualPlots,
+                              activityType: input.activityType,
+                              quantityActivityType: input.quantityActivityType,
+                              activityQuantity: input.activityQuantity,
+                              quantityAmount: input.quantityAmount,
+                              quantityUnit: input.quantityUnit,
+                              proofs: input.proofs,
+                              delayReason: input.delayReason,
+                              notes: input.notes,
+                              planId: widget.planId,
+                            );
+                      }
+
+                      Future<ProductionPlanDetail> loadLatestDetail() async {
+                        try {
+                          return await ref.refresh(
+                            productionPlanDetailProvider(widget.planId).future,
+                          );
+                        } catch (_) {
+                          return detail;
+                        }
+                      }
+
+                      Future<void> openLogProgressFlowForStaff(
+                        String staffProfileId, {
+                        required bool createNewEntry,
+                      }) async {
+                        try {
+                          final latestDetail = await loadLatestDetail();
+                          if (!mounted || !context.mounted) {
+                            return;
+                          }
+                          final latestActiveAttendance =
+                              resolveProductionWorkspaceActiveClockOutAttendance(
+                                attendanceRecords:
+                                    latestDetail.attendanceRecords,
+                                staffProfileId: staffProfileId,
+                                day: selectedDay,
+                                taskId: task.id,
+                              );
+                          if (!createNewEntry &&
+                              latestActiveAttendance != null &&
+                              latestActiveAttendance.clockInAt != null &&
+                              latestActiveAttendance.clockOutAt == null) {
+                            final completed =
+                                await _showWorkspaceClockOutWizard(
                                   context,
                                   workDate: selectedDay,
                                   task: task,
-                                  plan: detail.plan,
-                                  timelineRows: detail.timelineRows,
-                                  taskDayLedgers: detail.taskDayLedgers,
+                                  plan: latestDetail.plan,
+                                  timelineRows: latestDetail.timelineRows,
+                                  taskDayLedgers: latestDetail.taskDayLedgers,
+                                  attendanceRecords:
+                                      latestDetail.attendanceRecords,
                                   staffMap: staffMap,
                                   planUnitLabelById: planUnitLabelById,
                                   fallbackTotalUnits:
                                       workScopeSummary.totalUnits,
                                   fallbackWorkUnitLabel:
                                       workScopeSummary.singularLabel,
-                                  attendanceRecords: detail.attendanceRecords,
-                                  actorStaffId: selfStaffId.trim().isEmpty
-                                      ? null
-                                      : selfStaffId,
-                                  canPickAnyAssignedStaff: canManageCalendar,
-                                  canManageAttendance: canManageTaskAttendance,
-                                  onSetAttendanceForStaff:
-                                      (canManageTaskAttendance ||
-                                          selfStaffId.trim().isNotEmpty)
-                                      ? setAttendanceForTaskStaff
-                                      : null,
-                                  onQuickClockInForStaff:
-                                      canManageTaskAttendance ||
-                                          selfStaffId.trim().isNotEmpty
-                                      ? quickClockInForTaskStaff
-                                      : null,
-                                  onQuickClockOutForStaff: null,
-                                  createNewEntry: false,
+                                  staffId: staffProfileId,
+                                  onSubmit: submitProgressInput,
                                 );
-                                if (input == null) {
-                                  return;
+                            if (completed) {
+                              _showSnackSafe(_clockOutWizardSuccess);
+                            }
+                            return;
+                          }
+                          final input = await _showWorkspaceLogDialog(
+                            context,
+                            workDate: selectedDay,
+                            task: task,
+                            plan: latestDetail.plan,
+                            timelineRows: latestDetail.timelineRows,
+                            taskDayLedgers: latestDetail.taskDayLedgers,
+                            staffMap: staffMap,
+                            planUnitLabelById: planUnitLabelById,
+                            fallbackTotalUnits: workScopeSummary.totalUnits,
+                            fallbackWorkUnitLabel:
+                                workScopeSummary.singularLabel,
+                            attendanceRecords: latestDetail.attendanceRecords,
+                            actorStaffId: selfStaffId.trim().isEmpty
+                                ? null
+                                : selfStaffId,
+                            canPickAnyAssignedStaff: canManageCalendar,
+                            canManageAttendance: canManageTaskAttendance,
+                            onSetAttendanceForStaff:
+                                (canManageTaskAttendance ||
+                                    selfStaffId.trim().isNotEmpty)
+                                ? setAttendanceForTaskStaff
+                                : null,
+                            onQuickClockInForStaff:
+                                canManageTaskAttendance ||
+                                    selfStaffId.trim().isNotEmpty
+                                ? quickClockInForTaskStaff
+                                : null,
+                            onQuickClockOutForStaff: null,
+                            initialStaffId: staffProfileId,
+                            lockSelectedStaff: true,
+                            createNewEntry: createNewEntry,
+                          );
+                          if (input == null) {
+                            return;
+                          }
+                          AppDebug.log(
+                            _logTag,
+                            _logProgress,
+                            extra: {
+                              "planId": widget.planId,
+                              "taskId": task.id,
+                              "staffId": input.staffId,
+                              "createNewEntry": input.createNewEntry,
+                            },
+                          );
+                          await submitProgressInput(input);
+                          _showSnackSafe(
+                            input.createNewEntry
+                                ? _newCountSuccess
+                                : _taskProgressSuccess,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _taskProgressFailure,
+                            ),
+                          );
+                        }
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: _cardSpacing),
+                        child: _AgendaTaskCard(
+                          task: task,
+                          phaseName:
+                              phaseById[task.phaseId]?.name ?? task.phaseId,
+                          staffMap: staffMap,
+                          currentActorStaffId: selfStaffId,
+                          planUnitLabelById: planUnitLabelById,
+                          fallbackTotalUnits: workScopeSummary.totalUnits,
+                          fallbackWorkUnitLabel: workScopeSummary.singularLabel,
+                          planContextText:
+                              "${detail.plan.title} ${detail.plan.notes}",
+                          selectedDay: selectedDay,
+                          attendanceRecords: detail.attendanceRecords,
+                          timelineRows: detail.timelineRows,
+                          taskDayLedgers: detail.taskDayLedgers,
+                          rowsForDay: rowsForTask,
+                          canManageCalendar: canManageCalendar,
+                          canManageTaskAttendance: canManageTaskAttendance,
+                          canReviewProgress: canReviewProgress,
+                          isOwner: canUseBusinessOwnerEquivalentAccess(
+                            role: actorRole,
+                            staffRole: selfStaffRole,
+                          ),
+                          progressEnabledStaffIds: progressEnabledStaffIds,
+                          onManageStaff: canManageCalendar
+                              ? () async {
+                                  final selectedIds =
+                                      await _showTaskAssignmentDialog(
+                                        context,
+                                        task: task,
+                                        staffList: staffList,
+                                        staffMap: staffMap,
+                                      );
+                                  if (selectedIds == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logAssignStaff,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                      "assignedCount": selectedIds.length,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .assignTaskStaffProfiles(
+                                          taskId: task.id,
+                                          planId: widget.planId,
+                                          assignedStaffProfileIds: selectedIds,
+                                        );
+                                    _showSnackSafe(_taskAssignmentSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_taskAssignmentFailure);
+                                  }
                                 }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  await submitProgressInput(input);
-                                  _showSnackSafe(_taskProgressSuccess);
-                                } catch (error) {
-                                  _showSnackSafe(
-                                    _resolveProductionWorkspaceErrorMessage(
-                                      error,
-                                      fallback: _taskProgressFailure,
-                                    ),
+                              : null,
+                          onDeleteTask: canManageCalendar
+                              ? () async {
+                                  final confirmed = await _confirmAction(
+                                    title: _taskDeleteConfirmTitle,
+                                    message: _taskDeleteConfirmMessage,
+                                    confirmLabel: _taskDeleteConfirmLabel,
+                                  );
+                                  if (!confirmed) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logDeleteTask,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    final message = await ref
+                                        .read(productionPlanActionsProvider)
+                                        .deleteTask(
+                                          taskId: task.id,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(
+                                      message.trim().isNotEmpty
+                                          ? message
+                                          : _taskDeleteSuccess,
+                                    );
+                                  } catch (error) {
+                                    _showSnackSafe(
+                                      _resolveProductionWorkspaceErrorMessage(
+                                        error,
+                                        fallback: _taskDeleteFailure,
+                                      ),
+                                    );
+                                  }
+                                }
+                              : null,
+                          onSetAttendanceForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? (staffProfileId, existingAttendance) async {
+                                  await setAttendanceForTaskStaff(
+                                    staffProfileId,
+                                    existingAttendance,
                                   );
                                 }
-                              }
-                            : null,
-                        onApproveTask:
-                            canUseBusinessOwnerEquivalentAccess(
-                                  role: actorRole,
-                                  staffRole: selfStaffRole,
-                                ) &&
-                                task.approvalStatus == "pending_approval"
-                            ? () async {
-                                AppDebug.log(
-                                  _logTag,
-                                  _logApproveTask,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .approveTask(
-                                        taskId: task.id,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_approveTaskSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_approveTaskFailure);
+                              : null,
+                          onQuickClockInForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? (staffProfileId, existingAttendance) async {
+                                  await quickClockInForTaskStaff(
+                                    staffProfileId,
+                                    existingAttendance,
+                                  );
                                 }
-                              }
-                            : null,
-                        onRejectTask:
-                            canUseBusinessOwnerEquivalentAccess(
-                                  role: actorRole,
-                                  staffRole: selfStaffRole,
-                                ) &&
-                                task.approvalStatus == "pending_approval"
-                            ? () async {
-                                final reason = await _showReasonDialog(
-                                  context,
-                                  title: _rejectDialogTitle,
-                                  hint: _rejectDialogHint,
-                                );
-                                if (reason == null) {
-                                  return;
+                              : null,
+                          onQuickClockOutForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? (staffProfileId, existingAttendance) async {
+                                  await quickClockOutForTaskStaff(
+                                    staffProfileId,
+                                    existingAttendance,
+                                  );
                                 }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logRejectTask,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .rejectTask(
-                                        taskId: task.id,
-                                        reason: reason,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_rejectTaskSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_rejectTaskFailure);
+                              : null,
+                          onResetHistoryForStaff:
+                              (canManageTaskAttendance || canManageCalendar)
+                              ? (staffProfileId) async {
+                                  await resetTaskHistoryForStaff(
+                                    staffProfileId,
+                                  );
                                 }
-                              }
-                            : null,
-                        onApproveProgress: canReviewProgress
-                            ? (progressId) async {
-                                AppDebug.log(
-                                  _logTag,
-                                  _logApproveProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "progressId": progressId,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .approveTaskProgress(
-                                        progressId: progressId,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_approveProgressSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_approveProgressFailure);
+                              : null,
+                          onLogProgressForStaff: progressEnabledStaffIds.isEmpty
+                              ? null
+                              : (staffProfileId) async {
+                                  await openLogProgressFlowForStaff(
+                                    staffProfileId,
+                                    createNewEntry: false,
+                                  );
+                                },
+                          onAddProgressCountForStaff:
+                              progressEnabledStaffIds.isEmpty
+                              ? null
+                              : (staffProfileId) async {
+                                  await openLogProgressFlowForStaff(
+                                    staffProfileId,
+                                    createNewEntry: true,
+                                  );
+                                },
+                          onStatusSelected: canManageCalendar
+                              ? (status) async {
+                                  if (status == task.status) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logTaskStatus,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                      "status": status,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .updateTaskStatus(
+                                          taskId: task.id,
+                                          status: status,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_taskStatusSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_taskStatusFailure);
+                                  }
                                 }
-                              }
-                            : null,
-                        onRejectProgress: canReviewProgress
-                            ? (progressId) async {
-                                final reason = await _showReasonDialog(
-                                  context,
-                                  title: _rejectProgressDialogTitle,
-                                  hint: _rejectDialogHint,
-                                );
-                                if (reason == null) {
-                                  return;
+                              : null,
+                          onLogProgress: canLogProgressForTask
+                              ? () async {
+                                  final input = await _showWorkspaceLogDialog(
+                                    context,
+                                    workDate: selectedDay,
+                                    task: task,
+                                    plan: detail.plan,
+                                    timelineRows: detail.timelineRows,
+                                    taskDayLedgers: detail.taskDayLedgers,
+                                    staffMap: staffMap,
+                                    planUnitLabelById: planUnitLabelById,
+                                    fallbackTotalUnits:
+                                        workScopeSummary.totalUnits,
+                                    fallbackWorkUnitLabel:
+                                        workScopeSummary.singularLabel,
+                                    attendanceRecords: detail.attendanceRecords,
+                                    actorStaffId: selfStaffId.trim().isEmpty
+                                        ? null
+                                        : selfStaffId,
+                                    canPickAnyAssignedStaff: canManageCalendar,
+                                    canManageAttendance:
+                                        canManageTaskAttendance,
+                                    onSetAttendanceForStaff:
+                                        (canManageTaskAttendance ||
+                                            selfStaffId.trim().isNotEmpty)
+                                        ? setAttendanceForTaskStaff
+                                        : null,
+                                    onQuickClockInForStaff:
+                                        canManageTaskAttendance ||
+                                            selfStaffId.trim().isNotEmpty
+                                        ? quickClockInForTaskStaff
+                                        : null,
+                                    onQuickClockOutForStaff: null,
+                                    createNewEntry: false,
+                                  );
+                                  if (input == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logProgress,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    await submitProgressInput(input);
+                                    _showSnackSafe(_taskProgressSuccess);
+                                  } catch (error) {
+                                    _showSnackSafe(
+                                      _resolveProductionWorkspaceErrorMessage(
+                                        error,
+                                        fallback: _taskProgressFailure,
+                                      ),
+                                    );
+                                  }
                                 }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logRejectProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "progressId": progressId,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .rejectTaskProgress(
-                                        progressId: progressId,
-                                        reason: reason,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_rejectProgressSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_rejectProgressFailure);
+                              : null,
+                          onApproveTask:
+                              canUseBusinessOwnerEquivalentAccess(
+                                    role: actorRole,
+                                    staffRole: selfStaffRole,
+                                  ) &&
+                                  task.approvalStatus == "pending_approval"
+                              ? () async {
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logApproveTask,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .approveTask(
+                                          taskId: task.id,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_approveTaskSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_approveTaskFailure);
+                                  }
                                 }
-                              }
-                            : null,
-                      ),
-                    );
-                  }),
-              ],
+                              : null,
+                          onRejectTask:
+                              canUseBusinessOwnerEquivalentAccess(
+                                    role: actorRole,
+                                    staffRole: selfStaffRole,
+                                  ) &&
+                                  task.approvalStatus == "pending_approval"
+                              ? () async {
+                                  final reason = await _showReasonDialog(
+                                    context,
+                                    title: _rejectDialogTitle,
+                                    hint: _rejectDialogHint,
+                                  );
+                                  if (reason == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logRejectTask,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .rejectTask(
+                                          taskId: task.id,
+                                          reason: reason,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_rejectTaskSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_rejectTaskFailure);
+                                  }
+                                }
+                              : null,
+                          onApproveProgress: canReviewProgress
+                              ? (progressId) async {
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logApproveProgress,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "progressId": progressId,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .approveTaskProgress(
+                                          progressId: progressId,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_approveProgressSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_approveProgressFailure);
+                                  }
+                                }
+                              : null,
+                          onRejectProgress: canReviewProgress
+                              ? (progressId) async {
+                                  final reason = await _showReasonDialog(
+                                    context,
+                                    title: _rejectProgressDialogTitle,
+                                    hint: _rejectDialogHint,
+                                  );
+                                  if (reason == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logRejectProgress,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "progressId": progressId,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .rejectTaskProgress(
+                                          progressId: progressId,
+                                          reason: reason,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_rejectProgressSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_rejectProgressFailure);
+                                  }
+                                }
+                              : null,
+                        ),
+                      );
+                    }),
+                ],
+              ),
             );
           },
         ),
@@ -3751,6 +3805,8 @@ class _SelectedDayMetricsRow extends StatelessWidget {
   final List<ProductionTimelineRow> timelineRows;
   final List<ProductionTaskDayLedger> taskDayLedgers;
   final List<ProductionAttendanceRecord> attendanceRecords;
+  final bool isSummaryExpanded;
+  final VoidCallback onToggleSummaryExpanded;
 
   const _SelectedDayMetricsRow({
     required this.plan,
@@ -3761,6 +3817,8 @@ class _SelectedDayMetricsRow extends StatelessWidget {
     required this.timelineRows,
     required this.taskDayLedgers,
     required this.attendanceRecords,
+    required this.isSummaryExpanded,
+    required this.onToggleSummaryExpanded,
   });
 
   @override
@@ -3818,10 +3876,8 @@ class _SelectedDayMetricsRow extends StatelessWidget {
     });
     final quantityMetrics = _buildSelectedDayQuantityMetrics(
       plan: plan,
-      dayRows: rows,
       timelineRows: timelineRows,
       selectedDay: selectedDay,
-      taskDayLedgers: taskDayLedgers,
     );
 
     DateTime? firstClockInAt;
@@ -3839,6 +3895,11 @@ class _SelectedDayMetricsRow extends StatelessWidget {
       }
     }
 
+    final progressSummary =
+        "${_formatProgressAmount(actualAmount)} / ${_formatProgressAmount(plannedAmount)}";
+    final summaryLine =
+        "${tasks.length} tasks | ${assignedStaffIds.length} assigned | $progressSummary progress";
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final metricWidth = _resolveSelectedDayMetricTileWidth(
@@ -3847,113 +3908,120 @@ class _SelectedDayMetricsRow extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Wrap(
-              spacing: _cardSpacing,
-              runSpacing: _cardSpacing,
-              children: [
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryTasksLabel,
-                    value: "${tasks.length}",
-                    helper: "Scheduled on this day",
-                    accentColor: _workspaceBlue,
-                    softColor: _workspaceSoftBlue,
-                    icon: Icons.checklist_outlined,
-                  ),
-                ),
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryAssignedLabel,
-                    value: "${assignedStaffIds.length}",
-                    helper: "Unique staff assigned",
-                    accentColor: _workspaceTeal,
-                    softColor: _workspaceSoftTeal,
-                    icon: Icons.groups_2_outlined,
-                  ),
-                ),
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryClockedInLabel,
-                    value: "$clockedInCount",
-                    helper: "Attendance started",
-                    accentColor: _workspaceNavy,
-                    softColor: _workspaceSoftSlate,
-                    icon: Icons.login_outlined,
-                  ),
-                ),
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryClockedOutLabel,
-                    value: "$clockedOutCount",
-                    helper: "Shifts fully closed",
-                    accentColor: _workspaceBerry,
-                    softColor: _workspaceSoftBerry,
-                    icon: Icons.logout_outlined,
-                  ),
-                ),
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryLoggedLabel,
-                    value: "${rows.length}",
-                    helper: "Progress rows saved",
-                    accentColor: _workspaceAmber,
-                    softColor: _workspaceSoftAmber,
-                    icon: Icons.edit_note_outlined,
-                  ),
-                ),
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryUnitsTouchedLabel,
-                    value: "${unitsTouched.length}",
-                    helper: unitsTouched.isEmpty
-                        ? "No ${workScopeSummary.pluralLabel} logged yet"
-                        : "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} with progress",
-                    accentColor: _workspaceBerry,
-                    softColor: _workspaceSoftBerry,
-                    icon: Icons.grid_view_rounded,
-                  ),
-                ),
-                SizedBox(
-                  width: metricWidth,
-                  child: _WorkspaceDayMetricCard(
-                    label: _daySummaryProgressLabel,
-                    value:
-                        "${_formatProgressAmount(actualAmount)} / ${_formatProgressAmount(plannedAmount)}",
-                    helper:
-                        "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} logged against plan",
-                    accentColor: _workspaceTeal,
-                    softColor: _workspaceSoftTeal,
-                    icon: Icons.insights_outlined,
-                  ),
-                ),
-              ],
+            _SelectedDaySummaryToggle(
+              isExpanded: isSummaryExpanded,
+              summary: summaryLine,
+              onPressed: onToggleSummaryExpanded,
             ),
-            if (firstClockInAt != null || lastClockOutAt != null) ...[
+            if (isSummaryExpanded) ...[
               const SizedBox(height: _cardSpacing),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: _cardSpacing,
+                runSpacing: _cardSpacing,
                 children: [
-                  if (firstClockInAt != null)
-                    _SummaryPill(
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryTasksLabel,
+                      value: "${tasks.length}",
+                      helper: "Scheduled on this day",
+                      accentColor: _workspaceBlue,
+                      softColor: _workspaceSoftBlue,
+                      icon: Icons.checklist_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryAssignedLabel,
+                      value: "${assignedStaffIds.length}",
+                      helper: "Unique staff assigned",
+                      accentColor: _workspaceTeal,
+                      softColor: _workspaceSoftTeal,
+                      icon: Icons.groups_2_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryClockedInLabel,
+                      value: "$clockedInCount",
+                      helper: "Attendance started",
+                      accentColor: _workspaceNavy,
+                      softColor: _workspaceSoftSlate,
                       icon: Icons.login_outlined,
-                      label:
-                          "$_daySummaryFirstClockInLabel ${_clockLabel(firstClockInAt.toLocal())}",
                     ),
-                  if (lastClockOutAt != null)
-                    _SummaryPill(
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryClockedOutLabel,
+                      value: "$clockedOutCount",
+                      helper: "Shifts fully closed",
+                      accentColor: _workspaceBerry,
+                      softColor: _workspaceSoftBerry,
                       icon: Icons.logout_outlined,
-                      label:
-                          "$_daySummaryLastClockOutLabel ${_clockLabel(lastClockOutAt.toLocal())}",
                     ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryLoggedLabel,
+                      value: "${rows.length}",
+                      helper: "Progress rows saved",
+                      accentColor: _workspaceAmber,
+                      softColor: _workspaceSoftAmber,
+                      icon: Icons.edit_note_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryUnitsTouchedLabel,
+                      value: "${unitsTouched.length}",
+                      helper: unitsTouched.isEmpty
+                          ? "No ${workScopeSummary.pluralLabel} logged yet"
+                          : "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} with progress",
+                      accentColor: _workspaceBerry,
+                      softColor: _workspaceSoftBerry,
+                      icon: Icons.grid_view_rounded,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryProgressLabel,
+                      value: progressSummary,
+                      helper:
+                          "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} logged against plan",
+                      accentColor: _workspaceTeal,
+                      softColor: _workspaceSoftTeal,
+                      icon: Icons.insights_outlined,
+                    ),
+                  ),
                 ],
               ),
+              if (firstClockInAt != null || lastClockOutAt != null) ...[
+                const SizedBox(height: _cardSpacing),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (firstClockInAt != null)
+                      _SummaryPill(
+                        icon: Icons.login_outlined,
+                        label:
+                            "$_daySummaryFirstClockInLabel ${_clockLabel(firstClockInAt.toLocal())}",
+                      ),
+                    if (lastClockOutAt != null)
+                      _SummaryPill(
+                        icon: Icons.logout_outlined,
+                        label:
+                            "$_daySummaryLastClockOutLabel ${_clockLabel(lastClockOutAt.toLocal())}",
+                      ),
+                  ],
+                ),
+              ],
             ],
             if (quantityMetrics.isNotEmpty) ...[
               const SizedBox(height: _cardSpacing),
@@ -3980,6 +4048,124 @@ class _SelectedDayMetricsRow extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class _SelectedDaySummaryToggle extends StatelessWidget {
+  final bool isExpanded;
+  final String summary;
+  final VoidCallback onPressed;
+
+  const _SelectedDaySummaryToggle({
+    required this.isExpanded,
+    required this.summary,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foregroundColor = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.5,
+    );
+    return Tooltip(
+      message: isExpanded
+          ? _daySummaryPanelHideLabel
+          : _daySummaryPanelShowLabel,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(18),
+          child: Ink(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightTintAlpha: 0.035,
+                darkTintAlpha: 0.1,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  lightAlpha: 0.14,
+                  darkAlpha: 0.32,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: _workspaceBlue,
+                      lightTintAlpha: 0.08,
+                      darkTintAlpha: 0.18,
+                      baseColor: _workspaceIsDark(colorScheme)
+                          ? colorScheme.surfaceContainerLow
+                          : colorScheme.surface,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.analytics_outlined,
+                    size: 20,
+                    color: foregroundColor,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _daySummaryPanelLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  isExpanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -4229,54 +4415,6 @@ class _AgendaTaskCard extends StatelessWidget {
       fallbackWorkUnitLabel: fallbackWorkUnitLabel,
       contextText: "$planContextText ${task.title} ${task.instructions}",
     );
-    final activityChipData =
-        <
-          ({
-            String label,
-            String helper,
-            Color accentColor,
-            Color softColor,
-            IconData icon,
-          })
-        >[
-          if ((taskDayLedger?.activityTargets.planted ?? 0) > 0 ||
-              (taskDayLedger?.activityCompleted.planted ?? 0) > 0)
-            (
-              label:
-                  "Planted: ${_formatProgressAmount(taskDayLedger?.activityCompleted.planted ?? 0)} / ${_formatProgressAmount(taskDayLedger?.activityTargets.planted ?? 0)}",
-              helper:
-                  "Remaining ${_formatProgressAmount(taskDayLedger?.activityRemaining.planted ?? 0)} ${taskDayLedger?.activityUnits.planted ?? ""}"
-                      .trim(),
-              accentColor: _workspaceTeal,
-              softColor: _workspaceSoftTeal,
-              icon: Icons.grass_outlined,
-            ),
-          if ((taskDayLedger?.activityTargets.transplanted ?? 0) > 0 ||
-              (taskDayLedger?.activityCompleted.transplanted ?? 0) > 0)
-            (
-              label:
-                  "Transplanted: ${_formatProgressAmount(taskDayLedger?.activityCompleted.transplanted ?? 0)} / ${_formatProgressAmount(taskDayLedger?.activityTargets.transplanted ?? 0)}",
-              helper:
-                  "Remaining ${_formatProgressAmount(taskDayLedger?.activityRemaining.transplanted ?? 0)} ${taskDayLedger?.activityUnits.transplanted ?? ""}"
-                      .trim(),
-              accentColor: _workspaceBlue,
-              softColor: _workspaceSoftBlue,
-              icon: Icons.swap_horiz_outlined,
-            ),
-          if ((taskDayLedger?.activityTargets.harvested ?? 0) > 0 ||
-              (taskDayLedger?.activityCompleted.harvested ?? 0) > 0)
-            (
-              label:
-                  "Harvested: ${_formatProgressAmount(taskDayLedger?.activityCompleted.harvested ?? 0)} / ${_formatProgressAmount(taskDayLedger?.activityTargets.harvested ?? 0)}",
-              helper:
-                  "Remaining ${_formatProgressAmount(taskDayLedger?.activityRemaining.harvested ?? 0)} ${taskDayLedger?.activityUnits.harvested ?? ""}"
-                      .trim(),
-              accentColor: _workspaceAmber,
-              softColor: _workspaceSoftAmber,
-              icon: Icons.agriculture_outlined,
-            ),
-        ];
-
     return Container(
       padding: const EdgeInsets.all(_agendaCardPadding),
       decoration: BoxDecoration(
@@ -4438,28 +4576,6 @@ class _AgendaTaskCard extends StatelessWidget {
               );
             },
           ),
-          if (activityChipData.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: activityChipData
-                  .map(
-                    (metric) => ConstrainedBox(
-                      constraints: const BoxConstraints(minWidth: 180),
-                      child: _TaskSnapshotCard(
-                        label: "Activity",
-                        value: metric.label,
-                        helper: metric.helper,
-                        accentColor: metric.accentColor,
-                        softColor: metric.softColor,
-                        icon: metric.icon,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
           const SizedBox(height: 12),
           Row(
             children: [
@@ -6441,6 +6557,22 @@ List<ProductionTimelineRow> _rowsForDay(
   return items;
 }
 
+List<ProductionTimelineRow> _rowsThroughDayInclusive(
+  List<ProductionTimelineRow> rows,
+  DateTime day,
+) {
+  final lastIncludedDay = _normalizeToLocalDay(day);
+  final items = rows.where((row) {
+    final workDate = row.workDate;
+    if (workDate == null) {
+      return false;
+    }
+    return !_normalizeToLocalDay(workDate).isAfter(lastIncludedDay);
+  }).toList();
+  items.sort(_compareProgressRowsByNewest);
+  return items;
+}
+
 double _resolveSelectedDayMetricTileWidth(double maxWidth) {
   if (maxWidth >= 720) {
     return (maxWidth - (_cardSpacing * 2)) / 3;
@@ -6760,88 +6892,64 @@ String _formatWorkspaceProofSize(int sizeBytes) {
 List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
   required ProductionPlan plan,
   required DateTime selectedDay,
-  required List<ProductionTimelineRow> dayRows,
   required List<ProductionTimelineRow> timelineRows,
-  required List<ProductionTaskDayLedger> taskDayLedgers,
 }) {
   final plantingTargets = plan.plantingTargets;
+  // Keep the quantity cards cumulative through the selected day so the value
+  // and remaining helper stay in the same time scope.
+  final timelineRowsThroughSelectedDay = _rowsThroughDayInclusive(
+    timelineRows,
+    selectedDay,
+  );
   final farmQuantitySummary = _summarizeFarmQuantities(
     plan: plan,
-    timelineRows: timelineRows,
+    timelineRows: timelineRowsThroughSelectedDay,
   );
   if (plantingTargets == null || farmQuantitySummary == null) {
     return const <_SelectedDayQuantityMetric>[];
   }
 
-  final dayLedgers = taskDayLedgers.where((ledger) {
-    return _toWorkDateKey(ledger.workDate?.toLocal()) ==
-        _toWorkDateKey(selectedDay);
-  }).toList();
-  final plantingToday = dayLedgers.isNotEmpty
-      ? dayLedgers.fold<num>(
-          0,
-          (sum, ledger) =>
-              sum +
-              ledger.activityCompleted.valueFor(_quantityActivityPlanting),
-        )
-      : _sumQuantityForActivity(
-          timelineRows: dayRows,
-          activityType: _quantityActivityPlanting,
-        );
-  final transplantToday = dayLedgers.isNotEmpty
-      ? dayLedgers.fold<num>(
-          0,
-          (sum, ledger) =>
-              sum +
-              ledger.activityCompleted.valueFor(_quantityActivityTransplant),
-        )
-      : _sumQuantityForActivity(
-          timelineRows: dayRows,
-          activityType: _quantityActivityTransplant,
-        );
-  final harvestToday = dayLedgers.isNotEmpty
-      ? dayLedgers.fold<num>(
-          0,
-          (sum, ledger) =>
-              sum + ledger.activityCompleted.valueFor(_quantityActivityHarvest),
-        )
-      : _sumQuantityForActivity(
-          timelineRows: dayRows,
-          activityType: _quantityActivityHarvest,
-        );
-
-  return <_SelectedDayQuantityMetric>[
-    _SelectedDayQuantityMetric(
+  final metricsByActivityType = <String, _SelectedDayQuantityMetric>{
+    _quantityActivityPlanting: _SelectedDayQuantityMetric(
       label: _dayQuantityPlantingLabel,
       value:
-          "${_formatProgressAmount(plantingToday)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
+          "${_formatProgressAmount(farmQuantitySummary.plantingLogged)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
       helper:
           "${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} left ${farmQuantitySummary.plantingUnit}",
       accentColor: _workspaceTeal,
       softColor: _workspaceSoftTeal,
       icon: Icons.grass_outlined,
     ),
-    _SelectedDayQuantityMetric(
+    _quantityActivityTransplant: _SelectedDayQuantityMetric(
       label: _dayQuantityTransplantLabel,
       value:
-          "${_formatProgressAmount(transplantToday)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
+          "${_formatProgressAmount(farmQuantitySummary.transplantLogged)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
       helper:
           "${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} left ${farmQuantitySummary.plantingUnit}",
       accentColor: _workspaceBlue,
       softColor: _workspaceSoftBlue,
       icon: Icons.swap_horiz_outlined,
     ),
-    _SelectedDayQuantityMetric(
+    _quantityActivityHarvest: _SelectedDayQuantityMetric(
       label: _dayQuantityHarvestLabel,
       value:
-          "${_formatProgressAmount(harvestToday)} / ${_formatProgressAmount(plantingTargets.estimatedHarvestQuantity)}",
+          "${_formatProgressAmount(farmQuantitySummary.harvestLogged)} / ${_formatProgressAmount(plantingTargets.estimatedHarvestQuantity)}",
       helper:
           "${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} left ${farmQuantitySummary.harvestUnit}",
       accentColor: _workspaceAmber,
       softColor: _workspaceSoftAmber,
       icon: Icons.agriculture_outlined,
     ),
+  };
+  const selectedDayQuantityActivityTypes = <String>[
+    _quantityActivityPlanting,
+    _quantityActivityTransplant,
+    _quantityActivityHarvest,
   ];
+  return selectedDayQuantityActivityTypes
+      .map((value) => metricsByActivityType[value])
+      .whereType<_SelectedDayQuantityMetric>()
+      .toList();
 }
 
 Map<String, BusinessStaffProfileSummary> _buildStaffMap(
@@ -7290,6 +7398,28 @@ String _pluralizeWord(String value) {
   return "${normalized}s";
 }
 
+String _singularizeWord(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final lower = normalized.toLowerCase();
+  if (lower.endsWith("ies") && normalized.length > 3) {
+    return "${normalized.substring(0, normalized.length - 3)}y";
+  }
+  if ((lower.endsWith("ches") ||
+          lower.endsWith("shes") ||
+          lower.endsWith("xes") ||
+          lower.endsWith("zes")) &&
+      normalized.length > 2) {
+    return normalized.substring(0, normalized.length - 2);
+  }
+  if (lower.endsWith("s") && !lower.endsWith("ss") && normalized.length > 1) {
+    return normalized.substring(0, normalized.length - 1);
+  }
+  return normalized;
+}
+
 String _pluralizeUnitPhrase(String value) {
   final normalized = value.trim();
   if (normalized.isEmpty) {
@@ -7304,6 +7434,23 @@ String _pluralizeUnitPhrase(String value) {
   }
   final lastToken = tokens.removeLast();
   tokens.add(_pluralizeWord(lastToken));
+  return tokens.join(" ");
+}
+
+String _singularizeUnitPhrase(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (tokens.isEmpty) {
+    return normalized;
+  }
+  final lastToken = tokens.removeLast();
+  tokens.add(_singularizeWord(lastToken));
   return tokens.join(" ");
 }
 
@@ -7472,7 +7619,7 @@ String _formatProgressAmountWithUnit({
 }) {
   final normalizedUnit = singularUnitLabel.trim().isEmpty
       ? "work unit"
-      : singularUnitLabel.trim();
+      : _singularizeUnitPhrase(singularUnitLabel.trim());
   final unitLabel = _sameProgressAmount(amount, 1)
       ? normalizedUnit
       : _pluralizeUnitPhrase(normalizedUnit);
@@ -7661,8 +7808,20 @@ bool _sameProgressAmount(num left, num right) {
 
 List<num> _buildProgressAmountOptions({required num maxAmount}) {
   final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
-  final halfSteps = (normalizedMax * 2).floor();
-  final values = List<num>.generate(halfSteps + 1, (index) => index / 2);
+  final step = normalizedMax <= 10
+      ? 0.1
+      : normalizedMax <= 30
+      ? 0.5
+      : normalizedMax <= 120
+      ? 1.0
+      : normalizedMax <= 500
+      ? 5.0
+      : 10.0;
+  final stepCount = (normalizedMax / step).floor();
+  final values = List<num>.generate(
+    stepCount + 1,
+    (index) => double.parse((index * step).toStringAsFixed(2)),
+  );
   if (values.isEmpty) {
     return <num>[0];
   }
@@ -7670,6 +7829,24 @@ List<num> _buildProgressAmountOptions({required num maxAmount}) {
     values.add(normalizedMax);
   }
   return values;
+}
+
+List<num> _buildSelectableProgressAmountOptions({
+  required num maxAmount,
+  required String singularUnitLabel,
+  num? selectedAmount,
+}) {
+  final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
+  final values = <num>{0};
+  values.addAll(_buildProgressAmountOptions(maxAmount: normalizedMax));
+  if (selectedAmount != null && selectedAmount >= 0) {
+    values.add(selectedAmount.toDouble());
+  }
+  if (!_sameProgressAmount(normalizedMax, 0)) {
+    values.add(normalizedMax);
+  }
+  final ordered = values.toList()..sort((left, right) => left.compareTo(right));
+  return ordered;
 }
 
 List<num> _buildQuantityAmountOptions({required num maxAmount}) {
@@ -7696,6 +7873,22 @@ List<num> _buildQuantityAmountOptions({required num maxAmount}) {
     scale *= 10;
   }
   values.add(normalizedMax);
+  final ordered = values.toList()..sort((left, right) => left.compareTo(right));
+  return ordered;
+}
+
+List<num> _buildSelectableQuantityAmountOptions({
+  required num maxAmount,
+  num? selectedAmount,
+}) {
+  final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
+  final values = _buildQuantityAmountOptions(maxAmount: normalizedMax).toSet();
+  if (selectedAmount != null && selectedAmount >= 0) {
+    values.add(selectedAmount.toDouble());
+  }
+  if (!_sameProgressAmount(normalizedMax, 0)) {
+    values.add(normalizedMax);
+  }
   final ordered = values.toList()..sort((left, right) => left.compareTo(right));
   return ordered;
 }
@@ -8512,6 +8705,12 @@ class _WorkspaceClockOutWizardState
 
   num get _primaryAmountValue => _primaryAmount ?? 0;
 
+  int get _requiredPhotoCount =>
+      requiredTaskProgressPhotoCount(_primaryAmountValue);
+
+  int get _requiredVideoCount =>
+      requiredTaskProgressVideoCount(_primaryAmountValue);
+
   int get _requiredProofCount =>
       requiredTaskProgressProofCount(_primaryAmountValue);
 
@@ -8538,6 +8737,47 @@ class _WorkspaceClockOutWizardState
         (_loggedAmountExcludingSelection + _primaryAmountValue);
     return remaining < 0 ? 0 : remaining;
   }
+
+  int get _readyProofCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.length
+      : (_existingSelectionRow?.proofs.length ?? 0);
+
+  int get _readyPhotoCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.where((proof) => proof.isImage).length
+      : (_existingSelectionRow?.proofs.where((proof) => proof.isImage).length ??
+            0);
+
+  int get _readyVideoCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.where((proof) => proof.isVideo).length
+      : (_existingSelectionRow?.proofs.where((proof) => proof.isVideo).length ??
+            0);
+
+  int get _proofBackedCompletedUnitCount {
+    if (_readyProofCount <= 0) {
+      return 0;
+    }
+    if (_readyProofCount != _readyPhotoCount + _readyVideoCount) {
+      return 0;
+    }
+    if (_readyPhotoCount != _readyVideoCount) {
+      return 0;
+    }
+    return _readyPhotoCount;
+  }
+
+  num get _resolvedPrimaryAmountForSubmit {
+    final proofBackedCompletedUnitCount = _proofBackedCompletedUnitCount;
+    if (proofBackedCompletedUnitCount <= _requiredPhotoCount) {
+      return _primaryAmountValue;
+    }
+    return proofBackedCompletedUnitCount;
+  }
+
+  List<num> get _primaryAmountOptions => _buildSelectableProgressAmountOptions(
+    maxAmount: _maxPrimaryAmount,
+    singularUnitLabel: _progressUnitSingularLabel,
+    selectedAmount: _primaryAmount,
+  );
 
   @override
   void initState() {
@@ -8594,6 +8834,137 @@ class _WorkspaceClockOutWizardState
     _primaryMaxOverride = null;
     _activityMaxOverrides.clear();
     _inlineError = "";
+  }
+
+  void _setPrimaryAmount(num amount) {
+    _primaryController.text = _formatProgressAmount(amount);
+    if (_sameProgressAmount(amount, 0)) {
+      _selectedProofs = <ProductionTaskProgressProofInput>[];
+    }
+    _inlineError = "";
+  }
+
+  void _setActivityQuantity(num amount) {
+    final selectedActivityType = _selectedActivityType;
+    _activityQuantityController.text =
+        selectedActivityType == null ||
+            selectedActivityType == _quantityActivityNone
+        ? ""
+        : _formatProgressAmount(amount);
+    _inlineError = "";
+  }
+
+  void _updateActivityQuantity(num amount, {required String source}) {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null ||
+        selectedActivityType == _quantityActivityNone) {
+      return;
+    }
+    AppDebug.log(
+      _logTag,
+      _logClockOutQuantitySelection,
+      extra: {
+        "taskId": widget.task.id,
+        "staffId": widget.staffId,
+        "activityType": selectedActivityType,
+        "quantity": amount,
+        "source": source,
+      },
+    );
+    setState(() {
+      _setActivityQuantity(amount);
+    });
+  }
+
+  void _applyTypedActivityQuantity() {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null ||
+        selectedActivityType == _quantityActivityNone) {
+      return;
+    }
+    final typedQuantity = _parseWizardNumber(_activityQuantityController.text);
+    if (typedQuantity == null || typedQuantity < 0) {
+      setState(() {
+        _inlineError = _clockOutWizardActivityQuantityInvalid;
+      });
+      return;
+    }
+    final maxAllowedQuantity = _maxActivityAmountFor(selectedActivityType);
+    if (maxAllowedQuantity != null && typedQuantity > maxAllowedQuantity) {
+      setState(() {
+        _inlineError = _clockOutWizardStaleActivityTemplate.replaceFirst(
+          "%s",
+          "${_formatProgressAmount(maxAllowedQuantity)} ${_resolveQuantityUnit(selectedActivityType)}"
+              .trim(),
+        );
+      });
+      return;
+    }
+    _updateActivityQuantity(typedQuantity, source: "custom_input");
+  }
+
+  List<num> _activityQuantityOptionsFor({
+    required bool hasActivityTarget,
+    required num? activityRemaining,
+  }) {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null ||
+        selectedActivityType == _quantityActivityNone) {
+      return const <num>[0];
+    }
+    if (hasActivityTarget) {
+      return _buildSelectableQuantityAmountOptions(
+        maxAmount: activityRemaining ?? 0,
+        selectedAmount: _activityQuantity,
+      );
+    }
+    final fallbackMax = math.max(_activityQuantityValue, 100).toDouble();
+    return _buildSelectableQuantityAmountOptions(
+      maxAmount: fallbackMax,
+      selectedAmount: _activityQuantity,
+    );
+  }
+
+  String _buildProofStatusText() {
+    if (_requiredProofCount <= 0) {
+      return _clockOutWizardNoProofNeeded;
+    }
+    if (_proofRequirementSatisfied) {
+      return "$_readyProofCount / $_requiredProofCount proofs ready. "
+          "$_readyPhotoCount / $_requiredPhotoCount pictures and "
+          "$_readyVideoCount / $_requiredVideoCount videos selected.";
+    }
+    return buildTaskProgressProofRequirementText(_requiredProofCount);
+  }
+
+  List<ProductionTaskProgressProofInput> _normalizePickedProofsForRequirement(
+    List<ProductionTaskProgressProofInput> picked,
+  ) {
+    if (_requiredProofCount <= 0) {
+      return const <ProductionTaskProgressProofInput>[];
+    }
+
+    final requiredMediaCount = requiredTaskProgressProofMediaCountFromTotal(
+      _requiredProofCount,
+    );
+    final imageProofs = picked.where((proof) => proof.isImage).toList();
+    final videoProofs = picked.where((proof) => proof.isVideo).toList();
+
+    if (imageProofs.length < requiredMediaCount ||
+        videoProofs.length < requiredMediaCount) {
+      return picked;
+    }
+
+    final normalized = <ProductionTaskProgressProofInput>[
+      ...imageProofs.take(requiredMediaCount),
+      ...videoProofs.take(requiredMediaCount),
+    ];
+
+    if (normalized.length != _requiredProofCount) {
+      return picked;
+    }
+
+    return normalized;
   }
 
   num _resolveQuantityTarget(String activityType) {
@@ -8879,8 +9250,36 @@ class _WorkspaceClockOutWizardState
       if (!mounted) {
         return;
       }
+      final normalizedPicked = _normalizePickedProofsForRequirement(picked);
+      final selectionWasTrimmed =
+          normalizedPicked.length != picked.length &&
+          hasRequiredTaskProgressProofMix(
+            normalizedPicked,
+            _requiredProofCount,
+          );
+      if (selectionWasTrimmed) {
+        AppDebug.log(
+          _logTag,
+          "clock_out_proof_selection_trimmed",
+          extra: {
+            "taskId": widget.task.id,
+            "staffId": widget.staffId,
+            "pickedCount": picked.length,
+            "keptCount": normalizedPicked.length,
+            "requiredProofCount": _requiredProofCount,
+          },
+        );
+      }
       setState(() {
-        _selectedProofs = picked;
+        _selectedProofs = normalizedPicked;
+        _inlineError = _requiredProofCount <= 0
+            ? ""
+            : hasRequiredTaskProgressProofMix(
+                normalizedPicked,
+                _requiredProofCount,
+              )
+            ? ""
+            : _clockOutWizardProofRequired;
       });
     } catch (error) {
       if (!mounted) {
@@ -8907,8 +9306,26 @@ class _WorkspaceClockOutWizardState
     final responseMap = responseData is Map<String, dynamic>
         ? responseData
         : const <String, dynamic>{};
+    final backendError = (responseMap["error"] ?? responseMap["message"] ?? "")
+        .toString()
+        .trim();
     final requiredProofCount = _parseWizardNumber(
       responseMap["requiredProofCount"],
+    );
+    final requiredPhotoCount = _parseWizardNumber(
+      responseMap["requiredPhotoCount"],
+    );
+    final requiredVideoCount = _parseWizardNumber(
+      responseMap["requiredVideoCount"],
+    );
+    final providedProofCount = _parseWizardNumber(
+      responseMap["providedProofCount"],
+    );
+    final providedPhotoCount = _parseWizardNumber(
+      responseMap["providedPhotoCount"],
+    );
+    final providedVideoCount = _parseWizardNumber(
+      responseMap["providedVideoCount"],
     );
     final maxAllowedPlots = _parseWizardNumber(responseMap["maxAllowedPlots"]);
     final activityType = (responseMap["activityType"] ?? "").toString().trim();
@@ -8918,6 +9335,26 @@ class _WorkspaceClockOutWizardState
     var message = _resolveProductionWorkspaceErrorMessage(
       error,
       fallback: _taskProgressFailure,
+    );
+
+    AppDebug.log(
+      _logTag,
+      _logClockOutSubmitFailure,
+      extra: {
+        "taskId": widget.task.id,
+        "staffId": widget.staffId,
+        "step": _currentStep.name,
+        "backendError": backendError,
+        "requiredProofCount": requiredProofCount,
+        "requiredPhotoCount": requiredPhotoCount,
+        "requiredVideoCount": requiredVideoCount,
+        "providedProofCount": providedProofCount,
+        "providedPhotoCount": providedPhotoCount,
+        "providedVideoCount": providedVideoCount,
+        "maxAllowedPlots": maxAllowedPlots,
+        "activityType": activityType,
+        "maxAllowedActivityQuantity": maxAllowedActivityQuantity,
+      },
     );
 
     if (maxAllowedPlots != null) {
@@ -8933,7 +9370,25 @@ class _WorkspaceClockOutWizardState
     } else if (requiredProofCount != null ||
         message.toLowerCase().contains("proof")) {
       _currentStep = _WorkspaceClockOutWizardStep.proof;
-      if (requiredProofCount != null) {
+      final hasProofCountDetails =
+          requiredProofCount != null &&
+          providedProofCount != null &&
+          requiredPhotoCount != null &&
+          requiredVideoCount != null &&
+          providedPhotoCount != null &&
+          providedVideoCount != null;
+      if (hasProofCountDetails) {
+        final expectedCompletedUnits =
+            requiredTaskProgressProofMediaCountFromTotal(
+              requiredProofCount.toInt(),
+            );
+        message =
+            "This save currently needs ${requiredPhotoCount.toInt()} picture(s) and ${requiredVideoCount.toInt()} video(s) for ${expectedCompletedUnits.toInt()} completed unit(s). "
+            "The server received ${providedPhotoCount.toInt()} picture(s) and ${providedVideoCount.toInt()} video(s). "
+            "Replace proofs or go back to Step 1 if the completed amount should be higher.";
+      } else if (backendError.isNotEmpty) {
+        message = backendError;
+      } else if (requiredProofCount != null) {
         message = requiredProofCount <= 0
             ? _clockOutWizardNoProofNeeded
             : _clockOutWizardProofRequired;
@@ -8992,7 +9447,32 @@ class _WorkspaceClockOutWizardState
             !_validateNotes(showError: true)) {
           return;
         }
+        final resolvedUnitContribution = _resolvedPrimaryAmountForSubmit;
+        final promotedPrimaryAmount = !_sameProgressAmount(
+          resolvedUnitContribution,
+          _primaryAmountValue,
+        );
+        if (promotedPrimaryAmount) {
+          AppDebug.log(
+            _logTag,
+            _logClockOutPrimaryPromotion,
+            extra: {
+              "taskId": widget.task.id,
+              "staffId": widget.staffId,
+              "submittedUnitContribution": _primaryAmountValue,
+              "promotedUnitContribution": resolvedUnitContribution,
+              "readyProofCount": _readyProofCount,
+              "readyPhotoCount": _readyPhotoCount,
+              "readyVideoCount": _readyVideoCount,
+            },
+          );
+        }
         setState(() {
+          // WHY: Keep the saved completed-unit amount aligned with the proof bundle
+          // when the wizard state drifts after a valid upload.
+          if (promotedPrimaryAmount) {
+            _setPrimaryAmount(resolvedUnitContribution);
+          }
           _isSaving = true;
           _inlineError = "";
         });
@@ -9001,7 +9481,7 @@ class _WorkspaceClockOutWizardState
         final input = ProductionTaskLogProgressInput(
           staffId: widget.staffId,
           unitId: _selectedUnitId,
-          unitContribution: _primaryAmountValue,
+          unitContribution: resolvedUnitContribution,
           proofs: List<ProductionTaskProgressProofInput>.from(_selectedProofs),
           activityType: selectedActivityType,
           activityQuantity: selectedActivityType == _quantityActivityNone
@@ -9026,6 +9506,50 @@ class _WorkspaceClockOutWizardState
           _handleSubmitError(error);
         }
     }
+  }
+
+  ChoiceChip _buildWizardChoiceChip({
+    required ThemeData theme,
+    required String label,
+    required bool selected,
+    required ValueChanged<bool> onSelected,
+    Color accentColor = _workspaceBlue,
+  }) {
+    final colorScheme = theme.colorScheme;
+    // WHY: The wizard relies on chips for almost every action, so a shared style
+    // keeps the unselected text readable across dark and business themes.
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      showCheckmark: false,
+      labelStyle: theme.textTheme.bodyMedium?.copyWith(
+        color: selected
+            ? Colors.white
+            : _workspacePrimaryContentColor(colorScheme),
+        fontWeight: FontWeight.w800,
+      ),
+      selectedColor: accentColor,
+      backgroundColor: _workspaceToneSurface(
+        colorScheme: colorScheme,
+        accentColor: accentColor,
+        lightTintAlpha: 0.04,
+        darkTintAlpha: 0.12,
+        baseColor: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerHigh
+            : colorScheme.surface,
+      ),
+      side: BorderSide(
+        color: selected
+            ? accentColor
+            : _workspaceToneBorder(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightAlpha: 0.22,
+                darkAlpha: 0.46,
+              ),
+      ),
+      onSelected: onSelected,
+    );
   }
 
   Widget _buildCompletedSummaries(ThemeData theme) {
@@ -9088,6 +9612,8 @@ class _WorkspaceClockOutWizardState
 
   Widget _buildPrimaryStep(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
     final isCompact = MediaQuery.of(context).size.width < 720;
     final maxAllowedLabel = _formatProgressAmountWithUnit(
       amount: _maxPrimaryAmount,
@@ -9142,7 +9668,7 @@ class _WorkspaceClockOutWizardState
         Text(
           _clockOutWizardStepPrimaryTitle,
           style: theme.textTheme.titleLarge?.copyWith(
-            color: _workspaceNavy,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -9175,59 +9701,110 @@ class _WorkspaceClockOutWizardState
           ),
         if (_assignedUnitIds.length > 1) ...[
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _selectedUnitId,
-            decoration: const InputDecoration(
-              labelText: "Work area",
-              helperText: "Choose the area this staff finished work on.",
+          Text(
+            "Work area",
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: _workspacePrimaryContentColor(colorScheme),
+              fontWeight: FontWeight.w800,
             ),
-            items: _assignedUnitIds
-                .map(
-                  (unitId) => DropdownMenuItem<String>(
-                    value: unitId,
-                    child: Text(widget.planUnitLabelById[unitId] ?? unitId),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              if (value == null) {
-                return;
-              }
-              setState(() {
-                _selectedUnitId = value;
-                _syncFromExistingSelection();
-              });
-            },
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Tap the area this staff finished work on.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _assignedUnitIds.map((unitId) {
+              final selected = unitId == _selectedUnitId;
+              return _buildWizardChoiceChip(
+                theme: theme,
+                label: widget.planUnitLabelById[unitId] ?? unitId,
+                selected: selected,
+                onSelected: (_) {
+                  setState(() {
+                    _selectedUnitId = unitId;
+                    _syncFromExistingSelection();
+                  });
+                },
+              );
+            }).toList(),
           ),
         ],
         const SizedBox(height: 12),
-        TextField(
-          controller: _primaryController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: InputDecoration(
-            labelText: "Units completed now",
-            helperText: "You can enter up to $maxAllowedLabel.",
-            helperMaxLines: 2,
+        Text(
+          "Units completed now",
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: _workspacePrimaryContentColor(colorScheme),
+            fontWeight: FontWeight.w800,
           ),
-          onChanged: (_) {
-            setState(() {
-              _inlineError = "";
-            });
-          },
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "Tap the completed amount. You can select up to $maxAllowedLabel.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _primaryAmountOptions.map((amount) {
+            final selected =
+                _sameProgressAmount(amount, _primaryAmountValue) &&
+                _primaryController.text.trim().isNotEmpty;
+            return _buildWizardChoiceChip(
+              theme: theme,
+              label: _formatProgressAmount(amount),
+              selected: selected,
+              onSelected: (_) {
+                setState(() {
+                  _setPrimaryAmount(amount);
+                });
+              },
+            );
+          }).toList(),
         ),
         const SizedBox(height: 12),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: _workspaceSoftBlue,
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: _workspaceBlue,
+              lightColor: _workspaceSoftBlue,
+              lightTintAlpha: 0.08,
+              darkTintAlpha: 0.18,
+              baseColor: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
+            ),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _workspaceBlue.withValues(alpha: 0.16)),
+            border: Border.all(
+              color: _workspaceToneBorder(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightAlpha: 0.16,
+                darkAlpha: 0.38,
+              ),
+            ),
           ),
           child: Text(
-            "After save, shared remaining will be $afterSaveLabel.",
+            _primaryController.text.trim().isNotEmpty
+                ? "After save, shared remaining will be $afterSaveLabel."
+                : "Choose the completed amount to preview the shared balance after save.",
             style: theme.textTheme.bodySmall?.copyWith(
-              color: _workspaceBlue,
+              color: _workspaceToneForeground(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                darkMix: 0.52,
+              ),
               fontWeight: FontWeight.w700,
               height: 1.35,
             ),
@@ -9241,66 +9818,49 @@ class _WorkspaceClockOutWizardState
     if (_requiredProofCount <= 0) {
       return const SizedBox.shrink();
     }
-    final selectedHasVideo = _selectedProofs.any((proof) => proof.isVideo);
-    final existingRow = _existingSelectionRow;
-    final readyProofCount = _selectedProofs.isNotEmpty
-        ? _selectedProofs.length
-        : existingRow?.proofs.length ?? 0;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: List.generate(_requiredProofCount, (index) {
-        final slotFilled = index < readyProofCount;
-        final label = "Proof ${index + 1}";
-        final icon =
-            slotFilled && selectedHasVideo && index == readyProofCount - 1
-            ? Icons.videocam_outlined
-            : Icons.photo_library_outlined;
-        return Container(
-          width: 72,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            color: slotFilled ? _workspaceSoftTeal : _workspaceSoftSlate,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: (slotFilled ? _workspaceTeal : _workspaceNavy).withValues(
-                alpha: 0.16,
-              ),
-            ),
-          ),
-          child: Column(
-            children: [
-              Icon(
-                slotFilled ? Icons.check_circle_outline : icon,
-                size: 20,
-                color: slotFilled ? _workspaceTeal : _workspaceNavy,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: _workspaceNavy,
-                ),
-              ),
-            ],
-          ),
-        );
-      }),
-    );
+    final isCompact = MediaQuery.of(context).size.width < 720;
+    final proofCards = <Widget>[
+      _TaskSnapshotCard(
+        label: "Pictures",
+        value: "$_readyPhotoCount / $_requiredPhotoCount",
+        helper: "One picture per completed unit",
+        accentColor: _workspaceTeal,
+        softColor: _workspaceSoftTeal,
+        icon: Icons.image_outlined,
+      ),
+      _TaskSnapshotCard(
+        label: "Videos",
+        value: "$_readyVideoCount / $_requiredVideoCount",
+        helper: "One video per completed unit",
+        accentColor: _workspaceBlue,
+        softColor: _workspaceSoftBlue,
+        icon: Icons.videocam_outlined,
+      ),
+    ];
+    return isCompact
+        ? Column(
+            children: proofCards
+                .map(
+                  (card) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: SizedBox(width: double.infinity, child: card),
+                  ),
+                )
+                .toList(),
+          )
+        : Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: proofCards
+                .map((card) => SizedBox(width: 230, child: card))
+                .toList(),
+          );
   }
 
   Widget _buildProofStep(BuildContext context) {
     final theme = Theme.of(context);
-    final readyProofCount = _selectedProofs.isNotEmpty
-        ? _selectedProofs.length
-        : (_existingSelectionRow?.proofs.length ?? 0);
-    final proofStatusText = _requiredProofCount <= 0
-        ? _clockOutWizardNoProofNeeded
-        : _proofRequirementSatisfied
-        ? "$readyProofCount / $_requiredProofCount proofs ready."
-        : buildTaskProgressProofRequirementText(_requiredProofCount);
+    final colorScheme = theme.colorScheme;
+    final proofStatusText = _buildProofStatusText();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -9308,7 +9868,7 @@ class _WorkspaceClockOutWizardState
         Text(
           _clockOutWizardStepProofTitle,
           style: theme.textTheme.titleLarge?.copyWith(
-            color: _workspaceNavy,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -9331,14 +9891,16 @@ class _WorkspaceClockOutWizardState
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: _workspaceSoftSlate,
+            color: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : _workspaceSoftSlate,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _workspaceNavy.withValues(alpha: 0.12)),
+            border: Border.all(color: colorScheme.outlineVariant),
           ),
           child: Text(
             proofStatusText,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: _workspaceNavy,
+              color: _workspacePrimaryContentColor(colorScheme),
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -9391,6 +9953,8 @@ class _WorkspaceClockOutWizardState
 
   Widget _buildActivityStep(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
     final isCompact = MediaQuery.of(context).size.width < 720;
     final selectedActivityType = _selectedActivityType;
     final hasActivitySelection =
@@ -9417,6 +9981,19 @@ class _WorkspaceClockOutWizardState
               ? null
               : math.max(0, activityRemaining - _activityQuantityValue))
         : activityRemaining;
+    final activityQuantityOptions = showActivityQuantity
+        ? _activityQuantityOptionsFor(
+            hasActivityTarget: hasActivityTarget,
+            activityRemaining: activityRemaining,
+          )
+        : const <num>[];
+    num? selectedActivityQuantityOption;
+    for (final amount in activityQuantityOptions) {
+      if (_sameProgressAmount(amount, _activityQuantityValue)) {
+        selectedActivityQuantityOption = amount;
+        break;
+      }
+    }
     final activityCards = <Widget>[
       if (hasActivityTarget)
         _TaskSnapshotCard(
@@ -9456,7 +10033,7 @@ class _WorkspaceClockOutWizardState
         Text(
           _clockOutWizardStepActivityTitle,
           style: theme.textTheme.titleLarge?.copyWith(
-            color: _workspaceNavy,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -9468,39 +10045,38 @@ class _WorkspaceClockOutWizardState
           ),
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String?>(
-          initialValue: _selectedActivityType,
-          decoration: const InputDecoration(labelText: "Activity"),
-          items: const [
-            DropdownMenuItem<String?>(
-              value: null,
-              child: Text("Select activity"),
-            ),
-            DropdownMenuItem<String?>(
-              value: _quantityActivityNone,
-              child: Text("No quantity update"),
-            ),
-            DropdownMenuItem<String?>(
-              value: _quantityActivityPlanting,
-              child: Text("Planted"),
-            ),
-            DropdownMenuItem<String?>(
-              value: _quantityActivityTransplant,
-              child: Text("Transplanted"),
-            ),
-            DropdownMenuItem<String?>(
-              value: _quantityActivityHarvest,
-              child: Text("Harvested"),
-            ),
-          ],
-          onChanged: (value) {
-            setState(() {
-              _selectedActivityType = value;
-              _activityQuantityController.text =
-                  value == null || value == _quantityActivityNone ? "" : "0";
-              _inlineError = "";
-            });
-          },
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children:
+              const <String?>[
+                null,
+                _quantityActivityNone,
+                _quantityActivityPlanting,
+                _quantityActivityTransplant,
+                _quantityActivityHarvest,
+              ].map((value) {
+                final selected = value == _selectedActivityType;
+                final label = switch (value) {
+                  null => "Select activity",
+                  _quantityActivityNone => "No quantity update",
+                  _quantityActivityPlanting => "Planted",
+                  _quantityActivityTransplant => "Transplanted",
+                  _quantityActivityHarvest => "Harvested",
+                  _ => "Activity",
+                };
+                return _buildWizardChoiceChip(
+                  theme: theme,
+                  label: label,
+                  selected: selected,
+                  onSelected: (_) {
+                    setState(() {
+                      _selectedActivityType = value;
+                      _setActivityQuantity(0);
+                    });
+                  },
+                );
+              }).toList(),
         ),
         const SizedBox(height: 12),
         if (!hasActivitySelection)
@@ -9508,13 +10084,16 @@ class _WorkspaceClockOutWizardState
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _workspaceSoftSlate,
+              color: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : _workspaceSoftSlate,
               borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Text(
               _clockOutWizardActivityRequired,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: _workspaceNavy,
+                color: _workspacePrimaryContentColor(colorScheme),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -9524,14 +10103,16 @@ class _WorkspaceClockOutWizardState
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _workspaceSoftSlate,
+              color: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : _workspaceSoftSlate,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _workspaceNavy.withValues(alpha: 0.12)),
+              border: Border.all(color: colorScheme.outlineVariant),
             ),
             child: Text(
               "No production quantity will be added.",
               style: theme.textTheme.bodySmall?.copyWith(
-                color: _workspaceNavy,
+                color: _workspacePrimaryContentColor(colorScheme),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -9562,45 +10143,178 @@ class _WorkspaceClockOutWizardState
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _workspaceSoftSlate,
+                color: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : _workspaceSoftSlate,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _workspaceNavy.withValues(alpha: 0.12),
-                ),
+                border: Border.all(color: colorScheme.outlineVariant),
               ),
               child: Text(
                 "No shared target is set for this activity today. You can still record the quantity.",
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: _workspaceNavy,
+                  color: _workspacePrimaryContentColor(colorScheme),
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ),
           ],
           const SizedBox(height: 12),
-          TextField(
-            controller: _activityQuantityController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: "Activity quantity",
-              helperText: hasActivityTarget
-                  ? "This updates the shared activity total for today."
-                  : "This records today’s production activity quantity.",
+          Text(
+            "Activity quantity",
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: _workspacePrimaryContentColor(colorScheme),
+              fontWeight: FontWeight.w800,
             ),
-            onChanged: (_) {
-              setState(() {
-                _inlineError = "";
-              });
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasActivityTarget
+                ? "Tap the quantity to add to today’s shared activity total."
+                : "Tap the quantity to record for today’s activity.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: activityQuantityOptions.map((amount) {
+              final selected =
+                  _sameProgressAmount(amount, _activityQuantityValue) &&
+                  _activityQuantityController.text.trim().isNotEmpty;
+              return _buildWizardChoiceChip(
+                theme: theme,
+                label: "${_formatProgressAmount(amount)} $activityUnitLabel"
+                    .trim(),
+                selected: selected,
+                onSelected: (_) =>
+                    _updateActivityQuantity(amount, source: "chip"),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          // WHY: Quick-pick chips cover the common amounts, while the dropdown
+          // and numeric field keep exact counts available without allowing text.
+          DropdownButtonFormField<num>(
+            initialValue: selectedActivityQuantityOption,
+            decoration: const InputDecoration(
+              labelText: _clockOutWizardActivityPresetLabel,
+            ),
+            items: activityQuantityOptions
+                .map(
+                  (amount) => DropdownMenuItem<num>(
+                    value: amount,
+                    child: Text(
+                      "${_formatProgressAmount(amount)} $activityUnitLabel"
+                          .trim(),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) {
+                return;
+              }
+              _updateActivityQuantity(value, source: "dropdown");
             },
           ),
+          const SizedBox(height: 12),
+          if (isCompact) ...[
+            TextField(
+              controller: _activityQuantityController,
+              keyboardType: const TextInputType.numberWithOptions(
+                signed: false,
+              ),
+              textInputAction: TextInputAction.done,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: _clockOutWizardActivityCustomLabel,
+                helperText: _clockOutWizardActivityCustomHelper,
+                helperMaxLines: 2,
+                suffixText: activityUnitLabel.trim().isEmpty
+                    ? null
+                    : activityUnitLabel,
+              ),
+              onChanged: (_) {
+                setState(() {
+                  _inlineError = "";
+                });
+              },
+              onSubmitted: (_) => _applyTypedActivityQuantity(),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: _applyTypedActivityQuantity,
+                icon: const Icon(Icons.pin_outlined, size: 18),
+                label: const Text(_clockOutWizardActivityApplyLabel),
+              ),
+            ),
+          ] else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _activityQuantityController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      signed: false,
+                    ),
+                    textInputAction: TextInputAction.done,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: InputDecoration(
+                      labelText: _clockOutWizardActivityCustomLabel,
+                      helperText: _clockOutWizardActivityCustomHelper,
+                      helperMaxLines: 2,
+                      suffixText: activityUnitLabel.trim().isEmpty
+                          ? null
+                          : activityUnitLabel,
+                    ),
+                    onChanged: (_) {
+                      setState(() {
+                        _inlineError = "";
+                      });
+                    },
+                    onSubmitted: (_) => _applyTypedActivityQuantity(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilledButton.tonalIcon(
+                    onPressed: _applyTypedActivityQuantity,
+                    icon: const Icon(Icons.pin_outlined, size: 18),
+                    label: const Text(_clockOutWizardActivityApplyLabel),
+                  ),
+                ),
+              ],
+            ),
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _workspaceSoftBlue,
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightColor: _workspaceSoftBlue,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.18,
+                baseColor: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+              ),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _workspaceBlue.withValues(alpha: 0.16)),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  lightAlpha: 0.16,
+                  darkAlpha: 0.38,
+                ),
+              ),
             ),
             child: Text(
               hasActivityTarget
@@ -9608,7 +10322,11 @@ class _WorkspaceClockOutWizardState
                         .trim()
                   : "This updates the shared ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} total for today.",
               style: theme.textTheme.bodySmall?.copyWith(
-                color: _workspaceBlue,
+                color: _workspaceToneForeground(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  darkMix: 0.52,
+                ),
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -9620,6 +10338,7 @@ class _WorkspaceClockOutWizardState
 
   Widget _buildNotesStep(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final needsDelayReason = _delayReasonRequired;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -9627,7 +10346,7 @@ class _WorkspaceClockOutWizardState
         Text(
           _clockOutWizardStepNotesTitle,
           style: theme.textTheme.titleLarge?.copyWith(
-            color: _workspaceNavy,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           ),
         ),
@@ -9641,31 +10360,32 @@ class _WorkspaceClockOutWizardState
           ),
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: _selectedDelayReason,
-          decoration: InputDecoration(
-            labelText: "Delay reason",
-            helperText: needsDelayReason
-                ? "Delay reason is required when units completed now is 0."
-                : "Optional unless no primary units were completed.",
+        Text(
+          needsDelayReason
+              ? "Pick the delay reason before you finish."
+              : "Delay reason is optional unless no work was completed.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          items: _delayReasonOptions
-              .map(
-                (value) => DropdownMenuItem<String>(
-                  value: value,
-                  child: Text(_formatDelayReason(value)),
-                ),
-              )
-              .toList(),
-          onChanged: (value) {
-            if (value == null) {
-              return;
-            }
-            setState(() {
-              _selectedDelayReason = value;
-              _inlineError = "";
-            });
-          },
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _delayReasonOptions.map((value) {
+            final selected = value == _selectedDelayReason;
+            return _buildWizardChoiceChip(
+              theme: theme,
+              label: _formatDelayReason(value),
+              selected: selected,
+              onSelected: (_) {
+                setState(() {
+                  _selectedDelayReason = value;
+                  _inlineError = "";
+                });
+              },
+            );
+          }).toList(),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -9732,11 +10452,37 @@ class _WorkspaceClockOutWizardState
     }
   }
 
+  String _resolvedInlineErrorForDisplay() {
+    if (_inlineError.isEmpty) {
+      return "";
+    }
+    if (_currentStep != _WorkspaceClockOutWizardStep.proof) {
+      return _inlineError;
+    }
+
+    if (_inlineError == _clockOutWizardProofPicking && !_isPickingProofs) {
+      return "";
+    }
+
+    if (_inlineError == _clockOutWizardProofRequired &&
+        _proofRequirementSatisfied) {
+      return "";
+    }
+
+    if (_inlineError == _clockOutWizardProofNotAllowed &&
+        _requiredProofCount > 0) {
+      return "";
+    }
+
+    return _inlineError;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isCompact = MediaQuery.of(context).size.width < 720;
+    final visibleInlineError = _resolvedInlineErrorForDisplay();
 
     return Material(
       color: colorScheme.surface,
@@ -9758,7 +10504,7 @@ class _WorkspaceClockOutWizardState
                         Text(
                           _clockOutWizardTitle,
                           style: theme.textTheme.headlineSmall?.copyWith(
-                            color: _workspaceNavy,
+                            color: _workspacePrimaryContentColor(colorScheme),
                             fontWeight: FontWeight.w900,
                           ),
                         ),
@@ -9825,7 +10571,7 @@ class _WorkspaceClockOutWizardState
                   children: [
                     _buildCompletedSummaries(theme),
                     _buildCurrentStep(context),
-                    if (_inlineError.isNotEmpty) ...[
+                    if (visibleInlineError.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Container(
                         width: double.infinity,
@@ -9835,7 +10581,7 @@ class _WorkspaceClockOutWizardState
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Text(
-                          _inlineError,
+                          visibleInlineError,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colorScheme.onErrorContainer,
                             fontWeight: FontWeight.w700,

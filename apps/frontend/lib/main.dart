@@ -23,6 +23,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'; // ✅ REQUIRED for ProviderScope
+import 'package:go_router/go_router.dart';
 
 import 'app/app.dart';
 import 'app/core/constants/app_constants.dart';
@@ -32,6 +33,12 @@ void main() {
   // BOOT CONFIRMATION
   // ------------------------------------------------------------
   debugPrint("BOOT: main() started");
+
+  // WHY: Production screens are opened with imperative `push()` calls. On web,
+  // GoRouter does not reflect those routes into the browser URL unless this is
+  // enabled, which makes refresh reopen the old list route instead of the
+  // active production detail page.
+  GoRouter.optionURLReflectsImperativeAPIs = true;
 
   // ------------------------------------------------------------
   // ENVIRONMENT CONFIRMATION

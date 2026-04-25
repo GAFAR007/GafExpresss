@@ -271,6 +271,26 @@ final productionPortfolioConfidenceProvider =
       );
     });
 
+final productionPlanDetailSnapshotProvider =
+    StateProvider<Map<String, ProductionPlanDetail>>((ref) {
+      // WHY: Detail screens can keep rendering the last good payload while a
+      // manual or realtime refresh asks the backend for newer mutable rows.
+      return const <String, ProductionPlanDetail>{};
+    });
+
+void _storePlanDetailSnapshot(Ref ref, ProductionPlanDetail detail) {
+  final planId = detail.plan.id.trim();
+  if (planId.isEmpty) {
+    return;
+  }
+  ref.read(productionPlanDetailSnapshotProvider.notifier).update((current) {
+    return Map<String, ProductionPlanDetail>.unmodifiable({
+      ...current,
+      planId: detail,
+    });
+  });
+}
+
 final productionPlanDetailProvider =
     FutureProvider.family<ProductionPlanDetail, String>((ref, planId) async {
       AppDebug.log(
@@ -294,7 +314,12 @@ final productionPlanDetailProvider =
       }
 
       final api = ref.read(productionApiProvider);
-      return api.fetchPlanDetail(token: session.token, planId: planId);
+      final detail = await api.fetchPlanDetail(
+        token: session.token,
+        planId: planId,
+      );
+      _storePlanDetailSnapshot(ref, detail);
+      return detail;
     });
 
 final productionPlanUnitsProvider =
@@ -421,6 +446,7 @@ class ProductionPlanActions {
       payload: {...payload, "saveMode": "draft"},
     );
 
+    _storePlanDetailSnapshot(_ref, detail);
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPlanDetailProvider(detail.plan.id));
     _ref.invalidate(productionPortfolioConfidenceProvider);
@@ -447,6 +473,7 @@ class ProductionPlanActions {
     final detail = await api.createPlan(token: session.token, payload: payload);
 
     // WHY: Refresh list + detail caches after plan creation.
+    _storePlanDetailSnapshot(_ref, detail);
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPlanDetailProvider(detail.plan.id));
     _ref.invalidate(productionPortfolioConfidenceProvider);
@@ -479,6 +506,7 @@ class ProductionPlanActions {
       payload: payload,
     );
 
+    _storePlanDetailSnapshot(_ref, detail);
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPlanDetailProvider(planId));
     _ref.invalidate(productionPortfolioConfidenceProvider);

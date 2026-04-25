@@ -3,15 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const _step1Title = "Step 1: How many units did you complete?";
 const _step2Title = "Step 2: Upload proof";
 const _step3Title = "Step 3: Record activity";
 const _step4Title = "Step 4: Add notes";
 
-const _activityQuantityLabel = "Activity quantity";
 const _notesLabel = "Daily notes";
-const _unitsLabel = "Units completed now";
+const _addProofsLabel = "Add proofs";
 
 ProductionPlan _buildPlan() {
   return const ProductionPlan(
@@ -188,6 +188,18 @@ ProductionTaskProgressProofInput _proof(String filename) {
   );
 }
 
+Finder _choiceChipWithLabel(String label) {
+  return find.widgetWithText(ChoiceChip, label);
+}
+
+Future<void> _tapChoiceChip(WidgetTester tester, String label) async {
+  final chip = _choiceChipWithLabel(label);
+  await tester.ensureVisible(chip);
+  await tester.pumpAndSettle();
+  await tester.tap(chip);
+  await tester.pumpAndSettle();
+}
+
 Finder _textFieldWithLabel(String label) {
   return find.byWidgetPredicate(
     (widget) => widget is TextField && widget.decoration?.labelText == label,
@@ -199,6 +211,7 @@ Future<void> _pumpWizardHost(
   required Size size,
   required bool useBottomSheet,
   required ProductionClockOutWizardSheet wizard,
+  ThemeData? theme,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() async {
@@ -207,6 +220,7 @@ Future<void> _pumpWizardHost(
 
   await tester.pumpWidget(
     MaterialApp(
+      theme: theme ?? ThemeData.light(useMaterial3: true),
       home: Scaffold(
         body: Builder(
           builder: (context) {
@@ -327,6 +341,77 @@ void main() {
   );
 
   testWidgets(
+    "clock-out wizard exposes decimal quick-pick options for low unit counts",
+    (tester) async {
+      await _pumpWizardHost(
+        tester,
+        size: const Size(1280, 900),
+        useBottomSheet: false,
+        wizard: ProductionClockOutWizardSheet(
+          workDate: workDate,
+          task: task,
+          plan: plan,
+          timelineRows: const <ProductionTimelineRow>[],
+          taskDayLedgers: [ledger],
+          attendanceRecords: [attendance],
+          activeAttendance: attendance,
+          staffMap: {staff.id: staff},
+          planUnitLabelById: const <String, String>{},
+          fallbackTotalUnits: 5,
+          fallbackWorkUnitLabel: "greenhouses",
+          staffId: staff.id,
+          onPickProofs: () async => const <ProductionTaskProgressProofInput>[],
+          onSubmit: (_) async {},
+        ),
+      );
+
+      expect(_choiceChipWithLabel("0"), findsOneWidget);
+      expect(_choiceChipWithLabel("0.1"), findsOneWidget);
+      expect(_choiceChipWithLabel("0.5"), findsOneWidget);
+      expect(_choiceChipWithLabel("0.7"), findsOneWidget);
+      expect(_choiceChipWithLabel("1"), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    "clock-out wizard keeps heading and chip text readable in dark theme",
+    (tester) async {
+      await _pumpWizardHost(
+        tester,
+        size: const Size(1280, 900),
+        useBottomSheet: false,
+        theme: AppTheme.dark(),
+        wizard: ProductionClockOutWizardSheet(
+          workDate: workDate,
+          task: task,
+          plan: plan,
+          timelineRows: const <ProductionTimelineRow>[],
+          taskDayLedgers: [ledger],
+          attendanceRecords: [attendance],
+          activeAttendance: attendance,
+          staffMap: {staff.id: staff},
+          planUnitLabelById: const <String, String>{},
+          fallbackTotalUnits: 5,
+          fallbackWorkUnitLabel: "greenhouses",
+          staffId: staff.id,
+          onPickProofs: () async => const <ProductionTaskProgressProofInput>[],
+          onSubmit: (_) async {},
+        ),
+      );
+
+      final titleText = tester.widget<Text>(find.text(_step1Title));
+      final unitsTitle = tester.widget<Text>(find.text("Units completed now"));
+      final amountChip = tester.widget<ChoiceChip>(_choiceChipWithLabel("1"));
+      final dialogContext = tester.element(find.text(_step1Title));
+      final colorScheme = Theme.of(dialogContext).colorScheme;
+
+      expect(titleText.style?.color, colorScheme.onSurface);
+      expect(unitsTitle.style?.color, colorScheme.onSurface);
+      expect(amountChip.labelStyle?.color, colorScheme.onSurface);
+    },
+  );
+
+  testWidgets(
     "guided clock-out reveals one step at a time and finishes with a single save action",
     (tester) async {
       ProductionTaskLogProgressInput? submittedInput;
@@ -350,7 +435,7 @@ void main() {
           staffId: staff.id,
           onPickProofs: () async => [
             _proof("proof-1.jpg"),
-            _proof("proof-2.jpg"),
+            _proof("proof-1.mp4"),
           ],
           onSubmit: (input) async {
             submittedInput = input;
@@ -363,8 +448,7 @@ void main() {
       expect(find.text(_step3Title), findsNothing);
       expect(find.text(_step4Title), findsNothing);
 
-      await tester.enterText(_textFieldWithLabel(_unitsLabel), "1.5");
-      await tester.pump();
+      await _tapChoiceChip(tester, "1");
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
@@ -372,7 +456,7 @@ void main() {
       expect(find.text(_step2Title), findsOneWidget);
       expect(find.text(_step3Title), findsNothing);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, "Upload proof"));
+      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
@@ -381,15 +465,8 @@ void main() {
       expect(find.text(_step3Title), findsOneWidget);
       expect(find.text(_step4Title), findsNothing);
 
-      await tester.tap(find.text("Select activity"));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text("Planted").last);
-      await tester.pumpAndSettle();
-      await tester.enterText(
-        _textFieldWithLabel(_activityQuantityLabel),
-        "500",
-      );
-      await tester.pump();
+      await _tapChoiceChip(tester, "Planted");
+      await _tapChoiceChip(tester, "500 seeds");
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
@@ -407,7 +484,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(submittedInput, isNotNull);
-      expect(submittedInput!.unitContribution, 1.5);
+      expect(submittedInput!.unitContribution, 1);
       expect(submittedInput!.proofs.length, 2);
       expect(submittedInput!.activityType, "planted");
       expect(submittedInput!.activityQuantity, 500);
@@ -417,6 +494,133 @@ void main() {
       expect(find.text(_step4Title), findsNothing);
     },
   );
+
+  testWidgets(
+    "proof step requires matching picture and video counts for the selected units",
+    (tester) async {
+      await _pumpWizardHost(
+        tester,
+        size: const Size(1280, 900),
+        useBottomSheet: false,
+        wizard: ProductionClockOutWizardSheet(
+          workDate: workDate,
+          task: task,
+          plan: plan,
+          timelineRows: const <ProductionTimelineRow>[],
+          taskDayLedgers: [ledger],
+          attendanceRecords: [attendance],
+          activeAttendance: attendance,
+          staffMap: {staff.id: staff},
+          planUnitLabelById: const <String, String>{},
+          fallbackTotalUnits: 5,
+          fallbackWorkUnitLabel: "greenhouses",
+          staffId: staff.id,
+          onPickProofs: () async => [
+            _proof("proof-1.jpg"),
+            _proof("proof-1.mp4"),
+            _proof("proof-2.jpg"),
+            _proof("proof-2.mp4"),
+            _proof("proof-3.jpg"),
+            _proof("proof-3.mp4"),
+            _proof("proof-4.jpg"),
+            _proof("proof-4.mp4"),
+            _proof("proof-5.jpg"),
+            _proof("proof-5.mp4"),
+          ],
+          onSubmit: (_) async {},
+        ),
+      );
+
+      await _tapChoiceChip(tester, "5");
+      await tester.tap(find.widgetWithText(FilledButton, "Continue"));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          "Select exactly 10 proofs: 5 pictures and 5 videos of the greenhouse, plot, or unit.",
+        ),
+        findsOneWidget,
+      );
+      expect(find.text("0 / 5"), findsNWidgets(2));
+
+      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
+      await tester.pumpAndSettle();
+
+      expect(find.text("5 / 5"), findsNWidgets(2));
+
+      await tester.tap(find.widgetWithText(FilledButton, "Continue"));
+      await tester.pumpAndSettle();
+
+      expect(find.text(_step3Title), findsOneWidget);
+    },
+  );
+
+  testWidgets("successful proof replacement clears a stale proof error banner", (
+    tester,
+  ) async {
+    var pickAttempts = 0;
+
+    await _pumpWizardHost(
+      tester,
+      size: const Size(1280, 900),
+      useBottomSheet: false,
+      wizard: ProductionClockOutWizardSheet(
+        workDate: workDate,
+        task: task,
+        plan: plan,
+        timelineRows: const <ProductionTimelineRow>[],
+        taskDayLedgers: [ledger],
+        attendanceRecords: [attendance],
+        activeAttendance: attendance,
+        staffMap: {staff.id: staff},
+        planUnitLabelById: const <String, String>{},
+        fallbackTotalUnits: 5,
+        fallbackWorkUnitLabel: "greenhouses",
+        staffId: staff.id,
+        onPickProofs: () async {
+          pickAttempts += 1;
+          if (pickAttempts == 1) {
+            throw Exception(
+              "Upload every required picture and video for the completed units.",
+            );
+          }
+          return [
+            _proof("proof-1.jpg"),
+            _proof("proof-1.mp4"),
+            _proof("proof-2.jpg"),
+            _proof("proof-2.mp4"),
+            _proof("proof-3.jpg"),
+            _proof("proof-3.mp4"),
+            _proof("proof-4.jpg"),
+            _proof("proof-4.mp4"),
+            _proof("proof-5.jpg"),
+            _proof("proof-5.mp4"),
+          ];
+        },
+        onSubmit: (_) async {},
+      ),
+    );
+
+    await _tapChoiceChip(tester, "5");
+    await tester.tap(find.widgetWithText(FilledButton, "Continue"));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining("Upload every required picture and video"),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining("Upload every required picture and video"),
+      findsNothing,
+    );
+  });
 
   testWidgets(
     "mobile clock-out sheet keeps the user in proof step after a failed upload and allows retry",
@@ -446,7 +650,7 @@ void main() {
             if (pickAttempts == 1) {
               throw Exception("Upload failed");
             }
-            return [_proof("proof-1.jpg"), _proof("proof-2.jpg")];
+            return [_proof("proof-1.jpg"), _proof("proof-1.mp4")];
           },
           onSubmit: (_) async {
             submitCalls += 1;
@@ -454,21 +658,20 @@ void main() {
         ),
       );
 
-      await tester.enterText(_textFieldWithLabel(_unitsLabel), "2");
-      await tester.pump();
+      await _tapChoiceChip(tester, "1");
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
       expect(find.text(_step2Title), findsOneWidget);
       expect(find.text("Step 2 of 4"), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, "Upload proof"));
+      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
       await tester.pumpAndSettle();
 
       expect(find.textContaining("Upload failed"), findsOneWidget);
       expect(find.text(_step2Title), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, "Upload proof"));
+      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
@@ -503,7 +706,10 @@ void main() {
           fallbackTotalUnits: 5,
           fallbackWorkUnitLabel: "greenhouses",
           staffId: staff.id,
-          onPickProofs: () async => [_proof("proof-1.jpg")],
+          onPickProofs: () async => [
+            _proof("proof-1.jpg"),
+            _proof("proof-1.mp4"),
+          ],
           onSubmit: (input) async {
             submitAttempts += 1;
             if (submitAttempts == 1) {
@@ -514,20 +720,16 @@ void main() {
         ),
       );
 
-      await tester.enterText(_textFieldWithLabel(_unitsLabel), "1");
-      await tester.pump();
+      await _tapChoiceChip(tester, "1");
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(OutlinedButton, "Upload proof"));
+      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text("Select activity"));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text("No quantity update").last);
-      await tester.pumpAndSettle();
+      await _tapChoiceChip(tester, "No quantity update");
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 

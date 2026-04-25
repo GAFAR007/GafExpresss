@@ -67,7 +67,7 @@ class AppTheme {
       surface: AppColors.darkSurface,
       surfaceAlt: AppColors.darkSurfaceAlt,
       surfaceMuted: AppColors.darkSurfaceMuted,
-      surfaceTinted: Color(0xFF1C2A43),
+      surfaceTinted: Color(0xFF17263D),
       textPrimary: AppColors.darkTextPrimary,
       textSecondary: AppColors.darkTextSecondary,
       border: AppColors.darkBorder,
@@ -95,7 +95,7 @@ class AppTheme {
       surface: AppColors.businessSurface,
       surfaceAlt: AppColors.businessSurfaceAlt,
       surfaceMuted: AppColors.businessCard,
-      surfaceTinted: Color(0xFF1A2A43),
+      surfaceTinted: Color(0xFF182943),
       textPrimary: AppColors.businessTextPrimary,
       textSecondary: AppColors.businessTextSecondary,
       border: AppColors.businessBorder,
@@ -174,7 +174,7 @@ class AppTheme {
       textTheme: textTheme,
       dividerColor: palette.outlineVariant,
       appBarTheme: AppBarTheme(
-        backgroundColor: palette.background,
+        backgroundColor: isDark ? palette.surface : palette.background,
         foregroundColor: palette.textPrimary,
         centerTitle: false,
         elevation: 0,
@@ -240,14 +240,14 @@ class AppTheme {
         space: 1,
       ),
       chipTheme: baseTheme.chipTheme.copyWith(
-        backgroundColor: palette.surfaceAlt,
+        backgroundColor: isDark ? palette.surface : palette.surfaceAlt,
         selectedColor: palette.primaryContainer,
         disabledColor: palette.surfaceMuted,
         side: BorderSide(color: palette.outlineVariant),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.pill),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         labelStyle: textTheme.labelMedium?.copyWith(
           color: palette.textPrimary,
           fontWeight: FontWeight.w700,
@@ -270,10 +270,10 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: palette.surfaceAlt,
+        fillColor: isDark ? palette.surface : palette.surfaceAlt,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 16,
+          horizontal: 16,
+          vertical: 14,
         ),
         labelStyle: textTheme.bodySmall?.copyWith(color: palette.textSecondary),
         floatingLabelStyle: textTheme.bodySmall?.copyWith(
@@ -374,36 +374,36 @@ class AppTheme {
         ),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.onPrimary;
           }
           return palette.surface;
         }),
-        trackColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.primary;
           }
           return palette.surfaceMuted;
         }),
-        trackOutlineColor: MaterialStateProperty.all(Colors.transparent),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
       radioTheme: RadioThemeData(
-        fillColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.primary;
           }
           return palette.textSecondary;
         }),
       ),
       checkboxTheme: CheckboxThemeData(
-        fillColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.primary;
           }
           return Colors.transparent;
         }),
-        checkColor: MaterialStateProperty.all(palette.onPrimary),
+        checkColor: WidgetStateProperty.all(palette.onPrimary),
         side: BorderSide(color: palette.border),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -418,8 +418,8 @@ class AppTheme {
         ),
       ),
       dataTableTheme: DataTableThemeData(
-        headingRowColor: MaterialStateProperty.all(palette.surfaceAlt),
-        dataRowColor: MaterialStateProperty.all(palette.surface),
+        headingRowColor: WidgetStateProperty.all(palette.surfaceAlt),
+        dataRowColor: WidgetStateProperty.all(palette.surface),
         headingTextStyle: textTheme.labelLarge?.copyWith(
           color: palette.textPrimary,
           fontWeight: FontWeight.w800,
@@ -460,15 +460,15 @@ class AppTheme {
         indicatorColor: palette.primaryContainer,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         height: 76,
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          final isSelected = states.contains(MaterialState.selected);
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
           return textTheme.labelSmall?.copyWith(
             color: isSelected ? palette.primary : palette.textSecondary,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
           );
         }),
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          final isSelected = states.contains(MaterialState.selected);
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
           return IconThemeData(
             color: isSelected ? palette.primary : palette.textSecondary,
             size: 22,
@@ -494,30 +494,30 @@ class AppTheme {
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
-          backgroundColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.selected)) {
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
               return palette.primaryContainer;
             }
             return palette.surfaceAlt;
           }),
-          foregroundColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.selected)) {
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
               return palette.onPrimaryContainer;
             }
             return palette.textSecondary;
           }),
-          side: MaterialStateProperty.all(
+          side: WidgetStateProperty.all(
             BorderSide(color: palette.outlineVariant),
           ),
-          shape: MaterialStateProperty.all(
+          shape: WidgetStateProperty.all(
             RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadius.lg),
             ),
           ),
-          padding: MaterialStateProperty.all(
+          padding: WidgetStateProperty.all(
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
-          textStyle: MaterialStateProperty.all(
+          textStyle: WidgetStateProperty.all(
             textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
         ),
@@ -707,7 +707,7 @@ class AppStatusBadgeColors {
     }
 
     return AppStatusBadgeColors(
-      background: base.withValues(alpha: isDark ? 0.24 : 0.14),
+      background: base.withValues(alpha: isDark ? 0.18 : 0.14),
       foreground: base.withValues(alpha: isDark ? 0.96 : 0.92),
     );
   }
@@ -736,7 +736,7 @@ class AppStatusBadgeColors {
     }
 
     return AppStatusBadgeColors(
-      background: base.withValues(alpha: isDark ? 0.24 : 0.14),
+      background: base.withValues(alpha: isDark ? 0.18 : 0.14),
       foreground: base.withValues(alpha: isDark ? 0.96 : 0.92),
     );
   }

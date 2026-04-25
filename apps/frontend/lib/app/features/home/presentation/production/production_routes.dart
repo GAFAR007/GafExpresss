@@ -17,7 +17,10 @@ const String productionPlanCreateRoute = "/business-production/create";
 const String productionPlanDraftStudioRoute =
     "/business-production/draft-studio";
 const String productionPlanDetailRoute = "/business-production/:id";
+const String productionPlanTaskDetailRoute =
+    "/business-production/:id/task/:taskId";
 const String productionPlanInsightsRoute = "/business-production/:id/insights";
+const String productionPlanInsightsViewQuery = "view";
 const String productionPlanPhaseDetailRoute =
     "/business-production/:id/phase/:phaseId";
 const String productionPlanPresenceStatsRoute =
@@ -32,9 +35,24 @@ String productionPlanDetailPath(String id) {
   return "/business-production/$id";
 }
 
-String productionPlanInsightsPath(String id) {
+String productionPlanTaskDetailPath({
+  required String planId,
+  required String taskId,
+}) {
+  // WHY: Task detail routes need both ids so rows can deep-link into a
+  // focused task screen without reopening the whole phase dashboard.
+  return "/business-production/$planId/task/$taskId";
+}
+
+String productionPlanInsightsPath(String id, {String? view}) {
   // WHY: Insights live on a separate route so the plan workspace can stay calendar-first.
-  return "/business-production/$id/insights";
+  final trimmedView = (view ?? "").trim();
+  return Uri(
+    path: "/business-production/$id/insights",
+    queryParameters: trimmedView.isEmpty
+        ? null
+        : <String, String>{productionPlanInsightsViewQuery: trimmedView},
+  ).toString();
 }
 
 String productionPlanPhaseDetailPath({

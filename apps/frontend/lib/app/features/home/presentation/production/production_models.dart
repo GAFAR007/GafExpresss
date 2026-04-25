@@ -1100,7 +1100,7 @@ class ProductionDailyRollup {
 
   factory ProductionDailyRollup.fromJson(Map<String, dynamic> json) {
     return ProductionDailyRollup(
-      workDate: _parseDate(json[_keyWorkDate]),
+      workDate: _parseCalendarDate(json[_keyWorkDate]),
       scheduledTaskBlocks: _parseInt(json[_keyScheduledTaskBlocks]),
       assignedStaffCount: _parseInt(json[_keyAssignedStaffCount]),
       attendedStaffCount: _parseInt(json[_keyAttendedStaffCount]),
@@ -1560,7 +1560,7 @@ class ProductionAttendanceRecord {
       planId: _parseString(json[_keyPlanId]),
       taskId: _parseString(json[_keyTaskId]),
       staffProfileId: _parseString(json[_keyStaffProfileId]),
-      workDate: _parseDate(json[_keyWorkDate]),
+      workDate: _parseCalendarDate(json[_keyWorkDate]),
       clockInAt: _parseDate(json[_keyClockInAt]),
       clockOutAt: _parseDate(json[_keyClockOutAt]),
       durationMinutes: _parseInt(json[_keyDurationMinutes]),
@@ -1824,7 +1824,7 @@ class ProductionTaskDayLedger {
       id: _parseId(json),
       planId: _parseString(json[_keyPlanId]),
       taskId: _parseString(json[_keyTaskId]),
-      workDate: _parseDate(json[_keyWorkDate]),
+      workDate: _parseCalendarDate(json[_keyWorkDate]),
       unitType: _parseString(json[_keyUnitType]),
       unitTarget: _parseNum(json[_keyUnitTarget]),
       unitCompleted: _parseNum(json[_keyUnitCompleted]),
@@ -2858,7 +2858,7 @@ class ProductionTimelineRow {
 
     return ProductionTimelineRow(
       id: _parseId(json),
-      workDate: _parseDate(json[_keyWorkDate]),
+      workDate: _parseCalendarDate(json[_keyWorkDate]),
       taskId: _parseString(json[_keyTaskId]),
       planId: _parseString(json[_keyPlanId]),
       entryIndex: math.max(1, _parseInt(json[_keyProgressEntryIndex])),
@@ -3023,7 +3023,7 @@ class ProductionTaskProgressRecord {
       attendanceId: _parseString(json[_keyAttendanceId]),
       unitId: _parseString(json[_keyUnitId]),
       taskDayLedgerId: _parseString(json[_keyTaskDayLedgerId]),
-      workDate: _parseDate(json[_keyWorkDate]),
+      workDate: _parseCalendarDate(json[_keyWorkDate]),
       expectedPlots: _parseNum(json[_keyExpectedPlots]),
       actualPlots:
           _parseNullableNum(json[_keyUnitContribution]) ??
@@ -3222,7 +3222,7 @@ class ProductionTaskProgressBatchResponse {
     final successesList = (json[_keySuccesses] ?? []) as List<dynamic>;
     final errorsList = (json[_keyErrors] ?? []) as List<dynamic>;
     return ProductionTaskProgressBatchResponse(
-      workDate: _parseDate(json[_keyWorkDate]),
+      workDate: _parseCalendarDate(json[_keyWorkDate]),
       summary: ProductionTaskProgressBatchSummary.fromJson(summaryMap),
       successes: successesList
           .map(
@@ -3318,6 +3318,17 @@ DateTime? _parseDate(dynamic value) {
   return DateTime.tryParse(value.toString());
 }
 
+DateTime? _parseCalendarDate(dynamic value) {
+  final parsed = _parseDate(value);
+  if (parsed == null) {
+    return null;
+  }
+  // WHY: workDate is a calendar farming day, not a timezone-sensitive instant.
+  // Preserve the declared year/month/day exactly so UI defaults and labels stay
+  // on the intended operational date across time zones.
+  return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
 int _parseInt(dynamic value, {int fallback = 0}) {
   if (value is int) return value;
   return int.tryParse(value?.toString() ?? "") ?? fallback;
@@ -3352,7 +3363,7 @@ num? _parseNullableNum(dynamic value) {
   return num.tryParse(value.toString());
 }
 
-int requiredTaskProgressProofCount(num actualPlots) {
+int requiredTaskProgressProofMediaCount(num actualPlots) {
   final normalizedActualPlots = actualPlots.toDouble();
   if (normalizedActualPlots <= 0) {
     return 0;
@@ -3360,8 +3371,45 @@ int requiredTaskProgressProofCount(num actualPlots) {
   return normalizedActualPlots.ceil();
 }
 
+int requiredTaskProgressPhotoCount(num actualPlots) {
+  return requiredTaskProgressProofMediaCount(actualPlots);
+}
+
+int requiredTaskProgressVideoCount(num actualPlots) {
+  return requiredTaskProgressProofMediaCount(actualPlots);
+}
+
+int requiredTaskProgressProofCount(num actualPlots) {
+  final requiredMediaCount = requiredTaskProgressProofMediaCount(actualPlots);
+  if (requiredMediaCount <= 0) {
+    return 0;
+  }
+  return requiredMediaCount * 2;
+}
+
+int requiredTaskProgressProofMediaCountFromTotal(int requiredProofCount) {
+  if (requiredProofCount <= 0) {
+    return 0;
+  }
+  return (requiredProofCount / 2).ceil();
+}
+
 String formatTaskProgressProofCountLabel(int count) {
   return "$count proof${count == 1 ? "" : "s"}";
+}
+
+String formatTaskProgressProofMixLabel(int requiredProofCount) {
+  final requiredMediaCount = requiredTaskProgressProofMediaCountFromTotal(
+    requiredProofCount,
+  );
+  if (requiredMediaCount <= 0) {
+    return "no proof media";
+  }
+  final photoLabel =
+      "$requiredMediaCount picture${requiredMediaCount == 1 ? "" : "s"}";
+  final videoLabel =
+      "$requiredMediaCount video${requiredMediaCount == 1 ? "" : "s"}";
+  return "$photoLabel and $videoLabel";
 }
 
 String buildTaskProgressProofRequirementText(
@@ -3373,7 +3421,8 @@ String buildTaskProgressProofRequirementText(
   }
   final proofLabel = formatTaskProgressProofCountLabel(requiredProofCount);
   final verb = exact ? "Upload exactly" : "Select exactly";
-  return "$verb $proofLabel of the greenhouse, plot, or unit.";
+  final proofMixLabel = formatTaskProgressProofMixLabel(requiredProofCount);
+  return "$verb $proofLabel: $proofMixLabel of the greenhouse, plot, or unit.";
 }
 
 const List<String> _productionProofImageExtensions = <String>[
@@ -3420,7 +3469,14 @@ bool hasRequiredTaskProgressProofMix(
   if (requiredProofCount <= 0) {
     return proofs.isEmpty;
   }
-  return proofs.length == requiredProofCount;
+  final requiredMediaCount = requiredTaskProgressProofMediaCountFromTotal(
+    requiredProofCount,
+  );
+  final imageCount = proofs.where((proof) => proof.isImage).length;
+  final videoCount = proofs.where((proof) => proof.isVideo).length;
+  return proofs.length == requiredProofCount &&
+      imageCount == requiredMediaCount &&
+      videoCount == requiredMediaCount;
 }
 
 bool hasRequiredTaskProgressProofRecordMix(
@@ -3430,7 +3486,14 @@ bool hasRequiredTaskProgressProofRecordMix(
   if (requiredProofCount <= 0) {
     return proofs.isEmpty;
   }
-  return proofs.length == requiredProofCount;
+  final requiredMediaCount = requiredTaskProgressProofMediaCountFromTotal(
+    requiredProofCount,
+  );
+  final imageCount = proofs.where((proof) => proof.isImage).length;
+  final videoCount = proofs.where((proof) => proof.isVideo).length;
+  return proofs.length == requiredProofCount &&
+      imageCount == requiredMediaCount &&
+      videoCount == requiredMediaCount;
 }
 
 Map<String, num> _parseOutputByUnit(dynamic value) {

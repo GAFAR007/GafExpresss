@@ -71,21 +71,21 @@ class AppColors {
   // DARK MODE (separate tokens keeps it clean)
   // ------------------------------------------------------------
   // WHY: Dark mode should feel vivid and sharp, not greyed out.
-  static const Color darkBackground = Color(0xFF09111F);
-  static const Color darkSurface = Color(0xFF101A2C);
-  static const Color darkSurfaceAlt = Color(0xFF142031);
-  static const Color darkSurfaceMuted = Color(0xFF18253A);
-  static const Color darkPrimary = Color(0xFF87A8FF);
-  static const Color darkPrimaryContainer = Color(0xFF25355F);
-  static const Color darkSecondaryContainer = Color(0xFF22365A);
-  static const Color darkTertiaryContainer = Color(0xFF5E451E);
+  static const Color darkBackground = Color(0xFF07111C);
+  static const Color darkSurface = Color(0xFF0D1828);
+  static const Color darkSurfaceAlt = Color(0xFF111D30);
+  static const Color darkSurfaceMuted = Color(0xFF16243A);
+  static const Color darkPrimary = Color(0xFF7EA1FF);
+  static const Color darkPrimaryContainer = Color(0xFF1D3152);
+  static const Color darkSecondaryContainer = Color(0xFF152846);
+  static const Color darkTertiaryContainer = Color(0xFF4C391A);
 
-  static const Color darkTextPrimary = Color(0xFFF4F7FE);
-  static const Color darkTextSecondary = Color(0xFFB5BFD4);
+  static const Color darkTextPrimary = Color(0xFFF5F8FF);
+  static const Color darkTextSecondary = Color(0xFFA7B4CC);
 
-  static const Color darkBorder = Color(0xFF2B3953);
-  static const Color darkOutlineVariant = Color(0xFF223149);
-  static const Color darkShadow = Color(0xFF000000);
+  static const Color darkBorder = Color(0xFF253753);
+  static const Color darkOutlineVariant = Color(0xFF1C2C44);
+  static const Color darkShadow = Color(0xFF01050B);
 
   // ------------------------------------------------------------
   // BUSINESS MODE (analytics-focused palette)
@@ -93,16 +93,16 @@ class AppColors {
   // WHY: Business mode should feel like an operations cockpit.
   static const Color businessPrimary = Color(0xFF6F90FF);
   static const Color businessAccent = Color(0xFFE0A64D);
-  static const Color businessBackground = Color(0xFF09111B);
-  static const Color businessSurface = Color(0xFF101A2A);
-  static const Color businessSurfaceAlt = Color(0xFF131F30);
-  static const Color businessCard = Color(0xFF17263A);
-  static const Color businessPrimaryContainer = Color(0xFF1D3151);
-  static const Color businessSecondaryContainer = Color(0xFF5A4020);
-  static const Color businessTertiaryContainer = Color(0xFF1E3D69);
+  static const Color businessBackground = Color(0xFF08111C);
+  static const Color businessSurface = Color(0xFF0D1828);
+  static const Color businessSurfaceAlt = Color(0xFF111F31);
+  static const Color businessCard = Color(0xFF15243A);
+  static const Color businessPrimaryContainer = Color(0xFF1E3153);
+  static const Color businessSecondaryContainer = Color(0xFF54401E);
+  static const Color businessTertiaryContainer = Color(0xFF183154);
   static const Color businessTextPrimary = Color(0xFFF4F7FD);
-  static const Color businessTextSecondary = Color(0xFFB4BED4);
-  static const Color businessBorder = Color(0xFF2B3D59);
-  static const Color businessOutlineVariant = Color(0xFF223149);
-  static const Color businessShadow = Color(0xFF020505);
+  static const Color businessTextSecondary = Color(0xFFABB8CF);
+  static const Color businessBorder = Color(0xFF263956);
+  static const Color businessOutlineVariant = Color(0xFF1D2D45);
+  static const Color businessShadow = Color(0xFF01050B);
 }
