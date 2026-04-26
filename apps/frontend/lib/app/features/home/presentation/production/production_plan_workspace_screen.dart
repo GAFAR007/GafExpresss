@@ -129,6 +129,14 @@ const String _actualLabel = "Actual";
 const String _workingOnLabel = "Working on";
 const String _doneTodayLabel = "Done today";
 const String _leftTodayLabel = "Left today";
+const String _todayProgressTitle = "Today’s progress";
+const String _plannedTodayLabel = "Planned";
+const String _doneCompactLabel = "Done";
+const String _leftCompactLabel = "Left";
+const String _taskInfoLabel = "Task info";
+const String _taskInfoSubtitle = "Notes, actions, activity";
+const String _collapseTaskTooltip = "Collapse task";
+const String _expandTaskTooltip = "Expand task";
 const String _approvalLabel = "Approval";
 const String _noActivityLabel = "No progress logs yet for this day.";
 const String _estimatedDatesLabel = "Estimated";
@@ -330,7 +338,7 @@ const double _sectionSpacing = 18;
 const double _cardSpacing = 12;
 const double _calendarSpacing = 8;
 const double _dayTileRadius = 14;
-const double _agendaCardPadding = 14;
+const double _agendaCardPadding = 12;
 const int _workspaceAssetQueryPage = 1;
 const int _workspaceAssetQueryLimit = 200;
 const Color _workspaceBlue = Color(0xFF2856C3);
@@ -468,6 +476,10 @@ class _ProductionPlanWorkspaceScreenState
   Timer? _liveRefreshTimer;
   bool _detailRefreshInFlight = false;
   bool _selectedDaySummaryExpanded = false;
+  final Set<String> _collapsedTaskIds = <String>{};
+  final Set<String> _collapsedTaskProgressIds = <String>{};
+  final Set<String> _collapsedTaskAssignmentIds = <String>{};
+  final Set<String> _expandedTaskInfoIds = <String>{};
 
   @override
   void initState() {
@@ -487,6 +499,18 @@ class _ProductionPlanWorkspaceScreenState
   void dispose() {
     _liveRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  void _toggleTaskDisclosure(Set<String> taskIds, String taskId) {
+    final normalizedTaskId = taskId.trim();
+    if (normalizedTaskId.isEmpty) {
+      return;
+    }
+    setState(() {
+      if (!taskIds.add(normalizedTaskId)) {
+        taskIds.remove(normalizedTaskId);
+      }
+    });
   }
 
   void _startLiveRefreshTimer() {
@@ -1807,9 +1831,11 @@ class _ProductionPlanWorkspaceScreenState
                         }
                       }
 
+                      final taskDisclosureId = task.id.trim();
                       return Padding(
                         padding: const EdgeInsets.only(bottom: _cardSpacing),
                         child: _AgendaTaskCard(
+                          key: ValueKey("agenda-task-$taskDisclosureId"),
                           task: task,
                           phaseName:
                               phaseById[task.phaseId]?.name ?? task.phaseId,
@@ -1833,6 +1859,34 @@ class _ProductionPlanWorkspaceScreenState
                             staffRole: selfStaffRole,
                           ),
                           progressEnabledStaffIds: progressEnabledStaffIds,
+                          taskExpanded: !_collapsedTaskIds.contains(
+                            taskDisclosureId,
+                          ),
+                          progressExpanded: !_collapsedTaskProgressIds.contains(
+                            taskDisclosureId,
+                          ),
+                          assignmentExpanded: !_collapsedTaskAssignmentIds
+                              .contains(taskDisclosureId),
+                          infoExpanded: _expandedTaskInfoIds.contains(
+                            taskDisclosureId,
+                          ),
+                          onToggleTaskExpanded: () => _toggleTaskDisclosure(
+                            _collapsedTaskIds,
+                            taskDisclosureId,
+                          ),
+                          onToggleProgressExpanded: () => _toggleTaskDisclosure(
+                            _collapsedTaskProgressIds,
+                            taskDisclosureId,
+                          ),
+                          onToggleAssignmentExpanded: () =>
+                              _toggleTaskDisclosure(
+                                _collapsedTaskAssignmentIds,
+                                taskDisclosureId,
+                              ),
+                          onToggleInfoExpanded: () => _toggleTaskDisclosure(
+                            _expandedTaskInfoIds,
+                            taskDisclosureId,
+                          ),
                           onManageStaff: canManageCalendar
                               ? () async {
                                   final selectedIds =
@@ -4353,6 +4407,14 @@ class _AgendaTaskCard extends StatelessWidget {
   final bool canReviewProgress;
   final bool isOwner;
   final Set<String> progressEnabledStaffIds;
+  final bool taskExpanded;
+  final bool progressExpanded;
+  final bool assignmentExpanded;
+  final bool infoExpanded;
+  final VoidCallback onToggleTaskExpanded;
+  final VoidCallback onToggleProgressExpanded;
+  final VoidCallback onToggleAssignmentExpanded;
+  final VoidCallback onToggleInfoExpanded;
   final Future<void> Function()? onManageStaff;
   final Future<void> Function()? onDeleteTask;
   final Future<void> Function(
@@ -4382,6 +4444,7 @@ class _AgendaTaskCard extends StatelessWidget {
   final Future<void> Function(String progressId)? onRejectProgress;
 
   const _AgendaTaskCard({
+    super.key,
     required this.task,
     required this.phaseName,
     required this.staffMap,
@@ -4400,6 +4463,14 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.canReviewProgress,
     required this.isOwner,
     required this.progressEnabledStaffIds,
+    required this.taskExpanded,
+    required this.progressExpanded,
+    required this.assignmentExpanded,
+    required this.infoExpanded,
+    required this.onToggleTaskExpanded,
+    required this.onToggleProgressExpanded,
+    required this.onToggleAssignmentExpanded,
+    required this.onToggleInfoExpanded,
     required this.onManageStaff,
     required this.onDeleteTask,
     required this.onSetAttendanceForStaff,
@@ -4420,6 +4491,7 @@ class _AgendaTaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isCompactPhone = MediaQuery.sizeOf(context).width <= 430;
     final assignedStaffIds = _resolveAssignedStaffIds(task);
     final assignedUnitIds = task.assignedUnitIds
         .map((value) => value.trim())
@@ -4454,37 +4526,11 @@ class _AgendaTaskCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(_agendaCardPadding),
       decoration: BoxDecoration(
-        color: _workspaceToneSurface(
-          colorScheme: colorScheme,
-          accentColor: _workspaceBlue,
-          lightColor: Color.alphaBlend(
-            _workspaceSoftSlate.withValues(alpha: 0.48),
-            colorScheme.surface,
-          ),
-          lightTintAlpha: 0.04,
-          darkTintAlpha: 0.1,
-          baseColor: _workspaceIsDark(colorScheme)
-              ? colorScheme.surfaceContainerLow
-              : colorScheme.surface,
-        ),
+        color: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: _workspaceToneBorder(
-            colorScheme: colorScheme,
-            accentColor: _workspaceBlue,
-            lightAlpha: 0.14,
-            darkAlpha: 0.3,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: _workspaceNavy.withValues(
-              alpha: _workspaceIsDark(colorScheme) ? 0.16 : 0.06,
-            ),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4498,10 +4544,18 @@ class _AgendaTaskCard extends StatelessWidget {
                   children: [
                     Text(
                       task.title,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: _workspacePrimaryContentColor(colorScheme),
-                        fontWeight: FontWeight.w800,
-                      ),
+                      maxLines: isCompactPhone ? 2 : 3,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          (isCompactPhone
+                                  ? theme.textTheme.titleMedium
+                                  : theme.textTheme.titleLarge)
+                              ?.copyWith(
+                                color: _workspacePrimaryContentColor(
+                                  colorScheme,
+                                ),
+                                fontWeight: FontWeight.w800,
+                              ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -4514,14 +4568,45 @@ class _AgendaTaskCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              ProductionStatusPill(label: task.status),
+              const SizedBox(width: 8),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.end,
+                children: [
+                  ProductionStatusPill(label: task.status),
+                  IconButton(
+                    tooltip: taskExpanded
+                        ? _collapseTaskTooltip
+                        : _expandTaskTooltip,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                    padding: EdgeInsets.zero,
+                    style: IconButton.styleFrom(
+                      foregroundColor: colorScheme.onSurfaceVariant,
+                      backgroundColor: colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.42),
+                      side: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                    onPressed: onToggleTaskExpanded,
+                    icon: Icon(
+                      taskExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 21,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               _InfoChip(
                 label: "$_scheduleLabel: $estimatedWindow",
@@ -4562,470 +4647,560 @@ class _AgendaTaskCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final stacked = constraints.maxWidth < 680;
-              final workingOnCard = _TaskSnapshotCard(
-                label: _workingOnLabel,
-                value: taskProgressSummary.workingOnLabel,
-                helper: "Planned task scope for today",
-                accentColor: _workspaceAmber,
-                softColor: _workspaceSoftAmber,
-                icon: Icons.event_note_outlined,
-              );
-              final doneTodayCard = _TaskSnapshotCard(
-                label: _doneTodayLabel,
-                value: taskProgressSummary.doneTodayLabel,
-                helper: "Captured from today’s logs",
-                accentColor: _workspaceTeal,
-                softColor: _workspaceSoftTeal,
-                icon: Icons.insights_outlined,
-              );
-              final leftTodayCard = _TaskSnapshotCard(
-                label: _leftTodayLabel,
-                value: taskProgressSummary.leftTodayLabel,
-                helper: "Still open on this task today",
-                accentColor: _workspaceBlue,
-                softColor: _workspaceSoftBlue,
-                icon: Icons.track_changes_outlined,
-              );
-              if (stacked) {
-                return Column(
-                  children: [
-                    workingOnCard,
-                    const SizedBox(height: 10),
-                    doneTodayCard,
-                    const SizedBox(height: 10),
-                    leftTodayCard,
-                  ],
-                );
-              }
-              return Row(
-                children: [
-                  Expanded(child: workingOnCard),
-                  const SizedBox(width: 10),
-                  Expanded(child: doneTodayCard),
-                  const SizedBox(width: 10),
-                  Expanded(child: leftTodayCard),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Icon(Icons.badge_outlined, size: 18, color: _workspaceBlue),
-              const SizedBox(width: 8),
-              Text(
-                _assignedLabel,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: _workspaceToneForeground(
-                    colorScheme: colorScheme,
-                    accentColor: _workspaceBlue,
-                    darkMix: 0.58,
-                  ),
-                  fontWeight: FontWeight.w800,
-                ),
+          if (taskExpanded) ...[
+            const SizedBox(height: 10),
+            _WorkspaceDisclosureHeader(
+              title: _todayProgressTitle,
+              subtitle:
+                  "${taskProgressSummary.doneTodayLabel} done, ${taskProgressSummary.leftTodayLabel} left",
+              icon: Icons.timeline_outlined,
+              accentColor: _workspaceBlue,
+              expanded: progressExpanded,
+              onToggle: onToggleProgressExpanded,
+            ),
+            if (progressExpanded) ...[
+              const SizedBox(height: 8),
+              _TaskProgressSummaryCard(
+                summary: taskProgressSummary,
+                compact: isCompactPhone,
+                showTitle: false,
               ),
             ],
-          ),
-          const SizedBox(height: 6),
-          if (assignedStaffIds.isEmpty)
-            Text(
-              _unassignedLabel,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            )
-          else
-            Column(
-              children: assignedStaffIds.map((staffId) {
-                final taskAttendance = _attendanceForStaffOnDay(
-                  attendanceRecords: attendanceRecords,
-                  staffProfileId: staffId,
-                  day: selectedDay,
-                  taskId: task.id,
-                );
-                final displayAttendance =
-                    resolveProductionWorkspaceDisplayAttendance(
-                      attendanceRecords: attendanceRecords,
-                      staffProfileId: staffId,
-                      day: selectedDay,
-                      taskId: task.id,
-                    );
-                final activeClockOutAttendance =
-                    resolveProductionWorkspaceActiveClockOutAttendance(
-                      attendanceRecords: attendanceRecords,
-                      staffProfileId: staffId,
-                      day: selectedDay,
-                      taskId: task.id,
-                    );
-                final staffProgressRows = rowsForDay.where((row) {
-                  return row.taskId.trim() == task.id.trim() &&
-                      row.staffId.trim() == staffId.trim() &&
-                      _toWorkDateKey(row.workDate) ==
-                          _toWorkDateKey(selectedDay);
-                }).toList();
-                final staffProgress = _findStaffTaskProgressRow(
-                  timelineRows: rowsForDay,
-                  taskId: task.id,
-                  workDate: selectedDay,
-                  staffId: staffId,
-                );
-                final clockInAt = displayAttendance?.clockInAt?.toLocal();
-                final clockOutAt = displayAttendance?.clockOutAt?.toLocal();
-                final attendanceBelongsToCurrentTask =
-                    displayAttendance != null &&
-                    taskAttendance != null &&
-                    displayAttendance.id.trim() == taskAttendance.id.trim();
-                final attendanceMatchesSelectedDay =
-                    displayAttendance != null &&
-                    _attendanceMatchesWorkDay(
-                      displayAttendance,
-                      _toWorkDateKey(selectedDay),
-                    );
-                final totalStaffUnitContribution = staffProgressRows.fold<num>(
-                  0,
-                  (sum, row) => sum + row.unitContribution,
-                );
-                final hasDisplayClockIn = displayAttendance?.clockInAt != null;
-                final hasDisplayClockOut =
-                    displayAttendance?.clockOutAt != null;
-                final hasLoggedProgress = staffProgressRows.isNotEmpty;
-                final visibleProofs = _resolveWorkspaceVisibleProofs(
-                  progress: staffProgress,
-                  attendance:
-                      taskAttendance ??
-                      (attendanceBelongsToCurrentTask
-                          ? displayAttendance
-                          : null),
-                );
-                final canResetHistory =
-                    taskAttendance != null || hasLoggedProgress;
-                final canUseClockOutWizard =
-                    progressEnabledStaffIds.contains(staffId) &&
-                    activeClockOutAttendance != null &&
-                    activeClockOutAttendance.clockInAt != null &&
-                    activeClockOutAttendance.clockOutAt == null;
-                final canManageProgressFlow =
-                    progressEnabledStaffIds.contains(staffId) &&
-                    (canUseClockOutWizard ||
-                        hasDisplayClockOut ||
-                        hasLoggedProgress);
-                final quickClockOutAttendance =
-                    !canUseClockOutWizard &&
-                        taskAttendance != null &&
-                        taskAttendance.clockInAt != null &&
-                        taskAttendance.clockOutAt == null
-                    ? taskAttendance
-                    : (!canUseClockOutWizard &&
-                              !attendanceBelongsToCurrentTask &&
-                              displayAttendance != null &&
-                              displayAttendance.clockInAt != null &&
-                              displayAttendance.clockOutAt == null
-                          ? displayAttendance
-                          : null);
-                final attendanceHint = hasDisplayClockIn && !hasDisplayClockOut
-                    ? canUseClockOutWizard
-                          ? "Clock Out opens the production log. Enter completed units first, then upload proof before save closes the session."
-                          : attendanceBelongsToCurrentTask
-                          ? "Clock Out opens the daily production log and closes this task session after save."
-                          : _attendanceOpenElsewhereHint
-                    : hasDisplayClockIn && hasDisplayClockOut
-                    ? _attendanceReadyForProgressHint
-                    : _attendanceNotStartedHint;
-                final canClockOwnTaskAttendance =
-                    currentActorStaffId.trim().isNotEmpty &&
-                    currentActorStaffId.trim() == staffId.trim();
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Builder(
-                    builder: (context) {
-                      final staffIdentity = _resolveStaffIdentity(
-                        staffId,
-                        staffMap,
-                        fallbackRole: task.roleRequired,
-                      );
-                      return _AssignedStaffAttendanceRow(
-                        staffName: staffIdentity.displayName,
-                        staffRoleLabel: staffIdentity.roleLabel,
-                        estimatedWindow: estimatedWindow,
-                        clockInValue: _formatAttendanceTimeValue(
-                          clockInAt,
-                          emptyLabel: _attendanceClockInUnsetLabel,
-                          referenceDay: attendanceMatchesSelectedDay
-                              ? null
-                              : selectedDay,
-                        ),
-                        clockOutValue: clockOutAt != null
-                            ? _clockLabel(clockOutAt)
-                            : (clockInAt != null
-                                  ? _attendanceClockOutPendingLabel
-                                  : _attendanceClockOutUnsetLabel),
-                        hasClockIn: hasDisplayClockIn,
-                        hasClockOut: hasDisplayClockOut,
-                        attendanceBelongsToCurrentTask:
-                            attendanceBelongsToCurrentTask,
-                        canManageAttendance: canManageTaskAttendance,
-                        canClockSelfAttendance:
-                            !canManageTaskAttendance &&
-                            currentActorStaffId.trim().isNotEmpty &&
-                            currentActorStaffId.trim() == staffId.trim(),
-                        canLogProgress: canManageProgressFlow,
-                        attendanceLockedForProgress:
-                            progressEnabledStaffIds.contains(staffId) &&
-                            !canManageProgressFlow,
-                        hasLoggedProgress: hasLoggedProgress,
-                        attendanceHint: attendanceHint,
-                        personalUnitContribution: totalStaffUnitContribution,
-                        personalActivityType:
-                            staffProgress?.activityType ??
-                            staffProgress?.quantityActivityType ??
-                            _quantityActivityNone,
-                        personalActivityQuantity:
-                            staffProgress?.activityQuantity ??
-                            staffProgress?.quantityAmount ??
-                            0,
-                        personalQuantityUnit: staffProgress?.quantityUnit ?? "",
-                        visibleProofs: visibleProofs,
-                        proofStatusLabel: staffProgress == null
-                            ? _resolveAttendanceProofStatusLabel(taskAttendance)
-                            : "${staffProgress.proofCountUploaded} / ${staffProgress.proofCountRequired} proofs",
-                        personalNotes: staffProgress?.notes ?? "",
-                        delayReason:
-                            staffProgress?.delayReason ?? _delayReasonNone,
-                        progressUnitLabel:
-                            taskProgressSummary.singularUnitLabel,
-                        onQuickClockIn:
-                            onQuickClockInForStaff != null &&
-                                (canManageTaskAttendance ||
-                                    canClockOwnTaskAttendance) &&
-                                !hasDisplayClockIn &&
-                                !hasDisplayClockOut
-                            ? () => onQuickClockInForStaff!(
-                                staffId,
-                                taskAttendance,
-                              )
-                            : null,
-                        onQuickClockOut:
-                            onLogProgressForStaff != null &&
-                                canUseClockOutWizard
-                            ? () => onLogProgressForStaff!(staffId)
-                            : onQuickClockOutForStaff != null &&
-                                  (canManageTaskAttendance ||
-                                      canClockOwnTaskAttendance) &&
-                                  quickClockOutAttendance != null
-                            ? () => onQuickClockOutForStaff!(
-                                staffId,
-                                quickClockOutAttendance,
-                              )
-                            : null,
-                        onSetAttendance:
-                            onSetAttendanceForStaff == null ||
-                                (!attendanceBelongsToCurrentTask &&
-                                    displayAttendance != null)
-                            ? null
-                            : () => onSetAttendanceForStaff!(
-                                staffId,
-                                taskAttendance,
-                              ),
-                        onLogProgress:
-                            onLogProgressForStaff == null ||
-                                !canManageProgressFlow
-                            ? null
-                            : () => onLogProgressForStaff!(staffId),
-                        onAddProgressCount:
-                            onAddProgressCountForStaff == null ||
-                                !canManageProgressFlow ||
-                                !hasLoggedProgress
-                            ? null
-                            : () => onAddProgressCountForStaff!(staffId),
-                        onResetHistory:
-                            onResetHistoryForStaff == null || !canResetHistory
-                            ? null
-                            : () => onResetHistoryForStaff!(staffId),
-                        onOpenProof: visibleProofs.isEmpty
-                            ? null
-                            : (proof, index) =>
-                                  showProductionTaskProgressSavedProofPreview(
-                                    context,
-                                    title: proof.filename.trim().isNotEmpty
-                                        ? proof.filename.trim()
-                                        : "Proof ${index + 1}",
-                                    proof: proof,
-                                  ),
-                      );
-                    },
-                  ),
-                );
-              }).toList(),
+            const SizedBox(height: 10),
+            _WorkspaceDisclosureHeader(
+              title: _assignedLabel,
+              subtitle: assignedStaffIds.isEmpty
+                  ? _unassignedLabel
+                  : "${assignedStaffIds.length} staff",
+              icon: Icons.badge_outlined,
+              accentColor: _workspaceBlue,
+              expanded: assignmentExpanded,
+              onToggle: onToggleAssignmentExpanded,
             ),
-          if (task.instructions.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Icon(Icons.notes_outlined, size: 18, color: _workspaceBerry),
-                const SizedBox(width: 8),
+            if (assignmentExpanded) ...[
+              const SizedBox(height: 6),
+              if (assignedStaffIds.isEmpty)
                 Text(
-                  _instructionsLabel,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: _workspaceToneForeground(
-                      colorScheme: colorScheme,
-                      accentColor: _workspaceBerry,
-                      darkMix: 0.58,
+                  _unassignedLabel,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                Column(
+                  children: assignedStaffIds.map((staffId) {
+                    final taskAttendance = _attendanceForStaffOnDay(
+                      attendanceRecords: attendanceRecords,
+                      staffProfileId: staffId,
+                      day: selectedDay,
+                      taskId: task.id,
+                    );
+                    final displayAttendance =
+                        resolveProductionWorkspaceDisplayAttendance(
+                          attendanceRecords: attendanceRecords,
+                          staffProfileId: staffId,
+                          day: selectedDay,
+                          taskId: task.id,
+                        );
+                    final activeClockOutAttendance =
+                        resolveProductionWorkspaceActiveClockOutAttendance(
+                          attendanceRecords: attendanceRecords,
+                          staffProfileId: staffId,
+                          day: selectedDay,
+                          taskId: task.id,
+                        );
+                    final staffProgressRows = rowsForDay.where((row) {
+                      return row.taskId.trim() == task.id.trim() &&
+                          row.staffId.trim() == staffId.trim() &&
+                          _toWorkDateKey(row.workDate) ==
+                              _toWorkDateKey(selectedDay);
+                    }).toList();
+                    final staffProgress = _findStaffTaskProgressRow(
+                      timelineRows: rowsForDay,
+                      taskId: task.id,
+                      workDate: selectedDay,
+                      staffId: staffId,
+                    );
+                    final clockInAt = displayAttendance?.clockInAt?.toLocal();
+                    final clockOutAt = displayAttendance?.clockOutAt?.toLocal();
+                    final attendanceBelongsToCurrentTask =
+                        displayAttendance != null &&
+                        taskAttendance != null &&
+                        displayAttendance.id.trim() == taskAttendance.id.trim();
+                    final attendanceMatchesSelectedDay =
+                        displayAttendance != null &&
+                        _attendanceMatchesWorkDay(
+                          displayAttendance,
+                          _toWorkDateKey(selectedDay),
+                        );
+                    final totalStaffUnitContribution = staffProgressRows
+                        .fold<num>(0, (sum, row) => sum + row.unitContribution);
+                    final hasDisplayClockIn =
+                        displayAttendance?.clockInAt != null;
+                    final hasDisplayClockOut =
+                        displayAttendance?.clockOutAt != null;
+                    final hasLoggedProgress = staffProgressRows.isNotEmpty;
+                    final visibleProofs = _resolveWorkspaceVisibleProofs(
+                      progress: staffProgress,
+                      attendance:
+                          taskAttendance ??
+                          (attendanceBelongsToCurrentTask
+                              ? displayAttendance
+                              : null),
+                    );
+                    final canResetHistory =
+                        taskAttendance != null || hasLoggedProgress;
+                    final canUseClockOutWizard =
+                        progressEnabledStaffIds.contains(staffId) &&
+                        activeClockOutAttendance != null &&
+                        activeClockOutAttendance.clockInAt != null &&
+                        activeClockOutAttendance.clockOutAt == null;
+                    final canManageProgressFlow =
+                        progressEnabledStaffIds.contains(staffId) &&
+                        (canUseClockOutWizard ||
+                            hasDisplayClockOut ||
+                            hasLoggedProgress);
+                    final quickClockOutAttendance =
+                        !canUseClockOutWizard &&
+                            taskAttendance != null &&
+                            taskAttendance.clockInAt != null &&
+                            taskAttendance.clockOutAt == null
+                        ? taskAttendance
+                        : (!canUseClockOutWizard &&
+                                  !attendanceBelongsToCurrentTask &&
+                                  displayAttendance != null &&
+                                  displayAttendance.clockInAt != null &&
+                                  displayAttendance.clockOutAt == null
+                              ? displayAttendance
+                              : null);
+                    final attendanceHint =
+                        hasDisplayClockIn && !hasDisplayClockOut
+                        ? canUseClockOutWizard
+                              ? "Clock Out opens the production log. Enter completed units first, then upload proof before save closes the session."
+                              : attendanceBelongsToCurrentTask
+                              ? "Clock Out opens the daily production log and closes this task session after save."
+                              : _attendanceOpenElsewhereHint
+                        : hasDisplayClockIn && hasDisplayClockOut
+                        ? _attendanceReadyForProgressHint
+                        : _attendanceNotStartedHint;
+                    final canClockOwnTaskAttendance =
+                        currentActorStaffId.trim().isNotEmpty &&
+                        currentActorStaffId.trim() == staffId.trim();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Builder(
+                        builder: (context) {
+                          final staffIdentity = _resolveStaffIdentity(
+                            staffId,
+                            staffMap,
+                            fallbackRole: task.roleRequired,
+                          );
+                          return _AssignedStaffAttendanceRow(
+                            staffName: staffIdentity.displayName,
+                            staffRoleLabel: staffIdentity.roleLabel,
+                            estimatedWindow: estimatedWindow,
+                            clockInValue: _formatAttendanceTimeValue(
+                              clockInAt,
+                              emptyLabel: _attendanceClockInUnsetLabel,
+                              referenceDay: attendanceMatchesSelectedDay
+                                  ? null
+                                  : selectedDay,
+                            ),
+                            clockOutValue: clockOutAt != null
+                                ? _clockLabel(clockOutAt)
+                                : (clockInAt != null
+                                      ? _attendanceClockOutPendingLabel
+                                      : _attendanceClockOutUnsetLabel),
+                            hasClockIn: hasDisplayClockIn,
+                            hasClockOut: hasDisplayClockOut,
+                            attendanceBelongsToCurrentTask:
+                                attendanceBelongsToCurrentTask,
+                            canManageAttendance: canManageTaskAttendance,
+                            canClockSelfAttendance:
+                                !canManageTaskAttendance &&
+                                currentActorStaffId.trim().isNotEmpty &&
+                                currentActorStaffId.trim() == staffId.trim(),
+                            canLogProgress: canManageProgressFlow,
+                            attendanceLockedForProgress:
+                                progressEnabledStaffIds.contains(staffId) &&
+                                !canManageProgressFlow,
+                            hasLoggedProgress: hasLoggedProgress,
+                            attendanceHint: attendanceHint,
+                            personalUnitContribution:
+                                totalStaffUnitContribution,
+                            personalActivityType:
+                                staffProgress?.activityType ??
+                                staffProgress?.quantityActivityType ??
+                                _quantityActivityNone,
+                            personalActivityQuantity:
+                                staffProgress?.activityQuantity ??
+                                staffProgress?.quantityAmount ??
+                                0,
+                            personalQuantityUnit:
+                                staffProgress?.quantityUnit ?? "",
+                            visibleProofs: visibleProofs,
+                            proofStatusLabel: staffProgress == null
+                                ? _resolveAttendanceProofStatusLabel(
+                                    taskAttendance,
+                                  )
+                                : "${staffProgress.proofCountUploaded} / ${staffProgress.proofCountRequired} proofs",
+                            personalNotes: staffProgress?.notes ?? "",
+                            delayReason:
+                                staffProgress?.delayReason ?? _delayReasonNone,
+                            progressUnitLabel:
+                                taskProgressSummary.singularUnitLabel,
+                            onQuickClockIn:
+                                onQuickClockInForStaff != null &&
+                                    (canManageTaskAttendance ||
+                                        canClockOwnTaskAttendance) &&
+                                    !hasDisplayClockIn &&
+                                    !hasDisplayClockOut
+                                ? () => onQuickClockInForStaff!(
+                                    staffId,
+                                    taskAttendance,
+                                  )
+                                : null,
+                            onQuickClockOut:
+                                onLogProgressForStaff != null &&
+                                    canUseClockOutWizard
+                                ? () => onLogProgressForStaff!(staffId)
+                                : onQuickClockOutForStaff != null &&
+                                      (canManageTaskAttendance ||
+                                          canClockOwnTaskAttendance) &&
+                                      quickClockOutAttendance != null
+                                ? () => onQuickClockOutForStaff!(
+                                    staffId,
+                                    quickClockOutAttendance,
+                                  )
+                                : null,
+                            onSetAttendance:
+                                onSetAttendanceForStaff == null ||
+                                    (!attendanceBelongsToCurrentTask &&
+                                        displayAttendance != null)
+                                ? null
+                                : () => onSetAttendanceForStaff!(
+                                    staffId,
+                                    taskAttendance,
+                                  ),
+                            onLogProgress:
+                                onLogProgressForStaff == null ||
+                                    !canManageProgressFlow
+                                ? null
+                                : () => onLogProgressForStaff!(staffId),
+                            onAddProgressCount:
+                                onAddProgressCountForStaff == null ||
+                                    !canManageProgressFlow ||
+                                    !hasLoggedProgress
+                                ? null
+                                : () => onAddProgressCountForStaff!(staffId),
+                            onResetHistory:
+                                onResetHistoryForStaff == null ||
+                                    !canResetHistory
+                                ? null
+                                : () => onResetHistoryForStaff!(staffId),
+                            onOpenProof: visibleProofs.isEmpty
+                                ? null
+                                : (proof, index) =>
+                                      showProductionTaskProgressSavedProofPreview(
+                                        context,
+                                        title: proof.filename.trim().isNotEmpty
+                                            ? proof.filename.trim()
+                                            : "Proof ${index + 1}",
+                                        proof: proof,
+                                      ),
+                          );
+                        },
+                      ),
+                    );
+                  }).toList(),
+                ),
+            ],
+            const SizedBox(height: 10),
+            _WorkspaceDisclosureHeader(
+              title: _taskInfoLabel,
+              subtitle: _taskInfoSubtitle,
+              icon: Icons.info_outline_rounded,
+              accentColor: _workspaceBerry,
+              expanded: infoExpanded,
+              onToggle: onToggleInfoExpanded,
+            ),
+            if (infoExpanded) ...[
+              if (task.instructions.trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.notes_outlined,
+                      size: 17,
+                      color: _workspaceBerry,
                     ),
-                    fontWeight: FontWeight.w800,
+                    const SizedBox(width: 8),
+                    Text(
+                      _instructionsLabel,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: _workspaceToneForeground(
+                          colorScheme: colorScheme,
+                          accentColor: _workspaceBerry,
+                          darkMix: 0.58,
+                        ),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHigh
+                        : colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colorScheme.outlineVariant),
+                  ),
+                  child: Text(
+                    task.instructions,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: _workspaceSecondaryContentColor(colorScheme),
+                      height: 1.4,
+                    ),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: _workspaceToneSurface(
-                  colorScheme: colorScheme,
-                  accentColor: _workspaceBerry,
-                  lightTintAlpha: 0.06,
-                  darkTintAlpha: 0.12,
-                  baseColor: _workspaceIsDark(colorScheme)
-                      ? colorScheme.surfaceContainerHigh
-                      : colorScheme.surface,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _workspaceToneBorder(
-                    colorScheme: colorScheme,
-                    accentColor: _workspaceBerry,
-                    lightAlpha: 0.14,
-                    darkAlpha: 0.28,
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (canManageCalendar)
+                    OutlinedButton.icon(
+                      onPressed: onManageStaff,
+                      icon: const Icon(Icons.group_outlined),
+                      label: const Text(_assignStaffLabel),
+                    ),
+                  if (canManageCalendar)
+                    OutlinedButton.icon(
+                      onPressed: onLogProgress,
+                      icon: const Icon(Icons.edit_calendar_outlined),
+                      label: const Text(_logProgressLabel),
+                    ),
+                  if (canManageCalendar)
+                    PopupMenuButton<String>(
+                      onSelected: onStatusSelected,
+                      itemBuilder: (context) => _taskStatusOptions
+                          .map(
+                            (status) => PopupMenuItem<String>(
+                              value: status,
+                              child: Text(formatProductionStatusLabel(status)),
+                            ),
+                          )
+                          .toList(),
+                      child: OutlinedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.flag_outlined),
+                        label: Text(formatProductionStatusLabel(task.status)),
+                      ),
+                    ),
+                  if (onDeleteTask != null)
+                    TextButton.icon(
+                      onPressed: onDeleteTask,
+                      style: TextButton.styleFrom(
+                        foregroundColor: colorScheme.error,
+                      ),
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text(_taskDeleteLabel),
+                    ),
+                  if (isOwner && task.approvalStatus == "pending_approval")
+                    FilledButton.tonal(
+                      style: AppButtonStyles.tonal(
+                        theme: theme,
+                        tone: AppStatusTone.success,
+                      ),
+                      onPressed: onApproveTask,
+                      child: const Text(_taskApproveLabel),
+                    ),
+                  if (isOwner && task.approvalStatus == "pending_approval")
+                    TextButton(
+                      style: AppButtonStyles.text(
+                        theme: theme,
+                        tone: AppStatusTone.danger,
+                      ),
+                      onPressed: onRejectTask,
+                      child: const Text(_taskRejectLabel),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Icon(
+                    Icons.timeline_outlined,
+                    size: 18,
+                    color: _workspaceTeal,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _activityLabel,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: _workspaceNavy,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (rowsForDay.isEmpty)
+                Text(
+                  _noActivityLabel,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                ...rowsForDay.map(
+                  (row) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _TimelineLogRow(
+                      row: row,
+                      expectedTargetAmount: taskProgressSummary.plannedAmount,
+                      singularUnitLabel: taskProgressSummary.singularUnitLabel,
+                      canReviewProgress: canReviewProgress,
+                      onViewProof: row.proofs.isNotEmpty
+                          ? () {
+                              showProductionTaskProgressProofBrowser(
+                                context,
+                                rows: timelineRows,
+                                initialDate: row.workDate,
+                              );
+                            }
+                          : null,
+                      onApprove: onApproveProgress == null
+                          ? null
+                          : () => onApproveProgress!(row.id),
+                      onReject: onRejectProgress == null
+                          ? null
+                          : () => onRejectProgress!(row.id),
+                    ),
                   ),
                 ),
-              ),
-              child: Text(
-                task.instructions,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: _workspaceSecondaryContentColor(colorScheme),
-                  height: 1.4,
-                ),
-              ),
-            ),
+            ],
           ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (canManageCalendar)
-                OutlinedButton.icon(
-                  onPressed: onManageStaff,
-                  icon: const Icon(Icons.group_outlined),
-                  label: const Text(_assignStaffLabel),
-                ),
-              if (canManageCalendar)
-                OutlinedButton.icon(
-                  onPressed: onLogProgress,
-                  icon: const Icon(Icons.edit_calendar_outlined),
-                  label: const Text(_logProgressLabel),
-                ),
-              if (canManageCalendar)
-                PopupMenuButton<String>(
-                  onSelected: onStatusSelected,
-                  itemBuilder: (context) => _taskStatusOptions
-                      .map(
-                        (status) => PopupMenuItem<String>(
-                          value: status,
-                          child: Text(formatProductionStatusLabel(status)),
-                        ),
-                      )
-                      .toList(),
-                  child: OutlinedButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.flag_outlined),
-                    label: Text(formatProductionStatusLabel(task.status)),
-                  ),
-                ),
-              if (onDeleteTask != null)
-                TextButton.icon(
-                  onPressed: onDeleteTask,
-                  style: TextButton.styleFrom(
-                    foregroundColor: colorScheme.error,
-                  ),
-                  icon: const Icon(Icons.delete_outline),
-                  label: const Text(_taskDeleteLabel),
-                ),
-              if (isOwner && task.approvalStatus == "pending_approval")
-                FilledButton.tonal(
-                  style: AppButtonStyles.tonal(
-                    theme: theme,
-                    tone: AppStatusTone.success,
-                  ),
-                  onPressed: onApproveTask,
-                  child: const Text(_taskApproveLabel),
-                ),
-              if (isOwner && task.approvalStatus == "pending_approval")
-                TextButton(
-                  style: AppButtonStyles.text(
-                    theme: theme,
-                    tone: AppStatusTone.danger,
-                  ),
-                  onPressed: onRejectTask,
-                  child: const Text(_taskRejectLabel),
-                ),
-            ],
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceDisclosureHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final IconData icon;
+  final Color accentColor;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  const _WorkspaceDisclosureHeader({
+    required this.title,
+    required this.icon,
+    required this.accentColor,
+    required this.expanded,
+    required this.onToggle,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onToggle,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: accentColor,
+              lightTintAlpha: 0.025,
+              darkTintAlpha: 0.1,
+              baseColor: _workspaceIsDark(colorScheme)
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colorScheme.outlineVariant),
           ),
-          const SizedBox(height: 14),
-          Row(
+          child: Row(
             children: [
-              Icon(Icons.timeline_outlined, size: 18, color: _workspaceTeal),
-              const SizedBox(width: 8),
-              Text(
-                _activityLabel,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: _workspaceNavy,
-                  fontWeight: FontWeight.w800,
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: accentColor,
+                    lightTintAlpha: 0.08,
+                    darkTintAlpha: 0.16,
+                    baseColor: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHighest
+                        : colorScheme.surface,
+                  ),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, size: 16, color: foreground),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: _workspacePrimaryContentColor(colorScheme),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          if (rowsForDay.isEmpty)
-            Text(
-              _noActivityLabel,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              const SizedBox(width: 8),
+              Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 22,
                 color: colorScheme.onSurfaceVariant,
               ),
-            )
-          else
-            ...rowsForDay.map(
-              (row) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _TimelineLogRow(
-                  row: row,
-                  expectedTargetAmount: taskProgressSummary.plannedAmount,
-                  singularUnitLabel: taskProgressSummary.singularUnitLabel,
-                  canReviewProgress: canReviewProgress,
-                  onViewProof: row.proofs.isNotEmpty
-                      ? () {
-                          showProductionTaskProgressProofBrowser(
-                            context,
-                            rows: timelineRows,
-                            initialDate: row.workDate,
-                          );
-                        }
-                      : null,
-                  onApprove: onApproveProgress == null
-                      ? null
-                      : () => onApproveProgress!(row.id),
-                  onReject: onRejectProgress == null
-                      ? null
-                      : () => onRejectProgress!(row.id),
-                ),
-              ),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -5064,31 +5239,26 @@ class _InfoChip extends StatelessWidget {
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
         decoration: BoxDecoration(
-          color: backgroundColor == null
-              ? colorScheme.surfaceContainerHighest
-              : _workspaceToneSurface(
-                  colorScheme: colorScheme,
-                  accentColor: seedColor,
-                  lightColor: backgroundColor,
-                  lightTintAlpha: 0.06,
-                  darkTintAlpha: 0.18,
-                  baseColor: _workspaceIsDark(colorScheme)
-                      ? colorScheme.surfaceContainerHigh
-                      : colorScheme.surface,
-                ),
+          color: _workspaceToneSurface(
+            colorScheme: colorScheme,
+            accentColor: seedColor,
+            lightTintAlpha: backgroundColor == null ? 0.02 : 0.045,
+            darkTintAlpha: 0.12,
+            baseColor: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : colorScheme.surface,
+          ),
           borderRadius: BorderRadius.circular(999),
-          border: borderColor == null
-              ? null
-              : Border.all(
-                  color: _workspaceToneBorder(
-                    colorScheme: colorScheme,
-                    accentColor: seedColor,
-                    lightAlpha: 0.18,
-                    darkAlpha: 0.38,
-                  ),
-                ),
+          border: Border.all(
+            color: _workspaceToneBorder(
+              colorScheme: colorScheme,
+              accentColor: seedColor,
+              lightAlpha: borderColor == null ? 0.1 : 0.14,
+              darkAlpha: 0.32,
+            ),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -5101,15 +5271,207 @@ class _InfoChip extends StatelessWidget {
               child: Text(
                 label,
                 softWrap: true,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: resolvedForeground,
                   fontWeight: FontWeight.w700,
+                  height: 1.15,
                 ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TaskProgressSummaryCard extends StatelessWidget {
+  final _TaskUnitProgressSummary summary;
+  final bool compact;
+  final bool showTitle;
+
+  const _TaskProgressSummaryCard({
+    required this.summary,
+    required this.compact,
+    this.showTitle = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final cells = <_ProgressSummaryCellData>[
+      _ProgressSummaryCellData(
+        label: _plannedTodayLabel,
+        value: summary.workingOnLabel,
+        icon: Icons.event_note_outlined,
+        accentColor: _workspaceAmber,
+      ),
+      _ProgressSummaryCellData(
+        label: _doneCompactLabel,
+        value: summary.doneTodayLabel,
+        icon: Icons.insights_outlined,
+        accentColor: _workspaceTeal,
+      ),
+      _ProgressSummaryCellData(
+        label: _leftCompactLabel,
+        value: summary.leftTodayLabel,
+        icon: Icons.track_changes_outlined,
+        accentColor: _workspaceBlue,
+      ),
+    ];
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      decoration: BoxDecoration(
+        color: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showTitle) ...[
+            Row(
+              children: [
+                Icon(Icons.timeline_outlined, size: 17, color: _workspaceBlue),
+                const SizedBox(width: 7),
+                Text(
+                  _todayProgressTitle,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final singleColumn = constraints.maxWidth < 360;
+              if (singleColumn) {
+                return Column(
+                  children: [
+                    for (final entry in cells.asMap().entries) ...[
+                      _ProgressSummaryCell(data: entry.value, compact: true),
+                      if (entry.key != cells.length - 1)
+                        Divider(height: 12, color: colorScheme.outlineVariant),
+                    ],
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  for (final entry in cells.asMap().entries) ...[
+                    Expanded(
+                      child: _ProgressSummaryCell(
+                        data: entry.value,
+                        compact: compact,
+                      ),
+                    ),
+                    if (entry.key != cells.length - 1)
+                      Container(
+                        width: 1,
+                        height: 44,
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        color: colorScheme.outlineVariant,
+                      ),
+                  ],
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProgressSummaryCellData {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color accentColor;
+
+  const _ProgressSummaryCellData({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.accentColor,
+  });
+}
+
+class _ProgressSummaryCell extends StatelessWidget {
+  final _ProgressSummaryCellData data;
+  final bool compact;
+
+  const _ProgressSummaryCell({required this.data, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: data.accentColor,
+      darkMix: 0.58,
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: compact ? 26 : 30,
+          height: compact ? 26 : 30,
+          decoration: BoxDecoration(
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: data.accentColor,
+              lightTintAlpha: 0.08,
+              darkTintAlpha: 0.16,
+              baseColor: _workspaceIsDark(colorScheme)
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
+            ),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(data.icon, size: compact ? 14 : 16, color: foreground),
+        ),
+        SizedBox(width: compact ? 7 : 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                data.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                data.value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    (compact
+                            ? theme.textTheme.bodyMedium
+                            : theme.textTheme.titleSmall)
+                        ?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w900,
+                          height: 1.18,
+                        ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -5375,39 +5737,61 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
         : hasClockIn || hasClockOut
         ? _workspaceBlue
         : _workspaceNavy;
-    final actualSoft = hasClockIn && hasClockOut
-        ? _workspaceSoftTeal
-        : hasClockIn || hasClockOut
-        ? _workspaceSoftBlue
-        : _workspaceSoftSlate;
+    final compactButtonText = theme.textTheme.labelMedium?.copyWith(
+      fontWeight: FontWeight.w800,
+    );
+    final compactFilledStyle = AppButtonStyles.filled(
+      theme: theme,
+      tone: AppStatusTone.info,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      textStyle: compactButtonText,
+    );
+    final compactTonalStyle = AppButtonStyles.tonal(
+      theme: theme,
+      tone: AppStatusTone.info,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      textStyle: compactButtonText,
+    );
+    final compactOutlinedStyle = AppButtonStyles.outlined(
+      theme: theme,
+      tone: AppStatusTone.info,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      textStyle: compactButtonText,
+    );
     final actionButtons = <Widget>[
       if ((canManageAttendance || canClockSelfAttendance) &&
           !hasClockIn &&
           !hasClockOut &&
           onQuickClockIn != null)
-        FilledButton.tonalIcon(
+        FilledButton.icon(
+          style: compactFilledStyle,
           onPressed: onQuickClockIn,
-          icon: const Icon(Icons.login_outlined, size: 18),
+          icon: const Icon(Icons.login_outlined, size: 17),
           label: const Text(_attendanceDialogClockInLabel),
         ),
       if ((canManageAttendance || canClockSelfAttendance) &&
           hasClockIn &&
           !hasClockOut &&
           onQuickClockOut != null)
-        FilledButton.tonalIcon(
+        FilledButton.icon(
+          style: compactFilledStyle,
           onPressed: onQuickClockOut,
-          icon: const Icon(Icons.logout_outlined, size: 18),
+          icon: const Icon(Icons.logout_outlined, size: 17),
           label: const Text(_attendanceDialogClockOutLabel),
         ),
       if ((canManageAttendance || canClockSelfAttendance) &&
           onSetAttendance != null)
         OutlinedButton.icon(
+          style: compactOutlinedStyle,
           onPressed: onSetAttendance,
           icon: Icon(
             hasClockIn || hasClockOut
                 ? Icons.edit_calendar_outlined
                 : Icons.schedule_outlined,
-            size: 18,
+            size: 17,
           ),
           label: Text(
             hasClockIn || hasClockOut
@@ -5417,12 +5801,13 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
         ),
       if (canLogProgress && (hasClockOut || hasLoggedProgress))
         FilledButton.tonalIcon(
+          style: compactTonalStyle,
           onPressed: onLogProgress,
           icon: Icon(
             hasLoggedProgress
                 ? Icons.edit_note_outlined
                 : Icons.playlist_add_check_circle_outlined,
-            size: 18,
+            size: 17,
           ),
           label: Text(
             hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
@@ -5430,15 +5815,18 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
         ),
       if (canLogProgress && hasLoggedProgress && onAddProgressCount != null)
         OutlinedButton.icon(
+          style: compactOutlinedStyle,
           onPressed: onAddProgressCount,
-          icon: const Icon(Icons.post_add_outlined, size: 18),
+          icon: const Icon(Icons.post_add_outlined, size: 17),
           label: const Text(_newCountLabel),
         ),
       if (onResetHistory != null)
         OutlinedButton.icon(
           onPressed: onResetHistory,
-          style: OutlinedButton.styleFrom(foregroundColor: colorScheme.error),
-          icon: const Icon(Icons.restart_alt_outlined, size: 18),
+          style: compactOutlinedStyle.copyWith(
+            foregroundColor: WidgetStatePropertyAll(colorScheme.error),
+          ),
+          icon: const Icon(Icons.restart_alt_outlined, size: 17),
           label: const Text(_resetHistoryLabel),
         ),
     ];
@@ -5446,48 +5834,29 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _workspaceToneSurface(
-          colorScheme: colorScheme,
-          accentColor: actualAccent,
-          lightColor: Color.alphaBlend(
-            actualSoft.withValues(alpha: 0.4),
-            colorScheme.surface,
-          ),
-          lightTintAlpha: 0.04,
-          darkTintAlpha: 0.1,
-          baseColor: isDark
-              ? colorScheme.surfaceContainerLow
-              : colorScheme.surface,
-        ),
+        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: _workspaceToneBorder(
             colorScheme: colorScheme,
             accentColor: actualAccent,
-            lightAlpha: 0.14,
+            lightAlpha: 0.1,
             darkAlpha: 0.28,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: actualAccent.withValues(alpha: isDark ? 0.14 : 0.07),
-            blurRadius: 14,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final stackActions = constraints.maxWidth < 620;
+              final stackActions = constraints.maxWidth < 560;
               final identityBlock = Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 42,
-                    height: 42,
+                    width: 36,
+                    height: 36,
                     decoration: BoxDecoration(
                       color: _workspaceToneSurface(
                         colorScheme: colorScheme,
@@ -5503,6 +5872,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                     ),
                     child: Icon(
                       Icons.person_outline,
+                      size: 20,
                       color: _workspaceToneForeground(
                         colorScheme: colorScheme,
                         accentColor: _workspaceBlue,
@@ -5542,8 +5912,8 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 ],
               );
               final actionsWrap = Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 7,
+                runSpacing: 7,
                 alignment: stackActions
                     ? WrapAlignment.start
                     : WrapAlignment.end,
@@ -5555,7 +5925,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                   children: [
                     identityBlock,
                     if (actionButtons.isNotEmpty) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       actionsWrap,
                     ],
                   ],
@@ -5578,22 +5948,20 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, constraints) {
-              final stacked = constraints.maxWidth < 820;
+              final stacked = constraints.maxWidth < 560;
               final estimatedCard = _AttendanceTimingCard(
                 label: _estimatedDatesLabel,
                 value: estimatedWindow,
                 accentColor: _workspaceAmber,
-                softColor: _workspaceSoftAmber,
                 icon: Icons.event_outlined,
               );
               final clockInCard = _AttendanceTimingCard(
                 label: _clockedInLabel,
                 value: clockInValue,
                 accentColor: hasClockIn ? _workspaceTeal : _workspaceBlue,
-                softColor: hasClockIn ? _workspaceSoftTeal : _workspaceSoftBlue,
                 icon: Icons.login_outlined,
                 onTap: !hasClockIn && !hasClockOut ? onQuickClockIn : null,
               );
@@ -5603,9 +5971,6 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 accentColor: hasClockOut
                     ? _workspaceBerry
                     : (hasClockIn ? _workspaceBlue : _workspaceNavy),
-                softColor: hasClockOut
-                    ? _workspaceSoftBerry
-                    : (hasClockIn ? _workspaceSoftBlue : _workspaceSoftSlate),
                 icon: hasClockOut
                     ? Icons.logout_outlined
                     : (hasClockIn
@@ -5714,26 +6079,13 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
             const SizedBox(height: 10),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: _workspaceToneSurface(
-                  colorScheme: colorScheme,
-                  accentColor: _workspaceBerry,
-                  lightTintAlpha: 0.06,
-                  darkTintAlpha: 0.12,
-                  baseColor: isDark
-                      ? colorScheme.surfaceContainerHigh
-                      : colorScheme.surface,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _workspaceToneBorder(
-                    colorScheme: colorScheme,
-                    accentColor: _workspaceBerry,
-                    lightAlpha: 0.14,
-                    darkAlpha: 0.26,
-                  ),
-                ),
+                color: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colorScheme.outlineVariant),
               ),
               child: Text(
                 personalNotes,
@@ -5746,82 +6098,79 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
           ],
           if (attendanceLockedForProgress) ...[
             const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: _workspaceToneSurface(
-                  colorScheme: colorScheme,
-                  accentColor: _workspaceAmber,
-                  lightColor: _workspaceSoftAmber,
-                  lightTintAlpha: 0.0,
-                  darkTintAlpha: 0.16,
-                  baseColor: isDark
-                      ? colorScheme.surfaceContainerHigh
-                      : colorScheme.surface,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _workspaceToneBorder(
-                    colorScheme: colorScheme,
-                    accentColor: _workspaceAmber,
-                    lightAlpha: 0.18,
-                    darkAlpha: 0.3,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.lock_outline, size: 18, color: _workspaceAmber),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _taskProgressAttendanceRequired,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: _workspaceAmber,
-                        fontWeight: FontWeight.w800,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            const _WorkspaceCompactMessage(
+              message: _taskProgressAttendanceRequired,
+              icon: Icons.lock_outline,
+              accentColor: _workspaceAmber,
             ),
           ],
           const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: _workspaceToneSurface(
-                colorScheme: colorScheme,
-                accentColor: actualAccent,
-                lightColor: Color.alphaBlend(
-                  actualSoft.withValues(alpha: 0.74),
-                  colorScheme.surface,
-                ),
-                lightTintAlpha: 0.02,
-                darkTintAlpha: 0.12,
-                baseColor: isDark
-                    ? colorScheme.surfaceContainerHigh
-                    : colorScheme.surface,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: _workspaceToneBorder(
-                  colorScheme: colorScheme,
-                  accentColor: actualAccent,
-                  lightAlpha: 0.14,
-                  darkAlpha: 0.26,
-                ),
-              ),
-            ),
+          _WorkspaceCompactMessage(
+            message: attendanceHint,
+            icon: Icons.info_outline,
+            accentColor: actualAccent,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceCompactMessage extends StatelessWidget {
+  final String message;
+  final IconData icon;
+  final Color accentColor;
+
+  const _WorkspaceCompactMessage({
+    required this.message,
+    required this.icon,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightTintAlpha: 0.04,
+          darkTintAlpha: 0.12,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.12,
+            darkAlpha: 0.28,
+          ),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 8),
+          Expanded(
             child: Text(
-              attendanceHint,
+              message,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: actualAccent,
+                color: colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w700,
-                height: 1.35,
+                height: 1.28,
               ),
             ),
           ),
@@ -5955,7 +6304,6 @@ class _AttendanceTimingCard extends StatelessWidget {
   final String label;
   final String value;
   final Color accentColor;
-  final Color softColor;
   final IconData icon;
   final Future<void> Function()? onTap;
 
@@ -5963,7 +6311,6 @@ class _AttendanceTimingCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.accentColor,
-    required this.softColor,
     required this.icon,
     this.onTap,
   });
@@ -5984,28 +6331,18 @@ class _AttendanceTimingCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(15),
         child: Ink(
           width: double.infinity,
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           decoration: BoxDecoration(
-            color: _workspaceToneSurface(
-              colorScheme: colorScheme,
-              accentColor: accentColor,
-              lightColor: Color.alphaBlend(
-                softColor.withValues(alpha: 0.5),
-                colorScheme.surface,
-              ),
-              lightTintAlpha: 0.08,
-              darkTintAlpha: 0.12,
-              baseColor: _workspaceIsDark(colorScheme)
-                  ? colorScheme.surfaceContainerHigh
-                  : colorScheme.surface,
-            ),
-            borderRadius: BorderRadius.circular(15),
+            color: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : colorScheme.surface,
+            borderRadius: BorderRadius.circular(13),
             border: Border.all(
               color: _workspaceToneBorder(
                 colorScheme: colorScheme,
                 accentColor: accentColor,
-                lightAlpha: 0.2,
-                darkAlpha: 0.38,
+                lightAlpha: 0.13,
+                darkAlpha: 0.32,
               ),
             ),
           ),
@@ -6013,15 +6350,23 @@ class _AttendanceTimingCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: accentColor,
-                  borderRadius: BorderRadius.circular(12),
+                  color: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: accentColor,
+                    lightTintAlpha: 0.08,
+                    darkTintAlpha: 0.18,
+                    baseColor: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHighest
+                        : colorScheme.surface,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: Colors.white, size: 18),
+                child: Icon(icon, color: accentForeground, size: 16),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -6030,17 +6375,16 @@ class _AttendanceTimingCard extends StatelessWidget {
                       label,
                       style: theme.textTheme.labelMedium?.copyWith(
                         color: accentForeground,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.2,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       value,
-                      style: theme.textTheme.titleMedium?.copyWith(
+                      style: theme.textTheme.bodyMedium?.copyWith(
                         color: _workspacePrimaryContentColor(colorScheme),
-                        fontWeight: FontWeight.w900,
-                        height: 1.3,
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
                       ),
                     ),
                   ],
