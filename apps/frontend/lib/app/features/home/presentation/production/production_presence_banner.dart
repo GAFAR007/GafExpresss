@@ -66,24 +66,28 @@ class ProductionPresenceBanner extends StatelessWidget {
       alpha: theme.brightness == Brightness.dark ? 0.24 : 0.12,
     );
     final statsButton = canOpenStats
-        ? FilledButton.icon(
+        ? OutlinedButton.icon(
             onPressed: onOpenStats,
-            icon: const Icon(Icons.bar_chart_rounded, size: 18),
+            icon: const Icon(Icons.bar_chart_rounded, size: 17),
             label: const Text("Stats"),
-            style: FilledButton.styleFrom(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
               visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              side: BorderSide(color: theme.colorScheme.outlineVariant),
             ),
           )
         : null;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: statusColor.withValues(alpha: 0.28)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,8 +126,8 @@ class ProductionPresenceBanner extends StatelessWidget {
 
               final statusChip = Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: 10,
+                  vertical: 6,
                 ),
                 decoration: BoxDecoration(
                   color: statusBackground,
@@ -191,54 +195,7 @@ class ProductionPresenceBanner extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 14),
-          if (roomId.isNotEmpty) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface.withValues(
-                  alpha: theme.brightness == Brightness.dark ? 0.14 : 0.48,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: theme.colorScheme.outlineVariant.withValues(
-                    alpha: 0.7,
-                  ),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Debug room",
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Plan ID: $normalizedPlanId",
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    "Room: $roomId",
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-          ],
+          const SizedBox(height: 12),
           StreamBuilder<DateTime>(
             stream: Stream<DateTime>.periodic(
               const Duration(seconds: 30),
@@ -397,21 +354,24 @@ class _ProductionPresenceViewerChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = _resolveProductionPresenceAccentColor(theme, viewer.roleKey);
-    final background = accent.withValues(
-      alpha: theme.brightness == Brightness.dark ? 0.22 : 0.12,
+    final background = Color.alphaBlend(
+      accent.withValues(
+        alpha: theme.brightness == Brightness.dark ? 0.12 : 0.05,
+      ),
+      theme.colorScheme.surface,
     );
     final initials = _presenceViewerInitials(viewer.resolvedDisplayName);
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 320),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: accent.withValues(alpha: isSelf ? 0.72 : 0.42),
-            width: isSelf ? 1.8 : 1,
+            color: accent.withValues(alpha: isSelf ? 0.5 : 0.24),
+            width: isSelf ? 1.4 : 1,
           ),
         ),
         child: Row(
@@ -419,11 +379,11 @@ class _ProductionPresenceViewerChip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Container(
-              width: 32,
-              height: 32,
+              width: 30,
+              height: 30,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: accent.withValues(alpha: 0.2),
+                color: accent.withValues(alpha: 0.12),
               ),
               alignment: Alignment.center,
               child: Text(

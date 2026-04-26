@@ -440,6 +440,10 @@ ButtonStyle _workspaceActionButtonStyle(
         darkAlpha: 0.46,
       ),
     ),
+    visualDensity: VisualDensity.compact,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
   );
 }
 
@@ -2359,39 +2363,14 @@ class _WorkspaceSummaryCard extends StatelessWidget {
     );
     final lastSavedLabel = plan.lastDraftSavedBy?.displayLabel ?? "";
     final isDark = _workspaceIsDark(colorScheme);
+    final isCompactPhone = MediaQuery.sizeOf(context).width <= 430;
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(isCompactPhone ? 16 : 20),
       decoration: BoxDecoration(
-        color: _workspaceToneSurface(
-          colorScheme: colorScheme,
-          accentColor: _workspaceBlue,
-          lightColor: Color.alphaBlend(
-            _workspaceSoftBlue.withValues(alpha: 0.24),
-            colorScheme.surface,
-          ),
-          lightTintAlpha: 0.06,
-          darkTintAlpha: 0.14,
-          baseColor: isDark
-              ? colorScheme.surfaceContainerHigh
-              : colorScheme.surface,
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: _workspaceToneBorder(
-            colorScheme: colorScheme,
-            accentColor: _workspaceBlue,
-            lightAlpha: 0.14,
-            darkAlpha: 0.28,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: _workspaceNavy.withValues(alpha: isDark ? 0.16 : 0.06),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
+        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2409,22 +2388,28 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: isCompactPhone ? 6 : 8),
                   Text(
                     plan.title.trim().isEmpty
                         ? "Untitled production plan"
                         : plan.title.trim(),
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style:
+                        (isCompactPhone
+                                ? theme.textTheme.titleLarge
+                                : theme.textTheme.headlineSmall)
+                            ?.copyWith(fontWeight: FontWeight.w800),
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: isCompactPhone ? 6 : 8),
                   Text(
                     "Run the live schedule here, keep staffing and progress current day by day, and jump back to the draft only when you need to revise the saved baseline.",
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      height: 1.45,
-                    ),
+                    style:
+                        (isCompactPhone
+                                ? theme.textTheme.bodySmall
+                                : theme.textTheme.bodyMedium)
+                            ?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              height: 1.35,
+                            ),
                   ),
                 ],
               );
@@ -2437,8 +2422,13 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                   ProductionStatusPill(label: plan.status),
                   Chip(
                     avatar: const Icon(Icons.history_outlined, size: 16),
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(color: colorScheme.outlineVariant),
                     label: Text(
                       "${plan.draftRevisionCount} saved revision${plan.draftRevisionCount == 1 ? '' : 's'}",
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -2463,10 +2453,10 @@ class _WorkspaceSummaryCard extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: isCompactPhone ? 12 : 16),
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _SummaryPill(
                 icon: Icons.location_on_outlined,
@@ -2497,16 +2487,19 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: isCompactPhone ? 14 : 18),
           LayoutBuilder(
             builder: (context, constraints) {
               final wideTile = constraints.maxWidth >= 980;
+              final twoColumnTile = constraints.maxWidth >= 330;
               final tileWidth = wideTile
                   ? (constraints.maxWidth - 36) / 4
-                  : math.min(constraints.maxWidth, 220.0);
+                  : twoColumnTile
+                  ? (constraints.maxWidth - 10) / 2
+                  : constraints.maxWidth;
               return Wrap(
-                spacing: 12,
-                runSpacing: 12,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
                   SizedBox(
                     width: tileWidth,
@@ -2516,7 +2509,6 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       helper: "Stage groups",
                       icon: Icons.alt_route_outlined,
                       accentColor: _workspaceBlue,
-                      softColor: _workspaceSoftBlue,
                     ),
                   ),
                   SizedBox(
@@ -2527,7 +2519,6 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       helper: "Live workload",
                       icon: Icons.checklist_rtl_outlined,
                       accentColor: _workspaceNavy,
-                      softColor: _workspaceSoftSlate,
                     ),
                   ),
                   SizedBox(
@@ -2540,9 +2531,6 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       accentColor: metrics.unassignedTasks == 0
                           ? _workspaceTeal
                           : _workspaceAmber,
-                      softColor: metrics.unassignedTasks == 0
-                          ? _workspaceSoftTeal
-                          : _workspaceSoftAmber,
                     ),
                   ),
                   SizedBox(
@@ -2553,17 +2541,16 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       helper: workScopeSummary.helperLabel,
                       icon: Icons.grid_view_rounded,
                       accentColor: _workspaceBerry,
-                      softColor: _workspaceSoftBerry,
                     ),
                   ),
                 ],
               );
             },
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: isCompactPhone ? 14 : 18),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: _workspaceToneSurface(
                 colorScheme: colorScheme,
@@ -2574,7 +2561,7 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                     ? colorScheme.surfaceContainerLow
                     : colorScheme.surface,
               ),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: _workspaceToneBorder(
                   colorScheme: colorScheme,
@@ -2593,10 +2580,10 @@ class _WorkspaceSummaryCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 7,
+            runSpacing: 7,
             children: [
               _SummaryPill(
                 icon: Icons.today_outlined,
@@ -2625,14 +2612,14 @@ class _WorkspaceSummaryCard extends StatelessWidget {
               ],
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Text(
             "Keep this screen operational. Open draft to compare or revise the saved plan, and use insights for KPIs, governance, and longer-form reporting.",
             style: theme.textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -2706,7 +2693,6 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
   final String helper;
   final IconData icon;
   final Color accentColor;
-  final Color softColor;
 
   const _WorkspaceHeroMetricTile({
     required this.label,
@@ -2714,7 +2700,6 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
     required this.helper,
     required this.icon,
     required this.accentColor,
-    required this.softColor,
   });
 
   @override
@@ -2724,82 +2709,78 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
     final accentForeground = _workspaceToneForeground(
       colorScheme: colorScheme,
       accentColor: accentColor,
-      darkMix: 0.66,
+      darkMix: 0.58,
     );
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: _workspaceToneSurface(
           colorScheme: colorScheme,
           accentColor: accentColor,
-          lightColor: Color.alphaBlend(
-            softColor.withValues(alpha: 0.52),
-            colorScheme.surface,
-          ),
-          lightTintAlpha: 0.06,
-          darkTintAlpha: 0.12,
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
           baseColor: _workspaceIsDark(colorScheme)
               ? colorScheme.surfaceContainerHigh
               : colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: _workspaceToneBorder(
             colorScheme: colorScheme,
             accentColor: accentColor,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(
-              alpha: _workspaceIsDark(colorScheme) ? 0.12 : 0.10,
-            ),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Row(
         children: [
           Container(
-            width: 56,
-            height: 56,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.22),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: Colors.white),
+            child: Icon(icon, color: accentForeground, size: 20),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
                     color: accentForeground,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   value,
-                  style: theme.textTheme.headlineMedium?.copyWith(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
                     color: _workspacePrimaryContentColor(colorScheme),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   helper,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
@@ -2828,41 +2809,52 @@ class _SummaryPill extends StatelessWidget {
       accentColor: _workspaceBlue,
       darkMix: 0.52,
     );
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: _workspaceToneSurface(
-          colorScheme: colorScheme,
-          accentColor: _workspaceBlue,
-          lightTintAlpha: 0.05,
-          darkTintAlpha: 0.16,
-          baseColor: _workspaceIsDark(colorScheme)
-              ? colorScheme.surfaceContainerLow
-              : colorScheme.surface,
-        ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: _workspaceToneBorder(
+    final maxWidth = math.min(
+      360.0,
+      math.max(132.0, MediaQuery.sizeOf(context).width - 64),
+    );
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: _workspaceToneSurface(
             colorScheme: colorScheme,
             accentColor: _workspaceBlue,
-            lightAlpha: 0.14,
-            darkAlpha: 0.28,
+            lightTintAlpha: 0.025,
+            darkTintAlpha: 0.1,
+            baseColor: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerLow
+                : colorScheme.surface,
           ),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: foregroundColor),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: _workspacePrimaryContentColor(colorScheme),
-              fontWeight: FontWeight.w700,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: _workspaceToneBorder(
+              colorScheme: colorScheme,
+              accentColor: _workspaceBlue,
+              lightAlpha: 0.11,
+              darkAlpha: 0.24,
             ),
           ),
-        ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: foregroundColor),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                softWrap: true,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: _workspacePrimaryContentColor(colorScheme),
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
