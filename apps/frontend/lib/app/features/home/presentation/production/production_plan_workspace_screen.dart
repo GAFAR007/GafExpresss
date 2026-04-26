@@ -2319,7 +2319,7 @@ class _TaskUnitProgressSummary {
   );
 }
 
-class _WorkspaceSummaryCard extends StatelessWidget {
+class _WorkspaceSummaryCard extends StatefulWidget {
   final ProductionPlanDetail detail;
   final ProductionPlan plan;
   final _WorkspaceWorkScopeSummary workScopeSummary;
@@ -2353,9 +2353,38 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   });
 
   @override
+  State<_WorkspaceSummaryCard> createState() => _WorkspaceSummaryCardState();
+}
+
+class _WorkspaceSummaryCardState extends State<_WorkspaceSummaryCard> {
+  bool _planActionsExpanded = false;
+
+  @override
+  void didUpdateWidget(covariant _WorkspaceSummaryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.plan.id != widget.plan.id) {
+      _planActionsExpanded = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final detail = widget.detail;
+    final plan = widget.plan;
+    final workScopeSummary = widget.workScopeSummary;
+    final selectedEstateName = widget.selectedEstateName;
+    final selectedProductName = widget.selectedProductName;
+    final selectedDay = widget.selectedDay;
+    final scheduledTaskCount = widget.scheduledTaskCount;
+    final timelineRows = widget.timelineRows;
+    final onOpenDraft = widget.onOpenDraft;
+    final onViewInsights = widget.onViewInsights;
+    final onDownloadProgress = widget.onDownloadProgress;
+    final onEmailProgress = widget.onEmailProgress;
+    final onCopyProgressLink = widget.onCopyProgressLink;
+    final onReturnToDraft = widget.onReturnToDraft;
     final metrics = _WorkspaceSummaryMetrics.fromDetail(detail);
     final farmQuantitySummary = _summarizeFarmQuantities(
       plan: plan,
@@ -2547,140 +2576,155 @@ class _WorkspaceSummaryCard extends StatelessWidget {
               );
             },
           ),
-          SizedBox(height: isCompactPhone ? 14 : 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: _workspaceToneSurface(
-                colorScheme: colorScheme,
-                accentColor: _workspaceBlue,
-                lightTintAlpha: 0.04,
-                darkTintAlpha: 0.14,
-                baseColor: isDark
-                    ? colorScheme.surfaceContainerLow
-                    : colorScheme.surface,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: _workspaceToneBorder(
+          SizedBox(height: isCompactPhone ? 12 : 14),
+          _WorkspaceDisclosureHeader(
+            title: "Plan actions",
+            subtitle: "Draft, reports, and selected-day details",
+            icon: Icons.tune_outlined,
+            accentColor: _workspaceBlue,
+            expanded: _planActionsExpanded,
+            onToggle: () {
+              setState(() {
+                _planActionsExpanded = !_planActionsExpanded;
+              });
+            },
+          ),
+          if (_planActionsExpanded) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _workspaceToneSurface(
                   colorScheme: colorScheme,
                   accentColor: _workspaceBlue,
-                  lightAlpha: 0.14,
-                  darkAlpha: 0.28,
+                  lightTintAlpha: 0.04,
+                  darkTintAlpha: 0.14,
+                  baseColor: isDark
+                      ? colorScheme.surfaceContainerLow
+                      : colorScheme.surface,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _workspaceToneBorder(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBlue,
+                    lightAlpha: 0.14,
+                    darkAlpha: 0.28,
+                  ),
+                ),
+              ),
+              child: Text(
+                plan.lastDraftSavedAt == null
+                    ? "This production plan does not have a recorded draft save yet."
+                    : "Draft baseline last saved ${formatDateTimeLabel(plan.lastDraftSavedAt)}${lastSavedLabel.trim().isEmpty ? '' : ' by $lastSavedLabel'}.",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
-            child: Text(
-              plan.lastDraftSavedAt == null
-                  ? "This production plan does not have a recorded draft save yet."
-                  : "Draft baseline last saved ${formatDateTimeLabel(plan.lastDraftSavedAt)}${lastSavedLabel.trim().isEmpty ? '' : ' by $lastSavedLabel'}.",
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                _SummaryPill(
+                  icon: Icons.today_outlined,
+                  label: "Selected ${_formatCalendarDate(selectedDay)}",
+                ),
+                _SummaryPill(
+                  icon: Icons.event_note_outlined,
+                  label: "$scheduledTaskCount scheduled tasks",
+                ),
+                if (farmQuantitySummary != null) ...[
+                  _SummaryPill(
+                    icon: Icons.grass_outlined,
+                    label:
+                        "Planted left ${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} ${farmQuantitySummary.plantingUnit}",
+                  ),
+                  _SummaryPill(
+                    icon: Icons.swap_horiz_outlined,
+                    label:
+                        "Transplant left ${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} ${farmQuantitySummary.plantingUnit}",
+                  ),
+                  _SummaryPill(
+                    icon: Icons.agriculture_outlined,
+                    label:
+                        "Harvest left ${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} ${farmQuantitySummary.harvestUnit}",
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Keep this screen operational. Open draft to compare or revise the saved plan, and use insights for KPIs, governance, and longer-form reporting.",
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 7,
-            runSpacing: 7,
-            children: [
-              _SummaryPill(
-                icon: Icons.today_outlined,
-                label: "Selected ${_formatCalendarDate(selectedDay)}",
-              ),
-              _SummaryPill(
-                icon: Icons.event_note_outlined,
-                label: "$scheduledTaskCount scheduled tasks",
-              ),
-              if (farmQuantitySummary != null) ...[
-                _SummaryPill(
-                  icon: Icons.grass_outlined,
-                  label:
-                      "Planted left ${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} ${farmQuantitySummary.plantingUnit}",
-                ),
-                _SummaryPill(
-                  icon: Icons.swap_horiz_outlined,
-                  label:
-                      "Transplant left ${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} ${farmQuantitySummary.plantingUnit}",
-                ),
-                _SummaryPill(
-                  icon: Icons.agriculture_outlined,
-                  label:
-                      "Harvest left ${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} ${farmQuantitySummary.harvestUnit}",
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            "Keep this screen operational. Open draft to compare or revise the saved plan, and use insights for KPIs, governance, and longer-form reporting.",
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                style: _workspaceActionButtonStyle(
-                  context,
-                  accentColor: _workspaceBerry,
-                ),
-                onPressed: onOpenDraft,
-                icon: const Icon(Icons.edit_note_outlined),
-                label: const Text(_openDraftLabel),
-              ),
-              if (onReturnToDraft != null)
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
                 OutlinedButton.icon(
                   style: _workspaceActionButtonStyle(
                     context,
-                    accentColor: _workspaceAmber,
+                    accentColor: _workspaceBerry,
                   ),
-                  onPressed: onReturnToDraft,
-                  icon: const Icon(Icons.edit_calendar_outlined),
-                  label: const Text(_returnToDraftLabel),
+                  onPressed: onOpenDraft,
+                  icon: const Icon(Icons.edit_note_outlined),
+                  label: const Text(_openDraftLabel),
                 ),
-              OutlinedButton.icon(
-                style: _workspaceActionButtonStyle(
-                  context,
-                  accentColor: _workspaceBlue,
+                if (onReturnToDraft != null)
+                  OutlinedButton.icon(
+                    style: _workspaceActionButtonStyle(
+                      context,
+                      accentColor: _workspaceAmber,
+                    ),
+                    onPressed: onReturnToDraft,
+                    icon: const Icon(Icons.edit_calendar_outlined),
+                    label: const Text(_returnToDraftLabel),
+                  ),
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceBlue,
+                  ),
+                  onPressed: onViewInsights,
+                  icon: const Icon(Icons.insights_outlined),
+                  label: const Text(_viewInsightsLabel),
                 ),
-                onPressed: onViewInsights,
-                icon: const Icon(Icons.insights_outlined),
-                label: const Text(_viewInsightsLabel),
-              ),
-              OutlinedButton.icon(
-                style: _workspaceActionButtonStyle(
-                  context,
-                  accentColor: _workspaceTeal,
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceTeal,
+                  ),
+                  onPressed: onDownloadProgress,
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text(_downloadProgressLabel),
                 ),
-                onPressed: onDownloadProgress,
-                icon: const Icon(Icons.download_outlined),
-                label: const Text(_downloadProgressLabel),
-              ),
-              OutlinedButton.icon(
-                style: _workspaceActionButtonStyle(
-                  context,
-                  accentColor: _workspaceNavy,
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceNavy,
+                  ),
+                  onPressed: onEmailProgress,
+                  icon: const Icon(Icons.mail_outline),
+                  label: const Text(_emailProgressLabel),
                 ),
-                onPressed: onEmailProgress,
-                icon: const Icon(Icons.mail_outline),
-                label: const Text(_emailProgressLabel),
-              ),
-              OutlinedButton.icon(
-                style: _workspaceActionButtonStyle(
-                  context,
-                  accentColor: _workspaceBerry,
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceBerry,
+                  ),
+                  onPressed: onCopyProgressLink,
+                  icon: const Icon(Icons.link_outlined),
+                  label: const Text(_copyProgressLinkLabel),
                 ),
-                onPressed: onCopyProgressLink,
-                icon: const Icon(Icons.link_outlined),
-                label: const Text(_copyProgressLinkLabel),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );
