@@ -6,6 +6,8 @@
 /// applies lightweight responsive filter controls before rendering the cards.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +19,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
+import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
 import 'package:frontend/app/theme/app_colors.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
@@ -30,6 +33,8 @@ const String _statusFilterAction = "updateStatusFilter()";
 const String _sortAction = "updateSort()";
 const String _rowTapAction = "openTaskDetail()";
 const String _proofPreviewAction = "openProofPreview()";
+const String _createPhaseDayTaskAction = "createPhaseDayTask()";
+const String _createPhaseDayTaskFailure = "createPhaseDayTask() failed";
 
 const String _screenTitle = "Phase detail";
 const String _notFoundTitle = "Phase not found";
@@ -53,6 +58,27 @@ const String _progressTitle = "Overall progress";
 const String _taskSectionTitle = "Operational tasks";
 const String _taskSectionSubtitle =
     "Track ownership, proof, output, and approval without opening every task one by one.";
+const String _phaseDayTaskCardTitle = "Add another day";
+const String _phaseDayTaskCardSubtitle =
+    "Create a task on a new operational day when this phase needs to run longer.";
+const String _phaseDayTaskButtonLabel = "Add day task";
+const String _phaseDayTaskDialogTitle = "Add task to phase day";
+const String _phaseDayTaskDialogHelp =
+    "Pick the day this phase needs, then create the task staff will work on that day.";
+const String _phaseDayTaskDateLabel = "Task day";
+const String _phaseDayTaskTitleLabel = "Task title";
+const String _phaseDayTaskRoleLabel = "Role";
+const String _phaseDayTaskExpectedLabel = "Expected work amount";
+const String _phaseDayTaskHeadcountLabel = "Required headcount";
+const String _phaseDayTaskStaffLabel = "Assign staff now";
+const String _phaseDayTaskNotesLabel = "Task notes";
+const String _phaseDayTaskSubmitLabel = "Create task";
+const String _phaseDayTaskCancelLabel = "Cancel";
+const String _phaseDayTaskTitleRequired = "Task title is required.";
+const String _phaseDayTaskCreated = "Phase day task created.";
+const String _phaseDayTaskCreateFailed = "Unable to create phase day task.";
+const String _phaseDayTaskNoStaff =
+    "No active staff are available for this role.";
 const String _searchHint = "Search task, assignee, or status";
 const String _searchLabel = "Search";
 const String _dateLabel = "Date";
@@ -295,6 +321,90 @@ class _ProductionPhaseDetailScreenState
     );
   }
 
+  void _showSnackSafe(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _createPhaseDayTask({
+    required ProductionPhase phase,
+    required List<ProductionTask> phaseTasks,
+    required List<BusinessStaffProfileSummary> staffProfiles,
+  }) async {
+    final initialTaskDay = _resolveInitialNewPhaseTaskDay(
+      phase: phase,
+      tasks: phaseTasks,
+      selectedDate: _selectedDateFilter,
+    );
+    final input = await _showCreatePhaseDayTaskDialog(
+      context,
+      phase: phase,
+      initialTaskDay: initialTaskDay,
+      staffProfiles: staffProfiles,
+      initialRoleRequired: _resolveInitialPhaseTaskRole(phaseTasks),
+    );
+    if (!mounted || input == null) {
+      return;
+    }
+
+    AppDebug.log(
+      _logTag,
+      _createPhaseDayTaskAction,
+      extra: {
+        "planId": widget.planId,
+        "phaseId": phase.id,
+        "taskDay": formatDateInput(input.taskDay),
+        "assignedCount": input.assignedStaffProfileIds.length,
+      },
+    );
+
+    try {
+      await ref
+          .read(productionPlanActionsProvider)
+          .createTask(
+            planId: widget.planId,
+            payload: {
+              "phaseId": phase.id,
+              "title": input.title,
+              "roleRequired": input.roleRequired,
+              "requiredHeadcount": input.requiredHeadcount,
+              "weight": input.weight,
+              "assignedStaffProfileIds": input.assignedStaffProfileIds,
+              "instructions": input.instructions,
+              "startDate": input.startDate.toUtc().toIso8601String(),
+              "dueDate": input.dueDate.toUtc().toIso8601String(),
+              "taskType": "event",
+              // WHY: Managers use this only when phase work genuinely extends
+              // beyond the saved production window.
+              "allowWindowExtension": true,
+            },
+          );
+      if (!mounted) {
+        return;
+      }
+      _updateDateFilter(input.taskDay);
+      _showSnackSafe(_phaseDayTaskCreated);
+    } catch (error) {
+      AppDebug.log(
+        _logTag,
+        _createPhaseDayTaskFailure,
+        extra: {
+          "planId": widget.planId,
+          "phaseId": phase.id,
+          "reason": error.toString(),
+          "classification": "UNKNOWN_PROVIDER_ERROR",
+          "nextAction":
+              "Confirm the selected day is not before the phase start and retry.",
+        },
+      );
+      _showSnackSafe(_phaseDayTaskCreateFailed);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     AppDebug.log(
@@ -379,20 +489,6 @@ class _ProductionPhaseDetailScreenState
             final phaseTasks = _sortPhaseTasks(
               detail.tasks.where((task) => task.phaseId == phase.id).toList(),
             );
-            if (phaseTasks.isEmpty) {
-              return ProductionRefreshOverlay(
-                isRefreshing: isRefreshingDetail,
-                child: ListView(
-                  padding: const EdgeInsets.all(_pagePadding),
-                  children: const [
-                    ProductionEmptyState(
-                      title: _noTasksTitle,
-                      message: _noTasksMessage,
-                    ),
-                  ],
-                ),
-              );
-            }
 
             final phaseTaskIds = phaseTasks
                 .map((task) => task.id.trim())
@@ -463,6 +559,21 @@ class _ProductionPhaseDetailScreenState
                             proofRowCount: proofRows.length,
                           ),
                           const SizedBox(height: _sectionSpacing),
+                          _PhaseDayTaskActionCard(
+                            initialTaskDay: _resolveInitialNewPhaseTaskDay(
+                              phase: phase,
+                              tasks: phaseTasks,
+                              selectedDate: _selectedDateFilter,
+                            ),
+                            onCreateTask: () async {
+                              await _createPhaseDayTask(
+                                phase: phase,
+                                phaseTasks: phaseTasks,
+                                staffProfiles: detail.staffProfiles,
+                              );
+                            },
+                          ),
+                          const SizedBox(height: _sectionSpacing),
                           _PhaseSnapshotSection(
                             totalTasks: totalTasks,
                             completedTasks: completedTasks,
@@ -502,10 +613,14 @@ class _ProductionPhaseDetailScreenState
                             onSortChanged: _updateSort,
                             child: filteredTasks.isEmpty
                                 ? ProductionEmptyState(
-                                    title: _selectedDateFilter == null
+                                    title: phaseTasks.isEmpty
+                                        ? _noTasksTitle
+                                        : _selectedDateFilter == null
                                         ? _noMatchesTitle
                                         : _noDateMatchesTitle,
-                                    message: _selectedDateFilter == null
+                                    message: phaseTasks.isEmpty
+                                        ? _noTasksMessage
+                                        : _selectedDateFilter == null
                                         ? _noMatchesMessage
                                         : _noDateMatchesMessage,
                                   )
@@ -869,6 +984,103 @@ class _PhaseProgressCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PhaseDayTaskActionCard extends StatelessWidget {
+  final DateTime initialTaskDay;
+  final Future<void> Function() onCreateTask;
+
+  const _PhaseDayTaskActionCard({
+    required this.initialTaskDay,
+    required this.onCreateTask,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = AppStatusBadgeColors.fromTheme(
+      theme: theme,
+      tone: AppStatusTone.info,
+    );
+
+    return _PhaseSurfaceCard(
+      padding: const EdgeInsets.all(16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 640;
+          final summary = Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: colors.background,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  Icons.add_task_rounded,
+                  color: colors.foreground,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _phaseDayTaskCardTitle,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "$_phaseDayTaskCardSubtitle Suggested next day: ${formatDateInput(initialTaskDay)}.",
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+          final button = FilledButton.icon(
+            style: AppButtonStyles.tonal(
+              theme: theme,
+              tone: AppStatusTone.info,
+              minimumSize: const Size(0, 42),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            ),
+            onPressed: onCreateTask,
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text(_phaseDayTaskButtonLabel),
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                summary,
+                const SizedBox(height: 12),
+                Align(alignment: Alignment.centerLeft, child: button),
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(child: summary),
+              const SizedBox(width: 16),
+              button,
+            ],
+          );
+        },
       ),
     );
   }
@@ -1779,6 +1991,387 @@ class _TaskProgressSnapshot {
     required this.label,
     required this.color,
   });
+}
+
+class _CreatePhaseDayTaskInput {
+  final DateTime taskDay;
+  final String title;
+  final String roleRequired;
+  final int requiredHeadcount;
+  final int weight;
+  final List<String> assignedStaffProfileIds;
+  final String instructions;
+  final DateTime startDate;
+  final DateTime dueDate;
+
+  const _CreatePhaseDayTaskInput({
+    required this.taskDay,
+    required this.title,
+    required this.roleRequired,
+    required this.requiredHeadcount,
+    required this.weight,
+    required this.assignedStaffProfileIds,
+    required this.instructions,
+    required this.startDate,
+    required this.dueDate,
+  });
+}
+
+Future<_CreatePhaseDayTaskInput?> _showCreatePhaseDayTaskDialog(
+  BuildContext context, {
+  required ProductionPhase phase,
+  required DateTime initialTaskDay,
+  required List<BusinessStaffProfileSummary> staffProfiles,
+  required String initialRoleRequired,
+}) async {
+  final activeStaff = _activeStaffProfiles(staffProfiles);
+  final normalizedInitialRole = _normalizeRole(initialRoleRequired);
+  final roleOptions = <String>{
+    for (final staff in activeStaff)
+      if (staff.staffRole.trim().isNotEmpty) _normalizeRole(staff.staffRole),
+    if (normalizedInitialRole.isNotEmpty) normalizedInitialRole,
+    staffRoleFarmer,
+  }.toList()..sort();
+  final defaultTitle = _defaultPhaseDayTaskTitle(phase);
+  final titleController = TextEditingController(text: defaultTitle);
+  final weightController = TextEditingController(text: "1");
+  final headcountController = TextEditingController(text: "1");
+  final notesController = TextEditingController();
+
+  final result = await showDialog<_CreatePhaseDayTaskInput>(
+    context: context,
+    builder: (dialogContext) {
+      var selectedTaskDay = _normalizeDay(initialTaskDay);
+      var selectedRole = roleOptions.contains(normalizedInitialRole)
+          ? normalizedInitialRole
+          : roleOptions.first;
+      final selectedStaffIds = <String>{};
+      var validationError = "";
+
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          final staffCandidates = _staffCandidatesForRole(
+            roleRequired: selectedRole,
+            staffList: activeStaff,
+          );
+
+          Future<void> pickTaskDay() async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: selectedTaskDay,
+              firstDate: DateTime(kDatePickerFirstYear),
+              lastDate: DateTime(kDatePickerLastYear),
+            );
+            if (picked == null) {
+              return;
+            }
+            setDialogState(() {
+              selectedTaskDay = _normalizeDay(picked);
+            });
+          }
+
+          return AlertDialog(
+            title: const Text(_phaseDayTaskDialogTitle),
+            content: SizedBox(
+              width: 540,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _phaseDayTaskDialogHelp,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        key: const ValueKey("phase-day-task-date-picker"),
+                        style: AppButtonStyles.outlined(
+                          theme: Theme.of(context),
+                          tone: AppStatusTone.info,
+                          minimumSize: const Size(0, 44),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                        ),
+                        onPressed: pickTaskDay,
+                        icon: const Icon(
+                          Icons.calendar_month_outlined,
+                          size: 18,
+                        ),
+                        label: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            "$_phaseDayTaskDateLabel: ${formatDateInput(selectedTaskDay)}",
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      key: const ValueKey("phase-day-task-title-field"),
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: _phaseDayTaskTitleLabel,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedRole,
+                      decoration: const InputDecoration(
+                        labelText: _phaseDayTaskRoleLabel,
+                      ),
+                      items: roleOptions
+                          .map(
+                            (role) => DropdownMenuItem<String>(
+                              value: role,
+                              child: Text(
+                                formatStaffRoleLabel(role, fallback: role),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return;
+                        }
+                        setDialogState(() {
+                          selectedRole = _normalizeRole(value);
+                          final allowedIds = _staffCandidatesForRole(
+                            roleRequired: selectedRole,
+                            staffList: activeStaff,
+                          ).map((staff) => staff.id).toSet();
+                          selectedStaffIds.removeWhere(
+                            (staffId) => !allowedIds.contains(staffId),
+                          );
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: weightController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: _phaseDayTaskExpectedLabel,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: headcountController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: _phaseDayTaskHeadcountLabel,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: notesController,
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: _phaseDayTaskNotesLabel,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _phaseDayTaskStaffLabel,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (staffCandidates.isEmpty)
+                      Text(
+                        _phaseDayTaskNoStaff,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                    else
+                      ...staffCandidates.map((staff) {
+                        final checked = selectedStaffIds.contains(staff.id);
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: checked,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              if (value == true) {
+                                selectedStaffIds.add(staff.id);
+                              } else {
+                                selectedStaffIds.remove(staff.id);
+                              }
+                            });
+                          },
+                          title: Text(_staffListLabel(staff)),
+                          subtitle: Text(
+                            formatStaffRoleLabel(
+                              staff.staffRole,
+                              fallback: staff.staffRole,
+                            ),
+                          ),
+                        );
+                      }),
+                    if (validationError.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        validationError,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(_phaseDayTaskCancelLabel),
+              ),
+              FilledButton(
+                key: const ValueKey("phase-day-task-submit-button"),
+                onPressed: () {
+                  final title = titleController.text.trim();
+                  if (title.isEmpty) {
+                    setDialogState(() {
+                      validationError = _phaseDayTaskTitleRequired;
+                    });
+                    return;
+                  }
+                  final parsedWeight =
+                      int.tryParse(weightController.text.trim()) ?? 1;
+                  final parsedHeadcount =
+                      int.tryParse(headcountController.text.trim()) ?? 1;
+                  final requiredHeadcount = math.max(
+                    1,
+                    math.max(parsedHeadcount, selectedStaffIds.length),
+                  );
+                  final taskDay = _normalizeDay(selectedTaskDay);
+                  Navigator.of(dialogContext).pop(
+                    _CreatePhaseDayTaskInput(
+                      taskDay: taskDay,
+                      title: title,
+                      roleRequired: selectedRole,
+                      requiredHeadcount: requiredHeadcount,
+                      weight: math.max(1, parsedWeight),
+                      assignedStaffProfileIds: selectedStaffIds.toList(),
+                      instructions: notesController.text.trim(),
+                      startDate: _buildPhaseDayTaskStartDate(taskDay),
+                      dueDate: _buildPhaseDayTaskDueDate(taskDay),
+                    ),
+                  );
+                },
+                child: const Text(_phaseDayTaskSubmitLabel),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  titleController.dispose();
+  weightController.dispose();
+  headcountController.dispose();
+  notesController.dispose();
+
+  return result;
+}
+
+DateTime _resolveInitialNewPhaseTaskDay({
+  required ProductionPhase phase,
+  required List<ProductionTask> tasks,
+  required DateTime? selectedDate,
+}) {
+  final now = _normalizeDay(DateTime.now());
+  final phaseStart = _normalizeDay(_resolvePhaseStart(phase, tasks) ?? now);
+  if (selectedDate != null) {
+    final selectedDay = _normalizeDay(selectedDate);
+    if (!selectedDay.isBefore(phaseStart)) {
+      return selectedDay;
+    }
+  }
+
+  final phaseEnd = _resolvePhaseEnd(phase, tasks);
+  if (phaseEnd == null) {
+    return phaseStart;
+  }
+  return _normalizeDay(phaseEnd).add(const Duration(days: 1));
+}
+
+String _resolveInitialPhaseTaskRole(List<ProductionTask> tasks) {
+  for (final task in tasks) {
+    final role = _normalizeRole(task.roleRequired);
+    if (role.isNotEmpty) {
+      return role;
+    }
+  }
+  return staffRoleFarmer;
+}
+
+String _defaultPhaseDayTaskTitle(ProductionPhase phase) {
+  final phaseName = phase.name.trim();
+  if (phaseName.isEmpty) {
+    return "Phase follow-up";
+  }
+  return "$phaseName follow-up";
+}
+
+DateTime _buildPhaseDayTaskStartDate(DateTime day) {
+  final localDay = _normalizeDay(day);
+  return DateTime(localDay.year, localDay.month, localDay.day, 8);
+}
+
+DateTime _buildPhaseDayTaskDueDate(DateTime day) {
+  final localDay = _normalizeDay(day);
+  return DateTime(localDay.year, localDay.month, localDay.day, 17);
+}
+
+List<BusinessStaffProfileSummary> _activeStaffProfiles(
+  List<BusinessStaffProfileSummary> staffProfiles,
+) {
+  return staffProfiles
+      .where((staff) => staff.status.trim().toLowerCase() != "terminated")
+      .toList();
+}
+
+List<BusinessStaffProfileSummary> _staffCandidatesForRole({
+  required String roleRequired,
+  required List<BusinessStaffProfileSummary> staffList,
+}) {
+  final normalizedRole = _normalizeRole(roleRequired);
+  final matching = staffList
+      .where((staff) => _normalizeRole(staff.staffRole) == normalizedRole)
+      .toList();
+  if (matching.isNotEmpty) {
+    return matching;
+  }
+  return staffList;
+}
+
+String _staffListLabel(BusinessStaffProfileSummary staff) {
+  final name = staff.userName?.trim() ?? "";
+  if (name.isNotEmpty) {
+    return name;
+  }
+  final email = staff.userEmail?.trim() ?? "";
+  if (email.isNotEmpty) {
+    return email;
+  }
+  final phone = staff.userPhone?.trim() ?? "";
+  if (phone.isNotEmpty) {
+    return phone;
+  }
+  return staff.id;
+}
+
+String _normalizeRole(String value) {
+  return value.trim().toLowerCase().replaceAll(RegExp(r"[^a-z0-9]+"), "_");
 }
 
 ProductionPhase? _findPhaseById(List<ProductionPhase> phases, String phaseId) {

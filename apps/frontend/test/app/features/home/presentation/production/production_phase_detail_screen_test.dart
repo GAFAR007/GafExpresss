@@ -1,6 +1,6 @@
 // WHAT: Verifies the production phase detail screen defaults and filter UI.
-// WHY: The screen should open on the current day and keep the compact filter
-// toolbar usable on narrow viewports.
+// WHY: The screen should open with the full phase task pack visible and keep
+// the compact filter toolbar usable on narrow viewports.
 // HOW: The test builds plan data relative to the current date and interacts
 // with the date picker to confirm filtering updates.
 import 'package:flutter/material.dart';
@@ -169,11 +169,40 @@ ProductionPlanDetail _buildAssignmentApprovedDetail() {
   });
 }
 
+ProductionPlanDetail _buildEmptyPhaseDetail() {
+  final today = _today();
+  return ProductionPlanDetail.fromJson({
+    'plan': {
+      'id': _planId,
+      'businessId': 'business-1',
+      'estateAssetId': 'estate-1',
+      'productId': 'product-1',
+      'domainContext': 'farm',
+      'title': 'Pepper Production',
+      'status': 'active',
+    },
+    'phases': [
+      {
+        'id': _phaseId,
+        'planId': _planId,
+        'name': 'Transplant Establishment',
+        'phaseType': 'finite',
+        'order': 1,
+        'startDate': formatDateInput(today),
+        'endDate': formatDateInput(today),
+        'status': 'active',
+      },
+    ],
+    'tasks': const [],
+    'timelineRows': const [],
+    'staffProfiles': const [],
+  });
+}
+
 void main() {
-  testWidgets('defaults to today with collapsed search controls', (
+  testWidgets('defaults to all dates with collapsed search controls', (
     tester,
   ) async {
-    final todayLabel = formatDateInput(_today());
     final alternateDateLabel = formatDateInput(_alternateDate(_today()));
     await tester.binding.setSurfaceSize(const Size(420, 1200));
     addTearDown(() async {
@@ -207,9 +236,9 @@ void main() {
     final initialDateText = tester.widget<Text>(
       find.byKey(const ValueKey('phase-task-date-value')),
     );
-    expect(initialDateText.data, todayLabel);
+    expect(initialDateText.data, 'All dates');
     expect(find.text('Transplanting - Greenhouse 2'), findsOneWidget);
-    expect(find.text('Transplanting - Greenhouse 1'), findsNothing);
+    expect(find.text('Transplanting - Greenhouse 1'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('phase-task-date-filter')));
     await tester.pumpAndSettle();
@@ -267,4 +296,41 @@ void main() {
       expect(find.text('Pending'), findsOneWidget);
     },
   );
+
+  testWidgets('empty phase still exposes add day task action', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(420, 1100));
+    addTearDown(() async {
+      await tester.binding.setSurfaceSize(null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          productionPlanDetailProvider(
+            _planId,
+          ).overrideWith((ref) async => _buildEmptyPhaseDetail()),
+        ],
+        child: const MaterialApp(
+          home: ProductionPhaseDetailScreen(planId: _planId, phaseId: _phaseId),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Add day task'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Add day task'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('No tasks in this phase'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('No tasks in this phase'), findsOneWidget);
+  });
 }

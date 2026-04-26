@@ -183,6 +183,35 @@ test("business routes expose core production lifecycle endpoints", () => {
   });
 });
 
+test("phase day task creation can explicitly extend plan and phase windows", () => {
+  debug(TEST_LOG_TAG, "Checking phase day extension task wiring");
+  const controllerSource = fs.readFileSync(
+    path.resolve(__dirname, "../controllers/business.controller.js"),
+    "utf8",
+  );
+
+  assert.match(
+    controllerSource,
+    /allowWindowExtension\s*=\s*req\.body\?\.allowWindowExtension\s*===\s*true/,
+    "createProductionPlanTask should require an explicit allowWindowExtension flag",
+  );
+  assert.match(
+    controllerSource,
+    /!allowWindowExtension\s*&&\s*\(endsAfterPlanWindow\s*\|\|\s*endsAfterPhaseWindow\)/,
+    "outside-window task creation should remain blocked unless extension is explicit",
+  );
+  assert.match(
+    controllerSource,
+    /ProductionPhase\.updateOne\([\s\S]*\$max:\s*\{[\s\S]*endDate:\s*dueDate/,
+    "phase endDate should extend with $max when the new task lands after the phase",
+  );
+  assert.match(
+    controllerSource,
+    /ProductionPlan\.updateOne\([\s\S]*\$max:\s*\{[\s\S]*endDate:\s*dueDate/,
+    "plan endDate should extend with $max when the new task lands after the plan",
+  );
+});
+
 test("PlanUnit schema enforces unique unit index within each plan", () => {
   debug(TEST_LOG_TAG, "Checking PlanUnit schema indexes");
   const PlanUnit = require("../models/PlanUnit");

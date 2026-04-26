@@ -19181,13 +19181,17 @@ async function createProductionPlanTask(req, res) {
     const planEndDay = normalizeWorkDateToDayStart(plan.endDate);
     const phaseStartDay = normalizeWorkDateToDayStart(phase.startDate);
     const phaseEndDay = normalizeWorkDateToDayStart(phase.endDate);
+    const allowWindowExtension = req.body?.allowWindowExtension === true;
+    const startsBeforePlanWindow = startDay < planStartDay;
+    const startsBeforePhaseWindow = startDay < phaseStartDay;
+    const endsAfterPlanWindow = dueDay > planEndDay;
+    const endsAfterPhaseWindow = dueDay > phaseEndDay;
 
-    if (startDay < planStartDay || dueDay > planEndDay) {
-      return res.status(400).json({
-        error: PRODUCTION_COPY.TASK_SCHEDULE_OUTSIDE_PLAN,
-      });
-    }
-    if (startDay < phaseStartDay || dueDay > phaseEndDay) {
+    if (
+      startsBeforePlanWindow ||
+      startsBeforePhaseWindow ||
+      (!allowWindowExtension && (endsAfterPlanWindow || endsAfterPhaseWindow))
+    ) {
       return res.status(400).json({
         error: PRODUCTION_COPY.TASK_SCHEDULE_OUTSIDE_PLAN,
       });
@@ -19280,6 +19284,41 @@ async function createProductionPlanTask(req, res) {
       rejectionReason: "",
     });
 
+    const windowExtensionUpdates = [];
+    if (allowWindowExtension && endsAfterPhaseWindow) {
+      windowExtensionUpdates.push(
+        ProductionPhase.updateOne(
+          {
+            _id: phase._id,
+            planId: plan._id,
+          },
+          {
+            $max: {
+              endDate: dueDate,
+            },
+          },
+        ),
+      );
+    }
+    if (allowWindowExtension && endsAfterPlanWindow) {
+      windowExtensionUpdates.push(
+        ProductionPlan.updateOne(
+          {
+            _id: plan._id,
+            businessId,
+          },
+          {
+            $max: {
+              endDate: dueDate,
+            },
+          },
+        ),
+      );
+    }
+    if (windowExtensionUpdates.length > 0) {
+      await Promise.all(windowExtensionUpdates);
+    }
+
     debug("BUSINESS CONTROLLER: createProductionPlanTask - success", {
       actorId: actor._id,
       planId: plan._id,
@@ -19287,6 +19326,8 @@ async function createProductionPlanTask(req, res) {
       taskId: task._id,
       assignedCount: assignedStaffProfileIds.length,
       weight: normalizedWeight,
+      extendedPhaseWindow: allowWindowExtension && endsAfterPhaseWindow,
+      extendedPlanWindow: allowWindowExtension && endsAfterPlanWindow,
     });
 
     return res.status(201).json({
