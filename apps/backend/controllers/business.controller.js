@@ -486,6 +486,10 @@ const PRODUCTION_COPY = {
   TASK_PROGRESS_BATCH_DATE_REQUIRED: "Batch work date is required",
   TASK_PROGRESS_BATCH_DATE_INVALID: "Batch work date is invalid",
   TASK_PROGRESS_BATCH_ENTRIES_REQUIRED: "Batch entries are required",
+  PROOF_DOWNLOAD_AUDITED: "Proof media download audited successfully",
+  PROOF_DOWNLOAD_EMPTY: "No downloadable proof media was provided",
+  PROOF_DOWNLOAD_FORBIDDEN:
+    "You do not have permission to download proof media",
   STAFF_REQUIRED_FOR_DRAFT: "Staff profiles are required to generate a draft",
   ESTATE_REQUIRED: "Estate asset is required",
   DATES_REQUIRED: "Start and end dates are required",
@@ -1119,6 +1123,22 @@ function canReviewTaskProgress({ actorRole, staffRole }) {
     (staffRole === STAFF_ROLE_ESTATE_MANAGER ||
       staffRole === STAFF_ROLE_FARM_MANAGER ||
       staffRole === STAFF_ROLE_ASSET_MANAGER)
+  );
+}
+
+function canDownloadProductionProofMedia({ actorRole, staffRole }) {
+  const normalizedStaffRole = normalizeDraftAccessStaffRole(staffRole);
+  if (
+    actorRole === "business_owner" ||
+    normalizedStaffRole === STAFF_ROLE_SHAREHOLDER
+  ) {
+    return true;
+  }
+
+  return (
+    actorRole === "staff" &&
+    (normalizedStaffRole === STAFF_ROLE_ESTATE_MANAGER ||
+      normalizedStaffRole === STAFF_ROLE_FARM_MANAGER)
   );
 }
 
@@ -3364,6 +3384,71 @@ function copyAttendanceProofsToTaskProgressProofs({
     uploadedAt: proof.uploadedAt || null,
     uploadedBy: proof.uploadedBy || null,
   }));
+}
+
+function resolveProductionProofAuditMediaType({ filename = "", mimeType = "" }) {
+  const normalizedMimeType = (mimeType || "").toString().trim().toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/")) {
+    return "video";
+  }
+
+  const normalizedFilename = (filename || "").toString().trim().toLowerCase();
+  if (/\.(png|jpe?g|webp|gif|bmp|heic)$/i.test(normalizedFilename)) {
+    return "image";
+  }
+  if (/\.(mp4|mov|webm|m4v)$/i.test(normalizedFilename)) {
+    return "video";
+  }
+  return "";
+}
+
+function normalizeProductionProofDownloadAuditItems(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .slice(0, 50)
+    .map((proof) => {
+      if (!proof || typeof proof !== "object") {
+        return null;
+      }
+      const url = normalizeStaffIdInput(proof.url || proof.proofUrl);
+      const filename = normalizeStaffIdInput(
+        proof.filename || proof.proofFilename,
+      );
+      const publicId = normalizeStaffIdInput(
+        proof.publicId || proof.proofPublicId,
+      );
+      const mimeType = normalizeStaffIdInput(
+        proof.mimeType || proof.proofMimeType,
+      );
+      const mediaType = resolveProductionProofAuditMediaType({
+        filename,
+        mimeType,
+      });
+      if (!url || !mediaType) {
+        return null;
+      }
+      const sizeBytes = parseNonNegativeIntegerInput(
+        proof.sizeBytes || proof.proofSizeBytes,
+      );
+      return {
+        url,
+        publicId,
+        filename,
+        mimeType,
+        mediaType,
+        sizeBytes: sizeBytes == null ? 0 : sizeBytes,
+        uploadedAt:
+          parseDateInput(proof.uploadedAt || proof.proofUploadedAt) || null,
+        uploadedBy: proof.uploadedBy || proof.proofUploadedBy || null,
+      };
+    })
+    .filter(Boolean);
 }
 
 // WHY: Progress logging should only accept staff who completed a full shift on the same work day.
@@ -21810,6 +21895,174 @@ async function resetProductionTaskHistory(req, res) {
 }
 
 /**
+ * POST /business/production/plans/:id/proof-download-audit
+ * Owner + estate/farm managers: record proof media download attempts.
+ */
+async function auditProductionProofDownload(req, res) {
+  debug("BUSINESS CONTROLLER: auditProductionProofDownload - entry", {
+    actorId: req.user?.sub,
+    planId: req.params?.id,
+    taskId: req.body?.taskId,
+    proofCount: Array.isArray(req.body?.proofs) ? req.body.proofs.length : 0,
+  });
+
+  try {
+    const planId = normalizeStaffIdInput(req.params?.id || req.params?.planId);
+    if (!planId || !mongoose.Types.ObjectId.isValid(planId)) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.PLAN_ID_REQUIRED,
+      });
+    }
+
+    const proofItems = normalizeProductionProofDownloadAuditItems(
+      req.body?.proofs,
+    );
+    if (proofItems.length === 0) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.PROOF_DOWNLOAD_EMPTY,
+      });
+    }
+
+    const rawWorkDate = normalizeStaffIdInput(req.body?.workDate);
+    const normalizedWorkDate = rawWorkDate
+      ? normalizeWorkDateToDayStart(rawWorkDate)
+      : null;
+    if (rawWorkDate && !normalizedWorkDate) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_PROGRESS_DATE_INVALID,
+      });
+    }
+
+    const taskId = normalizeStaffIdInput(req.body?.taskId);
+    if (taskId && !mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_NOT_FOUND,
+      });
+    }
+
+    const requestedStaffProfileId = normalizeStaffIdInput(
+      req.body?.staffProfileId || req.body?.staffId,
+    );
+    if (
+      requestedStaffProfileId &&
+      !mongoose.Types.ObjectId.isValid(requestedStaffProfileId)
+    ) {
+      return res.status(400).json({
+        error: PRODUCTION_COPY.TASK_PROGRESS_STAFF_ID_INVALID,
+      });
+    }
+
+    const { actor, businessId } = await getBusinessContext(req.user.sub);
+    const staffProfile = await getStaffProfileForActor({
+      actor,
+      businessId,
+      allowMissing: true,
+    });
+    if (
+      !canDownloadProductionProofMedia({
+        actorRole: actor.role,
+        staffRole: staffProfile?.staffRole,
+      })
+    ) {
+      return res.status(403).json({
+        error: PRODUCTION_COPY.PROOF_DOWNLOAD_FORBIDDEN,
+      });
+    }
+
+    const plan = await ProductionPlan.findOne({
+      _id: planId,
+      businessId,
+    }).lean();
+    if (!plan) {
+      return res.status(404).json({
+        error: PRODUCTION_COPY.PLAN_NOT_FOUND,
+      });
+    }
+
+    if (
+      actor.role === "staff" &&
+      actor.estateAssetId &&
+      plan.estateAssetId?.toString() !== actor.estateAssetId.toString()
+    ) {
+      return res.status(403).json({
+        error: PRODUCTION_COPY.PROOF_DOWNLOAD_FORBIDDEN,
+      });
+    }
+
+    let task = null;
+    if (taskId) {
+      task = await ProductionTask.findOne({
+        _id: taskId,
+        planId: plan._id,
+      }).lean();
+      if (!task) {
+        return res.status(404).json({
+          error: PRODUCTION_COPY.TASK_NOT_FOUND,
+        });
+      }
+    }
+
+    let targetProfile = null;
+    if (requestedStaffProfileId) {
+      targetProfile = await BusinessStaffProfile.findOne({
+        _id: requestedStaffProfileId,
+        businessId,
+      }).lean();
+      if (!targetProfile) {
+        return res.status(404).json({
+          error: STAFF_COPY.STAFF_PROFILE_NOT_FOUND,
+        });
+      }
+    }
+
+    const auditedAt = new Date();
+    await writeAuditLog({
+      businessId,
+      actorId: actor._id,
+      actorRole: actor.role,
+      action: "production_proof_media_download",
+      entityType: "production_plan",
+      entityId: plan._id,
+      message: "Downloaded production proof media",
+      changes: {
+        planId: plan._id.toString(),
+        taskId: task?._id?.toString() || taskId || null,
+        staffProfileId:
+          targetProfile?._id?.toString() || requestedStaffProfileId || null,
+        workDate: normalizedWorkDate,
+        proofCount: proofItems.length,
+        proofs: proofItems,
+        auditedAt,
+      },
+      required: true,
+    });
+
+    debug("BUSINESS CONTROLLER: auditProductionProofDownload - success", {
+      actorId: actor._id,
+      planId: plan._id,
+      taskId: task?._id || null,
+      proofCount: proofItems.length,
+    });
+
+    return res.status(200).json({
+      message: PRODUCTION_COPY.PROOF_DOWNLOAD_AUDITED,
+      proofCount: proofItems.length,
+      auditedAt,
+    });
+  } catch (err) {
+    debug("BUSINESS CONTROLLER: auditProductionProofDownload - error", {
+      actorId: req.user?.sub,
+      planId: req.params?.id,
+      reason: err.message,
+      next: "Confirm production proof download role and plan scope before retrying",
+    });
+    return res.status(400).json({
+      error: err.message,
+    });
+  }
+}
+
+/**
  * POST /business/production/task-progress/:id/approve
  * Owner + estate manager: verify a daily progress record.
  */
@@ -24641,6 +24894,7 @@ module.exports = {
   deleteProductionTask,
   assignProductionTaskStaffProfiles,
   resetProductionTaskHistory,
+  auditProductionProofDownload,
   logProductionTaskProgress,
   logProductionTaskProgressBatch,
   approveTaskProgress,

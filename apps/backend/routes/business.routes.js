@@ -515,6 +515,13 @@ router.post(
   businessController.emailProductionPlanProgressReport,
 );
 
+router.post(
+  "/production/plans/:id/proof-download-audit",
+  requireAuth,
+  requireAnyRole(["business_owner", "staff"]),
+  businessController.auditProductionProofDownload,
+);
+
 router.get(
   "/production/plans/:planId/units",
   requireAuth,

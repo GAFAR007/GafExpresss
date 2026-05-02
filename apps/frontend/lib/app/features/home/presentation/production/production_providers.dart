@@ -56,6 +56,8 @@ const String _reasonPlanProgressReportMissing =
     "production_plan_progress_report_session_missing";
 const String _reasonPlanProgressReportEmailMissing =
     "production_plan_progress_report_email_session_missing";
+const String _reasonProofDownloadAuditMissing =
+    "production_proof_download_audit_session_missing";
 const String _reasonSchedulePolicyMissing =
     "production_schedule_policy_session_missing";
 const String _reasonSchedulePolicyUpdateMissing =
@@ -588,6 +590,38 @@ class ProductionPlanActions {
       planId: planId,
       toEmail: toEmail,
       routePath: routePath,
+    );
+  }
+
+  Future<void> auditProofDownload({
+    required String planId,
+    required String taskId,
+    required String staffId,
+    required DateTime workDate,
+    required List<ProductionTaskProgressProofRecord> proofs,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonProofDownloadAuditMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    await api.auditProofDownload(
+      token: session.token,
+      planId: planId,
+      taskId: taskId,
+      staffId: staffId,
+      workDate: workDate,
+      proofs: proofs,
     );
   }
 

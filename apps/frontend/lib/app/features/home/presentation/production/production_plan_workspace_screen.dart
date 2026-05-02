@@ -24,6 +24,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/remote_file_download.dart';
 import 'package:frontend/app/core/platform/text_file_download.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
@@ -85,6 +86,7 @@ const String _monthEmptyMessage =
     "Move to another month or start assigning tasks from the selected day.";
 const String _viewInsightsLabel = "View insights";
 const String _downloadProgressLabel = "Download progress";
+const String _downloadProofMediaLabel = "Download all";
 const String _emailProgressLabel = "Email progress";
 const String _copyProgressLinkLabel = "Copy view link";
 const String _openDraftLabel = "Open draft";
@@ -99,6 +101,9 @@ const String _returnToDraftConfirmMessage =
 const String _returnToDraftConfirmLabel = "Return to draft";
 const String _downloadProgressSuccess = "Progress report downloaded.";
 const String _downloadProgressFailure = "Unable to download progress report.";
+const String _downloadProofMediaEmpty =
+    "No downloadable proof photos or videos found.";
+const String _downloadProofMediaFailure = "Unable to download proof media.";
 const String _emailProgressFailure = "Unable to email progress report.";
 const String _copyProgressLinkSuccess = "View link copied.";
 const String _copyProgressLinkFailure = "Unable to copy view link.";
@@ -759,6 +764,52 @@ class _ProductionPlanWorkspaceScreenState
     }
   }
 
+  Future<void> _downloadProofMedia({
+    required String taskId,
+    required String staffProfileId,
+    required DateTime workDate,
+    required List<ProductionTaskProgressProofRecord> proofs,
+  }) async {
+    final downloadableProofs = _downloadableWorkspaceProofs(proofs);
+    if (downloadableProofs.isEmpty) {
+      _showSnackSafe(_downloadProofMediaEmpty);
+      return;
+    }
+
+    try {
+      await ref
+          .read(productionPlanActionsProvider)
+          .auditProofDownload(
+            planId: widget.planId,
+            taskId: taskId,
+            staffId: staffProfileId,
+            workDate: workDate,
+            proofs: downloadableProofs,
+          );
+      final startedCount = await downloadRemoteFiles(
+        files: [
+          for (final entry in downloadableProofs.asMap().entries)
+            RemoteFileDownloadDescriptor(
+              url: entry.value.url,
+              fileName: _workspaceProofDownloadFileName(entry.value, entry.key),
+            ),
+        ],
+      );
+      if (startedCount <= 0) {
+        throw StateError(_downloadProofMediaFailure);
+      }
+      final suffix = startedCount == 1 ? "file" : "files";
+      _showSnackSafe("Started download for $startedCount proof media $suffix.");
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _downloadProofMediaFailure,
+        ),
+      );
+    }
+  }
+
   Future<void> _emailProgressReport({required String routePath}) async {
     final toEmail = await showProductionProgressReportEmailDialog(
       context,
@@ -959,6 +1010,10 @@ class _ProductionPlanWorkspaceScreenState
             final canSubmitOwnProgress =
                 actorRole == "staff" && selfStaffId.trim().isNotEmpty;
             final canReviewProgress = _canReviewProgress(
+              actorRole: actorRole,
+              staffRole: selfStaffRole,
+            );
+            final canDownloadProofMedia = _canDownloadProofMedia(
               actorRole: actorRole,
               staffRole: selfStaffRole,
             );
@@ -1935,6 +1990,16 @@ class _ProductionPlanWorkspaceScreenState
                           canManageCalendar: canManageCalendar,
                           canManageTaskAttendance: canManageTaskAttendance,
                           canReviewProgress: canReviewProgress,
+                          onDownloadProofsForStaff: canDownloadProofMedia
+                              ? (staffProfileId, proofs) async {
+                                  await _downloadProofMedia(
+                                    taskId: task.id,
+                                    staffProfileId: staffProfileId,
+                                    workDate: selectedDay,
+                                    proofs: proofs,
+                                  );
+                                }
+                              : null,
                           isOwner: canUseBusinessOwnerEquivalentAccess(
                             role: actorRole,
                             staffRole: selfStaffRole,
@@ -5046,6 +5111,11 @@ class _AgendaTaskCard extends StatelessWidget {
   final bool canManageCalendar;
   final bool canManageTaskAttendance;
   final bool canReviewProgress;
+  final Future<void> Function(
+    String staffProfileId,
+    List<ProductionTaskProgressProofRecord> proofs,
+  )?
+  onDownloadProofsForStaff;
   final bool isOwner;
   final Set<String> progressEnabledStaffIds;
   final bool taskExpanded;
@@ -5102,6 +5172,7 @@ class _AgendaTaskCard extends StatelessWidget {
     required this.canManageCalendar,
     required this.canManageTaskAttendance,
     required this.canReviewProgress,
+    required this.onDownloadProofsForStaff,
     required this.isOwner,
     required this.progressEnabledStaffIds,
     required this.taskExpanded,
@@ -5554,6 +5625,16 @@ class _AgendaTaskCard extends StatelessWidget {
                                             : "Proof ${index + 1}",
                                         proof: proof,
                                       ),
+                            onDownloadProofs:
+                                onDownloadProofsForStaff == null ||
+                                    _downloadableWorkspaceProofs(
+                                      visibleProofs,
+                                    ).isEmpty
+                                ? null
+                                : () => onDownloadProofsForStaff!(
+                                    staffId,
+                                    visibleProofs,
+                                  ),
                           );
                         },
                       ),
@@ -6744,6 +6825,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     int index,
   )?
   onOpenProof;
+  final Future<void> Function()? onDownloadProofs;
 
   const _AssignedStaffAttendanceRow({
     required this.staffName,
@@ -6776,6 +6858,7 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
     required this.onAddProgressCount,
     required this.onResetHistory,
     required this.onOpenProof,
+    required this.onDownloadProofs,
   });
 
   @override
@@ -7103,12 +7186,24 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
           ),
           if (visibleProofs.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(
-              "Proofs",
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: _workspacePrimaryContentColor(colorScheme),
-                fontWeight: FontWeight.w800,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    "Proofs",
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: _workspacePrimaryContentColor(colorScheme),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (onDownloadProofs != null)
+                  TextButton.icon(
+                    onPressed: onDownloadProofs,
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: const Text(_downloadProofMediaLabel),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             Wrap(
@@ -8264,6 +8359,14 @@ List<ProductionTaskProgressProofRecord> _resolveWorkspaceVisibleProofs({
   return byKey.values.toList();
 }
 
+List<ProductionTaskProgressProofRecord> _downloadableWorkspaceProofs(
+  List<ProductionTaskProgressProofRecord> proofs,
+) {
+  return proofs
+      .where((proof) => proof.hasUrl && _isWorkspaceMediaProof(proof))
+      .toList(growable: false);
+}
+
 String _workspaceProofKey(ProductionTaskProgressProofRecord proof) {
   final publicId = proof.publicId.trim();
   if (publicId.isNotEmpty) {
@@ -8289,6 +8392,68 @@ bool _isWorkspaceImageProof(ProductionTaskProgressProofRecord proof) {
       filename.endsWith(".webp") ||
       filename.endsWith(".bmp") ||
       filename.endsWith(".heic");
+}
+
+bool _isWorkspaceVideoProof(ProductionTaskProgressProofRecord proof) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType.startsWith("video/")) {
+    return true;
+  }
+  final filename = proof.filename.trim().toLowerCase();
+  return filename.endsWith(".mp4") ||
+      filename.endsWith(".mov") ||
+      filename.endsWith(".webm") ||
+      filename.endsWith(".m4v");
+}
+
+bool _isWorkspaceMediaProof(ProductionTaskProgressProofRecord proof) {
+  return _isWorkspaceImageProof(proof) || _isWorkspaceVideoProof(proof);
+}
+
+String _workspaceProofDownloadFileName(
+  ProductionTaskProgressProofRecord proof,
+  int index,
+) {
+  final fallbackExtension = _workspaceProofDownloadExtension(proof);
+  final rawName = proof.filename.trim().isNotEmpty
+      ? proof.filename.trim()
+      : "proof-${index + 1}$fallbackExtension";
+  final sanitized = rawName
+      .replaceAll(RegExp(r'[\\/:*?"<>|]+'), "_")
+      .replaceAll(RegExp(r"\s+"), "_")
+      .trim();
+  if (sanitized.isNotEmpty) {
+    return sanitized;
+  }
+  return "proof-${index + 1}$fallbackExtension";
+}
+
+String _workspaceProofDownloadExtension(
+  ProductionTaskProgressProofRecord proof,
+) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType == "image/jpeg") {
+    return ".jpg";
+  }
+  if (mimeType == "image/png") {
+    return ".png";
+  }
+  if (mimeType == "image/webp") {
+    return ".webp";
+  }
+  if (mimeType == "video/mp4") {
+    return ".mp4";
+  }
+  if (mimeType == "video/webm") {
+    return ".webm";
+  }
+  if (_isWorkspaceVideoProof(proof)) {
+    return ".mp4";
+  }
+  if (_isWorkspaceImageProof(proof)) {
+    return ".jpg";
+  }
+  return "";
 }
 
 String _workspaceProofSubtitle(ProductionTaskProgressProofRecord proof) {
@@ -8504,6 +8669,22 @@ bool _canReviewProgress({
     staffRoleEstateManager,
     staffRoleFarmManager,
     staffRoleAssetManager,
+  });
+}
+
+bool _canDownloadProofMedia({
+  required String? actorRole,
+  required String? staffRole,
+}) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
   });
 }
 

@@ -38,6 +38,7 @@ const String _portfolioConfidencePath =
     "/business/production/confidence/portfolio";
 const String _progressReportSuffix = "/progress-report";
 const String _progressReportEmailSuffix = "/progress-report/email";
+const String _proofDownloadAuditSuffix = "/proof-download-audit";
 const String _preorderReconcilePath =
     "/business/preorder/reservations/reconcile-expired";
 const String _preorderReservationsPath = "/business/preorder/reservations";
@@ -58,6 +59,8 @@ const String _intentPlanDetail = "load production plan detail";
 const String _intentPlanProgressReport = "load production progress report";
 const String _intentPlanProgressReportEmail =
     "email production progress report";
+const String _intentProofDownloadAudit =
+    "audit production proof media download";
 const String _intentPlanUnits = "load production plan units";
 const String _intentPortfolioConfidence =
     "load production confidence portfolio";
@@ -96,6 +99,7 @@ const String _operationAssistantCropLifecycle = "previewAssistantCropLifecycle";
 const String _operationPlanDetail = "fetchPlanDetail";
 const String _operationPlanProgressReport = "fetchPlanProgressReport";
 const String _operationPlanProgressReportEmail = "emailPlanProgressReport";
+const String _operationProofDownloadAudit = "auditProofDownload";
 const String _operationPlanUnits = "fetchPlanUnits";
 const String _operationPortfolioConfidence = "fetchPortfolioConfidence";
 const String _operationPlanCreate = "createPlan";
@@ -136,6 +140,7 @@ const String _keyTask = "task";
 const String _keyToEmail = "toEmail";
 const String _keyRoutePath = "routePath";
 const String _keyStaff = "staff";
+const String _keyTaskId = "taskId";
 const String _keyStatus = "status";
 const String _keyReason = "reason";
 const String _keyPreorderSummary = "preorderSummary";
@@ -211,6 +216,9 @@ const String _planProgressReportEmailSuccessMessage =
     "emailPlanProgressReport() success";
 const String _planProgressReportEmailFailureMessage =
     "emailPlanProgressReport() failed";
+const String _proofDownloadAuditStartMessage = "auditProofDownload() start";
+const String _proofDownloadAuditSuccessMessage = "auditProofDownload() success";
+const String _proofDownloadAuditFailureMessage = "auditProofDownload() failed";
 const String _portfolioConfidenceStartMessage =
     "fetchPortfolioConfidence() start";
 const String _portfolioConfidenceSuccessMessage =
@@ -928,6 +936,89 @@ class ProductionApi {
           _extraOperationKey: _operationPlanProgressReportEmail,
           _extraIntentKey: _intentPlanProgressReportEmail,
           _extraPlanIdKey: planId,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<void> auditProofDownload({
+    required String? token,
+    required String planId,
+    required String taskId,
+    required String staffId,
+    required DateTime workDate,
+    required List<ProductionTaskProgressProofRecord> proofs,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      _proofDownloadAuditStartMessage,
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationProofDownloadAudit,
+        _extraIntentKey: _intentProofDownloadAudit,
+        _extraPlanIdKey: planId,
+        _extraTaskIdKey: taskId,
+        _extraStaffIdKey: staffId,
+        _extraCountKey: proofs.length,
+      },
+    );
+
+    try {
+      await _dio.post(
+        "$_plansPath/$planId$_proofDownloadAuditSuffix",
+        data: {
+          _keyTaskId: taskId,
+          _keyStaffId: staffId,
+          _keyWorkDate: formatDateInput(workDate),
+          _keyProofs: [
+            for (final proof in proofs)
+              {
+                "url": proof.url,
+                "publicId": proof.publicId,
+                "filename": proof.filename,
+                "mimeType": proof.mimeType,
+                "sizeBytes": proof.sizeBytes,
+                "uploadedAt": proof.uploadedAt?.toIso8601String(),
+                "uploadedBy": proof.uploadedBy,
+              },
+          ],
+        },
+        options: _authOptions(token),
+      );
+
+      AppDebug.log(
+        _logTag,
+        _proofDownloadAuditSuccessMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationProofDownloadAudit,
+          _extraIntentKey: _intentProofDownloadAudit,
+          _extraPlanIdKey: planId,
+          _extraTaskIdKey: taskId,
+          _extraStaffIdKey: staffId,
+          _extraCountKey: proofs.length,
+        },
+      );
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        _proofDownloadAuditFailureMessage,
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationProofDownloadAudit,
+          _extraIntentKey: _intentProofDownloadAudit,
+          _extraPlanIdKey: planId,
+          _extraTaskIdKey: taskId,
+          _extraStaffIdKey: staffId,
           _extraStatusKey: status,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,
