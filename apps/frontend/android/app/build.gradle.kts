@@ -1,3 +1,35 @@
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+fun releaseSigningProperty(name: String): String? =
+    keystoreProperties.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+
+val requiredReleaseSigningProperties =
+    listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val missingReleaseSigningProperties =
+    requiredReleaseSigningProperties.filter { releaseSigningProperty(it) == null }
+if (keystorePropertiesFile.exists() && missingReleaseSigningProperties.isNotEmpty()) {
+    throw GradleException(
+        "android/key.properties is missing required release signing value(s): " +
+            missingReleaseSigningProperties.joinToString(", "),
+    )
+}
+
+val releaseStoreFile = releaseSigningProperty("storeFile")?.let { rootProject.file(it) }
+if (keystorePropertiesFile.exists() && releaseStoreFile?.exists() != true) {
+    throw GradleException(
+        "android/key.properties storeFile must point to an existing local keystore file.",
+    )
+}
+
+val hasReleaseSigningProperties =
+    keystorePropertiesFile.exists() && missingReleaseSigningProperties.isEmpty()
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -30,11 +62,25 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigningProperties) {
+                keyAlias = releaseSigningProperty("keyAlias")
+                keyPassword = releaseSigningProperty("keyPassword")
+                storeFile = releaseStoreFile
+                storePassword = releaseSigningProperty("storePassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig =
+                if (hasReleaseSigningProperties) {
+                    signingConfigs.getByName("release")
+                } else {
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 }
