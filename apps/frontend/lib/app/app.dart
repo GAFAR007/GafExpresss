@@ -88,6 +88,9 @@ class _AppRootState extends ConsumerState<AppRoot> {
       routerConfig: router,
       builder: (context, child) {
         return Stack(
+          // WHY: Route pages must receive tight screen constraints; otherwise
+          // nested Scaffolds can shrink and pull footer actions under system UI.
+          fit: StackFit.expand,
           children: [
             child ?? const SizedBox.shrink(),
             const ChatCallOverlayHost(),
