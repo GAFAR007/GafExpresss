@@ -61,17 +61,17 @@ class ProductionCalendarVisuals {
             theme.colorScheme.surface,
           );
     final elevatedSurface = isDark
-        ? theme.colorScheme.surfaceContainer
+        ? theme.colorScheme.surfaceContainerHigh
         : Color.alphaBlend(
             const Color(0xFF0F172A).withValues(alpha: 0.035),
             theme.colorScheme.surfaceContainerLow,
           );
     final surface = Color.alphaBlend(
-      primaryTint.withValues(alpha: isDark ? 0.16 : 0.07),
+      primaryTint.withValues(alpha: isDark ? 0.08 : 0.07),
       baseSurface,
     );
     final surfaceAlt = Color.alphaBlend(
-      primaryTint.withValues(alpha: isDark ? 0.24 : 0.12),
+      primaryTint.withValues(alpha: isDark ? 0.14 : 0.12),
       elevatedSurface,
     );
     final badgeBackground = _emphasisFill(
@@ -106,32 +106,26 @@ class ProductionCalendarVisuals {
     double radius = 24,
     bool emphasized = false,
   }) {
-    final background = theme.colorScheme.surface;
-    final backgroundAlt = theme.colorScheme.surfaceContainerLow;
-    return BoxDecoration(
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: palette.border, width: emphasized ? 1.8 : 1.3),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          background,
-          Color.alphaBlend(
+    final isDark = theme.brightness == Brightness.dark;
+    final background = isDark
+        ? Color.alphaBlend(
+            palette.accent.withValues(alpha: emphasized ? 0.08 : 0.05),
+            theme.colorScheme.surfaceContainerLow,
+          )
+        : Color.alphaBlend(
             const Color(
               0xFF0F172A,
-            ).withValues(alpha: emphasized ? 0.035 : 0.02),
-            background,
-          ),
-          Color.alphaBlend(
-            palette.accent.withValues(alpha: emphasized ? 0.03 : 0.015),
-            backgroundAlt,
-          ),
-        ],
-      ),
+            ).withValues(alpha: emphasized ? 0.03 : 0.015),
+            theme.colorScheme.surface,
+          );
+    return BoxDecoration(
+      color: background,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: palette.border, width: emphasized ? 1.8 : 1.3),
       boxShadow: [
         BoxShadow(
           color: palette.shadow,
-          blurRadius: emphasized ? 26 : 18,
+          blurRadius: emphasized ? 24 : 16,
           offset: const Offset(0, 10),
         ),
       ],
@@ -144,22 +138,17 @@ class ProductionCalendarVisuals {
     double radius = 18,
     bool emphasized = false,
   }) {
-    final baseSurface = theme.colorScheme.surface;
+    final isDark = theme.brightness == Brightness.dark;
+    final background = emphasized
+        ? Color.alphaBlend(
+            palette.accent.withValues(alpha: isDark ? 0.14 : 0.08),
+            palette.surfaceAlt,
+          )
+        : palette.surface;
     return BoxDecoration(
+      color: background,
       borderRadius: BorderRadius.circular(radius),
       border: Border.all(color: palette.border, width: emphasized ? 2 : 1.4),
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          palette.surfaceAlt,
-          palette.surface,
-          Color.alphaBlend(
-            const Color(0xFF0F172A).withValues(alpha: 0.01),
-            baseSurface,
-          ),
-        ],
-      ),
       boxShadow: [
         BoxShadow(
           color: palette.shadow,
@@ -314,8 +303,8 @@ class ProductionCalendarMetricPill extends StatelessWidget {
     final theme = Theme.of(context);
     final defaultBackground = theme.brightness == Brightness.dark
         ? Color.alphaBlend(
-            theme.colorScheme.primary.withValues(alpha: 0.28),
-            theme.colorScheme.surfaceContainerHighest,
+            accent.withValues(alpha: 0.18),
+            theme.colorScheme.surfaceContainerHigh,
           )
         : const Color(0xFF1A3F91);
     final background = filled
@@ -334,8 +323,7 @@ class ProductionCalendarMetricPill extends StatelessWidget {
             ? accent.withValues(alpha: 0.96)
             : accent);
     final resolvedBorderColor =
-        borderColor ??
-        (filled ? theme.colorScheme.primary.withValues(alpha: 0.32) : null);
+        borderColor ?? (filled ? accent.withValues(alpha: 0.28) : null);
     final child = Container(
       padding:
           padding ??

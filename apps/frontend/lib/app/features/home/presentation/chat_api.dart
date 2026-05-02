@@ -16,31 +16,46 @@ library;
 import 'package:dio/dio.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/chat_constants.dart';
 import 'chat_models.dart';
 
 // WHY: Centralize endpoint paths to avoid magic strings.
 const String _conversationsPath = "/chat/conversations";
+const String _contactsPath = "/chat/contacts";
 const String _messagesPath = "/chat/messages";
 const String _messageReadPath = "/chat/messages/read";
 const String _attachmentsPath = "/chat/attachments";
+const String _callsPath = "/chat/calls";
 
 // WHY: Consistent logs for chat requests.
 const String _logTag = "CHAT_API";
 const String _serviceName = "chat_api";
 const String _intentList = "load conversations";
 const String _intentCreate = "create conversation";
+const String _intentContacts = "load chat contacts";
 const String _intentMessages = "load messages";
 const String _intentDetail = "load conversation detail";
 const String _intentSend = "send message";
 const String _intentRead = "mark messages read";
 const String _intentUpload = "upload attachment";
+const String _intentStartCall = "start voice call";
+const String _intentFetchCall = "load call";
+const String _intentAcceptCall = "accept call";
+const String _intentDeclineCall = "decline call";
+const String _intentEndCall = "end call";
 const String _operationList = "fetchConversations";
 const String _operationCreate = "createConversation";
+const String _operationContacts = "fetchContacts";
 const String _operationMessages = "fetchMessages";
 const String _operationDetail = "fetchConversationDetail";
 const String _operationSend = "sendMessage";
 const String _operationRead = "markMessagesRead";
 const String _operationUpload = "uploadAttachment";
+const String _operationStartCall = "startCall";
+const String _operationFetchCall = "fetchCall";
+const String _operationAcceptCall = "acceptCall";
+const String _operationDeclineCall = "declineCall";
+const String _operationEndCall = "endCall";
 const String _nextActionRetry = "Retry the request or contact support.";
 const String _missingTokenMessage = "Missing auth token";
 const String _missingTokenLog = "auth token missing";
@@ -125,7 +140,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "fetchConversations() failed",
@@ -181,7 +198,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "createConversation() failed",
@@ -189,6 +208,61 @@ class ChatApi {
           _extraServiceKey: _serviceName,
           _extraOperationKey: _operationCreate,
           _extraIntentKey: _intentCreate,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<List<ChatContact>> fetchContacts({required String? token}) async {
+    AppDebug.log(
+      _logTag,
+      "fetchContacts() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationContacts,
+        _extraIntentKey: _intentContacts,
+      },
+    );
+
+    try {
+      final resp = await _dio.get(_contactsPath, options: _authOptions(token));
+
+      final data = resp.data as Map<String, dynamic>;
+      final rawList = (data["contacts"] ?? []) as List<dynamic>;
+      final contacts = rawList
+          .whereType<Map<String, dynamic>>()
+          .map(ChatContact.fromJson)
+          .toList();
+
+      AppDebug.log(
+        _logTag,
+        "fetchContacts() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationContacts,
+          _extraIntentKey: _intentContacts,
+          _extraCountKey: contacts.length,
+        },
+      );
+
+      return contacts;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "fetchContacts() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationContacts,
+          _extraIntentKey: _intentContacts,
           _extraStatusKey: status,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,
@@ -235,7 +309,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "fetchConversationDetail() failed",
@@ -301,7 +377,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "fetchMessages() failed",
@@ -357,7 +435,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "sendMessage() failed",
@@ -392,10 +472,7 @@ class ChatApi {
     try {
       await _dio.post(
         _messageReadPath,
-        data: {
-          "conversationId": conversationId,
-          "messageIds": messageIds,
-        },
+        data: {"conversationId": conversationId, "messageIds": messageIds},
         options: _authOptions(token),
       );
 
@@ -411,7 +488,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "markMessagesRead() failed",
@@ -433,6 +512,7 @@ class ChatApi {
     required String conversationId,
     required List<int> bytes,
     required String filename,
+    String? mimeType,
   }) async {
     AppDebug.log(
       _logTag,
@@ -447,22 +527,15 @@ class ChatApi {
     try {
       final formData = FormData.fromMap({
         "conversationId": conversationId,
-        "file": MultipartFile.fromBytes(
-          bytes,
-          filename: filename,
-        ),
+        if (mimeType != null && mimeType.trim().isNotEmpty)
+          "mimeType": mimeType.trim(),
+        "file": MultipartFile.fromBytes(bytes, filename: filename),
       });
 
-      final resp = await _dio.post(
-        _attachmentsPath,
-        data: formData,
-        options: _authOptions(token),
+      final attachment = await _postAttachmentFormData(
+        token: token,
+        formData: formData,
       );
-
-      final data = resp.data as Map<String, dynamic>;
-      final attachmentMap =
-          (data["attachment"] ?? {}) as Map<String, dynamic>;
-      final attachment = ChatAttachment.fromJson(attachmentMap);
 
       AppDebug.log(
         _logTag,
@@ -478,7 +551,9 @@ class ChatApi {
     } on DioException catch (error) {
       final status = error.response?.statusCode ?? _fallbackStatusCode;
       final reason =
-          error.response?.data?.toString() ?? error.message ?? _fallbackErrorReason;
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
       AppDebug.log(
         _logTag,
         "uploadAttachment() failed",
@@ -486,6 +561,371 @@ class ChatApi {
           _extraServiceKey: _serviceName,
           _extraOperationKey: _operationUpload,
           _extraIntentKey: _intentUpload,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatAttachment> uploadAttachmentFile({
+    required String? token,
+    required String conversationId,
+    required String filePath,
+    required String filename,
+    String? mimeType,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "uploadAttachmentFile() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationUpload,
+        _extraIntentKey: _intentUpload,
+      },
+    );
+
+    try {
+      final formData = FormData.fromMap({
+        "conversationId": conversationId,
+        if (mimeType != null && mimeType.trim().isNotEmpty)
+          "mimeType": mimeType.trim(),
+        "file": await MultipartFile.fromFile(filePath, filename: filename),
+      });
+
+      final attachment = await _postAttachmentFormData(
+        token: token,
+        formData: formData,
+      );
+
+      AppDebug.log(
+        _logTag,
+        "uploadAttachmentFile() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationUpload,
+          _extraIntentKey: _intentUpload,
+        },
+      );
+
+      return attachment;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "uploadAttachmentFile() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationUpload,
+          _extraIntentKey: _intentUpload,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatAttachment> _postAttachmentFormData({
+    required String? token,
+    required FormData formData,
+  }) async {
+    final resp = await _dio.post(
+      _attachmentsPath,
+      data: formData,
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    final attachmentMap = (data["attachment"] ?? {}) as Map<String, dynamic>;
+    return ChatAttachment.fromJson(attachmentMap);
+  }
+
+  Future<ChatCallSession> startCall({
+    required String? token,
+    required String conversationId,
+    String mediaMode = chatCallMediaModeAudio,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "startCall() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationStartCall,
+        _extraIntentKey: _intentStartCall,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        _callsPath,
+        data: {"conversationId": conversationId, "mediaMode": mediaMode},
+        options: _authOptions(token),
+      );
+
+      final data = resp.data as Map<String, dynamic>;
+      final callMap = (data["call"] ?? {}) as Map<String, dynamic>;
+      final call = ChatCallSession.fromJson(callMap);
+
+      AppDebug.log(
+        _logTag,
+        "startCall() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationStartCall,
+          _extraIntentKey: _intentStartCall,
+        },
+      );
+
+      return call;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "startCall() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationStartCall,
+          _extraIntentKey: _intentStartCall,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatCallSession> fetchCall({
+    required String? token,
+    required String callId,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "fetchCall() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationFetchCall,
+        _extraIntentKey: _intentFetchCall,
+      },
+    );
+
+    try {
+      final resp = await _dio.get(
+        "$_callsPath/$callId",
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final callMap = (data["call"] ?? {}) as Map<String, dynamic>;
+      final call = ChatCallSession.fromJson(callMap);
+
+      AppDebug.log(
+        _logTag,
+        "fetchCall() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationFetchCall,
+          _extraIntentKey: _intentFetchCall,
+        },
+      );
+
+      return call;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "fetchCall() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationFetchCall,
+          _extraIntentKey: _intentFetchCall,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatCallSession> acceptCall({
+    required String? token,
+    required String callId,
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "acceptCall() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationAcceptCall,
+        _extraIntentKey: _intentAcceptCall,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_callsPath/$callId/accept",
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final callMap = (data["call"] ?? {}) as Map<String, dynamic>;
+      final call = ChatCallSession.fromJson(callMap);
+
+      AppDebug.log(
+        _logTag,
+        "acceptCall() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationAcceptCall,
+          _extraIntentKey: _intentAcceptCall,
+        },
+      );
+
+      return call;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "acceptCall() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationAcceptCall,
+          _extraIntentKey: _intentAcceptCall,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatCallSession> declineCall({
+    required String? token,
+    required String callId,
+    String reason = "declined",
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "declineCall() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationDeclineCall,
+        _extraIntentKey: _intentDeclineCall,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_callsPath/$callId/decline",
+        data: {"reason": reason},
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final callMap = (data["call"] ?? {}) as Map<String, dynamic>;
+      final call = ChatCallSession.fromJson(callMap);
+
+      AppDebug.log(
+        _logTag,
+        "declineCall() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationDeclineCall,
+          _extraIntentKey: _intentDeclineCall,
+        },
+      );
+
+      return call;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "declineCall() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationDeclineCall,
+          _extraIntentKey: _intentDeclineCall,
+          _extraStatusKey: status,
+          _extraReasonKey: reason,
+          _extraNextActionKey: _nextActionRetry,
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<ChatCallSession> endCall({
+    required String? token,
+    required String callId,
+    String reason = "ended",
+  }) async {
+    AppDebug.log(
+      _logTag,
+      "endCall() start",
+      extra: {
+        _extraServiceKey: _serviceName,
+        _extraOperationKey: _operationEndCall,
+        _extraIntentKey: _intentEndCall,
+      },
+    );
+
+    try {
+      final resp = await _dio.post(
+        "$_callsPath/$callId/end",
+        data: {"reason": reason},
+        options: _authOptions(token),
+      );
+      final data = resp.data as Map<String, dynamic>;
+      final callMap = (data["call"] ?? {}) as Map<String, dynamic>;
+      final call = ChatCallSession.fromJson(callMap);
+
+      AppDebug.log(
+        _logTag,
+        "endCall() success",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationEndCall,
+          _extraIntentKey: _intentEndCall,
+        },
+      );
+
+      return call;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? _fallbackStatusCode;
+      final reason =
+          error.response?.data?.toString() ??
+          error.message ??
+          _fallbackErrorReason;
+      AppDebug.log(
+        _logTag,
+        "endCall() failed",
+        extra: {
+          _extraServiceKey: _serviceName,
+          _extraOperationKey: _operationEndCall,
+          _extraIntentKey: _intentEndCall,
           _extraStatusKey: status,
           _extraReasonKey: reason,
           _extraNextActionKey: _nextActionRetry,

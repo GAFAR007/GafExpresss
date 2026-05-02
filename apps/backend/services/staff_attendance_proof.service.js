@@ -9,7 +9,7 @@
  * - Keeps upload and validation logic out of the controller.
  *
  * HOW:
- * - Validates the file payload and MIME type.
+ * - Validates the file payload and MIME/extension.
  * - Streams the file to Cloudinary and returns proof metadata.
  */
 
@@ -28,11 +28,85 @@ const ALLOWED_MIME_TYPES = [
   "image/png",
   "image/jpg",
   "image/webp",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+  "video/x-m4v",
+  "application/octet-stream",
 ];
+const ALLOWED_FORMATS = ["pdf", "png", "jpg", "jpeg", "webp", "mp4", "mov", "webm", "m4v"];
 
 const SERVICE_NAME = "CLOUDINARY";
 const OPERATION_UPLOAD = "staff_attendance_proof_upload";
 const REQUEST_INTENT = "Upload staff attendance proof";
+
+function resolveProofType(mimeType) {
+  const normalizedMimeType = (mimeType || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/")) {
+    return "video";
+  }
+  if (normalizedMimeType) {
+    return "document";
+  }
+  return "";
+}
+
+function normalizeExtension(fileName) {
+  const normalized = (fileName || "")
+    .toString()
+    .trim()
+    .toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  const parts = normalized.split(".");
+  return parts.length > 1 ? parts.pop().trim() : "";
+}
+
+function resolveProofMimeType(file) {
+  const mimetype = (file?.mimetype || "").toString().trim().toLowerCase();
+  if (mimetype && mimetype !== "application/octet-stream") {
+    return mimetype;
+  }
+  const extension = normalizeExtension(file?.originalname);
+  switch (extension) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "webp":
+      return "image/webp";
+    case "mp4":
+      return "video/mp4";
+    case "mov":
+      return "video/quicktime";
+    case "webm":
+      return "video/webm";
+    case "m4v":
+      return "video/x-m4v";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return mimetype || "";
+  }
+}
+
+function assertSupportedProofFile(file) {
+  const extension = normalizeExtension(file?.originalname);
+  const mimetype = (file?.mimetype || "").toString().trim().toLowerCase();
+  const hasAllowedMimeType = ALLOWED_MIME_TYPES.includes(mimetype);
+  const hasAllowedExtension = ALLOWED_FORMATS.includes(extension);
+  if (!hasAllowedMimeType && !hasAllowedExtension) {
+    throw new Error("Unsupported proof format");
+  }
+}
 
 function assertCloudinaryConfig() {
   const hasConfig =
@@ -63,6 +137,7 @@ async function uploadStaffAttendanceProof({
   businessId,
   attendanceId,
   file,
+  unitIndex = 1,
 }) {
   debug("STAFF ATTENDANCE PROOF: upload request", {
     businessId,
@@ -82,9 +157,7 @@ async function uploadStaffAttendanceProof({
     throw new Error("Proof file is required");
   }
 
-  if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-    throw new Error("Unsupported proof format");
-  }
+  assertSupportedProofFile(file);
 
   assertCloudinaryConfig();
 
@@ -94,7 +167,7 @@ async function uploadStaffAttendanceProof({
         {
           folder: `gafexpress/staff-attendance-proofs/${businessId}/${attendanceId}`,
           resource_type: "auto",
-          allowed_formats: ["pdf", "png", "jpg", "jpeg", "webp"],
+          allowed_formats: ALLOWED_FORMATS,
         },
         (error, result) => {
           if (error) return reject(error);
@@ -111,11 +184,14 @@ async function uploadStaffAttendanceProof({
     });
 
     return {
+      unitIndex: Math.max(1, Number(unitIndex || 1)),
       url: uploadResult.secure_url,
       publicId: uploadResult.public_id || "",
       filename: file.originalname || "",
-      mimeType: file.mimetype || "",
+      mimeType: resolveProofMimeType(file),
+      type: resolveProofType(resolveProofMimeType(file)),
       sizeBytes: file.size || 0,
+      uploadedAt: new Date(),
     };
   } catch (error) {
     logCloudinaryFailure({
@@ -127,6 +203,30 @@ async function uploadStaffAttendanceProof({
   }
 }
 
+async function uploadStaffAttendanceProofs({
+  businessId,
+  attendanceId,
+  files,
+  startingUnitIndex = 1,
+}) {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new Error("Proof file is required");
+  }
+  const uploadedProofs = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const uploadedProof = await uploadStaffAttendanceProof({
+      businessId,
+      attendanceId,
+      file: files[index],
+      unitIndex:
+        Math.max(1, Number(startingUnitIndex || 1)) + index,
+    });
+    uploadedProofs.push(uploadedProof);
+  }
+  return uploadedProofs;
+}
+
 module.exports = {
   uploadStaffAttendanceProof,
+  uploadStaffAttendanceProofs,
 };

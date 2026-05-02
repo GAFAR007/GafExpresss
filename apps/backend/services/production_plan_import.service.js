@@ -596,12 +596,12 @@ function extractImportedPlantingTargets(lines, fallbackTargets = {}) {
     }
 
     const estimatedHarvestMatch = normalized.match(
-      /(\d[\d,]*)\s*(kg|g|ton|bags?|sacks?|crates?|cartons?|baskets?|boxes?|buckets?)\s+(?:estimated\s+)?harvest/i,
+      /(\d[\d,]*)\s*(kg|g|ton|bags?|sacks?|crates?|cartons?|baskets?|boxes?|buckets?|stands?)\s+(?:estimated\s+)?harvest/i,
     );
     const estimatedHarvestValueMatch =
       /^Estimated Harvest$/i.test(normalized) ?
         nextLine.match(
-          /^(\d[\d,]*)\s*(kg|g|ton|bags?|sacks?|crates?|cartons?|baskets?|boxes?|buckets?)$/i,
+          /^(\d[\d,]*)\s*(kg|g|ton|bags?|sacks?|crates?|cartons?|baskets?|boxes?|buckets?|stands?)$/i,
         )
       : null;
     const resolvedHarvestMatch =

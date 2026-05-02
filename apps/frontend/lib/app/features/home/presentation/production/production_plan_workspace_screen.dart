@@ -13,15 +13,19 @@
 /// - Reuses existing production actions for task status, staff assignment, and progress logging.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/remote_file_download.dart';
+import 'package:frontend/app/core/platform/text_file_download.dart';
 import 'package:frontend/app/features/home/presentation/business_asset_providers.dart';
 import 'package:frontend/app/features/home/presentation/business_product_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
@@ -29,31 +33,50 @@ import 'package:frontend/app/features/home/presentation/production/production_dr
 import 'package:frontend/app/features/home/presentation/production/production_calendar_visuals.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft.dart';
+import 'package:frontend/app/features/home/presentation/production/production_progress_report_dialogs.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_local_video_preview.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_proof_flow.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_model.dart';
 import 'package:frontend/app/features/home/presentation/staff_attendance_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "PRODUCTION_PLAN_WORKSPACE";
 const String _logBuild = "build()";
 const String _logMonthChanged = "month_changed";
 const String _logDayChanged = "day_changed";
+const String _logCalendarToggle = "calendar_toggled";
+const String _logCalendarModeChanged = "calendar_mode_changed";
 const String _logAssignStaff = "assign_staff";
+const String _logCreateTask = "create_task";
+const String _logDeleteTask = "delete_task";
 const String _logTaskStatus = "task_status";
+const String _logResetHistory = "reset_history";
 const String _logProgress = "log_progress";
 const String _logApproveTask = "approve_task";
 const String _logRejectTask = "reject_task";
 const String _logApproveProgress = "approve_progress";
 const String _logRejectProgress = "reject_progress";
+const String _logLiveRefreshStart = "live_detail_refresh_start";
+const String _logLiveRefreshSkipped = "live_detail_refresh_skipped";
+const String _logLiveRefreshFailure = "live_detail_refresh_failed";
+const String _logClockOutQuantitySelection = "clock_out_quantity_selection";
+const String _logClockOutPrimaryPromotion = "clock_out_primary_promotion";
+const String _logClockOutSubmitFailure = "clock_out_submit_failed";
+const String _logClockOutWizardOpen = "clock_out_wizard_open";
 
 const String _screenTitle = "Production plan";
 const String _workspaceTitle = "Calendar workspace";
-const String _workspaceSubtitle =
-    "Use the calendar to assign staff, remove staff, and track progress day by day.";
+const String _workspaceSubtitle = "Assign staff and track daily progress.";
+const String _showCalendarTooltip = "Show calendar";
+const String _hideCalendarTooltip = "Hide calendar";
 const String _selectedDayTitle = "Selected day";
 const String _selectedDayEmptyTitle = "No scheduled work";
 const String _selectedDayEmptyMessage =
@@ -62,6 +85,10 @@ const String _monthEmptyTitle = "No scheduled work this month";
 const String _monthEmptyMessage =
     "Move to another month or start assigning tasks from the selected day.";
 const String _viewInsightsLabel = "View insights";
+const String _downloadProgressLabel = "Download progress";
+const String _downloadProofMediaLabel = "Download all";
+const String _emailProgressLabel = "Email progress";
+const String _copyProgressLinkLabel = "Copy view link";
 const String _openDraftLabel = "Open draft";
 const String _returnToDraftLabel = "Return to draft";
 const String _viewInsightsTooltip = "Open plan insights";
@@ -72,12 +99,24 @@ const String _returnToDraftConfirmTitle = "Return this plan to draft?";
 const String _returnToDraftConfirmMessage =
     "This stops the live production lifecycle and reopens the same plan in draft mode so you can edit the saved schedule directly.";
 const String _returnToDraftConfirmLabel = "Return to draft";
+const String _downloadProgressSuccess = "Progress report downloaded.";
+const String _downloadProgressFailure = "Unable to download progress report.";
+const String _downloadProofMediaEmpty =
+    "No downloadable proof photos or videos found.";
+const String _downloadProofMediaFailure = "Unable to download proof media.";
+const String _emailProgressFailure = "Unable to email progress report.";
+const String _copyProgressLinkSuccess = "View link copied.";
+const String _copyProgressLinkFailure = "Unable to copy view link.";
 const String _todayLabel = "Today";
 const String _unassignedLabel = "Unassigned";
 const String _assignStaffLabel = "Manage staff";
+const String _addTaskLabel = "New task";
+const String _taskDeleteLabel = "Delete task";
+const String _resetHistoryLabel = "Reset history";
 const String _removeStaffHint = "Leave everything unchecked to remove staff.";
 const String _logProgressLabel = "Log progress";
 const String _editProgressLabel = "Edit progress";
+const String _newCountLabel = "New count";
 const String _taskApproveLabel = "Approve task";
 const String _taskRejectLabel = "Reject task";
 const String _progressApproveLabel = "Approve log";
@@ -95,45 +134,32 @@ const String _actualLabel = "Actual";
 const String _workingOnLabel = "Working on";
 const String _doneTodayLabel = "Done today";
 const String _leftTodayLabel = "Left today";
+const String _todayProgressTitle = "Today’s progress";
+const String _plannedTodayLabel = "Planned";
+const String _doneCompactLabel = "Done";
+const String _leftCompactLabel = "Left";
+const String _taskInfoLabel = "Task info";
+const String _taskInfoSubtitle = "Notes, actions, activity";
+const String _collapseTaskTooltip = "Collapse task";
+const String _expandTaskTooltip = "Expand task";
 const String _approvalLabel = "Approval";
-const String _noActivityLabel =
-    "No attendance or progress activity yet for this day.";
+const String _noActivityLabel = "No progress logs yet for this day.";
 const String _estimatedDatesLabel = "Estimated";
 const String _clockedInLabel = "Clocked in";
 const String _clockedOutLabel = "Clocked out";
-const String _clockInActivityLabel = "Clocked in";
-const String _clockOutActivityLabel = "Clocked out";
-const String _attendanceAuditRecordedLabel = "Recorded for audit";
 const String _attendanceClockInUnsetLabel = "Not clocked in";
 const String _attendanceClockOutUnsetLabel = "Not clocked out";
 const String _attendanceClockOutPendingLabel = "Awaiting clock-out";
 const String _setAttendanceLabel = "Set time";
 const String _editAttendanceLabel = "Edit time";
 const String _attendanceQuickClockInSuccess = "Clock-in recorded.";
-const String _attendanceQuickClockOutSuccess =
-    "Proof saved and clock-out recorded.";
-const String _attendanceClockOutProgressTitle = "Record work before clock-out";
-const String _attendanceClockOutProgressSaveLabel = "Continue to proof";
-const String _attendanceClockOutProgressHint =
-    "Before clocking out, record how many greenhouse or plot units this staff completed. Upload proof next, then review the task title, date, and remaining units before the final clock-out save.";
-const String _attendanceClockOutPartialFailure =
-    "Daily progress was saved, but the attendance update did not finish. Retry the attendance action.";
-const String _attendanceClockOutActualRequired =
-    "Enter the completed greenhouse or plot units before clock-out.";
-const String _attendanceProofReadyHint =
-    "Proof uploaded. Review the task title, date, and remaining units below, then click Clock out to finish this shift.";
-const String _attendanceClockOutAuditReadyHint =
-    "Clock-out saved with proof, times, and remaining-unit audit details below.";
-const String _attendanceProofAuditCardLabel = "Proof and audit";
-const String _attendanceProofUploadedLabel = "Proof uploaded";
-const String _attendanceProofReviewTitle = "Review proof before clock-out";
-const String _attendanceProofReviewClockOutLabel = "Clock out";
+const String _attendanceQuickClockOutSuccess = "Clock-out and proof saved.";
 const String _attendanceNotStartedHint =
     "Use Clock in to start this shift, or Set time if you need to backfill the exact hours.";
-const String _attendanceShiftOpenHint =
-    "Clock-in is set. Add clock-out to close this shift for the day.";
 const String _attendanceReadyForProgressHint =
     "Time captured. Next: log progress below, then mark the task done if this assignment is complete.";
+const String _attendanceOpenElsewhereHint =
+    "Staff already has an open attendance session for this day. Close that session or set task-specific time before logging progress here.";
 const String _attendanceDialogTitle = "Set staff attendance";
 const String _attendanceDialogClockInLabel = "Clock in";
 const String _attendanceDialogClockOutLabel = "Clock out";
@@ -148,16 +174,42 @@ const String _attendanceUpdateSuccess =
 const String _attendanceUpdateFailure = "Unable to update attendance.";
 const String _daySummaryTasksLabel = "Tasks";
 const String _daySummaryAssignedLabel = "Assigned";
+const String _daySummaryClockedInLabel = "Clocked in";
+const String _daySummaryClockedOutLabel = "Clocked out";
 const String _daySummaryLoggedLabel = "Logged";
-const String _daySummaryDoneLabel = "Done";
+const String _daySummaryUnitsTouchedLabel = "Units";
+const String _daySummaryProgressLabel = "Progress";
+const String _daySummaryFirstClockInLabel = "First in";
+const String _daySummaryLastClockOutLabel = "Last out";
+const String _daySummaryPanelLabel = "Day stats";
+const String _daySummaryPanelShowLabel = "Show day stats";
+const String _daySummaryPanelHideLabel = "Hide day stats";
+const String _dayQuantityPlantingLabel = "Planting";
+const String _dayQuantityTransplantLabel = "Transplant";
+const String _dayQuantityHarvestLabel = "Harvest";
 const String _taskAssignmentSuccess = "Staff assignment updated.";
 const String _taskAssignmentFailure = "Unable to update task staff.";
+const String _taskCreateSuccess = "Task created.";
+const String _taskCreateFailure = "Unable to create task.";
+const String _taskDeleteSuccess = "Task deleted.";
+const String _taskDeleteFailure = "Unable to delete task.";
+const String _taskDeleteConfirmTitle = "Delete this task?";
+const String _taskDeleteConfirmMessage =
+    "This removes the task and deletes linked progress logs, attendance records, and shared day totals for this task.";
+const String _taskDeleteConfirmLabel = "Delete task";
 const String _taskStatusSuccess = "Task status updated.";
 const String _taskStatusFailure = "Unable to update task status.";
 const String _taskProgressSuccess = "Daily progress logged.";
+const String _newCountSuccess = "New count saved.";
 const String _taskProgressFailure = "Unable to log daily progress.";
+const String _taskResetHistorySuccess = "Production history reset.";
+const String _taskResetHistoryFailure = "Unable to reset production history.";
+const String _taskResetHistoryConfirmTitle = "Reset this staff history?";
+const String _taskResetHistoryConfirmLabel = "Reset history";
 const String _taskProgressNeedsAssignedStaff =
     "Assign staff to this task before logging daily progress.";
+const String _taskProgressAttendanceRequired =
+    "Clock in before logging progress. Clock-out is captured when you save the production log.";
 const String _approveTaskSuccess = "Task approved.";
 const String _approveTaskFailure = "Unable to approve task.";
 const String _rejectTaskSuccess = "Task rejected.";
@@ -171,8 +223,52 @@ const String _staffDialogCancelLabel = "Cancel";
 const String _staffDialogEmptyLabel =
     "No staff profiles match this task role yet. Add staff first or broaden the role assignment.";
 const String _logDialogTitle = "Record daily progress";
-const String _logDialogSaveLabel = "Save daily log";
+const String _logDialogSubmitLabel = "Submit";
+const String _logDialogUploadProofLabel = "Add proofs";
+const String _logDialogReplaceProofLabel = "Replace proofs";
 const String _logDialogCancelLabel = "Cancel";
+const String _clockOutWizardTitle = "Clock out";
+const String _clockOutWizardContinueLabel = "Continue";
+const String _clockOutWizardFinishLabel = "Finish";
+const String _clockOutWizardBackLabel = "Back";
+const String _clockOutWizardCancelLabel = "Cancel";
+const String _clockOutWizardSuccess = "Clock-out completed.";
+const String _clockOutWizardStepPrimaryTitle =
+    "Step 1: How many units did you complete?";
+const String _clockOutWizardStepProofTitle = "Step 2: Upload proof";
+const String _clockOutWizardStepActivityTitle = "Step 3: Record activity";
+const String _clockOutWizardStepNotesTitle = "Step 4: Add notes";
+const String _clockOutWizardNoProofNeeded =
+    "No proof is required when no primary unit contribution is entered.";
+const String _clockOutWizardProofPicking = "Selecting proof media...";
+const String _clockOutWizardProofRequired =
+    "Upload every required picture and video for the completed units.";
+const String _clockOutWizardProofNotAllowed =
+    "Proof uploads are not allowed when the completed amount is 0.";
+const String _clockOutWizardLiveImageRequired =
+    "Upload an image for this unit.";
+const String _clockOutWizardLiveVideoRequired = "Upload a video for this unit.";
+const String _clockOutWizardFinishSaving = "Finishing clock-out...";
+const String _clockOutWizardActiveSessionMissing =
+    "No active production session was found for this staff.";
+const String _clockOutWizardPrimaryInvalid = "Select a valid completed amount.";
+const String _clockOutWizardPrimaryRequired =
+    "Select the completed amount before you continue.";
+const String _clockOutWizardActivityRequired =
+    "Choose the activity type before you continue.";
+const String _clockOutWizardActivityQuantityInvalid =
+    "Select a valid activity quantity.";
+const String _clockOutWizardActivityPresetLabel = "Preset quantity";
+const String _clockOutWizardActivityCustomLabel = "Custom quantity";
+const String _clockOutWizardActivityCustomHelper =
+    "Numbers only. Use this when the exact quantity is not in the quick picks.";
+const String _clockOutWizardActivityApplyLabel = "Use number";
+const String _clockOutWizardDelayRequired =
+    "Choose a delay reason when no units or activity were completed.";
+const String _clockOutWizardStalePrimaryTemplate =
+    "Another staff member updated this task. You can enter up to %s now.";
+const String _clockOutWizardStaleActivityTemplate =
+    "Another staff member updated this activity. You can enter up to %s now.";
 const String _logDialogDelayRequired =
     "Choose a delay reason if this staff completed 0 today.";
 const String _logDialogActualInvalid = "Select a valid progress amount.";
@@ -180,14 +276,27 @@ const String _logDialogStaffLabel = "Staff who did this work today";
 const String _logDialogDelayLabel = "Delay reason";
 const String _logDialogDelayHelper =
     "Use None when work was completed. Choose the real reason only if this staff completed 0 today.";
-const String _logDialogQuantityActivityLabel = "Farm production activity";
+const String _logDialogQuantityActivityLabel =
+    "Production activity metric (optional)";
 const String _logDialogQuantityAmountLabel = "Quantity completed today";
-const String _logDialogQuantityHelper =
-    "Track planting, transplant, or harvest quantities against the farm estimate. This updates the remaining target immediately.";
 const String _logDialogNotesLabel = "Daily notes";
 const String _rejectDialogTitle = "Reject task";
+const String _taskCreateDialogTitle = "Create same-day task";
+const String _taskCreateDialogSubmitLabel = "Create task";
+const String _taskCreateDialogCancelLabel = "Cancel";
+const String _taskCreateTitleLabel = "Task title";
+const String _taskCreatePhaseLabel = "Phase";
+const String _taskCreateRoleLabel = "Role";
+const String _taskCreateExpectedLabel = "Expected amount for this task";
+const String _taskCreateHeadcountLabel = "Required headcount";
+const String _taskCreateStaffLabel = "Assign staff now";
+const String _taskCreateNotesLabel = "Task notes";
+const String _taskCreateOutsidePlanMessage =
+    "Pick a day inside the plan schedule before creating a task.";
+const String _taskCreateTitleRequired = "Task title is required.";
 const String _rejectDialogHint = "Add a short reason";
 const String _rejectProgressDialogTitle = "Mark progress for review";
+const String _viewProofLabel = "View proof";
 const String _taskStatusPending = "pending";
 const String _taskStatusInProgress = "in_progress";
 const String _taskStatusDone = "done";
@@ -204,9 +313,9 @@ const String _delayReasonHealth = "health";
 const String _delayReasonInputUnavailable = "input_unavailable";
 const String _delayReasonManagementDelay = "management_delay";
 const String _quantityActivityNone = "none";
-const String _quantityActivityPlanting = "planting";
-const String _quantityActivityTransplant = "transplant";
-const String _quantityActivityHarvest = "harvest";
+const String _quantityActivityPlanting = "planted";
+const String _quantityActivityTransplant = "transplanted";
+const String _quantityActivityHarvest = "harvested";
 const List<String> _delayReasonOptions = [
   _delayReasonNone,
   _delayReasonRain,
@@ -237,7 +346,7 @@ const double _sectionSpacing = 18;
 const double _cardSpacing = 12;
 const double _calendarSpacing = 8;
 const double _dayTileRadius = 14;
-const double _agendaCardPadding = 14;
+const double _agendaCardPadding = 12;
 const int _workspaceAssetQueryPage = 1;
 const int _workspaceAssetQueryLimit = 200;
 const Color _workspaceBlue = Color(0xFF2856C3);
@@ -250,6 +359,102 @@ const Color _workspaceSoftTeal = Color(0xFFE1F5EF);
 const Color _workspaceSoftAmber = Color(0xFFFFF0D9);
 const Color _workspaceSoftBerry = Color(0xFFF4E7FF);
 const Color _workspaceSoftSlate = Color(0xFFEEF4FC);
+
+bool _workspaceIsDark(ColorScheme colorScheme) =>
+    colorScheme.brightness == Brightness.dark;
+
+Color _workspaceToneSurface({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  Color? lightColor,
+  Color? baseColor,
+  double lightTintAlpha = 0.08,
+  double darkTintAlpha = 0.18,
+}) {
+  if (!_workspaceIsDark(colorScheme)) {
+    if (lightColor != null) {
+      return lightColor;
+    }
+    return Color.alphaBlend(
+      accentColor.withValues(alpha: lightTintAlpha),
+      baseColor ?? colorScheme.surface,
+    );
+  }
+
+  return Color.alphaBlend(
+    accentColor.withValues(alpha: darkTintAlpha),
+    baseColor ?? colorScheme.surfaceContainerHigh,
+  );
+}
+
+Color _workspaceToneBorder({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  double lightAlpha = 0.18,
+  double darkAlpha = 0.42,
+}) {
+  return accentColor.withValues(
+    alpha: _workspaceIsDark(colorScheme) ? darkAlpha : lightAlpha,
+  );
+}
+
+Color _workspaceToneForeground({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  double darkMix = 0.68,
+}) {
+  if (!_workspaceIsDark(colorScheme)) {
+    return accentColor;
+  }
+  return Color.lerp(colorScheme.onSurface, accentColor, darkMix) ?? accentColor;
+}
+
+Color _workspacePrimaryContentColor(ColorScheme colorScheme) {
+  return _workspaceIsDark(colorScheme) ? colorScheme.onSurface : _workspaceNavy;
+}
+
+Color _workspaceSecondaryContentColor(ColorScheme colorScheme) {
+  if (_workspaceIsDark(colorScheme)) {
+    return colorScheme.onSurfaceVariant;
+  }
+  return _workspaceNavy.withValues(alpha: 0.72);
+}
+
+ButtonStyle _workspaceActionButtonStyle(
+  BuildContext context, {
+  required Color accentColor,
+}) {
+  final colorScheme = Theme.of(context).colorScheme;
+  return OutlinedButton.styleFrom(
+    foregroundColor: _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.6,
+    ),
+    backgroundColor: _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      lightTintAlpha: 0.1,
+      darkTintAlpha: 0.2,
+      baseColor: _workspaceIsDark(colorScheme)
+          ? colorScheme.surfaceContainerHigh
+          : colorScheme.surface,
+    ),
+    side: BorderSide(
+      color: _workspaceToneBorder(
+        colorScheme: colorScheme,
+        accentColor: accentColor,
+        lightAlpha: 0.22,
+        darkAlpha: 0.46,
+      ),
+    ),
+    visualDensity: VisualDensity.compact,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  );
+}
+
 final RegExp _importedProjectDayPattern = RegExp(
   r"Project day\s+\d+\s+\((\d{4}-\d{2}-\d{2})\)\.",
   caseSensitive: false,
@@ -269,15 +474,397 @@ class ProductionPlanWorkspaceScreen extends ConsumerStatefulWidget {
 
 class _ProductionPlanWorkspaceScreenState
     extends ConsumerState<ProductionPlanWorkspaceScreen> {
+  static const Duration _liveRefreshInterval = Duration(seconds: 15);
+
   DateTime? _visibleMonth;
   DateTime? _selectedDay;
-  _WorkspaceCalendarMode _calendarMode = _WorkspaceCalendarMode.month;
+  // WHY: Managers should land on the day agenda first, then expand the
+  // calendar overview only when they need to change dates visually.
+  _WorkspaceCalendarMode _calendarMode = _WorkspaceCalendarMode.day;
+  // WHY: Reopen the same overview mode the user last used instead of always
+  // forcing month view after the calendar is collapsed.
+  _WorkspaceCalendarMode _lastExpandedCalendarMode =
+      _WorkspaceCalendarMode.month;
+  Timer? _liveRefreshTimer;
+  ProviderSubscription<ProductionDraftPresenceState>? _presenceSubscription;
+  int _liveRefreshPauseDepth = 0;
+  bool _detailRefreshInFlight = false;
+  bool _selectedDaySummaryExpanded = false;
+  bool _productionProgressExpanded = false;
+  final Set<String> _collapsedTaskIds = <String>{};
+  final Set<String> _collapsedTaskProgressIds = <String>{};
+  final Set<String> _collapsedTaskAssignmentIds = <String>{};
+  final Set<String> _expandedTaskInfoIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _startPresenceListener();
+    _startLiveRefreshTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant ProductionPlanWorkspaceScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.planId != widget.planId) {
+      _startPresenceListener();
+      _startLiveRefreshTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _presenceSubscription?.close();
+    _liveRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _toggleTaskDisclosure(Set<String> taskIds, String taskId) {
+    final normalizedTaskId = taskId.trim();
+    if (normalizedTaskId.isEmpty) {
+      return;
+    }
+    setState(() {
+      if (!taskIds.add(normalizedTaskId)) {
+        taskIds.remove(normalizedTaskId);
+      }
+    });
+  }
+
+  void _startPresenceListener() {
+    _presenceSubscription?.close();
+    _presenceSubscription = null;
+    final planId = widget.planId.trim();
+    if (planId.isEmpty) {
+      return;
+    }
+
+    _presenceSubscription = ref.listenManual<ProductionDraftPresenceState>(
+      productionDraftPresenceProvider(planId),
+      (previous, next) {
+        if (!mounted || previous?.updatedAt == next.updatedAt) {
+          return;
+        }
+        unawaited(_triggerLivePlanDetailRefresh(reason: "presence_update"));
+      },
+    );
+  }
+
+  void _startLiveRefreshTimer() {
+    _liveRefreshTimer?.cancel();
+    final planId = widget.planId.trim();
+    if (planId.isEmpty) {
+      return;
+    }
+
+    _liveRefreshTimer = Timer.periodic(_liveRefreshInterval, (_) {
+      if (!mounted ||
+          widget.planId.trim().isEmpty ||
+          widget.planId.trim() != planId) {
+        return;
+      }
+
+      final presenceState = ref.read(productionDraftPresenceProvider(planId));
+      if (!presenceState.isConnected) {
+        return;
+      }
+
+      unawaited(_triggerLivePlanDetailRefresh(reason: "presence_timer"));
+    });
+  }
+
+  Future<void> _triggerLivePlanDetailRefresh({required String reason}) async {
+    final planId = widget.planId.trim();
+    if (planId.isEmpty || !mounted) {
+      return;
+    }
+
+    if (_shouldSkipAutomaticRefresh(reason)) {
+      return;
+    }
+
+    if (_detailRefreshInFlight) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": planId,
+          "reason": reason,
+          "skipReason": "detail_refresh_in_flight",
+        },
+      );
+      return;
+    }
+
+    final currentDetailState = ref.read(productionPlanDetailProvider(planId));
+    if (currentDetailState.isLoading) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": planId,
+          "reason": reason,
+          "skipReason": "detail_provider_loading",
+        },
+      );
+      return;
+    }
+
+    _detailRefreshInFlight = true;
+    AppDebug.log(
+      _logTag,
+      _logLiveRefreshStart,
+      extra: {"planId": planId, "reason": reason},
+    );
+    try {
+      final _ = await ref.refresh(productionPlanDetailProvider(planId).future);
+      if (!mounted) {
+        return;
+      }
+      if (reason == "manual_button" || reason == "pull_to_refresh") {
+        ref.invalidate(productionPlansProvider);
+      }
+    } catch (error) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshFailure,
+        extra: {
+          "planId": planId,
+          "reason": reason,
+          "error": error.toString(),
+          "nextAction":
+              "Keep current detail data and retry from manual refresh",
+        },
+      );
+    } finally {
+      _detailRefreshInFlight = false;
+    }
+  }
+
+  bool _shouldSkipAutomaticRefresh(String reason) {
+    if (reason == "manual_button" || reason == "pull_to_refresh") {
+      return false;
+    }
+
+    if (_liveRefreshPauseDepth > 0) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": widget.planId.trim(),
+          "reason": reason,
+          "skipReason": "workspace_modal_or_mutation_active",
+        },
+      );
+      return true;
+    }
+
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext != null && focusedContext.widget is EditableText) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": widget.planId.trim(),
+          "reason": reason,
+          "skipReason": "text_input_active",
+        },
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<T> _withLiveRefreshPaused<T>(Future<T> Function() action) async {
+    _liveRefreshPauseDepth += 1;
+    try {
+      return await action();
+    } finally {
+      _liveRefreshPauseDepth = math.max(0, _liveRefreshPauseDepth - 1);
+    }
+  }
 
   void _showSnackSafe(String message) {
     if (!mounted) {
       return;
     }
     _showSnack(context, message);
+  }
+
+  void _toggleCalendarVisibility() {
+    final calendarVisible = _calendarMode != _WorkspaceCalendarMode.day;
+    final nextMode = calendarVisible
+        ? _WorkspaceCalendarMode.day
+        : (_lastExpandedCalendarMode == _WorkspaceCalendarMode.day
+              ? _WorkspaceCalendarMode.month
+              : _lastExpandedCalendarMode);
+    AppDebug.log(
+      _logTag,
+      _logCalendarToggle,
+      extra: {
+        "planId": widget.planId,
+        "calendarVisible": !calendarVisible,
+        "mode": nextMode.name,
+      },
+    );
+    setState(() {
+      if (_calendarMode != _WorkspaceCalendarMode.day) {
+        _lastExpandedCalendarMode = _calendarMode;
+      }
+      _calendarMode = nextMode;
+    });
+  }
+
+  void _updateCalendarMode(_WorkspaceCalendarMode mode) {
+    if (_calendarMode == mode) {
+      return;
+    }
+    AppDebug.log(
+      _logTag,
+      _logCalendarModeChanged,
+      extra: {"planId": widget.planId, "mode": mode.name},
+    );
+    setState(() {
+      _calendarMode = mode;
+      if (mode != _WorkspaceCalendarMode.day) {
+        _lastExpandedCalendarMode = mode;
+      }
+    });
+  }
+
+  String _resolveViewerEmail() {
+    final profile = ref.read(userProfileProvider).valueOrNull;
+    final session = ref.read(authSessionProvider);
+    final directEmail = (profile?.email ?? "").trim();
+    if (directEmail.isNotEmpty) {
+      return directEmail;
+    }
+    return (session?.user.email ?? "").trim();
+  }
+
+  Future<void> _downloadProgressReport({required String routePath}) async {
+    try {
+      final report = await ref
+          .read(productionPlanActionsProvider)
+          .fetchPlanProgressReport(planId: widget.planId, routePath: routePath);
+      await downloadPlainTextFile(
+        fileName: report.fileName,
+        contents: report.html,
+        mimeType: "text/html",
+      );
+      _showSnackSafe(_downloadProgressSuccess);
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _downloadProgressFailure,
+        ),
+      );
+    }
+  }
+
+  Future<void> _downloadProofMedia({
+    required String taskId,
+    required String staffProfileId,
+    required DateTime workDate,
+    required List<ProductionTaskProgressProofRecord> proofs,
+  }) async {
+    final downloadableProofs = _downloadableWorkspaceProofs(proofs);
+    if (downloadableProofs.isEmpty) {
+      _showSnackSafe(_downloadProofMediaEmpty);
+      return;
+    }
+
+    try {
+      await ref
+          .read(productionPlanActionsProvider)
+          .auditProofDownload(
+            planId: widget.planId,
+            taskId: taskId,
+            staffId: staffProfileId,
+            workDate: workDate,
+            proofs: downloadableProofs,
+          );
+      final startedCount = await downloadRemoteFiles(
+        files: [
+          for (final entry in downloadableProofs.asMap().entries)
+            RemoteFileDownloadDescriptor(
+              url: entry.value.url,
+              fileName: _workspaceProofDownloadFileName(entry.value, entry.key),
+            ),
+        ],
+      );
+      if (startedCount <= 0) {
+        throw StateError(_downloadProofMediaFailure);
+      }
+      final suffix = startedCount == 1 ? "file" : "files";
+      _showSnackSafe("Started download for $startedCount proof media $suffix.");
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _downloadProofMediaFailure,
+        ),
+      );
+    }
+  }
+
+  Future<void> _emailProgressReport({required String routePath}) async {
+    final toEmail = await showProductionProgressReportEmailDialog(
+      context,
+      initialEmail: _resolveViewerEmail(),
+    );
+    if (toEmail == null || toEmail.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final response = await ref
+          .read(productionPlanActionsProvider)
+          .emailPlanProgressReport(
+            planId: widget.planId,
+            toEmail: toEmail.trim(),
+            routePath: routePath,
+          );
+      _showSnackSafe("${response.message} to ${response.toEmail}.");
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _emailProgressFailure,
+        ),
+      );
+    }
+  }
+
+  Future<void> _copyProgressReportLink({required String routePath}) async {
+    final toEmail = await showProductionProgressReportLinkDialog(
+      context,
+      initialEmail: _resolveViewerEmail(),
+    );
+    if (toEmail == null || toEmail.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      final report = await ref
+          .read(productionPlanActionsProvider)
+          .fetchPlanProgressReport(
+            planId: widget.planId,
+            routePath: routePath,
+            toEmail: toEmail.trim(),
+          );
+      await Clipboard.setData(ClipboardData(text: report.reportUrl));
+      _showSnackSafe("$_copyProgressLinkSuccess for ${toEmail.trim()}.");
+    } catch (error) {
+      _showSnackSafe(
+        _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: _copyProgressLinkFailure,
+        ),
+      );
+    }
   }
 
   Future<bool> _confirmAction({
@@ -311,10 +898,23 @@ class _ProductionPlanWorkspaceScreenState
   Widget build(BuildContext context) {
     AppDebug.log(_logTag, _logBuild, extra: {"planId": widget.planId});
     final detailAsync = ref.watch(productionPlanDetailProvider(widget.planId));
+    final cachedDetail = ref.watch(
+      productionPlanDetailSnapshotProvider.select(
+        (snapshots) => snapshots[widget.planId],
+      ),
+    );
+    final displayDetailAsync =
+        detailAsync.valueOrNull == null && cachedDetail != null
+        ? AsyncValue<ProductionPlanDetail>.data(cachedDetail)
+        : detailAsync;
+    final isRefreshingDetail =
+        detailAsync.isLoading &&
+        (detailAsync.valueOrNull != null || cachedDetail != null);
     final staffAsync = ref.watch(productionStaffProvider);
     final session = ref.watch(authSessionProvider);
     final profileAsync = ref.watch(userProfileProvider);
-    final profileRole = profileAsync.valueOrNull?.role ?? "";
+    final profile = profileAsync.valueOrNull;
+    final profileRole = profile?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
     final presenceState = ref.watch(
       productionDraftPresenceProvider(widget.planId),
@@ -345,20 +945,19 @@ class _ProductionPlanWorkspaceScreenState
             tooltip: _refreshTooltip,
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              ref.invalidate(productionPlanDetailProvider(widget.planId));
+              unawaited(_triggerLivePlanDetailRefresh(reason: "manual_button"));
             },
           ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          final refreshed = ref.refresh(
-            productionPlanDetailProvider(widget.planId).future,
-          );
-          await refreshed;
+          await _triggerLivePlanDetailRefresh(reason: "pull_to_refresh");
         },
-        child: detailAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
+        child: displayDetailAsync.when(
+          skipError: cachedDetail != null,
+          skipLoadingOnReload: true,
+          loading: () => const ProductionLoadingState(),
           error: (error, _) => Center(
             child: Padding(
               padding: const EdgeInsets.all(_pagePadding),
@@ -379,13 +978,26 @@ class _ProductionPlanWorkspaceScreenState
               ...detail.staffProfiles,
             ];
             final staffMap = _buildStaffMap(staffList);
+            final currentUserId = profile?.id.trim();
+            final currentUserEmail = profile?.email.trim();
+            final resolvedUserId =
+                currentUserId != null && currentUserId.isNotEmpty
+                ? currentUserId
+                : (session?.user.id ?? "").trim();
+            final resolvedUserEmail =
+                currentUserEmail != null && currentUserEmail.isNotEmpty
+                ? currentUserEmail
+                : (session?.user.email ?? "").trim();
             final selfStaffRole = _resolveSelfStaffRole(
               staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+              userId: resolvedUserId,
+              userEmail: resolvedUserEmail,
+              fallbackStaffRole: profile?.staffRole ?? session?.user.staffRole,
             );
             final selfStaffId = _resolveSelfStaffId(
               staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+              userId: resolvedUserId,
+              userEmail: resolvedUserEmail,
             );
             final canManageCalendar = _canManageCalendar(
               actorRole: actorRole,
@@ -401,12 +1013,14 @@ class _ProductionPlanWorkspaceScreenState
               actorRole: actorRole,
               staffRole: selfStaffRole,
             );
+            final canDownloadProofMedia = _canDownloadProofMedia(
+              actorRole: actorRole,
+              staffRole: selfStaffRole,
+            );
             final canManageTaskAttendance = _canManageTaskAttendance(
               actorRole: actorRole,
               staffRole: selfStaffRole,
             );
-            final canManageOwnAttendance =
-                actorRole == "staff" && selfStaffId.trim().isNotEmpty;
             final selectedDay = _selectedDay ?? _resolveInitialDay(detail.plan);
             final visibleMonth = _visibleMonth ?? _firstDayOfMonth(selectedDay);
             final planUnitsResponse = ref
@@ -421,6 +1035,10 @@ class _ProductionPlanWorkspaceScreenState
               plan: detail.plan,
               planUnitsResponse: planUnitsResponse,
             );
+            // WHY: Keep the agenda as the default landing view while still
+            // letting the user reopen the same calendar overview on demand.
+            final showCalendarOverview =
+                _calendarMode != _WorkspaceCalendarMode.day;
             final tasksForDay = _tasksForDay(detail.tasks, selectedDay);
             final rowsForDay = _rowsForDay(detail.timelineRows, selectedDay);
             final phaseById = {
@@ -447,25 +1065,31 @@ class _ProductionPlanWorkspaceScreenState
                 productAsync?.valueOrNull?.name.trim().isNotEmpty == true
                 ? productAsync!.valueOrNull!.name.trim()
                 : inferredProductName;
-            final currentUserId = profileAsync.valueOrNull?.id.trim();
             final currentUserName = profileAsync.valueOrNull?.name.trim();
-            final currentUserEmail = profileAsync.valueOrNull?.email.trim();
             final currentAccountRole = profileRole.trim();
             final currentViewer = ProductionDraftPresenceViewer(
-              userId: (currentUserId != null && currentUserId.isNotEmpty)
-                  ? currentUserId
-                  : (session?.user.id ?? "").trim(),
+              userId: resolvedUserId,
               displayName:
                   (currentUserName != null && currentUserName.isNotEmpty)
                   ? currentUserName
                   : (session?.user.name ?? "").trim(),
-              email: (currentUserEmail != null && currentUserEmail.isNotEmpty)
-                  ? currentUserEmail
-                  : (session?.user.email ?? "").trim(),
+              email: resolvedUserEmail,
               accountRole: currentAccountRole.isNotEmpty
                   ? currentAccountRole
                   : (session?.user.role ?? "").trim(),
               staffRole: selfStaffRole,
+              enteredAt: null,
+              lastSeenAt: null,
+              leftAt: null,
+              activeSocketCount: 0,
+              currentSessionSeconds: 0,
+              durationSeconds: 0,
+              todaySeconds: 0,
+              weekSeconds: 0,
+              monthSeconds: 0,
+              yearSeconds: 0,
+              totalSeconds: 0,
+              sessionCount: 0,
             );
             void selectDay(DateTime next) {
               AppDebug.log(
@@ -479,317 +1103,696 @@ class _ProductionPlanWorkspaceScreenState
               });
             }
 
-            return ListView(
-              padding: const EdgeInsets.all(_pagePadding),
-              children: [
-                _WorkspaceSummaryCard(
-                  detail: detail,
-                  plan: detail.plan,
-                  workScopeSummary: workScopeSummary,
-                  selectedEstateName: selectedEstateName,
-                  selectedProductName: selectedProductName,
-                  selectedDay: selectedDay,
-                  scheduledTaskCount: tasksForDay.length,
-                  timelineRows: detail.timelineRows,
-                  onOpenDraft: () {
-                    context.push(
-                      productionPlanDraftStudioPath(planId: widget.planId),
-                    );
-                  },
-                  onViewInsights: () {
-                    context.push(productionPlanInsightsPath(widget.planId));
-                  },
-                  onReturnToDraft:
-                      canManageLifecycle &&
-                          (detail.plan.status == "active" ||
-                              detail.plan.status == "paused")
-                      ? () async {
-                          final confirmed = await _confirmAction(
-                            title: _returnToDraftConfirmTitle,
-                            message: _returnToDraftConfirmMessage,
-                            confirmLabel: _returnToDraftConfirmLabel,
-                          );
-                          if (!confirmed) {
-                            return;
-                          }
-                          try {
-                            await ref
-                                .read(productionPlanActionsProvider)
-                                .updatePlanStatus(
-                                  planId: widget.planId,
-                                  status: "draft",
-                                );
-                            if (!mounted || !this.context.mounted) {
-                              return;
-                            }
-                            setState(() {
-                              _visibleMonth = null;
-                              _selectedDay = null;
-                            });
-                            _showSnackSafe(_returnToDraftSuccess);
-                            GoRouter.of(this.context).go(
-                              productionPlanDraftStudioPath(
-                                planId: widget.planId,
-                              ),
-                            );
-                          } catch (error) {
-                            _showSnackSafe(
-                              _resolveProductionWorkspaceErrorMessage(
-                                error,
-                                fallback: _returnToDraftFailure,
-                              ),
-                            );
-                          }
-                        }
-                      : null,
-                ),
-                const SizedBox(height: _sectionSpacing),
-                ProductionPresenceBanner(
-                  currentViewer: currentViewer,
-                  remoteViewers: presenceState.viewers,
-                  isConnected: presenceState.isConnected,
-                  isSharedRoom: widget.planId.trim().isNotEmpty,
-                  errorMessage: presenceState.error,
-                ),
-                const SizedBox(height: _sectionSpacing),
-                ProductionSectionHeader(
-                  title: _workspaceTitle,
-                  subtitle:
-                      "$_workspaceSubtitle Working on ${workScopeSummary.countLabel}.",
-                ),
-                const SizedBox(height: _cardSpacing),
-                _WorkspaceCalendarModeBar(
-                  mode: _calendarMode,
-                  onModeChanged: (mode) {
-                    setState(() {
-                      _calendarMode = mode;
-                    });
-                  },
-                ),
-                const SizedBox(height: _cardSpacing),
-                switch (_calendarMode) {
-                  _WorkspaceCalendarMode.day => const SizedBox.shrink(),
-                  _WorkspaceCalendarMode.month => _MonthCalendarCard(
-                    month: visibleMonth,
-                    selectedDay: selectedDay,
-                    plan: detail.plan,
-                    workScopeSummary: workScopeSummary,
-                    tasks: detail.tasks,
-                    timelineRows: detail.timelineRows,
-                    onPreviousMonth: () {
-                      final next = DateTime(
-                        visibleMonth.year,
-                        visibleMonth.month - 1,
-                        1,
-                      );
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onNextMonth: () {
-                      final next = DateTime(
-                        visibleMonth.year,
-                        visibleMonth.month + 1,
-                        1,
-                      );
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onToday: () {
-                      final next = _resolveInitialDay(detail.plan);
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(next)},
-                      );
-                      setState(() {
-                        _selectedDay = next;
-                        _visibleMonth = _firstDayOfMonth(next);
-                      });
-                    },
-                    onSelectDay: (day) {
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(day)},
-                      );
-                      setState(() {
-                        _selectedDay = day;
-                        _visibleMonth = _firstDayOfMonth(day);
-                      });
-                    },
-                  ),
-                  _WorkspaceCalendarMode.year => _YearCalendarCard(
-                    year: visibleMonth.year,
-                    selectedDay: selectedDay,
-                    workScopeSummary: workScopeSummary,
-                    tasks: detail.tasks,
-                    onPreviousYear: () {
-                      final next = DateTime(visibleMonth.year - 1, 1, 1);
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onNextYear: () {
-                      final next = DateTime(visibleMonth.year + 1, 1, 1);
-                      AppDebug.log(
-                        _logTag,
-                        _logMonthChanged,
-                        extra: {"month": _monthTitle(next)},
-                      );
-                      setState(() {
-                        _visibleMonth = next;
-                      });
-                    },
-                    onToday: () {
-                      final next = _resolveInitialDay(detail.plan);
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(next)},
-                      );
-                      setState(() {
-                        _selectedDay = next;
-                        _visibleMonth = _firstDayOfMonth(next);
-                      });
-                    },
-                    onSelectDay: (day) {
-                      AppDebug.log(
-                        _logTag,
-                        _logDayChanged,
-                        extra: {"day": formatDateInput(day)},
-                      );
-                      setState(() {
-                        _selectedDay = day;
-                        _visibleMonth = _firstDayOfMonth(day);
-                        _calendarMode = _WorkspaceCalendarMode.month;
-                      });
-                    },
-                  ),
-                },
-                if (_calendarMode != _WorkspaceCalendarMode.day)
-                  const SizedBox(height: _sectionSpacing),
-                _SelectedDaySectionHeader(
-                  title: _selectedDayTitle,
-                  subtitle: _formatSelectedDaySubtitle(
-                    day: selectedDay,
-                    taskCount: tasksForDay.length,
-                    logCount: rowsForDay.length,
-                    workScopeSummary: workScopeSummary,
-                  ),
-                  showDayNavigation:
-                      _calendarMode == _WorkspaceCalendarMode.day,
-                  onPreviousDay: () {
-                    selectDay(selectedDay.subtract(const Duration(days: 1)));
-                  },
-                  onToday: () {
-                    selectDay(_resolveInitialDay(detail.plan));
-                  },
-                  onNextDay: () {
-                    selectDay(selectedDay.add(const Duration(days: 1)));
-                  },
-                ),
-                const SizedBox(height: _cardSpacing),
-                _SelectedDayMetricsRow(tasks: tasksForDay, rows: rowsForDay),
-                const SizedBox(height: _cardSpacing),
-                if (tasksForDay.isEmpty)
-                  const ProductionEmptyState(
-                    title: _selectedDayEmptyTitle,
-                    message: _selectedDayEmptyMessage,
-                  )
-                else
-                  ...tasksForDay.map((task) {
-                    final rowsForTask = rowsForDay
-                        .where((row) => row.taskId == task.id)
-                        .toList();
-                    final assignedStaffIdsForTask = _resolveAssignedStaffIds(
-                      task,
-                    );
-                    final canLogProgressForTask =
-                        assignedStaffIdsForTask.isNotEmpty &&
-                        (canManageCalendar ||
-                            (canSubmitOwnProgress &&
-                                assignedStaffIdsForTask.contains(selfStaffId)));
-                    final progressEnabledStaffIds = canManageCalendar
-                        ? assignedStaffIdsForTask.toSet()
-                        : (canSubmitOwnProgress &&
-                              selfStaffId.trim().isNotEmpty &&
-                              assignedStaffIdsForTask.contains(selfStaffId))
-                        ? <String>{selfStaffId}
-                        : <String>{};
-                    final attendanceActions = StaffAttendanceActions(ref);
+            final planStartDay = _normalizeToLocalDay(
+              detail.plan.startDate ?? selectedDay,
+            );
+            final planEndDay = _normalizeToLocalDay(
+              detail.plan.endDate ?? selectedDay,
+            );
+            final selectedDayOnly = _normalizeToLocalDay(selectedDay);
+            final canCreateTaskForSelectedDay =
+                !selectedDayOnly.isBefore(planStartDay) &&
+                !selectedDayOnly.isAfter(planEndDay);
+            final phasesForSelectedDay = detail.phases.where((phase) {
+              final phaseStart = _normalizeToLocalDay(
+                phase.startDate ?? detail.plan.startDate ?? selectedDay,
+              );
+              final phaseEnd = _normalizeToLocalDay(
+                phase.endDate ?? detail.plan.endDate ?? selectedDay,
+              );
+              return !selectedDayOnly.isBefore(phaseStart) &&
+                  !selectedDayOnly.isAfter(phaseEnd);
+            }).toList();
 
-                    Future<_ClockOutAuditSubmission?>
-                    collectClockOutAuditForTaskStaff(
-                      String staffProfileId,
-                    ) async {
-                      final input = await _showWorkspaceLogDialog(
-                        context,
-                        workDate: selectedDay,
-                        task: task,
-                        plan: detail.plan,
-                        timelineRows: detail.timelineRows,
-                        staffMap: staffMap,
-                        planUnitLabelById: planUnitLabelById,
-                        fallbackTotalUnits: workScopeSummary.totalUnits,
-                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
-                        attendanceRecords: detail.attendanceRecords,
-                        actorStaffId: staffProfileId,
-                        canPickAnyAssignedStaff: false,
-                        canManageAttendance: false,
-                        onSetAttendanceForStaff: null,
-                        onQuickClockInForStaff: null,
-                        onQuickClockOutForStaff: null,
-                        dialogTitle: _attendanceClockOutProgressTitle,
-                        saveLabel: _attendanceClockOutProgressSaveLabel,
-                        workflowHintOverride: _attendanceClockOutProgressHint,
-                        requireCompletedActual: true,
-                        requiredActualMessage:
-                            _attendanceClockOutActualRequired,
-                      );
-                      if (input == null) {
-                        return null;
-                      }
-                      final auditSubmission = _buildClockOutAuditSubmission(
-                        input: input,
-                        workDate: selectedDay,
-                        task: task,
+            Future<void> createTaskForSelectedDay() async {
+              if (!canCreateTaskForSelectedDay) {
+                _showSnackSafe(_taskCreateOutsidePlanMessage);
+                return;
+              }
+              final dialogPhases = phasesForSelectedDay.isNotEmpty
+                  ? phasesForSelectedDay
+                  : detail.phases;
+              if (dialogPhases.isEmpty) {
+                _showSnackSafe(_taskCreateFailure);
+                return;
+              }
+              final input = await _withLiveRefreshPaused(
+                () => _showCreateWorkspaceTaskDialog(
+                  context,
+                  selectedDay: selectedDay,
+                  phases: dialogPhases,
+                  staffList: staffList,
+                  workScopeSummary: workScopeSummary,
+                  initialPhaseId: tasksForDay.isNotEmpty
+                      ? tasksForDay.first.phaseId
+                      : dialogPhases.first.id,
+                  initialRoleRequired: tasksForDay.isNotEmpty
+                      ? tasksForDay.first.roleRequired
+                      : "",
+                ),
+              );
+              if (input == null) {
+                return;
+              }
+
+              AppDebug.log(
+                _logTag,
+                _logCreateTask,
+                extra: {
+                  "planId": widget.planId,
+                  "phaseId": input.phaseId,
+                  "title": input.title,
+                  "assignedCount": input.assignedStaffProfileIds.length,
+                },
+              );
+
+              try {
+                await _withLiveRefreshPaused(() async {
+                  await Future<void>.delayed(const Duration(milliseconds: 120));
+                  await ref
+                      .read(productionPlanActionsProvider)
+                      .createTask(
                         planId: widget.planId,
-                        timelineRows: detail.timelineRows,
-                        staffMap: staffMap,
-                        planUnitLabelById: planUnitLabelById,
-                        fallbackTotalUnits: workScopeSummary.totalUnits,
-                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
-                        planContextText:
-                            "${detail.plan.title} ${detail.plan.notes}",
-                      );
-                      AppDebug.log(
-                        _logTag,
-                        _logProgress,
-                        extra: {
-                          "planId": widget.planId,
-                          "taskId": task.id,
-                          "staffId": input.staffId ?? staffProfileId,
-                          "source": "clock_out_gate",
+                        payload: {
+                          "phaseId": input.phaseId,
+                          "title": input.title,
+                          "roleRequired": input.roleRequired,
+                          "requiredHeadcount": input.requiredHeadcount,
+                          "weight": input.weight,
+                          "assignedStaffProfileIds":
+                              input.assignedStaffProfileIds,
+                          "instructions": input.instructions,
+                          "startDate": input.startDate
+                              .toUtc()
+                              .toIso8601String(),
+                          "dueDate": input.dueDate.toUtc().toIso8601String(),
+                          "taskType": "event",
                         },
                       );
-                      try {
+                });
+                _showSnackSafe(_taskCreateSuccess);
+              } catch (error) {
+                _showSnackSafe(
+                  _resolveProductionWorkspaceErrorMessage(
+                    error,
+                    fallback: _taskCreateFailure,
+                  ),
+                );
+              }
+            }
+
+            return ProductionRefreshOverlay(
+              isRefreshing: isRefreshingDetail,
+              child: ListView(
+                padding: const EdgeInsets.all(_pagePadding),
+                children: [
+                  _WorkspaceSummaryCard(
+                    detail: detail,
+                    plan: detail.plan,
+                    workScopeSummary: workScopeSummary,
+                    selectedEstateName: selectedEstateName,
+                    selectedProductName: selectedProductName,
+                    selectedDay: selectedDay,
+                    scheduledTaskCount: tasksForDay.length,
+                    timelineRows: detail.timelineRows,
+                    onOpenDraft: () {
+                      context.push(
+                        productionPlanDraftStudioPath(planId: widget.planId),
+                      );
+                    },
+                    onViewInsights: () {
+                      context.push(productionPlanInsightsPath(widget.planId));
+                    },
+                    onDownloadProgress: () async {
+                      await _downloadProgressReport(
+                        routePath: productionPlanDetailPath(widget.planId),
+                      );
+                    },
+                    onEmailProgress: () async {
+                      await _emailProgressReport(
+                        routePath: productionPlanDetailPath(widget.planId),
+                      );
+                    },
+                    onCopyProgressLink: () async {
+                      await _copyProgressReportLink(
+                        routePath: productionPlanDetailPath(widget.planId),
+                      );
+                    },
+                    onReturnToDraft:
+                        canManageLifecycle &&
+                            (detail.plan.status == "active" ||
+                                detail.plan.status == "paused")
+                        ? () async {
+                            final confirmed = await _confirmAction(
+                              title: _returnToDraftConfirmTitle,
+                              message: _returnToDraftConfirmMessage,
+                              confirmLabel: _returnToDraftConfirmLabel,
+                            );
+                            if (!confirmed) {
+                              return;
+                            }
+                            try {
+                              await ref
+                                  .read(productionPlanActionsProvider)
+                                  .updatePlanStatus(
+                                    planId: widget.planId,
+                                    status: "draft",
+                                  );
+                              if (!mounted || !this.context.mounted) {
+                                return;
+                              }
+                              setState(() {
+                                _visibleMonth = null;
+                                _selectedDay = null;
+                              });
+                              _showSnackSafe(_returnToDraftSuccess);
+                              GoRouter.of(this.context).go(
+                                productionPlanDraftStudioPath(
+                                  planId: widget.planId,
+                                ),
+                              );
+                            } catch (error) {
+                              _showSnackSafe(
+                                _resolveProductionWorkspaceErrorMessage(
+                                  error,
+                                  fallback: _returnToDraftFailure,
+                                ),
+                              );
+                            }
+                          }
+                        : null,
+                  ),
+                  const SizedBox(height: _sectionSpacing),
+                  _WorkspaceCalendarHeader(
+                    title: _workspaceTitle,
+                    subtitle: _workspaceSubtitle,
+                    calendarVisible: showCalendarOverview,
+                    onToggleCalendar: _toggleCalendarVisibility,
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  if (showCalendarOverview) ...[
+                    _WorkspaceCalendarModeBar(
+                      mode: _calendarMode,
+                      onModeChanged: _updateCalendarMode,
+                    ),
+                    const SizedBox(height: _cardSpacing),
+                    switch (_calendarMode) {
+                      _WorkspaceCalendarMode.day => const SizedBox.shrink(),
+                      _WorkspaceCalendarMode.month => _MonthCalendarCard(
+                        month: visibleMonth,
+                        selectedDay: selectedDay,
+                        plan: detail.plan,
+                        workScopeSummary: workScopeSummary,
+                        tasks: detail.tasks,
+                        timelineRows: detail.timelineRows,
+                        onPreviousMonth: () {
+                          final next = DateTime(
+                            visibleMonth.year,
+                            visibleMonth.month - 1,
+                            1,
+                          );
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onNextMonth: () {
+                          final next = DateTime(
+                            visibleMonth.year,
+                            visibleMonth.month + 1,
+                            1,
+                          );
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onToday: () {
+                          final next = _resolveInitialDay(detail.plan);
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(next)},
+                          );
+                          setState(() {
+                            _selectedDay = next;
+                            _visibleMonth = _firstDayOfMonth(next);
+                          });
+                        },
+                        onSelectDay: (day) {
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(day)},
+                          );
+                          setState(() {
+                            _selectedDay = day;
+                            _visibleMonth = _firstDayOfMonth(day);
+                          });
+                        },
+                      ),
+                      _WorkspaceCalendarMode.year => _YearCalendarCard(
+                        year: visibleMonth.year,
+                        selectedDay: selectedDay,
+                        workScopeSummary: workScopeSummary,
+                        tasks: detail.tasks,
+                        onPreviousYear: () {
+                          final next = DateTime(visibleMonth.year - 1, 1, 1);
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onNextYear: () {
+                          final next = DateTime(visibleMonth.year + 1, 1, 1);
+                          AppDebug.log(
+                            _logTag,
+                            _logMonthChanged,
+                            extra: {"month": _monthTitle(next)},
+                          );
+                          setState(() {
+                            _visibleMonth = next;
+                          });
+                        },
+                        onToday: () {
+                          final next = _resolveInitialDay(detail.plan);
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(next)},
+                          );
+                          setState(() {
+                            _selectedDay = next;
+                            _visibleMonth = _firstDayOfMonth(next);
+                          });
+                        },
+                        onSelectDay: (day) {
+                          AppDebug.log(
+                            _logTag,
+                            _logDayChanged,
+                            extra: {"day": formatDateInput(day)},
+                          );
+                          setState(() {
+                            _selectedDay = day;
+                            _visibleMonth = _firstDayOfMonth(day);
+                            _calendarMode = _WorkspaceCalendarMode.month;
+                            _lastExpandedCalendarMode =
+                                _WorkspaceCalendarMode.month;
+                          });
+                        },
+                      ),
+                    },
+                    const SizedBox(height: _sectionSpacing),
+                  ],
+                  _SelectedDaySectionHeader(
+                    title: _selectedDayTitle,
+                    subtitle: _formatSelectedDaySubtitle(
+                      day: selectedDay,
+                      taskCount: tasksForDay.length,
+                      logCount: rowsForDay.length,
+                      workScopeSummary: workScopeSummary,
+                    ),
+                    showDayNavigation:
+                        _calendarMode == _WorkspaceCalendarMode.day,
+                    onPreviousDay: () {
+                      selectDay(selectedDay.subtract(const Duration(days: 1)));
+                    },
+                    onToday: () {
+                      selectDay(_resolveInitialDay(detail.plan));
+                    },
+                    onNextDay: () {
+                      selectDay(selectedDay.add(const Duration(days: 1)));
+                    },
+                    onCreateTask: canManageCalendar
+                        ? createTaskForSelectedDay
+                        : null,
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  _SelectedDayMetricsRow(
+                    plan: detail.plan,
+                    selectedDay: selectedDay,
+                    workScopeSummary: workScopeSummary,
+                    tasks: tasksForDay,
+                    rows: rowsForDay,
+                    timelineRows: detail.timelineRows,
+                    taskDayLedgers: detail.taskDayLedgers,
+                    attendanceRecords: detail.attendanceRecords,
+                    isSummaryExpanded: _selectedDaySummaryExpanded,
+                    isProgressExpanded: _productionProgressExpanded,
+                    onToggleSummaryExpanded: () {
+                      setState(() {
+                        _selectedDaySummaryExpanded =
+                            !_selectedDaySummaryExpanded;
+                      });
+                    },
+                    onToggleProgressExpanded: () {
+                      setState(() {
+                        _productionProgressExpanded =
+                            !_productionProgressExpanded;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  ProductionPresenceBanner(
+                    currentViewer: currentViewer,
+                    remoteViewers: presenceState.viewers,
+                    isConnected: presenceState.isConnected,
+                    isSharedRoom: widget.planId.trim().isNotEmpty,
+                    errorMessage: presenceState.error,
+                    planId: widget.planId,
+                    snapshotAt: presenceState.updatedAt,
+                    onOpenStats: widget.planId.trim().isEmpty
+                        ? null
+                        : () => context.push(
+                            productionPlanPresenceStatsPath(widget.planId),
+                          ),
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  if (tasksForDay.isEmpty)
+                    const ProductionEmptyState(
+                      title: _selectedDayEmptyTitle,
+                      message: _selectedDayEmptyMessage,
+                    )
+                  else
+                    ...tasksForDay.map((task) {
+                      final rowsForTask = rowsForDay
+                          .where((row) => row.taskId == task.id)
+                          .toList();
+                      final assignedStaffIdsForTask = _resolveAssignedStaffIds(
+                        task,
+                      );
+                      final canLogProgressForTask =
+                          assignedStaffIdsForTask.isNotEmpty &&
+                          (canManageCalendar ||
+                              (canSubmitOwnProgress &&
+                                  assignedStaffIdsForTask.contains(
+                                    selfStaffId,
+                                  )));
+                      final progressEnabledStaffIds = canManageCalendar
+                          ? assignedStaffIdsForTask.toSet()
+                          : (canSubmitOwnProgress &&
+                                selfStaffId.trim().isNotEmpty &&
+                                assignedStaffIdsForTask.contains(selfStaffId))
+                          ? <String>{selfStaffId}
+                          : <String>{};
+                      final attendanceActions = StaffAttendanceActions(ref);
+
+                      Future<ProductionAttendanceRecord?>
+                      setAttendanceForTaskStaff(
+                        String staffProfileId,
+                        ProductionAttendanceRecord? existingAttendance,
+                      ) async {
+                        final staffLabel = _resolveStaffDisplayLabel(
+                          staffProfileId,
+                          staffMap,
+                          fallbackRole: task.roleRequired,
+                        );
+                        final input = await _showAttendanceDialog(
+                          context,
+                          staffLabel: staffLabel,
+                          taskTitle: task.title,
+                          workDate: selectedDay,
+                          existingAttendance: existingAttendance,
+                        );
+                        if (input == null) {
+                          return null;
+                        }
+                        try {
+                          final note = "Updated from production workspace";
+                          StaffAttendanceRecord attendanceRecord;
+                          final existingClockInAt = existingAttendance
+                              ?.clockInAt
+                              ?.toLocal();
+                          final existingClockOutAt = existingAttendance
+                              ?.clockOutAt
+                              ?.toLocal();
+                          final shouldSetClockOutFirst =
+                              existingAttendance != null &&
+                              input.clockOutAt != null &&
+                              existingClockOutAt != null &&
+                              input.clockInAt.isAfter(existingClockOutAt) &&
+                              !(existingClockInAt != null &&
+                                  input.clockOutAt!.isBefore(
+                                    existingClockInAt,
+                                  ));
+                          if (shouldSetClockOutFirst) {
+                            final updatedClockOut = await attendanceActions
+                                .clockOut(
+                                  staffProfileId: staffProfileId,
+                                  attendanceId: existingAttendance.id,
+                                  clockOutAt: input.clockOutAt,
+                                  workDate: selectedDay,
+                                  planId: widget.planId,
+                                  taskId: task.id,
+                                  notes: note,
+                                );
+                            if (!mounted || !context.mounted) {
+                              return null;
+                            }
+                            await requireAttendanceProofUpload(
+                              context: context,
+                              ref: ref,
+                              attendance: updatedClockOut,
+                              subjectLabel: staffLabel,
+                              taskLabel: task.title,
+                            );
+                            attendanceRecord = await attendanceActions.clockIn(
+                              staffProfileId: staffProfileId,
+                              attendanceId: updatedClockOut.id,
+                              clockInAt: input.clockInAt,
+                              workDate: selectedDay,
+                              planId: widget.planId,
+                              taskId: task.id,
+                              notes: note,
+                            );
+                          } else {
+                            attendanceRecord = await attendanceActions.clockIn(
+                              staffProfileId: staffProfileId,
+                              attendanceId: existingAttendance?.id,
+                              clockInAt: input.clockInAt,
+                              workDate: selectedDay,
+                              planId: widget.planId,
+                              taskId: task.id,
+                              notes: note,
+                            );
+                            if (input.clockOutAt != null) {
+                              attendanceRecord = await attendanceActions
+                                  .clockOut(
+                                    staffProfileId: staffProfileId,
+                                    attendanceId: attendanceRecord.id,
+                                    clockOutAt: input.clockOutAt,
+                                    workDate: selectedDay,
+                                    planId: widget.planId,
+                                    taskId: task.id,
+                                    notes: note,
+                                  );
+                              if (!mounted || !context.mounted) {
+                                return null;
+                              }
+                              attendanceRecord =
+                                  await requireAttendanceProofUpload(
+                                    context: context,
+                                    ref: ref,
+                                    attendance: attendanceRecord,
+                                    subjectLabel: staffLabel,
+                                    taskLabel: task.title,
+                                  );
+                            }
+                          }
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          _showSnackSafe(_attendanceUpdateSuccess);
+                          return _toProductionAttendanceRecord(
+                            attendanceRecord,
+                          );
+                        } catch (_) {
+                          _showSnackSafe(_attendanceUpdateFailure);
+                          return null;
+                        }
+                      }
+
+                      Future<ProductionAttendanceRecord?>
+                      quickClockInForTaskStaff(
+                        String staffProfileId,
+                        ProductionAttendanceRecord? existingAttendance,
+                      ) async {
+                        if (existingAttendance != null) {
+                          return null;
+                        }
+                        try {
+                          final clockInAt = _resolveQuickAttendanceTime(
+                            selectedDay,
+                          );
+                          final attendanceRecord = await attendanceActions
+                              .clockIn(
+                                staffProfileId: staffProfileId,
+                                clockInAt: clockInAt,
+                                workDate: selectedDay,
+                                planId: widget.planId,
+                                taskId: task.id,
+                                notes: "Clocked in from production workspace",
+                              );
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          _showSnackSafe(_attendanceQuickClockInSuccess);
+                          return _toProductionAttendanceRecord(
+                            attendanceRecord,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _attendanceUpdateFailure,
+                            ),
+                          );
+                          return null;
+                        }
+                      }
+
+                      Future<ProductionAttendanceRecord?>
+                      quickClockOutForTaskStaff(
+                        String staffProfileId,
+                        ProductionAttendanceRecord? existingAttendance,
+                      ) async {
+                        final openAttendance = existingAttendance;
+                        if (openAttendance == null ||
+                            openAttendance.clockOutAt != null) {
+                          return null;
+                        }
+                        final clockInAt = openAttendance.clockInAt?.toLocal();
+                        if (clockInAt == null) {
+                          return null;
+                        }
+                        try {
+                          final scopedWorkDate =
+                              (openAttendance.workDate ??
+                                      openAttendance.clockInAt)
+                                  ?.toLocal() ??
+                              selectedDay;
+                          final scopedPlanId =
+                              openAttendance.planId.trim().isNotEmpty
+                              ? openAttendance.planId
+                              : widget.planId;
+                          final scopedTaskId =
+                              openAttendance.taskId.trim().isNotEmpty
+                              ? openAttendance.taskId
+                              : task.id;
+                          final clockOutAt = _resolveQuickClockOutTime(
+                            workDate: scopedWorkDate,
+                            clockInAt: clockInAt,
+                          );
+                          final attendanceRecord = await attendanceActions
+                              .clockOut(
+                                staffProfileId: staffProfileId,
+                                attendanceId: openAttendance.id,
+                                clockOutAt: clockOutAt,
+                                workDate: scopedWorkDate,
+                                planId: scopedPlanId,
+                                taskId: scopedTaskId,
+                                notes: "Clocked out from production workspace",
+                              );
+                          if (!mounted || !context.mounted) {
+                            return null;
+                          }
+                          final attendanceWithProof =
+                              await requireAttendanceProofUpload(
+                                context: context,
+                                ref: ref,
+                                attendance: attendanceRecord,
+                                subjectLabel: _resolveStaffDisplayLabel(
+                                  staffProfileId,
+                                  staffMap,
+                                  fallbackRole: task.roleRequired,
+                                ),
+                                taskLabel: task.title,
+                              );
+                          ref.invalidate(
+                            productionPlanDetailProvider(widget.planId),
+                          );
+                          _showSnackSafe(_attendanceQuickClockOutSuccess);
+                          return _toProductionAttendanceRecord(
+                            attendanceWithProof,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _attendanceUpdateFailure,
+                            ),
+                          );
+                          return null;
+                        }
+                      }
+
+                      Future<void> resetTaskHistoryForStaff(
+                        String staffProfileId,
+                      ) async {
+                        final staffLabel = _resolveStaffDisplayLabel(
+                          staffProfileId,
+                          staffMap,
+                          fallbackRole: task.roleRequired,
+                        );
+                        final confirmed = await _confirmAction(
+                          title: _taskResetHistoryConfirmTitle,
+                          message:
+                              "This clears today’s clock-in, clock-out, proofs, and saved progress for $staffLabel on ${task.title}. Audit logs stay.",
+                          confirmLabel: _taskResetHistoryConfirmLabel,
+                        );
+                        if (!confirmed) {
+                          return;
+                        }
+                        AppDebug.log(
+                          _logTag,
+                          _logResetHistory,
+                          extra: {
+                            "planId": widget.planId,
+                            "taskId": task.id,
+                            "staffId": staffProfileId,
+                            "workDate": formatDateInput(selectedDay),
+                          },
+                        );
+                        try {
+                          final message = await ref
+                              .read(productionPlanActionsProvider)
+                              .resetTaskHistory(
+                                taskId: task.id,
+                                workDate: selectedDay,
+                                staffId: staffProfileId,
+                                planId: widget.planId,
+                                notes: "Reset from production workspace",
+                              );
+                          _showSnackSafe(
+                            message.trim().isNotEmpty
+                                ? message
+                                : _taskResetHistorySuccess,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _taskResetHistoryFailure,
+                            ),
+                          );
+                        }
+                      }
+
+                      Future<void> submitProgressInput(
+                        ProductionTaskLogProgressInput input,
+                      ) async {
                         await ref
                             .read(productionPlanActionsProvider)
                             .logTaskProgress(
@@ -797,739 +1800,581 @@ class _ProductionPlanWorkspaceScreenState
                               workDate: selectedDay,
                               staffId: input.staffId,
                               unitId: input.unitId,
+                              createNewEntry: input.createNewEntry,
+                              unitContribution: input.unitContribution,
                               actualPlots: input.actualPlots,
+                              activityType: input.activityType,
                               quantityActivityType: input.quantityActivityType,
+                              activityQuantity: input.activityQuantity,
                               quantityAmount: input.quantityAmount,
                               quantityUnit: input.quantityUnit,
+                              proofs: input.proofs,
                               delayReason: input.delayReason,
                               notes: input.notes,
                               planId: widget.planId,
                             );
-                        return auditSubmission;
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _taskProgressFailure,
-                          ),
-                        );
-                        return null;
                       }
-                    }
 
-                    Future<ProductionAttendanceRecord?>
-                    prepareClockOutProofReview({
-                      required ProductionAttendanceRecord attendance,
-                      required DateTime plannedClockOutAt,
-                      _ClockOutAuditSubmission? clockOutAuditSubmission,
-                    }) async {
-                      var proofReadyAttendance = attendance;
-                      if (!_attendanceHasProofAudit(attendance)) {
-                        if (clockOutAuditSubmission == null) {
-                          return null;
-                        }
-                        final updatedAttendance =
-                            await requireAttendanceProofUpload(
-                              context: context,
-                              ref: ref,
-                              attendance: _toStaffAttendanceRecord(attendance),
-                              subjectLabel:
-                                  clockOutAuditSubmission.proofSubjectLabel,
-                              taskLabel: clockOutAuditSubmission.proofTaskLabel,
-                              clockOutAuditPayload:
-                                  clockOutAuditSubmission.proofAuditPayload,
-                            );
-                        if (!context.mounted) {
-                          return null;
-                        }
-                        proofReadyAttendance = _toProductionAttendanceRecord(
-                          updatedAttendance,
-                        );
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                      }
-                      if (!context.mounted) {
-                        return null;
-                      }
-                      final shouldClockOut =
-                          await _showClockOutProofReviewDialog(
-                            context,
-                            taskTitle: task.title,
-                            workDate: selectedDay,
-                            plannedClockOutAt: plannedClockOutAt,
-                            attendance: proofReadyAttendance,
-                          );
-                      if (!context.mounted || !shouldClockOut) {
-                        return null;
-                      }
-                      return proofReadyAttendance;
-                    }
-
-                    Future<ProductionAttendanceRecord?>
-                    setAttendanceForTaskStaff(
-                      String staffProfileId,
-                      ProductionAttendanceRecord? existingAttendance,
-                    ) async {
-                      final staffLabel = _resolveStaffDisplayLabel(
-                        staffProfileId,
-                        staffMap,
-                        fallbackRole: task.roleRequired,
-                      );
-                      final input = await _showAttendanceDialog(
-                        context,
-                        staffLabel: staffLabel,
-                        taskTitle: task.title,
-                        workDate: selectedDay,
-                        existingAttendance: existingAttendance,
-                      );
-                      if (input == null) {
-                        return null;
-                      }
-                      final existingProofReady = _attendanceHasProofAudit(
-                        existingAttendance,
-                      );
-                      final clockOutAuditSubmission =
-                          input.clockOutAt != null && !existingProofReady
-                          ? await collectClockOutAuditForTaskStaff(
-                              staffProfileId,
-                            )
-                          : null;
-                      if (input.clockOutAt != null &&
-                          !existingProofReady &&
-                          clockOutAuditSubmission == null) {
-                        return null;
-                      }
-                      try {
-                        final note = "Updated from production workspace";
-                        StaffAttendanceRecord attendanceRecord;
-                        final existingClockInAt = existingAttendance?.clockInAt
-                            ?.toLocal();
-                        final existingClockOutAt = existingAttendance
-                            ?.clockOutAt
-                            ?.toLocal();
-                        final shouldSetClockOutFirst =
-                            existingAttendance != null &&
-                            input.clockOutAt != null &&
-                            existingClockOutAt != null &&
-                            input.clockInAt.isAfter(existingClockOutAt) &&
-                            !(existingClockInAt != null &&
-                                input.clockOutAt!.isBefore(existingClockInAt));
-                        if (shouldSetClockOutFirst) {
-                          final proofReadyAttendance =
-                              await prepareClockOutProofReview(
-                                attendance: existingAttendance,
-                                plannedClockOutAt: input.clockOutAt!,
-                                clockOutAuditSubmission:
-                                    clockOutAuditSubmission,
-                              );
-                          if (proofReadyAttendance == null) {
-                            return null;
-                          }
-                          final updatedClockOut = await attendanceActions
-                              .clockOut(
-                                staffProfileId: staffProfileId,
-                                attendanceId: proofReadyAttendance.id,
-                                clockOutAt: input.clockOutAt,
-                                workDate: selectedDay,
-                                planId: widget.planId,
-                                taskId: task.id,
-                                notes: note,
-                              );
-                          attendanceRecord = await attendanceActions.clockIn(
-                            staffProfileId: staffProfileId,
-                            attendanceId: updatedClockOut.id,
-                            clockInAt: input.clockInAt,
-                            workDate: selectedDay,
-                            planId: widget.planId,
-                            taskId: task.id,
-                            notes: note,
-                          );
-                        } else {
-                          attendanceRecord = await attendanceActions.clockIn(
-                            staffProfileId: staffProfileId,
-                            attendanceId: existingAttendance?.id,
-                            clockInAt: input.clockInAt,
-                            workDate: selectedDay,
-                            planId: widget.planId,
-                            taskId: task.id,
-                            notes: note,
-                          );
-                          if (input.clockOutAt != null) {
-                            final proofReadyAttendance =
-                                await prepareClockOutProofReview(
-                                  attendance: _toProductionAttendanceRecord(
-                                    attendanceRecord,
-                                  ),
-                                  plannedClockOutAt: input.clockOutAt!,
-                                  clockOutAuditSubmission:
-                                      clockOutAuditSubmission,
-                                );
-                            if (proofReadyAttendance == null) {
-                              return null;
-                            }
-                            attendanceRecord = await attendanceActions.clockOut(
-                              staffProfileId: staffProfileId,
-                              attendanceId: proofReadyAttendance.id,
-                              clockOutAt: input.clockOutAt,
-                              workDate: selectedDay,
-                              planId: widget.planId,
-                              taskId: task.id,
-                              notes: note,
-                            );
-                          }
-                        }
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                        _showSnackSafe(_attendanceUpdateSuccess);
-                        return _toProductionAttendanceRecord(attendanceRecord);
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: input.clockOutAt != null
-                                ? _attendanceClockOutPartialFailure
-                                : _attendanceUpdateFailure,
-                          ),
-                        );
-                        return null;
-                      }
-                    }
-
-                    Future<ProductionAttendanceRecord?>
-                    quickClockInForTaskStaff(
-                      String staffProfileId,
-                      ProductionAttendanceRecord? existingAttendance,
-                    ) async {
-                      Future<ProductionAttendanceRecord?>
-                      recoverOpenAttendance() async {
-                        final knownOpenAttendance = _findOpenAttendanceForStaff(
-                          attendanceRecords: detail.attendanceRecords,
-                          staffProfileId: staffProfileId,
-                        );
-                        if (knownOpenAttendance != null) {
-                          return knownOpenAttendance;
-                        }
+                      Future<ProductionPlanDetail> loadLatestDetail() async {
                         try {
-                          final records = await ref.refresh(
-                            staffAttendanceProvider(staffProfileId).future,
+                          return await ref.refresh(
+                            productionPlanDetailProvider(widget.planId).future,
                           );
-                          final recoveredRecord =
-                              _findLatestOpenStaffAttendanceRecord(records);
-                          if (recoveredRecord == null) {
-                            return null;
-                          }
-                          return _toProductionAttendanceRecord(recoveredRecord);
                         } catch (_) {
-                          return null;
+                          return detail;
                         }
                       }
 
-                      final existingOpenAttendance =
-                          existingAttendance?.clockOutAt == null
-                          ? existingAttendance
-                          : await recoverOpenAttendance();
-                      if (existingOpenAttendance != null &&
-                          existingOpenAttendance.clockOutAt == null) {
-                        _showSnackSafe(
-                          _buildOpenAttendanceRecoveredMessage(
-                            attendance: existingOpenAttendance,
-                            selectedDay: selectedDay,
-                          ),
-                        );
-                        return existingOpenAttendance;
-                      }
-                      try {
-                        final clockInAt = _resolveQuickAttendanceTime(
-                          selectedDay,
-                        );
-                        final attendanceRecord = await attendanceActions
-                            .clockIn(
-                              staffProfileId: staffProfileId,
-                              clockInAt: clockInAt,
-                              workDate: selectedDay,
-                              planId: widget.planId,
-                              taskId: task.id,
-                              notes: "Clocked in from production workspace",
-                            );
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                        _showSnackSafe(_attendanceQuickClockInSuccess);
-                        return _toProductionAttendanceRecord(attendanceRecord);
-                      } catch (error) {
-                        if (_isOpenAttendanceSessionError(error)) {
-                          final recoveredAttendance =
-                              await recoverOpenAttendance();
-                          if (recoveredAttendance != null) {
-                            _showSnackSafe(
-                              _buildOpenAttendanceRecoveredMessage(
-                                attendance: recoveredAttendance,
-                                selectedDay: selectedDay,
-                              ),
-                            );
-                            return recoveredAttendance;
+                      Future<void> openLogProgressFlowForStaff(
+                        String staffProfileId, {
+                        required bool createNewEntry,
+                      }) async {
+                        Future<bool> openClockOutWizardFromDetail(
+                          ProductionPlanDetail sourceDetail, {
+                          required String source,
+                        }) async {
+                          final activeAttendance =
+                              resolveProductionWorkspaceActiveClockOutAttendance(
+                                attendanceRecords:
+                                    sourceDetail.attendanceRecords,
+                                staffProfileId: staffProfileId,
+                                day: selectedDay,
+                                taskId: task.id,
+                              );
+                          if (activeAttendance == null ||
+                              activeAttendance.clockInAt == null ||
+                              activeAttendance.clockOutAt != null) {
+                            return false;
                           }
+                          AppDebug.log(
+                            _logTag,
+                            _logClockOutWizardOpen,
+                            extra: {
+                              "planId": widget.planId,
+                              "taskId": task.id,
+                              "staffId": staffProfileId,
+                              "source": source,
+                            },
+                          );
+                          final completed = await _showWorkspaceClockOutWizard(
+                            context,
+                            workDate: selectedDay,
+                            task: task,
+                            plan: sourceDetail.plan,
+                            timelineRows: sourceDetail.timelineRows,
+                            taskDayLedgers: sourceDetail.taskDayLedgers,
+                            attendanceRecords: sourceDetail.attendanceRecords,
+                            staffMap: staffMap,
+                            planUnitLabelById: planUnitLabelById,
+                            fallbackTotalUnits: workScopeSummary.totalUnits,
+                            fallbackWorkUnitLabel:
+                                workScopeSummary.singularLabel,
+                            staffId: staffProfileId,
+                            onSubmit: submitProgressInput,
+                          );
+                          if (completed) {
+                            _showSnackSafe(_clockOutWizardSuccess);
+                          }
+                          return true;
                         }
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _attendanceUpdateFailure,
-                          ),
-                        );
-                        return null;
-                      }
-                    }
 
-                    Future<ProductionAttendanceRecord?>
-                    quickClockOutForTaskStaff(
-                      String staffProfileId,
-                      ProductionAttendanceRecord? existingAttendance,
-                    ) async {
-                      final openAttendance = existingAttendance;
-                      if (openAttendance == null ||
-                          openAttendance.clockOutAt != null) {
-                        return null;
-                      }
-                      final clockInAt = openAttendance.clockInAt?.toLocal();
-                      if (clockInAt == null) {
-                        return null;
-                      }
-                      final needsClockOutAudit = !_attendanceHasProofAudit(
-                        openAttendance,
-                      );
-                      final clockOutAuditSubmission = needsClockOutAudit
-                          ? await collectClockOutAuditForTaskStaff(
-                              staffProfileId,
-                            )
-                          : null;
-                      if (needsClockOutAudit &&
-                          clockOutAuditSubmission == null) {
-                        return null;
-                      }
-                      try {
-                        final clockOutAt = _resolveQuickClockOutTime(
-                          workDate: selectedDay,
-                          clockInAt: clockInAt,
-                        );
-                        final proofReadyAttendance =
-                            await prepareClockOutProofReview(
-                              attendance: openAttendance,
-                              plannedClockOutAt: clockOutAt,
-                              clockOutAuditSubmission: clockOutAuditSubmission,
-                            );
-                        if (proofReadyAttendance == null) {
-                          return null;
+                        try {
+                          if (!createNewEntry) {
+                            final openedFromCurrentDetail =
+                                await openClockOutWizardFromDetail(
+                                  detail,
+                                  source: "current_detail",
+                                );
+                            if (openedFromCurrentDetail ||
+                                !mounted ||
+                                !context.mounted) {
+                              return;
+                            }
+                          }
+                          final latestDetail = await loadLatestDetail();
+                          if (!mounted || !context.mounted) {
+                            return;
+                          }
+                          if (!createNewEntry &&
+                              await openClockOutWizardFromDetail(
+                                latestDetail,
+                                source: "refreshed_detail",
+                              )) {
+                            return;
+                          }
+                          if (!mounted || !context.mounted) {
+                            return;
+                          }
+                          final input = await _showWorkspaceLogDialog(
+                            context,
+                            workDate: selectedDay,
+                            task: task,
+                            plan: latestDetail.plan,
+                            timelineRows: latestDetail.timelineRows,
+                            taskDayLedgers: latestDetail.taskDayLedgers,
+                            staffMap: staffMap,
+                            planUnitLabelById: planUnitLabelById,
+                            fallbackTotalUnits: workScopeSummary.totalUnits,
+                            fallbackWorkUnitLabel:
+                                workScopeSummary.singularLabel,
+                            attendanceRecords: latestDetail.attendanceRecords,
+                            actorStaffId: selfStaffId.trim().isEmpty
+                                ? null
+                                : selfStaffId,
+                            canPickAnyAssignedStaff: canManageCalendar,
+                            canManageAttendance: canManageTaskAttendance,
+                            onSetAttendanceForStaff:
+                                (canManageTaskAttendance ||
+                                    selfStaffId.trim().isNotEmpty)
+                                ? setAttendanceForTaskStaff
+                                : null,
+                            onQuickClockInForStaff:
+                                canManageTaskAttendance ||
+                                    selfStaffId.trim().isNotEmpty
+                                ? quickClockInForTaskStaff
+                                : null,
+                            onQuickClockOutForStaff: null,
+                            initialStaffId: staffProfileId,
+                            lockSelectedStaff: true,
+                            createNewEntry: createNewEntry,
+                          );
+                          if (input == null) {
+                            return;
+                          }
+                          AppDebug.log(
+                            _logTag,
+                            _logProgress,
+                            extra: {
+                              "planId": widget.planId,
+                              "taskId": task.id,
+                              "staffId": input.staffId,
+                              "createNewEntry": input.createNewEntry,
+                            },
+                          );
+                          await submitProgressInput(input);
+                          _showSnackSafe(
+                            input.createNewEntry
+                                ? _newCountSuccess
+                                : _taskProgressSuccess,
+                          );
+                        } catch (error) {
+                          _showSnackSafe(
+                            _resolveProductionWorkspaceErrorMessage(
+                              error,
+                              fallback: _taskProgressFailure,
+                            ),
+                          );
                         }
-                        final attendanceRecord = await attendanceActions
-                            .clockOut(
-                              staffProfileId: staffProfileId,
-                              attendanceId: proofReadyAttendance.id,
-                              clockOutAt: clockOutAt,
-                              workDate: selectedDay,
-                              planId: widget.planId,
-                              taskId: task.id,
-                              notes: "Clocked out from production workspace",
-                            );
-                        ref.invalidate(
-                          productionPlanDetailProvider(widget.planId),
-                        );
-                        _showSnackSafe(_attendanceQuickClockOutSuccess);
-                        return _toProductionAttendanceRecord(attendanceRecord);
-                      } catch (error) {
-                        _showSnackSafe(
-                          _resolveProductionWorkspaceErrorMessage(
-                            error,
-                            fallback: _attendanceClockOutPartialFailure,
-                          ),
-                        );
-                        return null;
                       }
-                    }
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: _cardSpacing),
-                      child: _AgendaTaskCard(
-                        task: task,
-                        phaseName:
-                            phaseById[task.phaseId]?.name ?? task.phaseId,
-                        staffMap: staffMap,
-                        planUnitLabelById: planUnitLabelById,
-                        fallbackTotalUnits: workScopeSummary.totalUnits,
-                        fallbackWorkUnitLabel: workScopeSummary.singularLabel,
-                        planContextText:
-                            "${detail.plan.title} ${detail.plan.notes}",
-                        selectedDay: selectedDay,
-                        attendanceRecords: detail.attendanceRecords,
-                        rowsForDay: rowsForTask,
-                        canManageCalendar: canManageCalendar,
-                        canManageTaskAttendance: canManageTaskAttendance,
-                        selfStaffId: selfStaffId,
-                        canReviewProgress: canReviewProgress,
-                        isOwner: actorRole == "business_owner",
-                        progressEnabledStaffIds: progressEnabledStaffIds,
-                        onManageStaff: canManageCalendar
-                            ? () async {
-                                final selectedIds =
-                                    await _showTaskAssignmentDialog(
-                                      context,
-                                      task: task,
-                                      staffList: staffList,
-                                      staffMap: staffMap,
+                      final taskDisclosureId = task.id.trim();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: _cardSpacing),
+                        child: _AgendaTaskCard(
+                          key: ValueKey("agenda-task-$taskDisclosureId"),
+                          task: task,
+                          phaseName:
+                              phaseById[task.phaseId]?.name ?? task.phaseId,
+                          staffMap: staffMap,
+                          currentActorStaffId: selfStaffId,
+                          planUnitLabelById: planUnitLabelById,
+                          fallbackTotalUnits: workScopeSummary.totalUnits,
+                          fallbackWorkUnitLabel: workScopeSummary.singularLabel,
+                          planContextText:
+                              "${detail.plan.title} ${detail.plan.notes}",
+                          selectedDay: selectedDay,
+                          attendanceRecords: detail.attendanceRecords,
+                          timelineRows: detail.timelineRows,
+                          taskDayLedgers: detail.taskDayLedgers,
+                          rowsForDay: rowsForTask,
+                          canManageCalendar: canManageCalendar,
+                          canManageTaskAttendance: canManageTaskAttendance,
+                          canReviewProgress: canReviewProgress,
+                          onDownloadProofsForStaff: canDownloadProofMedia
+                              ? (staffProfileId, proofs) async {
+                                  await _downloadProofMedia(
+                                    taskId: task.id,
+                                    staffProfileId: staffProfileId,
+                                    workDate: selectedDay,
+                                    proofs: proofs,
+                                  );
+                                }
+                              : null,
+                          isOwner: canUseBusinessOwnerEquivalentAccess(
+                            role: actorRole,
+                            staffRole: selfStaffRole,
+                          ),
+                          progressEnabledStaffIds: progressEnabledStaffIds,
+                          taskExpanded: !_collapsedTaskIds.contains(
+                            taskDisclosureId,
+                          ),
+                          progressExpanded: !_collapsedTaskProgressIds.contains(
+                            taskDisclosureId,
+                          ),
+                          assignmentExpanded: !_collapsedTaskAssignmentIds
+                              .contains(taskDisclosureId),
+                          infoExpanded: _expandedTaskInfoIds.contains(
+                            taskDisclosureId,
+                          ),
+                          onToggleTaskExpanded: () => _toggleTaskDisclosure(
+                            _collapsedTaskIds,
+                            taskDisclosureId,
+                          ),
+                          onToggleProgressExpanded: () => _toggleTaskDisclosure(
+                            _collapsedTaskProgressIds,
+                            taskDisclosureId,
+                          ),
+                          onToggleAssignmentExpanded: () =>
+                              _toggleTaskDisclosure(
+                                _collapsedTaskAssignmentIds,
+                                taskDisclosureId,
+                              ),
+                          onToggleInfoExpanded: () => _toggleTaskDisclosure(
+                            _expandedTaskInfoIds,
+                            taskDisclosureId,
+                          ),
+                          onManageStaff: canManageCalendar
+                              ? () async {
+                                  final selectedIds =
+                                      await _showTaskAssignmentDialog(
+                                        context,
+                                        task: task,
+                                        staffList: staffList,
+                                        staffMap: staffMap,
+                                      );
+                                  if (selectedIds == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logAssignStaff,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                      "assignedCount": selectedIds.length,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .assignTaskStaffProfiles(
+                                          taskId: task.id,
+                                          planId: widget.planId,
+                                          assignedStaffProfileIds: selectedIds,
+                                        );
+                                    _showSnackSafe(_taskAssignmentSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_taskAssignmentFailure);
+                                  }
+                                }
+                              : null,
+                          onDeleteTask: canManageCalendar
+                              ? () async {
+                                  final confirmed = await _confirmAction(
+                                    title: _taskDeleteConfirmTitle,
+                                    message: _taskDeleteConfirmMessage,
+                                    confirmLabel: _taskDeleteConfirmLabel,
+                                  );
+                                  if (!confirmed) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logDeleteTask,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    final message = await ref
+                                        .read(productionPlanActionsProvider)
+                                        .deleteTask(
+                                          taskId: task.id,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(
+                                      message.trim().isNotEmpty
+                                          ? message
+                                          : _taskDeleteSuccess,
                                     );
-                                if (selectedIds == null) {
-                                  return;
+                                  } catch (error) {
+                                    _showSnackSafe(
+                                      _resolveProductionWorkspaceErrorMessage(
+                                        error,
+                                        fallback: _taskDeleteFailure,
+                                      ),
+                                    );
+                                  }
                                 }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logAssignStaff,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                    "assignedCount": selectedIds.length,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .assignTaskStaffProfiles(
-                                        taskId: task.id,
-                                        planId: widget.planId,
-                                        assignedStaffProfileIds: selectedIds,
-                                      );
-                                  _showSnackSafe(_taskAssignmentSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_taskAssignmentFailure);
-                                }
-                              }
-                            : null,
-                        onSetAttendanceForStaff:
-                            canManageTaskAttendance || canManageOwnAttendance
-                            ? (staffProfileId, existingAttendance) async {
-                                if (!canManageTaskAttendance &&
-                                    staffProfileId != selfStaffId) {
-                                  return;
-                                }
-                                await setAttendanceForTaskStaff(
-                                  staffProfileId,
-                                  existingAttendance,
-                                );
-                              }
-                            : null,
-                        onQuickClockInForStaff:
-                            canManageTaskAttendance || canManageOwnAttendance
-                            ? (staffProfileId, existingAttendance) async {
-                                if (!canManageTaskAttendance &&
-                                    staffProfileId != selfStaffId) {
-                                  return;
-                                }
-                                await quickClockInForTaskStaff(
-                                  staffProfileId,
-                                  existingAttendance,
-                                );
-                              }
-                            : null,
-                        onQuickClockOutForStaff:
-                            canManageTaskAttendance || canManageOwnAttendance
-                            ? (staffProfileId, existingAttendance) async {
-                                if (!canManageTaskAttendance &&
-                                    staffProfileId != selfStaffId) {
-                                  return;
-                                }
-                                await quickClockOutForTaskStaff(
-                                  staffProfileId,
-                                  existingAttendance,
-                                );
-                              }
-                            : null,
-                        onLogProgressForStaff: progressEnabledStaffIds.isEmpty
-                            ? null
-                            : (staffProfileId) async {
-                                final input = await _showWorkspaceLogDialog(
-                                  context,
-                                  workDate: selectedDay,
-                                  task: task,
-                                  plan: detail.plan,
-                                  timelineRows: detail.timelineRows,
-                                  staffMap: staffMap,
-                                  planUnitLabelById: planUnitLabelById,
-                                  fallbackTotalUnits:
-                                      workScopeSummary.totalUnits,
-                                  fallbackWorkUnitLabel:
-                                      workScopeSummary.singularLabel,
-                                  attendanceRecords: detail.attendanceRecords,
-                                  actorStaffId: staffProfileId,
-                                  canPickAnyAssignedStaff: false,
-                                  canManageAttendance:
-                                      canManageTaskAttendance ||
-                                      staffProfileId == selfStaffId,
-                                  onSetAttendanceForStaff:
-                                      canManageTaskAttendance ||
-                                          staffProfileId == selfStaffId
-                                      ? setAttendanceForTaskStaff
-                                      : null,
-                                  onQuickClockInForStaff:
-                                      canManageTaskAttendance ||
-                                          staffProfileId == selfStaffId
-                                      ? quickClockInForTaskStaff
-                                      : null,
-                                  onQuickClockOutForStaff: null,
-                                );
-                                if (input == null) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                    "staffId": input.staffId,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .logTaskProgress(
-                                        taskId: task.id,
-                                        workDate: selectedDay,
-                                        staffId: input.staffId,
-                                        unitId: input.unitId,
-                                        actualPlots: input.actualPlots,
-                                        quantityActivityType:
-                                            input.quantityActivityType,
-                                        quantityAmount: input.quantityAmount,
-                                        quantityUnit: input.quantityUnit,
-                                        delayReason: input.delayReason,
-                                        notes: input.notes,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_taskProgressSuccess);
-                                } catch (error) {
-                                  _showSnackSafe(
-                                    _resolveProductionWorkspaceErrorMessage(
-                                      error,
-                                      fallback: _taskProgressFailure,
-                                    ),
+                              : null,
+                          onSetAttendanceForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? (staffProfileId, existingAttendance) async {
+                                  await setAttendanceForTaskStaff(
+                                    staffProfileId,
+                                    existingAttendance,
                                   );
                                 }
-                              },
-                        onStatusSelected: canManageCalendar
-                            ? (status) async {
-                                if (status == task.status) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logTaskStatus,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                    "status": status,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .updateTaskStatus(
-                                        taskId: task.id,
-                                        status: status,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_taskStatusSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_taskStatusFailure);
-                                }
-                              }
-                            : null,
-                        onLogProgress: canLogProgressForTask
-                            ? () async {
-                                final input = await _showWorkspaceLogDialog(
-                                  context,
-                                  workDate: selectedDay,
-                                  task: task,
-                                  plan: detail.plan,
-                                  timelineRows: detail.timelineRows,
-                                  staffMap: staffMap,
-                                  planUnitLabelById: planUnitLabelById,
-                                  fallbackTotalUnits:
-                                      workScopeSummary.totalUnits,
-                                  fallbackWorkUnitLabel:
-                                      workScopeSummary.singularLabel,
-                                  attendanceRecords: detail.attendanceRecords,
-                                  actorStaffId: selfStaffId.trim().isEmpty
-                                      ? null
-                                      : selfStaffId,
-                                  canPickAnyAssignedStaff: canManageCalendar,
-                                  canManageAttendance: canManageTaskAttendance,
-                                  onSetAttendanceForStaff:
-                                      canManageTaskAttendance
-                                      ? setAttendanceForTaskStaff
-                                      : null,
-                                  onQuickClockInForStaff:
-                                      canManageTaskAttendance
-                                      ? quickClockInForTaskStaff
-                                      : null,
-                                  onQuickClockOutForStaff: null,
-                                );
-                                if (input == null) {
-                                  return;
-                                }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .logTaskProgress(
-                                        taskId: task.id,
-                                        workDate: selectedDay,
-                                        staffId: input.staffId,
-                                        unitId: input.unitId,
-                                        actualPlots: input.actualPlots,
-                                        quantityActivityType:
-                                            input.quantityActivityType,
-                                        quantityAmount: input.quantityAmount,
-                                        quantityUnit: input.quantityUnit,
-                                        delayReason: input.delayReason,
-                                        notes: input.notes,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_taskProgressSuccess);
-                                } catch (error) {
-                                  _showSnackSafe(
-                                    _resolveProductionWorkspaceErrorMessage(
-                                      error,
-                                      fallback: _taskProgressFailure,
-                                    ),
+                              : null,
+                          onQuickClockInForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? (staffProfileId, existingAttendance) async {
+                                  await quickClockInForTaskStaff(
+                                    staffProfileId,
+                                    existingAttendance,
                                   );
                                 }
-                              }
-                            : null,
-                        onApproveTask:
-                            actorRole == "business_owner" &&
-                                task.approvalStatus == "pending_approval"
-                            ? () async {
-                                AppDebug.log(
-                                  _logTag,
-                                  _logApproveTask,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .approveTask(
-                                        taskId: task.id,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_approveTaskSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_approveTaskFailure);
+                              : null,
+                          onQuickClockOutForStaff:
+                              (canManageTaskAttendance ||
+                                  selfStaffId.trim().isNotEmpty)
+                              ? (staffProfileId, existingAttendance) async {
+                                  await quickClockOutForTaskStaff(
+                                    staffProfileId,
+                                    existingAttendance,
+                                  );
                                 }
-                              }
-                            : null,
-                        onRejectTask:
-                            actorRole == "business_owner" &&
-                                task.approvalStatus == "pending_approval"
-                            ? () async {
-                                final reason = await _showReasonDialog(
-                                  context,
-                                  title: _rejectDialogTitle,
-                                  hint: _rejectDialogHint,
-                                );
-                                if (reason == null) {
-                                  return;
+                              : null,
+                          onResetHistoryForStaff:
+                              (canManageTaskAttendance || canManageCalendar)
+                              ? (staffProfileId) async {
+                                  await resetTaskHistoryForStaff(
+                                    staffProfileId,
+                                  );
                                 }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logRejectTask,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "taskId": task.id,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .rejectTask(
-                                        taskId: task.id,
-                                        reason: reason,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_rejectTaskSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_rejectTaskFailure);
+                              : null,
+                          onLogProgressForStaff: progressEnabledStaffIds.isEmpty
+                              ? null
+                              : (staffProfileId) async {
+                                  await openLogProgressFlowForStaff(
+                                    staffProfileId,
+                                    createNewEntry: false,
+                                  );
+                                },
+                          onAddProgressCountForStaff:
+                              progressEnabledStaffIds.isEmpty
+                              ? null
+                              : (staffProfileId) async {
+                                  await openLogProgressFlowForStaff(
+                                    staffProfileId,
+                                    createNewEntry: true,
+                                  );
+                                },
+                          onStatusSelected: canManageCalendar
+                              ? (status) async {
+                                  if (status == task.status) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logTaskStatus,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                      "status": status,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .updateTaskStatus(
+                                          taskId: task.id,
+                                          status: status,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_taskStatusSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_taskStatusFailure);
+                                  }
                                 }
-                              }
-                            : null,
-                        onApproveProgress: canReviewProgress
-                            ? (progressId) async {
-                                AppDebug.log(
-                                  _logTag,
-                                  _logApproveProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "progressId": progressId,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .approveTaskProgress(
-                                        progressId: progressId,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_approveProgressSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_approveProgressFailure);
+                              : null,
+                          onLogProgress: canLogProgressForTask
+                              ? () async {
+                                  final input = await _showWorkspaceLogDialog(
+                                    context,
+                                    workDate: selectedDay,
+                                    task: task,
+                                    plan: detail.plan,
+                                    timelineRows: detail.timelineRows,
+                                    taskDayLedgers: detail.taskDayLedgers,
+                                    staffMap: staffMap,
+                                    planUnitLabelById: planUnitLabelById,
+                                    fallbackTotalUnits:
+                                        workScopeSummary.totalUnits,
+                                    fallbackWorkUnitLabel:
+                                        workScopeSummary.singularLabel,
+                                    attendanceRecords: detail.attendanceRecords,
+                                    actorStaffId: selfStaffId.trim().isEmpty
+                                        ? null
+                                        : selfStaffId,
+                                    canPickAnyAssignedStaff: canManageCalendar,
+                                    canManageAttendance:
+                                        canManageTaskAttendance,
+                                    onSetAttendanceForStaff:
+                                        (canManageTaskAttendance ||
+                                            selfStaffId.trim().isNotEmpty)
+                                        ? setAttendanceForTaskStaff
+                                        : null,
+                                    onQuickClockInForStaff:
+                                        canManageTaskAttendance ||
+                                            selfStaffId.trim().isNotEmpty
+                                        ? quickClockInForTaskStaff
+                                        : null,
+                                    onQuickClockOutForStaff: null,
+                                    createNewEntry: false,
+                                  );
+                                  if (input == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logProgress,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    await submitProgressInput(input);
+                                    _showSnackSafe(_taskProgressSuccess);
+                                  } catch (error) {
+                                    _showSnackSafe(
+                                      _resolveProductionWorkspaceErrorMessage(
+                                        error,
+                                        fallback: _taskProgressFailure,
+                                      ),
+                                    );
+                                  }
                                 }
-                              }
-                            : null,
-                        onRejectProgress: canReviewProgress
-                            ? (progressId) async {
-                                final reason = await _showReasonDialog(
-                                  context,
-                                  title: _rejectProgressDialogTitle,
-                                  hint: _rejectDialogHint,
-                                );
-                                if (reason == null) {
-                                  return;
+                              : null,
+                          onApproveTask:
+                              canUseBusinessOwnerEquivalentAccess(
+                                    role: actorRole,
+                                    staffRole: selfStaffRole,
+                                  ) &&
+                                  task.approvalStatus == "pending_approval"
+                              ? () async {
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logApproveTask,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .approveTask(
+                                          taskId: task.id,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_approveTaskSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_approveTaskFailure);
+                                  }
                                 }
-                                AppDebug.log(
-                                  _logTag,
-                                  _logRejectProgress,
-                                  extra: {
-                                    "planId": widget.planId,
-                                    "progressId": progressId,
-                                  },
-                                );
-                                try {
-                                  await ref
-                                      .read(productionPlanActionsProvider)
-                                      .rejectTaskProgress(
-                                        progressId: progressId,
-                                        reason: reason,
-                                        planId: widget.planId,
-                                      );
-                                  _showSnackSafe(_rejectProgressSuccess);
-                                } catch (_) {
-                                  _showSnackSafe(_rejectProgressFailure);
+                              : null,
+                          onRejectTask:
+                              canUseBusinessOwnerEquivalentAccess(
+                                    role: actorRole,
+                                    staffRole: selfStaffRole,
+                                  ) &&
+                                  task.approvalStatus == "pending_approval"
+                              ? () async {
+                                  final reason = await _showReasonDialog(
+                                    context,
+                                    title: _rejectDialogTitle,
+                                    hint: _rejectDialogHint,
+                                  );
+                                  if (reason == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logRejectTask,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "taskId": task.id,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .rejectTask(
+                                          taskId: task.id,
+                                          reason: reason,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_rejectTaskSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_rejectTaskFailure);
+                                  }
                                 }
-                              }
-                            : null,
-                      ),
-                    );
-                  }),
-              ],
+                              : null,
+                          onApproveProgress: canReviewProgress
+                              ? (progressId) async {
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logApproveProgress,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "progressId": progressId,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .approveTaskProgress(
+                                          progressId: progressId,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_approveProgressSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_approveProgressFailure);
+                                  }
+                                }
+                              : null,
+                          onRejectProgress: canReviewProgress
+                              ? (progressId) async {
+                                  final reason = await _showReasonDialog(
+                                    context,
+                                    title: _rejectProgressDialogTitle,
+                                    hint: _rejectDialogHint,
+                                  );
+                                  if (reason == null) {
+                                    return;
+                                  }
+                                  AppDebug.log(
+                                    _logTag,
+                                    _logRejectProgress,
+                                    extra: {
+                                      "planId": widget.planId,
+                                      "progressId": progressId,
+                                    },
+                                  );
+                                  try {
+                                    await ref
+                                        .read(productionPlanActionsProvider)
+                                        .rejectTaskProgress(
+                                          progressId: progressId,
+                                          reason: reason,
+                                          planId: widget.planId,
+                                        );
+                                    _showSnackSafe(_rejectProgressSuccess);
+                                  } catch (_) {
+                                    _showSnackSafe(_rejectProgressFailure);
+                                  }
+                                }
+                              : null,
+                        ),
+                      );
+                    }),
+                ],
+              ),
             );
           },
         ),
@@ -1616,7 +2461,33 @@ class _TaskUnitProgressSummary {
   );
 }
 
-class _WorkspaceSummaryCard extends StatelessWidget {
+String _resolveWorkspaceTaskDisplayStatus({
+  required ProductionTask task,
+  required _TaskUnitProgressSummary taskProgressSummary,
+  required List<ProductionTimelineRow> rowsForDay,
+}) {
+  final normalizedTaskStatus = task.status.trim().toLowerCase();
+  if (normalizedTaskStatus == _taskStatusDone) {
+    return _taskStatusDone;
+  }
+
+  // WHY: Progress approval is stored separately from task.status, but a
+  // fully approved day should not look pending in the operational workspace.
+  final completeApprovedDay =
+      taskProgressSummary.plannedAmount > 0 &&
+      taskProgressSummary.remainingAmount <= 0 &&
+      rowsForDay.isNotEmpty &&
+      rowsForDay.every(
+        (row) => row.approvalState.trim().toLowerCase() == "approved",
+      );
+  if (completeApprovedDay) {
+    return _taskStatusDone;
+  }
+
+  return task.status;
+}
+
+class _WorkspaceSummaryCard extends StatefulWidget {
   final ProductionPlanDetail detail;
   final ProductionPlan plan;
   final _WorkspaceWorkScopeSummary workScopeSummary;
@@ -1627,6 +2498,9 @@ class _WorkspaceSummaryCard extends StatelessWidget {
   final List<ProductionTimelineRow> timelineRows;
   final VoidCallback onOpenDraft;
   final VoidCallback onViewInsights;
+  final VoidCallback onDownloadProgress;
+  final VoidCallback onEmailProgress;
+  final VoidCallback onCopyProgressLink;
   final VoidCallback? onReturnToDraft;
 
   const _WorkspaceSummaryCard({
@@ -1640,47 +2514,60 @@ class _WorkspaceSummaryCard extends StatelessWidget {
     required this.timelineRows,
     required this.onOpenDraft,
     required this.onViewInsights,
+    required this.onDownloadProgress,
+    required this.onEmailProgress,
+    required this.onCopyProgressLink,
     this.onReturnToDraft,
   });
+
+  @override
+  State<_WorkspaceSummaryCard> createState() => _WorkspaceSummaryCardState();
+}
+
+class _WorkspaceSummaryCardState extends State<_WorkspaceSummaryCard> {
+  bool _planActionsExpanded = false;
+
+  @override
+  void didUpdateWidget(covariant _WorkspaceSummaryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.plan.id != widget.plan.id) {
+      _planActionsExpanded = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final detail = widget.detail;
+    final plan = widget.plan;
+    final workScopeSummary = widget.workScopeSummary;
+    final selectedEstateName = widget.selectedEstateName;
+    final selectedProductName = widget.selectedProductName;
+    final selectedDay = widget.selectedDay;
+    final scheduledTaskCount = widget.scheduledTaskCount;
+    final timelineRows = widget.timelineRows;
+    final onOpenDraft = widget.onOpenDraft;
+    final onViewInsights = widget.onViewInsights;
+    final onDownloadProgress = widget.onDownloadProgress;
+    final onEmailProgress = widget.onEmailProgress;
+    final onCopyProgressLink = widget.onCopyProgressLink;
+    final onReturnToDraft = widget.onReturnToDraft;
     final metrics = _WorkspaceSummaryMetrics.fromDetail(detail);
     final farmQuantitySummary = _summarizeFarmQuantities(
       plan: plan,
       timelineRows: timelineRows,
     );
     final lastSavedLabel = plan.lastDraftSavedBy?.displayLabel ?? "";
+    final isDark = _workspaceIsDark(colorScheme);
+    final isCompactPhone = MediaQuery.sizeOf(context).width <= 430;
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(isCompactPhone ? 16 : 20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              _workspaceSoftBlue.withValues(alpha: 0.72),
-              colorScheme.surfaceContainerLow,
-            ),
-            Color.alphaBlend(
-              _workspaceSoftTeal.withValues(alpha: 0.42),
-              colorScheme.surfaceContainerLow,
-            ),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: _workspaceBlue.withValues(alpha: 0.14)),
-        boxShadow: [
-          BoxShadow(
-            color: _workspaceNavy.withValues(alpha: 0.06),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
+        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1698,22 +2585,28 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  SizedBox(height: isCompactPhone ? 6 : 8),
                   Text(
                     plan.title.trim().isEmpty
                         ? "Untitled production plan"
                         : plan.title.trim(),
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style:
+                        (isCompactPhone
+                                ? theme.textTheme.titleLarge
+                                : theme.textTheme.headlineSmall)
+                            ?.copyWith(fontWeight: FontWeight.w800),
                   ),
-                  const SizedBox(height: 8),
+                  SizedBox(height: isCompactPhone ? 6 : 8),
                   Text(
                     "Run the live schedule here, keep staffing and progress current day by day, and jump back to the draft only when you need to revise the saved baseline.",
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                      height: 1.45,
-                    ),
+                    style:
+                        (isCompactPhone
+                                ? theme.textTheme.bodySmall
+                                : theme.textTheme.bodyMedium)
+                            ?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              height: 1.35,
+                            ),
                   ),
                 ],
               );
@@ -1726,8 +2619,13 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                   ProductionStatusPill(label: plan.status),
                   Chip(
                     avatar: const Icon(Icons.history_outlined, size: 16),
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(color: colorScheme.outlineVariant),
                     label: Text(
                       "${plan.draftRevisionCount} saved revision${plan.draftRevisionCount == 1 ? '' : 's'}",
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -1752,10 +2650,10 @@ class _WorkspaceSummaryCard extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 18),
+          SizedBox(height: isCompactPhone ? 12 : 16),
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _SummaryPill(
                 icon: Icons.location_on_outlined,
@@ -1786,16 +2684,19 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 20),
+          SizedBox(height: isCompactPhone ? 14 : 18),
           LayoutBuilder(
             builder: (context, constraints) {
               final wideTile = constraints.maxWidth >= 980;
+              final twoColumnTile = constraints.maxWidth >= 330;
               final tileWidth = wideTile
                   ? (constraints.maxWidth - 36) / 4
-                  : math.min(constraints.maxWidth, 220.0);
+                  : twoColumnTile
+                  ? (constraints.maxWidth - 10) / 2
+                  : constraints.maxWidth;
               return Wrap(
-                spacing: 12,
-                runSpacing: 12,
+                spacing: 10,
+                runSpacing: 10,
                 children: [
                   SizedBox(
                     width: tileWidth,
@@ -1805,7 +2706,6 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       helper: "Stage groups",
                       icon: Icons.alt_route_outlined,
                       accentColor: _workspaceBlue,
-                      softColor: _workspaceSoftBlue,
                     ),
                   ),
                   SizedBox(
@@ -1816,7 +2716,6 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       helper: "Live workload",
                       icon: Icons.checklist_rtl_outlined,
                       accentColor: _workspaceNavy,
-                      softColor: _workspaceSoftSlate,
                     ),
                   ),
                   SizedBox(
@@ -1829,9 +2728,6 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       accentColor: metrics.unassignedTasks == 0
                           ? _workspaceTeal
                           : _workspaceAmber,
-                      softColor: metrics.unassignedTasks == 0
-                          ? _workspaceSoftTeal
-                          : _workspaceSoftAmber,
                     ),
                   ),
                   SizedBox(
@@ -1842,93 +2738,161 @@ class _WorkspaceSummaryCard extends StatelessWidget {
                       helper: workScopeSummary.helperLabel,
                       icon: Icons.grid_view_rounded,
                       accentColor: _workspaceBerry,
-                      softColor: _workspaceSoftBerry,
                     ),
                   ),
                 ],
               );
             },
           ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: colorScheme.outlineVariant),
+          SizedBox(height: isCompactPhone ? 12 : 14),
+          _WorkspaceDisclosureHeader(
+            title: "Plan actions",
+            subtitle: "Draft, reports, and selected-day details",
+            icon: Icons.tune_outlined,
+            accentColor: _workspaceBlue,
+            expanded: _planActionsExpanded,
+            onToggle: () {
+              setState(() {
+                _planActionsExpanded = !_planActionsExpanded;
+              });
+            },
+          ),
+          if (_planActionsExpanded) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _workspaceToneSurface(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  lightTintAlpha: 0.04,
+                  darkTintAlpha: 0.14,
+                  baseColor: isDark
+                      ? colorScheme.surfaceContainerLow
+                      : colorScheme.surface,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: _workspaceToneBorder(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBlue,
+                    lightAlpha: 0.14,
+                    darkAlpha: 0.28,
+                  ),
+                ),
+              ),
+              child: Text(
+                plan.lastDraftSavedAt == null
+                    ? "This production plan does not have a recorded draft save yet."
+                    : "Draft baseline last saved ${formatDateTimeLabel(plan.lastDraftSavedAt)}${lastSavedLabel.trim().isEmpty ? '' : ' by $lastSavedLabel'}.",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
             ),
-            child: Text(
-              plan.lastDraftSavedAt == null
-                  ? "This production plan does not have a recorded draft save yet."
-                  : "Draft baseline last saved ${formatDateTimeLabel(plan.lastDraftSavedAt)}${lastSavedLabel.trim().isEmpty ? '' : ' by $lastSavedLabel'}.",
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                _SummaryPill(
+                  icon: Icons.today_outlined,
+                  label: "Selected ${_formatCalendarDate(selectedDay)}",
+                ),
+                _SummaryPill(
+                  icon: Icons.event_note_outlined,
+                  label: "$scheduledTaskCount scheduled tasks",
+                ),
+                if (farmQuantitySummary != null) ...[
+                  _SummaryPill(
+                    icon: Icons.grass_outlined,
+                    label:
+                        "Planted left ${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} ${farmQuantitySummary.plantingUnit}",
+                  ),
+                  _SummaryPill(
+                    icon: Icons.swap_horiz_outlined,
+                    label:
+                        "Transplant left ${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} ${farmQuantitySummary.plantingUnit}",
+                  ),
+                  _SummaryPill(
+                    icon: Icons.agriculture_outlined,
+                    label:
+                        "Harvest left ${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} ${farmQuantitySummary.harvestUnit}",
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Keep this screen operational. Open draft to compare or revise the saved plan, and use insights for KPIs, governance, and longer-form reporting.",
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _SummaryPill(
-                icon: Icons.today_outlined,
-                label: "Selected ${_formatCalendarDate(selectedDay)}",
-              ),
-              _SummaryPill(
-                icon: Icons.event_note_outlined,
-                label: "$scheduledTaskCount scheduled tasks",
-              ),
-              if (farmQuantitySummary != null) ...[
-                _SummaryPill(
-                  icon: Icons.grass_outlined,
-                  label:
-                      "Planted left ${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} ${farmQuantitySummary.plantingUnit}",
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceBerry,
+                  ),
+                  onPressed: onOpenDraft,
+                  icon: const Icon(Icons.edit_note_outlined),
+                  label: const Text(_openDraftLabel),
                 ),
-                _SummaryPill(
-                  icon: Icons.swap_horiz_outlined,
-                  label:
-                      "Transplant left ${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} ${farmQuantitySummary.plantingUnit}",
+                if (onReturnToDraft != null)
+                  OutlinedButton.icon(
+                    style: _workspaceActionButtonStyle(
+                      context,
+                      accentColor: _workspaceAmber,
+                    ),
+                    onPressed: onReturnToDraft,
+                    icon: const Icon(Icons.edit_calendar_outlined),
+                    label: const Text(_returnToDraftLabel),
+                  ),
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceBlue,
+                  ),
+                  onPressed: onViewInsights,
+                  icon: const Icon(Icons.insights_outlined),
+                  label: const Text(_viewInsightsLabel),
                 ),
-                _SummaryPill(
-                  icon: Icons.agriculture_outlined,
-                  label:
-                      "Harvest left ${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} ${farmQuantitySummary.harvestUnit}",
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceTeal,
+                  ),
+                  onPressed: onDownloadProgress,
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text(_downloadProgressLabel),
+                ),
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceNavy,
+                  ),
+                  onPressed: onEmailProgress,
+                  icon: const Icon(Icons.mail_outline),
+                  label: const Text(_emailProgressLabel),
+                ),
+                OutlinedButton.icon(
+                  style: _workspaceActionButtonStyle(
+                    context,
+                    accentColor: _workspaceBerry,
+                  ),
+                  onPressed: onCopyProgressLink,
+                  icon: const Icon(Icons.link_outlined),
+                  label: const Text(_copyProgressLinkLabel),
                 ),
               ],
-            ],
-          ),
-          const SizedBox(height: 14),
-          Text(
-            "Keep this screen operational. Open draft to compare or revise the saved plan, and use insights for KPIs, governance, and longer-form reporting.",
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
             ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: onOpenDraft,
-                icon: const Icon(Icons.edit_note_outlined),
-                label: const Text(_openDraftLabel),
-              ),
-              if (onReturnToDraft != null)
-                OutlinedButton.icon(
-                  onPressed: onReturnToDraft,
-                  icon: const Icon(Icons.edit_calendar_outlined),
-                  label: const Text(_returnToDraftLabel),
-                ),
-              OutlinedButton.icon(
-                onPressed: onViewInsights,
-                icon: const Icon(Icons.insights_outlined),
-                label: const Text(_viewInsightsLabel),
-              ),
-            ],
-          ),
+          ],
         ],
       ),
     );
@@ -1941,7 +2905,6 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
   final String helper;
   final IconData icon;
   final Color accentColor;
-  final Color softColor;
 
   const _WorkspaceHeroMetricTile({
     required this.label,
@@ -1949,78 +2912,87 @@ class _WorkspaceHeroMetricTile extends StatelessWidget {
     required this.helper,
     required this.icon,
     required this.accentColor,
-    required this.softColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.88),
-              colorScheme.surface,
-            ),
-          ],
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.10),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
           ),
-        ],
+        ),
       ),
       child: Row(
         children: [
           Container(
-            width: 56,
-            height: 56,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.22),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: Colors.white),
+            child: Icon(icon, color: accentForeground, size: 20),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: accentColor,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: accentForeground,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   value,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    color: _workspaceNavy,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   helper,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
@@ -2044,20 +3016,57 @@ class _SummaryPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: colorScheme.primary),
-          const SizedBox(width: 6),
-          Text(label),
-        ],
+    final foregroundColor = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.52,
+    );
+    final maxWidth = math.min(
+      360.0,
+      math.max(132.0, MediaQuery.sizeOf(context).width - 64),
+    );
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: _workspaceToneSurface(
+            colorScheme: colorScheme,
+            accentColor: _workspaceBlue,
+            lightTintAlpha: 0.025,
+            darkTintAlpha: 0.1,
+            baseColor: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerLow
+                : colorScheme.surface,
+          ),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: _workspaceToneBorder(
+              colorScheme: colorScheme,
+              accentColor: _workspaceBlue,
+              lightAlpha: 0.11,
+              darkAlpha: 0.24,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: foregroundColor),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                softWrap: true,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: _workspacePrimaryContentColor(colorScheme),
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2104,6 +3113,122 @@ class _WorkspaceCalendarModeBar extends StatelessWidget {
   }
 }
 
+class _WorkspaceCalendarHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool calendarVisible;
+  final VoidCallback onToggleCalendar;
+
+  const _WorkspaceCalendarHeader({
+    required this.title,
+    required this.subtitle,
+    required this.calendarVisible,
+    required this.onToggleCalendar,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.55,
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.02,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightTintAlpha: 0.07,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.calendar_month_outlined,
+              size: 18,
+              color: foreground,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: calendarVisible
+                ? _hideCalendarTooltip
+                : _showCalendarTooltip,
+            child: IconButton(
+              onPressed: onToggleCalendar,
+              style: IconButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                backgroundColor: colorScheme.surfaceContainerHigh,
+                foregroundColor: colorScheme.onSurface,
+              ),
+              icon: Icon(
+                calendarVisible
+                    ? Icons.calendar_view_day_outlined
+                    : Icons.calendar_month_outlined,
+                size: 20,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SelectedDaySectionHeader extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -2111,6 +3236,7 @@ class _SelectedDaySectionHeader extends StatelessWidget {
   final VoidCallback onPreviousDay;
   final VoidCallback onToday;
   final VoidCallback onNextDay;
+  final VoidCallback? onCreateTask;
 
   const _SelectedDaySectionHeader({
     required this.title,
@@ -2119,46 +3245,175 @@ class _SelectedDaySectionHeader extends StatelessWidget {
     required this.onPreviousDay,
     required this.onToday,
     required this.onNextDay,
+    this.onCreateTask,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-
-    if (!showDayNavigation) {
-      return ProductionSectionHeader(title: title, subtitle: subtitle);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        Text(
-          subtitle,
-          style: textTheme.bodySmall?.copyWith(
-            color: colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            IconButton(
-              onPressed: onPreviousDay,
-              icon: const Icon(Icons.chevron_left),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.55,
+    );
+    final navigationControls = showDayNavigation
+        ? Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              IconButton(
+                tooltip: "Previous day",
+                onPressed: onPreviousDay,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(38, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: colorScheme.surfaceContainerHigh,
+                  foregroundColor: colorScheme.onSurface,
+                ),
+                icon: const Icon(Icons.chevron_left, size: 22),
+              ),
+              TextButton(
+                onPressed: onToday,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text(_todayLabel),
+              ),
+              IconButton(
+                tooltip: "Next day",
+                onPressed: onNextDay,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(38, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: colorScheme.surfaceContainerHigh,
+                  foregroundColor: colorScheme.onSurface,
+                ),
+                icon: const Icon(Icons.chevron_right, size: 22),
+              ),
+            ],
+          )
+        : null;
+    final newTaskButton = onCreateTask == null
+        ? null
+        : FilledButton.tonalIcon(
+            onPressed: onCreateTask,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 40),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              visualDensity: VisualDensity.compact,
             ),
-            TextButton(onPressed: onToday, child: const Text(_todayLabel)),
-            IconButton(
-              onPressed: onNextDay,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
+            icon: const Icon(Icons.add_task_outlined, size: 18),
+            label: const Text(_addTaskLabel),
+          );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.018,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
-      ],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stackControls = constraints.maxWidth < 560;
+          final titleBlock = Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBlue,
+                    lightTintAlpha: 0.07,
+                    darkTintAlpha: 0.16,
+                    baseColor: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHighest
+                        : colorScheme.surface,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.today_outlined, size: 18, color: foreground),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: _workspacePrimaryContentColor(colorScheme),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+          final controls = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: stackControls ? WrapAlignment.start : WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (navigationControls != null) navigationControls,
+              if (newTaskButton != null) newTaskButton,
+            ],
+          );
+
+          if (navigationControls == null && newTaskButton == null) {
+            return titleBlock;
+          }
+
+          if (stackControls) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [titleBlock, const SizedBox(height: 10), controls],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: 12),
+              Flexible(child: controls),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -2199,6 +3454,8 @@ class _MonthCalendarCard extends StatelessWidget {
       return workDate?.year == month.year && workDate?.month == month.month;
     }).toList();
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
     final completedCount = monthTasks
         .where((task) => task.status == _taskStatusDone)
         .length;
@@ -2208,11 +3465,31 @@ class _MonthCalendarCard extends StatelessWidget {
       completedCount: completedCount,
       warning: monthTasks.any(_workspaceTaskHasStaffGap),
     );
-    final shellColor = palette.badgeBackground;
-    final shellForeground = palette.badgeForeground;
-    final shellSurface = shellForeground.withValues(alpha: 0.12);
-    final shellBorder = shellForeground.withValues(alpha: 0.16);
-    final metricIconColor = shellForeground.withValues(alpha: 0.82);
+    final shellColor = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: palette.accent,
+      lightTintAlpha: 0.04,
+      darkTintAlpha: 0.12,
+      baseColor: isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
+    );
+    final shellForeground = _workspacePrimaryContentColor(colorScheme);
+    final shellMuted = _workspaceSecondaryContentColor(colorScheme);
+    final shellSurface = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: palette.accent,
+      lightTintAlpha: 0.05,
+      darkTintAlpha: 0.16,
+      baseColor: isDark
+          ? colorScheme.surfaceContainerHigh
+          : colorScheme.surface,
+    );
+    final shellBorder = _workspaceToneBorder(
+      colorScheme: colorScheme,
+      accentColor: palette.accent,
+      lightAlpha: 0.16,
+      darkAlpha: 0.3,
+    );
+    final metricIconColor = shellMuted;
     final completedMetricAccent = completedCount > 0
         ? ProductionCalendarVisuals.palette(
             theme: theme,
@@ -2224,27 +3501,13 @@ class _MonthCalendarCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
+        color: shellColor,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: shellBorder, width: 1.4),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(
-              shellForeground.withValues(alpha: 0.04),
-              shellColor,
-            ),
-            shellColor,
-            Color.alphaBlend(
-              palette.accent.withValues(alpha: 0.08),
-              shellColor,
-            ),
-          ],
-        ),
         boxShadow: [
           BoxShadow(
-            color: palette.shadow.withValues(alpha: 0.22),
-            blurRadius: 22,
+            color: palette.shadow.withValues(alpha: isDark ? 0.22 : 0.08),
+            blurRadius: 18,
             offset: const Offset(0, 10),
           ),
         ],
@@ -2283,53 +3546,29 @@ class _MonthCalendarCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Wrap(
-                            spacing: 12,
+                            spacing: 10,
                             runSpacing: 6,
                             children: [
-                              ProductionCalendarMetricPill(
+                              _MonthHeaderMetric(
                                 icon: Icons.checklist_rounded,
-                                value: "${monthTasks.length}",
-                                accent: shellForeground,
-                                compact: true,
-                                filled: false,
-                                padding: EdgeInsets.zero,
-                                foregroundColor: shellForeground,
-                                iconColor: metricIconColor,
-                                tooltip: "Tasks",
+                                label: "${monthTasks.length} tasks",
+                                foregroundColor: shellMuted,
                               ),
-                              ProductionCalendarMetricPill(
+                              _MonthHeaderMetric(
                                 icon: Icons.done_all_rounded,
-                                value: "$completedCount",
-                                accent: completedMetricAccent,
-                                compact: true,
-                                filled: false,
-                                padding: EdgeInsets.zero,
-                                foregroundColor: shellForeground,
-                                iconColor: completedMetricAccent,
-                                tooltip: "Completed",
+                                label: "$completedCount done",
+                                foregroundColor: completedMetricAccent,
                               ),
-                              ProductionCalendarMetricPill(
+                              _MonthHeaderMetric(
                                 icon: Icons.grid_view_rounded,
-                                value: workScopeSummary.countLabel,
-                                accent: shellForeground,
-                                compact: true,
-                                filled: false,
-                                padding: EdgeInsets.zero,
-                                foregroundColor: shellForeground,
-                                iconColor: metricIconColor,
-                                tooltip: "Draft work scope",
+                                label: workScopeSummary.countLabel,
+                                foregroundColor: shellMuted,
                               ),
                               if (timelineRows.isNotEmpty)
-                                ProductionCalendarMetricPill(
+                                _MonthHeaderMetric(
                                   icon: Icons.waterfall_chart_rounded,
-                                  value: "${monthRows.length}",
-                                  accent: shellForeground,
-                                  compact: true,
-                                  filled: false,
-                                  padding: EdgeInsets.zero,
-                                  foregroundColor: shellForeground,
-                                  iconColor: metricIconColor,
-                                  tooltip: "Logs",
+                                  label: "${monthRows.length} logs",
+                                  foregroundColor: shellMuted,
                                 ),
                             ],
                           ),
@@ -2387,10 +3626,10 @@ class _MonthCalendarCard extends StatelessWidget {
                     constraints.maxWidth - (_calendarSpacing * 6);
                 final cellWidth = usableWidth / 7;
                 final compact = cellWidth < 128;
-                final showPreview = cellWidth >= 136;
+                final showPreview = cellWidth >= 148;
                 final cellHeight = compact
-                    ? (cellWidth * 1.18).clamp(88.0, 112.0)
-                    : (cellWidth * 1.16).clamp(108.0, 138.0);
+                    ? (cellWidth * 1.02).clamp(76.0, 96.0)
+                    : (cellWidth * 1.08).clamp(100.0, 126.0);
                 return GridView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -2444,39 +3683,67 @@ class _MonthWeekdayHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    return Row(
-      children: _weekdayLabels
-          .map(
-            (label) => Expanded(
-              child: Container(
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  color:
-                      backgroundColor ??
-                      Color.alphaBlend(
-                        colorScheme.primary.withValues(alpha: 0.08),
-                        colorScheme.surfaceContainerHighest,
-                      ),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color:
-                        borderColor ??
-                        colorScheme.primary.withValues(alpha: 0.12),
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: textColor ?? colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color:
+            backgroundColor ??
+            Color.alphaBlend(
+              colorScheme.primary.withValues(alpha: 0.06),
+              colorScheme.surfaceContainerHigh,
+            ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: borderColor ?? colorScheme.primary.withValues(alpha: 0.12),
+        ),
+      ),
+      child: Row(
+        children: _weekdayLabels
+            .map(
+              (label) => Expanded(
+                child: Center(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: textColor ?? colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            ),
-          )
-          .toList(),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class _MonthHeaderMetric extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color foregroundColor;
+
+  const _MonthHeaderMetric({
+    required this.icon,
+    required this.label,
+    required this.foregroundColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: foregroundColor),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: foregroundColor,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2819,6 +4086,7 @@ class _MonthDayTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final completed = tasks
         .where((task) => task.status == _taskStatusDone)
         .length;
@@ -2832,17 +4100,27 @@ class _MonthDayTile extends StatelessWidget {
     );
     final previewTaskTitle = tasks.isNotEmpty ? tasks.first.title : null;
     final tilePadding = compact ? 6.0 : 8.0;
+    final today = _isSameDay(day, DateTime.now());
+    final hasWarning = tasks.any(_workspaceTaskHasStaffGap);
+    final statusIcon = hasWarning
+        ? Icons.warning_amber_rounded
+        : completed > 0
+        ? Icons.done_all_rounded
+        : (tasks.isNotEmpty
+              ? Icons.checklist_rounded
+              : (rows.isNotEmpty ? Icons.waterfall_chart_rounded : null));
+    final statusCount = tasks.isNotEmpty ? tasks.length : rows.length;
     final titleStyle = compact
         ? theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.onSurface,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           )
         : theme.textTheme.titleSmall?.copyWith(
-            color: theme.colorScheme.onSurface,
+            color: _workspacePrimaryContentColor(colorScheme),
             fontWeight: FontWeight.w800,
           );
     final previewStyle = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurface,
+      color: _workspacePrimaryContentColor(colorScheme),
       height: 1.15,
       fontWeight: FontWeight.w600,
     );
@@ -2868,7 +4146,18 @@ class _MonthDayTile extends StatelessWidget {
                 children: [
                   Text("${day.day}", style: titleStyle),
                   const Spacer(),
-                  if (rows.isNotEmpty)
+                  if (selected || today)
+                    Container(
+                      width: compact ? 8 : 10,
+                      height: compact ? 8 : 10,
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? palette.badgeForeground
+                            : palette.accent,
+                        shape: BoxShape.circle,
+                      ),
+                    )
+                  else if (!compact && rows.isNotEmpty)
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -2881,7 +4170,7 @@ class _MonthDayTile extends StatelessWidget {
                         Text(
                           "${rows.length}",
                           style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurface,
+                            color: _workspaceSecondaryContentColor(colorScheme),
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -2890,7 +4179,30 @@ class _MonthDayTile extends StatelessWidget {
                 ],
               ),
               SizedBox(height: compact ? 4 : 6),
-              if (tasks.isNotEmpty) ...[
+              if (compact) ...[
+                const Spacer(),
+                if (statusIcon != null && statusCount > 0)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        statusIcon,
+                        size: 11,
+                        color: hasWarning
+                            ? theme.colorScheme.tertiary
+                            : palette.accent,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        "$statusCount",
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: _workspaceSecondaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+              ] else if (tasks.isNotEmpty) ...[
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -2903,11 +4215,11 @@ class _MonthDayTile extends StatelessWidget {
                     Text(
                       "${tasks.length}",
                       style: theme.textTheme.labelLarge?.copyWith(
-                        color: theme.colorScheme.onSurface,
+                        color: _workspacePrimaryContentColor(colorScheme),
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (tasks.any(_workspaceTaskHasStaffGap)) ...[
+                    if (hasWarning) ...[
                       const SizedBox(width: 6),
                       Icon(
                         Icons.warning_amber_rounded,
@@ -2938,9 +4250,14 @@ class _MonthDayTile extends StatelessWidget {
                     vertical: 7,
                   ),
                   decoration: BoxDecoration(
-                    color: Color.alphaBlend(
-                      palette.accent.withValues(alpha: 0.08),
-                      theme.colorScheme.surface,
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: palette.accent,
+                      lightTintAlpha: 0.06,
+                      darkTintAlpha: 0.12,
+                      baseColor: _workspaceIsDark(colorScheme)
+                          ? colorScheme.surfaceContainerHigh
+                          : colorScheme.surface,
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -2973,142 +4290,651 @@ class _MonthDayTile extends StatelessWidget {
 }
 
 class _SelectedDayMetricsRow extends StatelessWidget {
+  final ProductionPlan plan;
+  final DateTime selectedDay;
+  final _WorkspaceWorkScopeSummary workScopeSummary;
   final List<ProductionTask> tasks;
   final List<ProductionTimelineRow> rows;
+  final List<ProductionTimelineRow> timelineRows;
+  final List<ProductionTaskDayLedger> taskDayLedgers;
+  final List<ProductionAttendanceRecord> attendanceRecords;
+  final bool isSummaryExpanded;
+  final bool isProgressExpanded;
+  final VoidCallback onToggleSummaryExpanded;
+  final VoidCallback onToggleProgressExpanded;
 
-  const _SelectedDayMetricsRow({required this.tasks, required this.rows});
+  const _SelectedDayMetricsRow({
+    required this.plan,
+    required this.selectedDay,
+    required this.workScopeSummary,
+    required this.tasks,
+    required this.rows,
+    required this.timelineRows,
+    required this.taskDayLedgers,
+    required this.attendanceRecords,
+    required this.isSummaryExpanded,
+    required this.isProgressExpanded,
+    required this.onToggleSummaryExpanded,
+    required this.onToggleProgressExpanded,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final assignedCount = tasks.fold<int>(
-      0,
-      (sum, task) => sum + _resolveAssignedStaffIds(task).length,
+    final assignedStaffIds = tasks
+        .expand(_resolveAssignedStaffIds)
+        .map((staffId) => staffId.trim())
+        .where((staffId) => staffId.isNotEmpty)
+        .toSet();
+    final dayAttendanceRecords = _attendanceRowsForDay(
+      attendanceRecords: attendanceRecords,
+      day: selectedDay,
     );
-    final doneCount = tasks
-        .where((task) => task.status == _taskStatusDone)
+    final clockedInCount = dayAttendanceRecords.length;
+    final clockedOutCount = dayAttendanceRecords
+        .where((record) => record.clockOutAt != null)
         .length;
-    const metricWidth = 168.0;
-    return Wrap(
-      spacing: _cardSpacing,
-      runSpacing: _cardSpacing,
-      children: [
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryTasksLabel,
-            value: "${tasks.length}",
-            accentColor: _workspaceBlue,
-            softColor: _workspaceSoftBlue,
-            icon: Icons.checklist_outlined,
-          ),
-        ),
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryAssignedLabel,
-            value: "$assignedCount",
-            accentColor: _workspaceTeal,
-            softColor: _workspaceSoftTeal,
-            icon: Icons.groups_2_outlined,
-          ),
-        ),
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryLoggedLabel,
-            value: "${rows.length}",
-            accentColor: _workspaceAmber,
-            softColor: _workspaceSoftAmber,
-            icon: Icons.edit_note_outlined,
-          ),
-        ),
-        SizedBox(
-          width: metricWidth,
-          child: _WorkspaceDayMetricCard(
-            label: _daySummaryDoneLabel,
-            value: "$doneCount",
-            accentColor: _workspaceBerry,
-            softColor: _workspaceSoftBerry,
-            icon: Icons.task_alt_outlined,
-          ),
-        ),
-      ],
+    final unitsTouched = rows
+        .map((row) => row.unitId.trim())
+        .where((unitId) => unitId.isNotEmpty)
+        .toSet();
+    final plannedAmount = tasks.fold<num>(0, (sum, task) {
+      final ledger = _ledgerForTaskOnDay(
+        taskDayLedgers: taskDayLedgers,
+        taskId: task.id,
+        day: selectedDay,
+      );
+      if (ledger != null) {
+        return sum + ledger.unitTarget;
+      }
+      final assignedUnitIds = task.assignedUnitIds
+          .map((unitId) => unitId.trim())
+          .where((unitId) => unitId.isNotEmpty)
+          .toList();
+      return sum +
+          _resolveTaskProgressTargetAmount(
+            task: task,
+            assignedUnitIds: assignedUnitIds,
+            fallbackTotalUnits: workScopeSummary.totalUnits,
+          );
+    });
+    final actualAmount = tasks.fold<num>(0, (sum, task) {
+      final ledger = _ledgerForTaskOnDay(
+        taskDayLedgers: taskDayLedgers,
+        taskId: task.id,
+        day: selectedDay,
+      );
+      if (ledger != null) {
+        return sum + ledger.unitCompleted;
+      }
+      return sum +
+          rows
+              .where((row) => row.taskId.trim() == task.id.trim())
+              .fold<num>(0, (rowSum, row) => rowSum + row.actualPlots);
+    });
+    final quantityMetrics = _buildSelectedDayQuantityMetrics(
+      plan: plan,
+      timelineRows: timelineRows,
+      selectedDay: selectedDay,
+    );
+
+    DateTime? firstClockInAt;
+    DateTime? lastClockOutAt;
+    for (final record in dayAttendanceRecords) {
+      final clockInAt = record.clockInAt;
+      if (clockInAt != null &&
+          (firstClockInAt == null || clockInAt.isBefore(firstClockInAt))) {
+        firstClockInAt = clockInAt;
+      }
+      final clockOutAt = record.clockOutAt;
+      if (clockOutAt != null &&
+          (lastClockOutAt == null || clockOutAt.isAfter(lastClockOutAt))) {
+        lastClockOutAt = clockOutAt;
+      }
+    }
+
+    final progressSummary =
+        "${_formatProgressAmount(actualAmount)} / ${_formatProgressAmount(plannedAmount)}";
+    final summaryLine =
+        "${tasks.length} tasks | ${assignedStaffIds.length} assigned | $progressSummary progress";
+    final productionProgressSummary = quantityMetrics.isEmpty
+        ? null
+        : _resolveProductionProgressSummary(quantityMetrics);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final metricWidth = _resolveSelectedDayMetricTileWidth(
+          constraints.maxWidth,
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SelectedDaySummaryToggle(
+              isExpanded: isSummaryExpanded,
+              summary: summaryLine,
+              onPressed: onToggleSummaryExpanded,
+            ),
+            if (isSummaryExpanded) ...[
+              const SizedBox(height: _cardSpacing),
+              Wrap(
+                spacing: _cardSpacing,
+                runSpacing: _cardSpacing,
+                children: [
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryTasksLabel,
+                      value: "${tasks.length}",
+                      helper: "Scheduled on this day",
+                      accentColor: _workspaceBlue,
+                      softColor: _workspaceSoftBlue,
+                      icon: Icons.checklist_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryAssignedLabel,
+                      value: "${assignedStaffIds.length}",
+                      helper: "Unique staff assigned",
+                      accentColor: _workspaceTeal,
+                      softColor: _workspaceSoftTeal,
+                      icon: Icons.groups_2_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryClockedInLabel,
+                      value: "$clockedInCount",
+                      helper: "Attendance started",
+                      accentColor: _workspaceNavy,
+                      softColor: _workspaceSoftSlate,
+                      icon: Icons.login_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryClockedOutLabel,
+                      value: "$clockedOutCount",
+                      helper: "Shifts fully closed",
+                      accentColor: _workspaceBerry,
+                      softColor: _workspaceSoftBerry,
+                      icon: Icons.logout_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryLoggedLabel,
+                      value: "${rows.length}",
+                      helper: "Progress rows saved",
+                      accentColor: _workspaceAmber,
+                      softColor: _workspaceSoftAmber,
+                      icon: Icons.edit_note_outlined,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryUnitsTouchedLabel,
+                      value: "${unitsTouched.length}",
+                      helper: unitsTouched.isEmpty
+                          ? "No ${workScopeSummary.pluralLabel} logged yet"
+                          : "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} with progress",
+                      accentColor: _workspaceBerry,
+                      softColor: _workspaceSoftBerry,
+                      icon: Icons.grid_view_rounded,
+                    ),
+                  ),
+                  SizedBox(
+                    width: metricWidth,
+                    child: _WorkspaceDayMetricCard(
+                      label: _daySummaryProgressLabel,
+                      value: progressSummary,
+                      helper:
+                          "${_capitalizeWorkspaceLabel(workScopeSummary.pluralLabel)} logged against plan",
+                      accentColor: _workspaceTeal,
+                      softColor: _workspaceSoftTeal,
+                      icon: Icons.insights_outlined,
+                    ),
+                  ),
+                ],
+              ),
+              if (firstClockInAt != null || lastClockOutAt != null) ...[
+                const SizedBox(height: _cardSpacing),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (firstClockInAt != null)
+                      _SummaryPill(
+                        icon: Icons.login_outlined,
+                        label:
+                            "$_daySummaryFirstClockInLabel ${_clockLabel(firstClockInAt.toLocal())}",
+                      ),
+                    if (lastClockOutAt != null)
+                      _SummaryPill(
+                        icon: Icons.logout_outlined,
+                        label:
+                            "$_daySummaryLastClockOutLabel ${_clockLabel(lastClockOutAt.toLocal())}",
+                      ),
+                  ],
+                ),
+              ],
+            ],
+            if (quantityMetrics.isNotEmpty) ...[
+              const SizedBox(height: _cardSpacing),
+              _ProductionProgressToggle(
+                isExpanded: isProgressExpanded,
+                summary: productionProgressSummary?.summary ?? "",
+                helper: productionProgressSummary?.helper ?? "",
+                onPressed: onToggleProgressExpanded,
+              ),
+              if (isProgressExpanded) ...[
+                const SizedBox(height: 8),
+                _ProductionProgressRowsCard(metrics: quantityMetrics),
+              ],
+            ],
+          ],
+        );
+      },
     );
   }
 }
 
-class _WorkspaceDayMetricCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color accentColor;
-  final Color softColor;
-  final IconData icon;
+class _SelectedDaySummaryToggle extends StatelessWidget {
+  final bool isExpanded;
+  final String summary;
+  final VoidCallback onPressed;
 
-  const _WorkspaceDayMetricCard({
-    required this.label,
-    required this.value,
-    this.accentColor = _workspaceBlue,
-    this.softColor = _workspaceSoftBlue,
-    this.icon = Icons.analytics_outlined,
+  const _SelectedDaySummaryToggle({
+    required this.isExpanded,
+    required this.summary,
+    required this.onPressed,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.92),
-              colorScheme.surface,
+    final foregroundColor = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.5,
+    );
+    return Tooltip(
+      message: isExpanded
+          ? _daySummaryPanelHideLabel
+          : _daySummaryPanelShowLabel,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(18),
+          child: Ink(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightTintAlpha: 0.035,
+                darkTintAlpha: 0.1,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  lightAlpha: 0.14,
+                  darkAlpha: 0.32,
+                ),
+              ),
             ),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: _workspaceBlue,
+                      lightTintAlpha: 0.08,
+                      darkTintAlpha: 0.18,
+                      baseColor: _workspaceIsDark(colorScheme)
+                          ? colorScheme.surfaceContainerLow
+                          : colorScheme.surface,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.analytics_outlined,
+                    size: 20,
+                    color: foregroundColor,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _daySummaryPanelLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  isExpanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductionProgressSummary {
+  final String summary;
+  final String helper;
+
+  const _ProductionProgressSummary({
+    required this.summary,
+    required this.helper,
+  });
+}
+
+class _ProductionProgressToggle extends StatelessWidget {
+  final bool isExpanded;
+  final String summary;
+  final String helper;
+  final VoidCallback onPressed;
+
+  const _ProductionProgressToggle({
+    required this.isExpanded,
+    required this.summary,
+    required this.helper,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foregroundColor = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceTeal,
+      darkMix: 0.56,
+    );
+    return Tooltip(
+      message: isExpanded
+          ? "Hide production progress"
+          : "Show production progress",
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Ink(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceTeal,
+                lightTintAlpha: 0.022,
+                darkTintAlpha: 0.1,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceTeal,
+                  lightAlpha: 0.14,
+                  darkAlpha: 0.32,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: _workspaceTeal,
+                      lightTintAlpha: 0.07,
+                      darkTintAlpha: 0.18,
+                      baseColor: _workspaceIsDark(colorScheme)
+                          ? colorScheme.surfaceContainerLow
+                          : colorScheme.surface,
+                    ),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(
+                    Icons.waterfall_chart_rounded,
+                    size: 19,
+                    color: foregroundColor,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Production progress",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (summary.trim().isNotEmpty)
+                            Text(
+                              summary,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          if (helper.trim().isNotEmpty) ...[
+                            const SizedBox(height: 1),
+                            Text(
+                              helper,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: foregroundColor,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  isExpanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductionProgressRowsCard extends StatelessWidget {
+  final List<_SelectedDayQuantityMetric> metrics;
+
+  const _ProductionProgressRowsCard({required this.metrics});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerHigh
+            : colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        children: [
+          for (var index = 0; index < metrics.length; index++) ...[
+            _ProductionProgressRow(metric: metrics[index]),
+            if (index != metrics.length - 1)
+              Divider(height: 14, color: colorScheme.outlineVariant),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _ProductionProgressRow extends StatelessWidget {
+  final _SelectedDayQuantityMetric metric;
+
+  const _ProductionProgressRow({required this.metric});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: metric.accentColor,
+      darkMix: 0.62,
+    );
+    final progressValue = metric.progressFraction.clamp(0, 1).toDouble();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(14),
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: metric.accentColor,
+                lightTintAlpha: 0.065,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: Colors.white, size: 22),
+            child: Icon(metric.icon, color: foreground, size: 17),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: accentColor,
-                    fontWeight: FontWeight.w800,
-                  ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        metric.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        metric.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value: progressValue,
+                  minHeight: 5,
+                  borderRadius: BorderRadius.circular(999),
+                  backgroundColor: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: metric.accentColor,
+                    lightTintAlpha: 0.05,
+                    darkTintAlpha: 0.14,
+                    baseColor: colorScheme.surfaceContainerHighest,
+                  ),
+                  valueColor: AlwaysStoppedAnimation<Color>(foreground),
+                ),
+                const SizedBox(height: 5),
                 Text(
-                  value,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: _workspaceNavy,
-                    fontWeight: FontWeight.w900,
+                  metric.helper,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    height: 1.15,
                   ),
                 ),
               ],
@@ -3120,24 +4946,188 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
   }
 }
 
+class _WorkspaceDayMetricCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String? helper;
+  final Color accentColor;
+  final Color softColor;
+  final IconData icon;
+
+  const _WorkspaceDayMetricCard({
+    required this.label,
+    required this.value,
+    this.helper,
+    this.accentColor = _workspaceBlue,
+    this.softColor = _workspaceSoftBlue,
+    this.icon = Icons.analytics_outlined,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightColor: Color.alphaBlend(
+            softColor.withValues(alpha: 0.18),
+            colorScheme.surface,
+          ),
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: accentForeground, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: accentForeground,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                if (helper != null && helper!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    helper!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedDayQuantityMetric {
+  final String label;
+  final String value;
+  final String helper;
+  final num loggedAmount;
+  final num plannedAmount;
+  final num remainingAmount;
+  final String unitLabel;
+  final Color accentColor;
+  final Color softColor;
+  final IconData icon;
+
+  const _SelectedDayQuantityMetric({
+    required this.label,
+    required this.value,
+    required this.helper,
+    required this.loggedAmount,
+    required this.plannedAmount,
+    required this.remainingAmount,
+    required this.unitLabel,
+    required this.accentColor,
+    required this.softColor,
+    required this.icon,
+  });
+
+  double get progressFraction {
+    if (plannedAmount <= 0) {
+      return 0;
+    }
+    return (loggedAmount / plannedAmount).clamp(0, 1).toDouble();
+  }
+}
+
 class _AgendaTaskCard extends StatelessWidget {
   final ProductionTask task;
   final String phaseName;
   final Map<String, BusinessStaffProfileSummary> staffMap;
+  final String currentActorStaffId;
   final Map<String, String> planUnitLabelById;
   final int fallbackTotalUnits;
   final String fallbackWorkUnitLabel;
   final String planContextText;
   final DateTime selectedDay;
   final List<ProductionAttendanceRecord> attendanceRecords;
+  final List<ProductionTimelineRow> timelineRows;
+  final List<ProductionTaskDayLedger> taskDayLedgers;
   final List<ProductionTimelineRow> rowsForDay;
   final bool canManageCalendar;
   final bool canManageTaskAttendance;
-  final String selfStaffId;
   final bool canReviewProgress;
+  final Future<void> Function(
+    String staffProfileId,
+    List<ProductionTaskProgressProofRecord> proofs,
+  )?
+  onDownloadProofsForStaff;
   final bool isOwner;
   final Set<String> progressEnabledStaffIds;
+  final bool taskExpanded;
+  final bool progressExpanded;
+  final bool assignmentExpanded;
+  final bool infoExpanded;
+  final VoidCallback onToggleTaskExpanded;
+  final VoidCallback onToggleProgressExpanded;
+  final VoidCallback onToggleAssignmentExpanded;
+  final VoidCallback onToggleInfoExpanded;
   final Future<void> Function()? onManageStaff;
+  final Future<void> Function()? onDeleteTask;
   final Future<void> Function(
     String staffProfileId,
     ProductionAttendanceRecord? attendance,
@@ -3153,7 +5143,10 @@ class _AgendaTaskCard extends StatelessWidget {
     ProductionAttendanceRecord? attendance,
   )?
   onQuickClockOutForStaff;
+  final Future<void> Function(String staffProfileId)? onResetHistoryForStaff;
   final Future<void> Function(String staffProfileId)? onLogProgressForStaff;
+  final Future<void> Function(String staffProfileId)?
+  onAddProgressCountForStaff;
   final Future<void> Function(String status)? onStatusSelected;
   final Future<void> Function()? onLogProgress;
   final Future<void> Function()? onApproveTask;
@@ -3162,27 +5155,42 @@ class _AgendaTaskCard extends StatelessWidget {
   final Future<void> Function(String progressId)? onRejectProgress;
 
   const _AgendaTaskCard({
+    super.key,
     required this.task,
     required this.phaseName,
     required this.staffMap,
+    required this.currentActorStaffId,
     required this.planUnitLabelById,
     required this.fallbackTotalUnits,
     required this.fallbackWorkUnitLabel,
     required this.planContextText,
     required this.selectedDay,
     required this.attendanceRecords,
+    required this.timelineRows,
+    required this.taskDayLedgers,
     required this.rowsForDay,
     required this.canManageCalendar,
     required this.canManageTaskAttendance,
-    required this.selfStaffId,
     required this.canReviewProgress,
+    required this.onDownloadProofsForStaff,
     required this.isOwner,
     required this.progressEnabledStaffIds,
+    required this.taskExpanded,
+    required this.progressExpanded,
+    required this.assignmentExpanded,
+    required this.infoExpanded,
+    required this.onToggleTaskExpanded,
+    required this.onToggleProgressExpanded,
+    required this.onToggleAssignmentExpanded,
+    required this.onToggleInfoExpanded,
     required this.onManageStaff,
+    required this.onDeleteTask,
     required this.onSetAttendanceForStaff,
     required this.onQuickClockInForStaff,
     required this.onQuickClockOutForStaff,
+    required this.onResetHistoryForStaff,
     required this.onLogProgressForStaff,
+    required this.onAddProgressCountForStaff,
     required this.onStatusSelected,
     required this.onLogProgress,
     required this.onApproveTask,
@@ -3195,6 +5203,7 @@ class _AgendaTaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final isCompactPhone = MediaQuery.sizeOf(context).width <= 430;
     final assignedStaffIds = _resolveAssignedStaffIds(task);
     final assignedUnitIds = task.assignedUnitIds
         .map((value) => value.trim())
@@ -3212,45 +5221,33 @@ class _AgendaTaskCard extends StatelessWidget {
       contextText:
           "${task.title} ${task.instructions} ${task.taskType} $fallbackWorkUnitLabel",
     );
+    final taskDayLedger = _ledgerForTaskOnDay(
+      taskDayLedgers: taskDayLedgers,
+      taskId: task.id,
+      day: selectedDay,
+    );
     final taskProgressSummary = _buildTaskUnitProgressSummary(
       task: task,
       timelineRows: rowsForDay,
+      taskDayLedger: taskDayLedger,
       planUnitLabelById: planUnitLabelById,
       fallbackTotalUnits: fallbackTotalUnits,
       fallbackWorkUnitLabel: fallbackWorkUnitLabel,
       contextText: "$planContextText ${task.title} ${task.instructions}",
     );
-    final attendanceActivityEntries = _buildAttendanceActivityEntries(
-      attendanceRecords: attendanceRecords,
-      assignedStaffIds: assignedStaffIds,
-      day: selectedDay,
-      staffMap: staffMap,
-      fallbackRole: task.roleRequired,
+    final displayStatus = _resolveWorkspaceTaskDisplayStatus(
+      task: task,
+      taskProgressSummary: taskProgressSummary,
+      rowsForDay: rowsForDay,
     );
-
     return Container(
       padding: const EdgeInsets.all(_agendaCardPadding),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              _workspaceSoftSlate.withValues(alpha: 0.96),
-              colorScheme.surface,
-            ),
-          ],
-        ),
+        color: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _workspaceBlue.withValues(alpha: 0.14)),
-        boxShadow: [
-          BoxShadow(
-            color: _workspaceNavy.withValues(alpha: 0.06),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3264,10 +5261,18 @@ class _AgendaTaskCard extends StatelessWidget {
                   children: [
                     Text(
                       task.title,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: _workspaceNavy,
-                        fontWeight: FontWeight.w800,
-                      ),
+                      maxLines: isCompactPhone ? 2 : 3,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          (isCompactPhone
+                                  ? theme.textTheme.titleMedium
+                                  : theme.textTheme.titleLarge)
+                              ?.copyWith(
+                                color: _workspacePrimaryContentColor(
+                                  colorScheme,
+                                ),
+                                fontWeight: FontWeight.w800,
+                              ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -3280,14 +5285,45 @@ class _AgendaTaskCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              ProductionStatusPill(label: task.status),
+              const SizedBox(width: 8),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.end,
+                children: [
+                  ProductionStatusPill(label: displayStatus),
+                  IconButton(
+                    tooltip: taskExpanded
+                        ? _collapseTaskTooltip
+                        : _expandTaskTooltip,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 36,
+                      height: 36,
+                    ),
+                    padding: EdgeInsets.zero,
+                    style: IconButton.styleFrom(
+                      foregroundColor: colorScheme.onSurfaceVariant,
+                      backgroundColor: colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.42),
+                      side: BorderSide(color: colorScheme.outlineVariant),
+                    ),
+                    onPressed: onToggleTaskExpanded,
+                    icon: Icon(
+                      taskExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 21,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               _InfoChip(
                 label: "$_scheduleLabel: $estimatedWindow",
@@ -3328,280 +5364,570 @@ class _AgendaTaskCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final stacked = constraints.maxWidth < 680;
-              final workingOnCard = _TaskSnapshotCard(
-                label: _workingOnLabel,
-                value: taskProgressSummary.workingOnLabel,
-                helper: "Planned task scope for today",
-                accentColor: _workspaceAmber,
-                softColor: _workspaceSoftAmber,
-                icon: Icons.event_note_outlined,
-              );
-              final doneTodayCard = _TaskSnapshotCard(
-                label: _doneTodayLabel,
-                value: taskProgressSummary.doneTodayLabel,
-                helper: "Captured from today’s logs",
-                accentColor: _workspaceTeal,
-                softColor: _workspaceSoftTeal,
-                icon: Icons.insights_outlined,
-              );
-              final leftTodayCard = _TaskSnapshotCard(
-                label: _leftTodayLabel,
-                value: taskProgressSummary.leftTodayLabel,
-                helper: "Still open on this task today",
-                accentColor: _workspaceBlue,
-                softColor: _workspaceSoftBlue,
-                icon: Icons.track_changes_outlined,
-              );
-              if (stacked) {
-                return Column(
-                  children: [
-                    workingOnCard,
-                    const SizedBox(height: 10),
-                    doneTodayCard,
-                    const SizedBox(height: 10),
-                    leftTodayCard,
-                  ],
-                );
-              }
-              return Row(
-                children: [
-                  Expanded(child: workingOnCard),
-                  const SizedBox(width: 10),
-                  Expanded(child: doneTodayCard),
-                  const SizedBox(width: 10),
-                  Expanded(child: leftTodayCard),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Icon(Icons.badge_outlined, size: 18, color: _workspaceBlue),
-              const SizedBox(width: 8),
-              Text(
-                _assignedLabel,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: _workspaceNavy,
-                  fontWeight: FontWeight.w800,
-                ),
+          if (taskExpanded) ...[
+            const SizedBox(height: 10),
+            _WorkspaceDisclosureHeader(
+              title: _todayProgressTitle,
+              subtitle:
+                  "${taskProgressSummary.doneTodayLabel} done, ${taskProgressSummary.leftTodayLabel} left",
+              icon: Icons.timeline_outlined,
+              accentColor: _workspaceBlue,
+              expanded: progressExpanded,
+              onToggle: onToggleProgressExpanded,
+            ),
+            if (progressExpanded) ...[
+              const SizedBox(height: 8),
+              _TaskProgressSummaryCard(
+                summary: taskProgressSummary,
+                compact: isCompactPhone,
+                showTitle: false,
               ),
             ],
-          ),
-          const SizedBox(height: 6),
-          if (assignedStaffIds.isEmpty)
-            Text(
-              _unassignedLabel,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            )
-          else
-            Column(
-              children: assignedStaffIds.map((staffId) {
-                final attendance =
-                    _attendanceForStaffOnDay(
+            const SizedBox(height: 10),
+            _WorkspaceDisclosureHeader(
+              title: _assignedLabel,
+              subtitle: assignedStaffIds.isEmpty
+                  ? _unassignedLabel
+                  : "${assignedStaffIds.length} staff",
+              icon: Icons.badge_outlined,
+              accentColor: _workspaceBlue,
+              expanded: assignmentExpanded,
+              onToggle: onToggleAssignmentExpanded,
+            ),
+            if (assignmentExpanded) ...[
+              const SizedBox(height: 6),
+              if (assignedStaffIds.isEmpty)
+                Text(
+                  _unassignedLabel,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                Column(
+                  children: assignedStaffIds.map((staffId) {
+                    final taskAttendance = _attendanceForStaffOnDay(
                       attendanceRecords: attendanceRecords,
                       staffProfileId: staffId,
                       day: selectedDay,
-                    ) ??
-                    _findOpenAttendanceForStaff(
-                      attendanceRecords: attendanceRecords,
-                      staffProfileId: staffId,
+                      taskId: task.id,
                     );
-                final clockInAt = attendance?.clockInAt?.toLocal();
-                final clockOutAt = attendance?.clockOutAt?.toLocal();
-                final hasLoggedProgress = rowsForDay.any(
-                  (row) => row.staffId == staffId,
-                );
-                final canManageAttendanceForStaff =
-                    canManageTaskAttendance || staffId == selfStaffId;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Builder(
-                    builder: (context) {
-                      final staffIdentity = _resolveStaffIdentity(
-                        staffId,
-                        staffMap,
-                        fallbackRole: task.roleRequired,
-                      );
-                      return _AssignedStaffAttendanceRow(
-                        staffName: staffIdentity.displayName,
-                        staffRoleLabel: staffIdentity.roleLabel,
-                        taskTitle: task.title,
-                        selectedDay: selectedDay,
-                        estimatedWindow: estimatedWindow,
-                        clockInValue: _formatAttendanceDisplayValue(
-                          clockInAt,
-                          selectedDay: selectedDay,
-                          emptyLabel: _attendanceClockInUnsetLabel,
-                        ),
-                        clockOutValue: clockOutAt != null
-                            ? _formatAttendanceDisplayValue(
-                                clockOutAt,
-                                selectedDay: selectedDay,
-                                emptyLabel: _attendanceClockOutUnsetLabel,
-                              )
-                            : (clockInAt != null
-                                  ? _attendanceClockOutPendingLabel
-                                  : _attendanceClockOutUnsetLabel),
-                        hasClockIn: attendance?.clockInAt != null,
-                        hasClockOut: attendance?.clockOutAt != null,
-                        proofUrl: attendance?.proofUrl,
-                        proofFilename: attendance?.proofFilename,
-                        proofMimeType: attendance?.proofMimeType,
-                        proofUploadedAt: attendance?.proofUploadedAt?.toLocal(),
-                        clockOutAudit: attendance?.clockOutAudit,
-                        canManageAttendance: canManageAttendanceForStaff,
-                        canLogProgress: progressEnabledStaffIds.contains(
-                          staffId,
-                        ),
-                        hasLoggedProgress: hasLoggedProgress,
-                        onQuickClockIn:
-                            onQuickClockInForStaff == null ||
-                                !canManageAttendanceForStaff
-                            ? null
-                            : () =>
-                                  onQuickClockInForStaff!(staffId, attendance),
-                        onQuickClockOut:
-                            onQuickClockOutForStaff == null ||
-                                !canManageAttendanceForStaff
-                            ? null
-                            : () =>
-                                  onQuickClockOutForStaff!(staffId, attendance),
-                        onSetAttendance:
-                            onSetAttendanceForStaff == null ||
-                                !canManageAttendanceForStaff
-                            ? null
-                            : () =>
-                                  onSetAttendanceForStaff!(staffId, attendance),
-                        onLogProgress:
-                            onLogProgressForStaff == null ||
-                                !progressEnabledStaffIds.contains(staffId)
-                            ? null
-                            : () => onLogProgressForStaff!(staffId),
-                      );
-                    },
-                  ),
-                );
-              }).toList(),
+                    final displayAttendance =
+                        resolveProductionWorkspaceDisplayAttendance(
+                          attendanceRecords: attendanceRecords,
+                          staffProfileId: staffId,
+                          day: selectedDay,
+                          taskId: task.id,
+                        );
+                    final activeClockOutAttendance =
+                        resolveProductionWorkspaceActiveClockOutAttendance(
+                          attendanceRecords: attendanceRecords,
+                          staffProfileId: staffId,
+                          day: selectedDay,
+                          taskId: task.id,
+                        );
+                    final staffProgressRows = rowsForDay.where((row) {
+                      return row.taskId.trim() == task.id.trim() &&
+                          row.staffId.trim() == staffId.trim() &&
+                          _toWorkDateKey(row.workDate) ==
+                              _toWorkDateKey(selectedDay);
+                    }).toList();
+                    final staffProgress = _findStaffTaskProgressRow(
+                      timelineRows: rowsForDay,
+                      taskId: task.id,
+                      workDate: selectedDay,
+                      staffId: staffId,
+                    );
+                    final clockInAt = displayAttendance?.clockInAt?.toLocal();
+                    final clockOutAt = displayAttendance?.clockOutAt?.toLocal();
+                    final attendanceBelongsToCurrentTask =
+                        displayAttendance != null &&
+                        taskAttendance != null &&
+                        displayAttendance.id.trim() == taskAttendance.id.trim();
+                    final attendanceMatchesSelectedDay =
+                        displayAttendance != null &&
+                        _attendanceMatchesWorkDay(
+                          displayAttendance,
+                          _toWorkDateKey(selectedDay),
+                        );
+                    final totalStaffUnitContribution = staffProgressRows
+                        .fold<num>(0, (sum, row) => sum + row.unitContribution);
+                    final hasDisplayClockIn =
+                        displayAttendance?.clockInAt != null;
+                    final hasDisplayClockOut =
+                        displayAttendance?.clockOutAt != null;
+                    final hasLoggedProgress = staffProgressRows.isNotEmpty;
+                    final visibleProofs = _resolveWorkspaceVisibleProofs(
+                      progress: staffProgress,
+                      attendance:
+                          taskAttendance ??
+                          (attendanceBelongsToCurrentTask
+                              ? displayAttendance
+                              : null),
+                    );
+                    final canResetHistory =
+                        taskAttendance != null || hasLoggedProgress;
+                    final canUseClockOutWizard =
+                        progressEnabledStaffIds.contains(staffId) &&
+                        activeClockOutAttendance != null &&
+                        activeClockOutAttendance.clockInAt != null &&
+                        activeClockOutAttendance.clockOutAt == null;
+                    final canManageProgressFlow =
+                        progressEnabledStaffIds.contains(staffId) &&
+                        (canUseClockOutWizard ||
+                            hasDisplayClockOut ||
+                            hasLoggedProgress);
+                    final quickClockOutAttendance =
+                        !canUseClockOutWizard &&
+                            taskAttendance != null &&
+                            taskAttendance.clockInAt != null &&
+                            taskAttendance.clockOutAt == null
+                        ? taskAttendance
+                        : (!canUseClockOutWizard &&
+                                  !attendanceBelongsToCurrentTask &&
+                                  displayAttendance != null &&
+                                  displayAttendance.clockInAt != null &&
+                                  displayAttendance.clockOutAt == null
+                              ? displayAttendance
+                              : null);
+                    final attendanceHint =
+                        hasDisplayClockIn && !hasDisplayClockOut
+                        ? canUseClockOutWizard
+                              ? "Clock Out opens the production log. Enter completed units first, then upload proof before save closes the session."
+                              : attendanceBelongsToCurrentTask
+                              ? "Clock Out opens the daily production log and closes this task session after save."
+                              : _attendanceOpenElsewhereHint
+                        : hasDisplayClockIn && hasDisplayClockOut
+                        ? _attendanceReadyForProgressHint
+                        : _attendanceNotStartedHint;
+                    final canClockOwnTaskAttendance =
+                        currentActorStaffId.trim().isNotEmpty &&
+                        currentActorStaffId.trim() == staffId.trim();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Builder(
+                        builder: (context) {
+                          final staffIdentity = _resolveStaffIdentity(
+                            staffId,
+                            staffMap,
+                            fallbackRole: task.roleRequired,
+                          );
+                          return _AssignedStaffAttendanceRow(
+                            staffName: staffIdentity.displayName,
+                            staffRoleLabel: staffIdentity.roleLabel,
+                            estimatedWindow: estimatedWindow,
+                            clockInValue: _formatAttendanceTimeValue(
+                              clockInAt,
+                              emptyLabel: _attendanceClockInUnsetLabel,
+                              referenceDay: attendanceMatchesSelectedDay
+                                  ? null
+                                  : selectedDay,
+                            ),
+                            clockOutValue: clockOutAt != null
+                                ? _clockLabel(clockOutAt)
+                                : (clockInAt != null
+                                      ? _attendanceClockOutPendingLabel
+                                      : _attendanceClockOutUnsetLabel),
+                            hasClockIn: hasDisplayClockIn,
+                            hasClockOut: hasDisplayClockOut,
+                            attendanceBelongsToCurrentTask:
+                                attendanceBelongsToCurrentTask,
+                            canManageAttendance: canManageTaskAttendance,
+                            canClockSelfAttendance:
+                                !canManageTaskAttendance &&
+                                currentActorStaffId.trim().isNotEmpty &&
+                                currentActorStaffId.trim() == staffId.trim(),
+                            canLogProgress: canManageProgressFlow,
+                            attendanceLockedForProgress:
+                                progressEnabledStaffIds.contains(staffId) &&
+                                !canManageProgressFlow,
+                            hasLoggedProgress: hasLoggedProgress,
+                            attendanceHint: attendanceHint,
+                            personalUnitContribution:
+                                totalStaffUnitContribution,
+                            personalActivityType:
+                                staffProgress?.activityType ??
+                                staffProgress?.quantityActivityType ??
+                                _quantityActivityNone,
+                            personalActivityQuantity:
+                                staffProgress?.activityQuantity ??
+                                staffProgress?.quantityAmount ??
+                                0,
+                            personalQuantityUnit:
+                                staffProgress?.quantityUnit ?? "",
+                            visibleProofs: visibleProofs,
+                            proofStatusLabel: staffProgress == null
+                                ? _resolveAttendanceProofStatusLabel(
+                                    taskAttendance,
+                                  )
+                                : "${staffProgress.proofCountUploaded} / ${staffProgress.proofCountRequired} proofs",
+                            personalNotes: staffProgress?.notes ?? "",
+                            delayReason:
+                                staffProgress?.delayReason ?? _delayReasonNone,
+                            progressUnitLabel:
+                                taskProgressSummary.singularUnitLabel,
+                            onQuickClockIn:
+                                onQuickClockInForStaff != null &&
+                                    (canManageTaskAttendance ||
+                                        canClockOwnTaskAttendance) &&
+                                    !hasDisplayClockIn &&
+                                    !hasDisplayClockOut
+                                ? () => onQuickClockInForStaff!(
+                                    staffId,
+                                    taskAttendance,
+                                  )
+                                : null,
+                            onQuickClockOut:
+                                onLogProgressForStaff != null &&
+                                    canUseClockOutWizard
+                                ? () => onLogProgressForStaff!(staffId)
+                                : onQuickClockOutForStaff != null &&
+                                      (canManageTaskAttendance ||
+                                          canClockOwnTaskAttendance) &&
+                                      quickClockOutAttendance != null
+                                ? () => onQuickClockOutForStaff!(
+                                    staffId,
+                                    quickClockOutAttendance,
+                                  )
+                                : null,
+                            onSetAttendance:
+                                onSetAttendanceForStaff == null ||
+                                    (!attendanceBelongsToCurrentTask &&
+                                        displayAttendance != null)
+                                ? null
+                                : () => onSetAttendanceForStaff!(
+                                    staffId,
+                                    taskAttendance,
+                                  ),
+                            onLogProgress:
+                                onLogProgressForStaff == null ||
+                                    !canManageProgressFlow
+                                ? null
+                                : () => onLogProgressForStaff!(staffId),
+                            onAddProgressCount:
+                                onAddProgressCountForStaff == null ||
+                                    !canManageProgressFlow ||
+                                    !hasLoggedProgress
+                                ? null
+                                : () => onAddProgressCountForStaff!(staffId),
+                            onResetHistory:
+                                onResetHistoryForStaff == null ||
+                                    !canResetHistory
+                                ? null
+                                : () => onResetHistoryForStaff!(staffId),
+                            onOpenProof: visibleProofs.isEmpty
+                                ? null
+                                : (proof, index) =>
+                                      showProductionTaskProgressSavedProofPreview(
+                                        context,
+                                        title: proof.filename.trim().isNotEmpty
+                                            ? proof.filename.trim()
+                                            : "Proof ${index + 1}",
+                                        proof: proof,
+                                      ),
+                            onDownloadProofs:
+                                onDownloadProofsForStaff == null ||
+                                    _downloadableWorkspaceProofs(
+                                      visibleProofs,
+                                    ).isEmpty
+                                ? null
+                                : () => onDownloadProofsForStaff!(
+                                    staffId,
+                                    visibleProofs,
+                                  ),
+                          );
+                        },
+                      ),
+                    );
+                  }).toList(),
+                ),
+            ],
+            const SizedBox(height: 10),
+            _WorkspaceDisclosureHeader(
+              title: _taskInfoLabel,
+              subtitle: _taskInfoSubtitle,
+              icon: Icons.info_outline_rounded,
+              accentColor: _workspaceBerry,
+              expanded: infoExpanded,
+              onToggle: onToggleInfoExpanded,
             ),
-          if (task.instructions.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Icon(Icons.notes_outlined, size: 18, color: _workspaceBerry),
-                const SizedBox(width: 8),
-                Text(
-                  _instructionsLabel,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: _workspaceNavy,
-                    fontWeight: FontWeight.w800,
+            if (infoExpanded) ...[
+              if (task.instructions.trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.notes_outlined,
+                      size: 17,
+                      color: _workspaceBerry,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _instructionsLabel,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: _workspaceToneForeground(
+                          colorScheme: colorScheme,
+                          accentColor: _workspaceBerry,
+                          darkMix: 0.58,
+                        ),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHigh
+                        : colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colorScheme.outlineVariant),
+                  ),
+                  child: Text(
+                    task.instructions,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: _workspaceSecondaryContentColor(colorScheme),
+                      height: 1.4,
+                    ),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 4),
-            Text(task.instructions),
-          ],
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (canManageCalendar)
-                OutlinedButton.icon(
-                  onPressed: onManageStaff,
-                  icon: const Icon(Icons.group_outlined),
-                  label: const Text(_assignStaffLabel),
-                ),
-              if (canManageCalendar)
-                OutlinedButton.icon(
-                  onPressed: onLogProgress,
-                  icon: const Icon(Icons.edit_calendar_outlined),
-                  label: const Text(_logProgressLabel),
-                ),
-              if (canManageCalendar)
-                PopupMenuButton<String>(
-                  onSelected: onStatusSelected,
-                  itemBuilder: (context) => _taskStatusOptions
-                      .map(
-                        (status) => PopupMenuItem<String>(
-                          value: status,
-                          child: Text(formatProductionStatusLabel(status)),
-                        ),
-                      )
-                      .toList(),
-                  child: OutlinedButton.icon(
-                    onPressed: null,
-                    icon: const Icon(Icons.flag_outlined),
-                    label: Text(formatProductionStatusLabel(task.status)),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (canManageCalendar)
+                    OutlinedButton.icon(
+                      onPressed: onManageStaff,
+                      icon: const Icon(Icons.group_outlined),
+                      label: const Text(_assignStaffLabel),
+                    ),
+                  if (canManageCalendar)
+                    OutlinedButton.icon(
+                      onPressed: onLogProgress,
+                      icon: const Icon(Icons.edit_calendar_outlined),
+                      label: const Text(_logProgressLabel),
+                    ),
+                  if (canManageCalendar)
+                    PopupMenuButton<String>(
+                      onSelected: onStatusSelected,
+                      itemBuilder: (context) => _taskStatusOptions
+                          .map(
+                            (status) => PopupMenuItem<String>(
+                              value: status,
+                              child: Text(formatProductionStatusLabel(status)),
+                            ),
+                          )
+                          .toList(),
+                      child: OutlinedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.flag_outlined),
+                        label: Text(formatProductionStatusLabel(task.status)),
+                      ),
+                    ),
+                  if (onDeleteTask != null)
+                    TextButton.icon(
+                      onPressed: onDeleteTask,
+                      style: TextButton.styleFrom(
+                        foregroundColor: colorScheme.error,
+                      ),
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text(_taskDeleteLabel),
+                    ),
+                  if (isOwner && task.approvalStatus == "pending_approval")
+                    FilledButton.tonal(
+                      style: AppButtonStyles.tonal(
+                        theme: theme,
+                        tone: AppStatusTone.success,
+                      ),
+                      onPressed: onApproveTask,
+                      child: const Text(_taskApproveLabel),
+                    ),
+                  if (isOwner && task.approvalStatus == "pending_approval")
+                    TextButton(
+                      style: AppButtonStyles.text(
+                        theme: theme,
+                        tone: AppStatusTone.danger,
+                      ),
+                      onPressed: onRejectTask,
+                      child: const Text(_taskRejectLabel),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Icon(
+                    Icons.timeline_outlined,
+                    size: 18,
+                    color: _workspaceTeal,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _activityLabel,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: _workspaceNavy,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              if (rowsForDay.isEmpty)
+                Text(
+                  _noActivityLabel,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                ...rowsForDay.map(
+                  (row) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _TimelineLogRow(
+                      row: row,
+                      expectedTargetAmount: taskProgressSummary.plannedAmount,
+                      singularUnitLabel: taskProgressSummary.singularUnitLabel,
+                      canReviewProgress: canReviewProgress,
+                      onViewProof: row.proofs.isNotEmpty
+                          ? () {
+                              showProductionTaskProgressProofBrowser(
+                                context,
+                                rows: timelineRows,
+                                initialDate: row.workDate,
+                              );
+                            }
+                          : null,
+                      onApprove: onApproveProgress == null
+                          ? null
+                          : () => onApproveProgress!(row.id),
+                      onReject: onRejectProgress == null
+                          ? null
+                          : () => onRejectProgress!(row.id),
+                    ),
                   ),
                 ),
-              if (isOwner && task.approvalStatus == "pending_approval")
-                FilledButton.tonal(
-                  onPressed: onApproveTask,
-                  child: const Text(_taskApproveLabel),
-                ),
-              if (isOwner && task.approvalStatus == "pending_approval")
-                TextButton(
-                  onPressed: onRejectTask,
-                  child: const Text(_taskRejectLabel),
-                ),
             ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Icon(Icons.timeline_outlined, size: 18, color: _workspaceTeal),
-              const SizedBox(width: 8),
-              Text(
-                _activityLabel,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: _workspaceNavy,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          if (attendanceActivityEntries.isEmpty && rowsForDay.isEmpty)
-            Text(
-              _noActivityLabel,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            )
-          else ...[
-            ...attendanceActivityEntries.map(
-              (entry) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _AttendanceActivityRow(entry: entry),
-              ),
-            ),
-            ...rowsForDay.map(
-              (row) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _TimelineLogRow(
-                  row: row,
-                  expectedTargetAmount: taskProgressSummary.plannedAmount,
-                  singularUnitLabel: taskProgressSummary.singularUnitLabel,
-                  canReviewProgress: canReviewProgress,
-                  onApprove: onApproveProgress == null
-                      ? null
-                      : () => onApproveProgress!(row.id),
-                  onReject: onRejectProgress == null
-                      ? null
-                      : () => onRejectProgress!(row.id),
-                ),
-              ),
-            ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceDisclosureHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final IconData icon;
+  final Color accentColor;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  const _WorkspaceDisclosureHeader({
+    required this.title,
+    required this.icon,
+    required this.accentColor,
+    required this.expanded,
+    required this.onToggle,
+    this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onToggle,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: accentColor,
+              lightTintAlpha: 0.025,
+              darkTintAlpha: 0.1,
+              baseColor: _workspaceIsDark(colorScheme)
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: accentColor,
+                    lightTintAlpha: 0.08,
+                    darkTintAlpha: 0.16,
+                    baseColor: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHighest
+                        : colorScheme.surface,
+                  ),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, size: 16, color: foreground),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: _workspacePrimaryContentColor(colorScheme),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        subtitle!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                expanded
+                    ? Icons.keyboard_arrow_up_rounded
+                    : Icons.keyboard_arrow_down_rounded,
+                size: 22,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3625,30 +5951,254 @@ class _InfoChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final resolvedForeground = foregroundColor ?? colorScheme.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: backgroundColor ?? colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-        border: borderColor == null ? null : Border.all(color: borderColor!),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: resolvedForeground),
-            const SizedBox(width: 6),
-          ],
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: resolvedForeground,
-              fontWeight: FontWeight.w700,
+    final seedColor = foregroundColor ?? backgroundColor ?? colorScheme.primary;
+    final resolvedForeground = foregroundColor == null
+        ? colorScheme.onSurfaceVariant
+        : _workspaceToneForeground(
+            colorScheme: colorScheme,
+            accentColor: foregroundColor!,
+            darkMix: 0.56,
+          );
+    final maxWidth = math.min(
+      360.0,
+      math.max(140.0, MediaQuery.of(context).size.width - 64),
+    );
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: _workspaceToneSurface(
+            colorScheme: colorScheme,
+            accentColor: seedColor,
+            lightTintAlpha: backgroundColor == null ? 0.02 : 0.045,
+            darkTintAlpha: 0.12,
+            baseColor: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : colorScheme.surface,
+          ),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: _workspaceToneBorder(
+              colorScheme: colorScheme,
+              accentColor: seedColor,
+              lightAlpha: borderColor == null ? 0.1 : 0.14,
+              darkAlpha: 0.32,
             ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 14, color: resolvedForeground),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                softWrap: true,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: resolvedForeground,
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TaskProgressSummaryCard extends StatelessWidget {
+  final _TaskUnitProgressSummary summary;
+  final bool compact;
+  final bool showTitle;
+
+  const _TaskProgressSummaryCard({
+    required this.summary,
+    required this.compact,
+    this.showTitle = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final cells = <_ProgressSummaryCellData>[
+      _ProgressSummaryCellData(
+        label: _plannedTodayLabel,
+        value: summary.workingOnLabel,
+        icon: Icons.event_note_outlined,
+        accentColor: _workspaceAmber,
+      ),
+      _ProgressSummaryCellData(
+        label: _doneCompactLabel,
+        value: summary.doneTodayLabel,
+        icon: Icons.insights_outlined,
+        accentColor: _workspaceTeal,
+      ),
+      _ProgressSummaryCellData(
+        label: _leftCompactLabel,
+        value: summary.leftTodayLabel,
+        icon: Icons.track_changes_outlined,
+        accentColor: _workspaceBlue,
+      ),
+    ];
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(compact ? 10 : 12),
+      decoration: BoxDecoration(
+        color: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerLow
+            : colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showTitle) ...[
+            Row(
+              children: [
+                Icon(Icons.timeline_outlined, size: 17, color: _workspaceBlue),
+                const SizedBox(width: 7),
+                Text(
+                  _todayProgressTitle,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final singleColumn = constraints.maxWidth < 360;
+              if (singleColumn) {
+                return Column(
+                  children: [
+                    for (final entry in cells.asMap().entries) ...[
+                      _ProgressSummaryCell(data: entry.value, compact: true),
+                      if (entry.key != cells.length - 1)
+                        Divider(height: 12, color: colorScheme.outlineVariant),
+                    ],
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  for (final entry in cells.asMap().entries) ...[
+                    Expanded(
+                      child: _ProgressSummaryCell(
+                        data: entry.value,
+                        compact: compact,
+                      ),
+                    ),
+                    if (entry.key != cells.length - 1)
+                      Container(
+                        width: 1,
+                        height: 44,
+                        margin: const EdgeInsets.symmetric(horizontal: 8),
+                        color: colorScheme.outlineVariant,
+                      ),
+                  ],
+                ],
+              );
+            },
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ProgressSummaryCellData {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color accentColor;
+
+  const _ProgressSummaryCellData({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.accentColor,
+  });
+}
+
+class _ProgressSummaryCell extends StatelessWidget {
+  final _ProgressSummaryCellData data;
+  final bool compact;
+
+  const _ProgressSummaryCell({required this.data, required this.compact});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: data.accentColor,
+      darkMix: 0.58,
+    );
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: compact ? 26 : 30,
+          height: compact ? 26 : 30,
+          decoration: BoxDecoration(
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: data.accentColor,
+              lightTintAlpha: 0.08,
+              darkTintAlpha: 0.16,
+              baseColor: _workspaceIsDark(colorScheme)
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
+            ),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(data.icon, size: compact ? 14 : 16, color: foreground),
+        ),
+        SizedBox(width: compact ? 7 : 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                data.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                data.value,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    (compact
+                            ? theme.textTheme.bodyMedium
+                            : theme.textTheme.titleSmall)
+                        ?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w900,
+                          height: 1.18,
+                        ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -3674,125 +6224,89 @@ class _TaskSnapshotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color.alphaBlend(
-              accentColor.withValues(alpha: 0.16),
-              colorScheme.surface,
-            ),
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.98),
-              colorScheme.surface,
-            ),
-            Color.alphaBlend(
-              accentColor.withValues(alpha: 0.08),
-              colorScheme.surfaceContainerHigh,
-            ),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: accentColor.withValues(alpha: 0.34),
-          width: 1.4,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.14),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightColor: Color.alphaBlend(
+            softColor.withValues(alpha: 0.18),
+            colorScheme.surface,
           ),
-        ],
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
+          ),
+        ),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  accentColor,
-                  Color.alphaBlend(
-                    accentColor.withValues(alpha: 0.24),
-                    _workspaceNavy,
-                  ),
-                ],
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
               ),
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.18),
-                  blurRadius: 12,
-                  offset: const Offset(0, 5),
-                ),
-              ],
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: Colors.white, size: 20),
+            child: Icon(icon, color: accentForeground, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: accentColor.withValues(alpha: 0.20),
-                    ),
-                  ),
-                  child: Text(
-                    label,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: accentColor,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.1,
-                    ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: accentForeground,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.72),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: accentColor.withValues(alpha: 0.22),
-                    ),
-                  ),
-                  child: Text(
-                    value,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: _workspaceNavy,
-                      fontWeight: FontWeight.w900,
-                      height: 1.15,
-                    ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 2),
                 Text(
                   helper,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: _workspaceNavy.withValues(alpha: 0.72),
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
                   ),
                 ),
               ],
@@ -3804,76 +6318,614 @@ class _TaskSnapshotCard extends StatelessWidget {
   }
 }
 
-class _AssignedStaffAttendanceRow extends StatelessWidget {
-  final String staffName;
-  final String staffRoleLabel;
-  final String taskTitle;
-  final DateTime selectedDay;
-  final String estimatedWindow;
-  final String clockInValue;
-  final String clockOutValue;
-  final bool hasClockIn;
-  final bool hasClockOut;
-  final String? proofUrl;
-  final String? proofFilename;
-  final String? proofMimeType;
-  final DateTime? proofUploadedAt;
-  final ProductionAttendanceClockOutAudit? clockOutAudit;
-  final bool canManageAttendance;
-  final bool canLogProgress;
-  final bool hasLoggedProgress;
-  final Future<void> Function()? onQuickClockIn;
-  final Future<void> Function()? onQuickClockOut;
-  final Future<void> Function()? onSetAttendance;
-  final Future<void> Function()? onLogProgress;
+class _ProofUnitChecklistTile extends StatelessWidget {
+  final String title;
+  final int unitNumber;
+  final IconData unitIcon;
+  final bool imageReady;
+  final bool videoReady;
+  final ProductionTaskProgressProofInput? imageProof;
+  final ProductionTaskProgressProofInput? videoProof;
+  final bool isBusy;
+  final VoidCallback onCaptureImage;
+  final VoidCallback onCaptureVideo;
+  final VoidCallback? onRemoveImage;
+  final VoidCallback? onRemoveVideo;
 
-  const _AssignedStaffAttendanceRow({
-    required this.staffName,
-    required this.staffRoleLabel,
-    required this.taskTitle,
-    required this.selectedDay,
-    required this.estimatedWindow,
-    required this.clockInValue,
-    required this.clockOutValue,
-    required this.hasClockIn,
-    required this.hasClockOut,
-    required this.proofUrl,
-    required this.proofFilename,
-    required this.proofMimeType,
-    required this.proofUploadedAt,
-    required this.clockOutAudit,
-    required this.canManageAttendance,
-    required this.canLogProgress,
-    required this.hasLoggedProgress,
-    required this.onQuickClockIn,
-    required this.onQuickClockOut,
-    required this.onSetAttendance,
-    required this.onLogProgress,
+  const _ProofUnitChecklistTile({
+    required this.title,
+    required this.unitNumber,
+    required this.unitIcon,
+    required this.imageReady,
+    required this.videoReady,
+    required this.imageProof,
+    required this.videoProof,
+    required this.isBusy,
+    required this.onCaptureImage,
+    required this.onCaptureVideo,
+    required this.onRemoveImage,
+    required this.onRemoveVideo,
+  });
+
+  bool get _complete => imageReady && videoReady;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final accentColor = _workspaceBlue;
+    final statusColor = _complete ? _workspaceTeal : _workspaceBlue;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.6,
+    );
+    final statusForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: statusColor,
+      darkMix: 0.6,
+    );
+    final backgroundColor = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      lightTintAlpha: 0.025,
+      darkTintAlpha: 0.1,
+      baseColor: _workspaceIsDark(colorScheme)
+          ? colorScheme.surfaceContainerHigh
+          : colorScheme.surface,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: _complete ? 0.22 : 0.16,
+            darkAlpha: _complete ? 0.36 : 0.32,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.1,
+                darkTintAlpha: 0.18,
+                baseColor: colorScheme.surfaceContainerHighest,
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(unitIcon, size: 18, color: foreground),
+                Text(
+                  "$unitNumber",
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _ProofMediaStatusPill(
+                      icon: Icons.image_outlined,
+                      label: imageReady ? "Replace image" : "Upload image",
+                      statusLabel: imageReady ? "1/1 ready" : "0/1 image",
+                      ready: imageReady,
+                      accentColor: _workspaceTeal,
+                      onPressed: isBusy ? null : onCaptureImage,
+                      tooltip: imageReady
+                          ? "Replace image for $title"
+                          : "Upload image for $title",
+                    ),
+                    _ProofMediaStatusPill(
+                      icon: Icons.videocam_outlined,
+                      label: videoReady ? "Replace video" : "Upload video",
+                      statusLabel: videoReady ? "1/1 ready" : "0/1 video",
+                      ready: videoReady,
+                      accentColor: _workspaceBlue,
+                      onPressed: isBusy ? null : onCaptureVideo,
+                      tooltip: videoReady
+                          ? "Replace video for $title"
+                          : "Upload video for $title",
+                    ),
+                  ],
+                ),
+                if (imageProof != null || videoProof != null) ...[
+                  const SizedBox(height: 10),
+                  _ProofMediaPreviewStrip(
+                    imageProof: imageProof,
+                    videoProof: videoProof,
+                    onRemoveImage: onRemoveImage,
+                    onRemoveVideo: onRemoveVideo,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            _complete ? Icons.check_circle_rounded : Icons.lock_outline_rounded,
+            color: statusForeground,
+            size: 22,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProofMediaStatusPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String statusLabel;
+  final bool ready;
+  final Color accentColor;
+  final VoidCallback? onPressed;
+  final String tooltip;
+
+  const _ProofMediaStatusPill({
+    required this.icon,
+    required this.label,
+    required this.statusLabel,
+    required this.ready,
+    required this.accentColor,
+    required this.onPressed,
+    required this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final foreground = ready
+        ? _workspaceToneForeground(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            darkMix: 0.62,
+          )
+        : colorScheme.onSurfaceVariant;
+    final backgroundColor = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: ready ? accentColor : colorScheme.onSurfaceVariant,
+      lightTintAlpha: ready ? 0.08 : 0.03,
+      darkTintAlpha: ready ? 0.18 : 0.1,
+      baseColor: _workspaceIsDark(colorScheme)
+          ? colorScheme.surfaceContainerHighest
+          : colorScheme.surface,
+    );
+    final borderColor = ready
+        ? _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.22,
+            darkAlpha: 0.4,
+          )
+        : colorScheme.outlineVariant;
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: 148,
+        height: 56,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(148, 56),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            foregroundColor: foreground,
+            disabledForegroundColor: foreground.withValues(alpha: 0.48),
+            iconColor: foreground,
+            disabledIconColor: foreground.withValues(alpha: 0.48),
+            backgroundColor: backgroundColor,
+            disabledBackgroundColor: backgroundColor,
+            side: BorderSide(color: borderColor),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      statusLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: foreground.withValues(alpha: 0.86),
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProofMediaPreviewStrip extends StatelessWidget {
+  final ProductionTaskProgressProofInput? imageProof;
+  final ProductionTaskProgressProofInput? videoProof;
+  final VoidCallback? onRemoveImage;
+  final VoidCallback? onRemoveVideo;
+
+  const _ProofMediaPreviewStrip({
+    required this.imageProof,
+    required this.videoProof,
+    required this.onRemoveImage,
+    required this.onRemoveVideo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final proofs = <Widget>[
+      if (imageProof != null)
+        _ProofMediaPreviewTile(
+          key: ValueKey("image-preview-${imageProof!.filename}"),
+          proof: imageProof!,
+          icon: Icons.image_outlined,
+          label: "Image",
+          onRemove: onRemoveImage,
+          removeTooltip: "Remove image proof",
+          child: Image.memory(
+            Uint8List.fromList(imageProof!.bytes),
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (context, error, stackTrace) {
+              return const _ProofMediaPreviewFallback(
+                icon: Icons.image_not_supported_outlined,
+              );
+            },
+          ),
+        ),
+      if (videoProof != null)
+        _ProofMediaPreviewTile(
+          key: ValueKey("video-preview-${videoProof!.filename}"),
+          proof: videoProof!,
+          icon: Icons.videocam_outlined,
+          label: "Video",
+          onRemove: onRemoveVideo,
+          removeTooltip: "Remove video proof",
+          child: ProductionLocalVideoPreview(proof: videoProof!),
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useSideBySide = proofs.length > 1 && constraints.maxWidth >= 260;
+        final previewWidth = useSideBySide
+            ? math.min(180.0, (constraints.maxWidth - 8) / 2)
+            : math.min(180.0, constraints.maxWidth);
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: proofs
+              .map(
+                (preview) =>
+                    SizedBox(width: previewWidth, height: 104, child: preview),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ProofMediaPreviewTile extends StatelessWidget {
+  final ProductionTaskProgressProofInput proof;
+  final IconData icon;
+  final String label;
+  final VoidCallback? onRemove;
+  final String removeTooltip;
+  final Widget child;
+
+  const _ProofMediaPreviewTile({
+    super.key,
+    required this.proof,
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+    required this.removeTooltip,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Tooltip(
+      message: proof.displayLabel,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () {
+          showProductionTaskProgressPickedProofPreview(context, proof: proof);
+        },
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                child,
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: Tooltip(
+                    message: removeTooltip,
+                    child: Material(
+                      color: colorScheme.surface.withValues(alpha: 0.9),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: onRemove,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 15,
+                            color: colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colorScheme.surface.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: colorScheme.outlineVariant),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            icon,
+                            size: 13,
+                            color: _workspacePrimaryContentColor(colorScheme),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            label,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: _workspacePrimaryContentColor(colorScheme),
+                              fontWeight: FontWeight.w900,
+                              height: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProofMediaPreviewFallback extends StatelessWidget {
+  final IconData icon;
+
+  const _ProofMediaPreviewFallback({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(icon, color: colorScheme.onSurfaceVariant, size: 28),
+      ),
+    );
+  }
+}
+
+class _AssignedStaffAttendanceRow extends StatelessWidget {
+  final String staffName;
+  final String staffRoleLabel;
+  final String estimatedWindow;
+  final String clockInValue;
+  final String clockOutValue;
+  final bool hasClockIn;
+  final bool hasClockOut;
+  final bool attendanceBelongsToCurrentTask;
+  final bool canManageAttendance;
+  final bool canClockSelfAttendance;
+  final bool canLogProgress;
+  final bool attendanceLockedForProgress;
+  final bool hasLoggedProgress;
+  final String attendanceHint;
+  final num personalUnitContribution;
+  final String personalActivityType;
+  final num personalActivityQuantity;
+  final String personalQuantityUnit;
+  final List<ProductionTaskProgressProofRecord> visibleProofs;
+  final String proofStatusLabel;
+  final String personalNotes;
+  final String delayReason;
+  final String progressUnitLabel;
+  final Future<void> Function()? onQuickClockIn;
+  final Future<void> Function()? onQuickClockOut;
+  final Future<void> Function()? onSetAttendance;
+  final Future<void> Function()? onLogProgress;
+  final Future<void> Function()? onAddProgressCount;
+  final Future<void> Function()? onResetHistory;
+  final Future<void> Function(
+    ProductionTaskProgressProofRecord proof,
+    int index,
+  )?
+  onOpenProof;
+  final Future<void> Function()? onDownloadProofs;
+
+  const _AssignedStaffAttendanceRow({
+    required this.staffName,
+    required this.staffRoleLabel,
+    required this.estimatedWindow,
+    required this.clockInValue,
+    required this.clockOutValue,
+    required this.hasClockIn,
+    required this.hasClockOut,
+    required this.attendanceBelongsToCurrentTask,
+    required this.canManageAttendance,
+    required this.canClockSelfAttendance,
+    required this.canLogProgress,
+    required this.attendanceLockedForProgress,
+    required this.hasLoggedProgress,
+    required this.attendanceHint,
+    required this.personalUnitContribution,
+    required this.personalActivityType,
+    required this.personalActivityQuantity,
+    required this.personalQuantityUnit,
+    required this.visibleProofs,
+    required this.proofStatusLabel,
+    required this.personalNotes,
+    required this.delayReason,
+    required this.progressUnitLabel,
+    required this.onQuickClockIn,
+    required this.onQuickClockOut,
+    required this.onSetAttendance,
+    required this.onLogProgress,
+    required this.onAddProgressCount,
+    required this.onResetHistory,
+    required this.onOpenProof,
+    required this.onDownloadProofs,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
     final actualAccent = hasClockIn && hasClockOut
         ? _workspaceTeal
         : hasClockIn || hasClockOut
         ? _workspaceBlue
         : _workspaceNavy;
-    final actualSoft = hasClockIn && hasClockOut
-        ? _workspaceSoftTeal
-        : hasClockIn || hasClockOut
-        ? _workspaceSoftBlue
-        : _workspaceSoftSlate;
-    final headerActions = <Widget>[
-      if (canManageAttendance && onSetAttendance != null)
+    final compactButtonText = theme.textTheme.labelMedium?.copyWith(
+      fontWeight: FontWeight.w800,
+    );
+    final compactFilledStyle = AppButtonStyles.filled(
+      theme: theme,
+      tone: AppStatusTone.info,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      textStyle: compactButtonText,
+    );
+    final compactTonalStyle = AppButtonStyles.tonal(
+      theme: theme,
+      tone: AppStatusTone.info,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      textStyle: compactButtonText,
+    );
+    final compactOutlinedStyle = AppButtonStyles.outlined(
+      theme: theme,
+      tone: AppStatusTone.info,
+      minimumSize: const Size(0, 44),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      textStyle: compactButtonText,
+    );
+    final actionButtons = <Widget>[
+      if ((canManageAttendance || canClockSelfAttendance) &&
+          !hasClockIn &&
+          !hasClockOut &&
+          onQuickClockIn != null)
+        FilledButton.icon(
+          style: compactFilledStyle,
+          onPressed: onQuickClockIn,
+          icon: const Icon(Icons.login_outlined, size: 17),
+          label: const Text(_attendanceDialogClockInLabel),
+        ),
+      if ((canManageAttendance || canClockSelfAttendance) &&
+          hasClockIn &&
+          !hasClockOut &&
+          onQuickClockOut != null)
+        FilledButton.icon(
+          style: compactFilledStyle,
+          onPressed: onQuickClockOut,
+          icon: const Icon(Icons.logout_outlined, size: 17),
+          label: const Text(_attendanceDialogClockOutLabel),
+        ),
+      if ((canManageAttendance || canClockSelfAttendance) &&
+          onSetAttendance != null)
         OutlinedButton.icon(
+          style: compactOutlinedStyle,
           onPressed: onSetAttendance,
           icon: Icon(
             hasClockIn || hasClockOut
                 ? Icons.edit_calendar_outlined
                 : Icons.schedule_outlined,
-            size: 18,
+            size: 17,
           ),
           label: Text(
             hasClockIn || hasClockOut
@@ -3881,133 +6933,134 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 : _setAttendanceLabel,
           ),
         ),
-      if (canLogProgress)
+      if (canLogProgress && (hasClockOut || hasLoggedProgress))
         FilledButton.tonalIcon(
+          style: compactTonalStyle,
           onPressed: onLogProgress,
           icon: Icon(
             hasLoggedProgress
                 ? Icons.edit_note_outlined
                 : Icons.playlist_add_check_circle_outlined,
-            size: 18,
+            size: 17,
           ),
           label: Text(
             hasLoggedProgress ? _editProgressLabel : _logProgressLabel,
           ),
         ),
+      if (canLogProgress && hasLoggedProgress && onAddProgressCount != null)
+        OutlinedButton.icon(
+          style: compactOutlinedStyle,
+          onPressed: onAddProgressCount,
+          icon: const Icon(Icons.post_add_outlined, size: 17),
+          label: const Text(_newCountLabel),
+        ),
+      if (onResetHistory != null)
+        OutlinedButton.icon(
+          onPressed: onResetHistory,
+          style: compactOutlinedStyle.copyWith(
+            foregroundColor: WidgetStatePropertyAll(colorScheme.error),
+          ),
+          icon: const Icon(Icons.restart_alt_outlined, size: 17),
+          label: const Text(_resetHistoryLabel),
+        ),
     ];
-    final hasProofSummary =
-        (proofUrl?.trim().isNotEmpty == true) ||
-        (proofFilename?.trim().isNotEmpty == true) ||
-        clockOutAudit != null;
-    final auditTaskTitle = clockOutAudit?.taskTitle.trim().isNotEmpty == true
-        ? clockOutAudit!.taskTitle.trim()
-        : taskTitle;
-    final auditUnitLabel = _resolveClockOutAuditUnitLabel(clockOutAudit);
-    final auditCompletedLabel = _formatClockOutAuditAmount(
-      clockOutAudit?.unitsCompleted,
-      clockOutAudit,
-    );
-    final auditRemainingLabel = _formatClockOutAuditAmount(
-      clockOutAudit?.unitsRemaining,
-      clockOutAudit,
-    );
-    final attendanceHintText = hasProofSummary && !hasClockOut
-        ? _attendanceProofReadyHint
-        : hasClockIn && hasClockOut && hasProofSummary
-        ? _attendanceClockOutAuditReadyHint
-        : hasClockIn && hasClockOut
-        ? _attendanceReadyForProgressHint
-        : hasClockIn
-        ? _attendanceShiftOpenHint
-        : _attendanceNotStartedHint;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              _workspaceSoftSlate.withValues(alpha: 0.96),
-              colorScheme.surface,
-            ),
-          ],
-        ),
+        color: isDark ? colorScheme.surfaceContainerLow : colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: actualAccent.withValues(alpha: 0.16)),
-        boxShadow: [
-          BoxShadow(
-            color: actualAccent.withValues(alpha: 0.07),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: actualAccent,
+            lightAlpha: 0.1,
+            darkAlpha: 0.28,
           ),
-        ],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              final stackHeader = constraints.maxWidth < 560;
-              Widget buildIdentityRow({required int maxNameLines}) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: _workspaceSoftBlue,
-                        borderRadius: BorderRadius.circular(14),
+              final stackActions = constraints.maxWidth < 560;
+              final identityBlock = Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _workspaceToneSurface(
+                        colorScheme: colorScheme,
+                        accentColor: _workspaceBlue,
+                        lightColor: _workspaceSoftBlue,
+                        lightTintAlpha: 0.0,
+                        darkTintAlpha: 0.18,
+                        baseColor: isDark
+                            ? colorScheme.surfaceContainerHigh
+                            : colorScheme.surface,
                       ),
-                      child: const Icon(
-                        Icons.person_outline,
-                        color: _workspaceBlue,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.person_outline,
+                      size: 20,
+                      color: _workspaceToneForeground(
+                        colorScheme: colorScheme,
+                        accentColor: _workspaceBlue,
+                        darkMix: 0.68,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          staffName,
+                          maxLines: stackActions ? 2 : 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: _workspacePrimaryContentColor(colorScheme),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (staffRoleLabel.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
                           Text(
-                            staffName,
-                            maxLines: maxNameLines,
+                            staffRoleLabel,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: _workspaceNavy,
-                              fontWeight: FontWeight.w800,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          if (staffRoleLabel.trim().isNotEmpty) ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              staffRoleLabel,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
                         ],
-                      ),
+                      ],
                     ),
-                  ],
-                );
-              }
-
-              if (stackHeader) {
+                  ),
+                ],
+              );
+              final actionsWrap = Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                alignment: stackActions
+                    ? WrapAlignment.start
+                    : WrapAlignment.end,
+                children: actionButtons,
+              );
+              if (stackActions) {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    buildIdentityRow(maxNameLines: 2),
-                    if (headerActions.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Wrap(spacing: 8, runSpacing: 8, children: headerActions),
+                    identityBlock,
+                    if (actionButtons.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      actionsWrap,
                     ],
                   ],
                 );
@@ -4015,18 +7068,13 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: buildIdentityRow(maxNameLines: 2)),
-                  if (headerActions.isNotEmpty) ...[
+                  Expanded(child: identityBlock),
+                  if (actionButtons.isNotEmpty) ...[
                     const SizedBox(width: 12),
                     Flexible(
                       child: Align(
                         alignment: Alignment.topRight,
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          alignment: WrapAlignment.end,
-                          children: headerActions,
-                        ),
+                        child: actionsWrap,
                       ),
                     ),
                   ],
@@ -4034,38 +7082,22 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, constraints) {
-              final stacked = constraints.maxWidth < 820;
+              final stacked = constraints.maxWidth < 560;
               final estimatedCard = _AttendanceTimingCard(
                 label: _estimatedDatesLabel,
                 value: estimatedWindow,
                 accentColor: _workspaceAmber,
-                softColor: _workspaceSoftAmber,
                 icon: Icons.event_outlined,
               );
               final clockInCard = _AttendanceTimingCard(
                 label: _clockedInLabel,
                 value: clockInValue,
                 accentColor: hasClockIn ? _workspaceTeal : _workspaceBlue,
-                softColor: hasClockIn ? _workspaceSoftTeal : _workspaceSoftBlue,
                 icon: Icons.login_outlined,
-                actionLabel:
-                    canManageAttendance &&
-                        !hasClockIn &&
-                        !hasClockOut &&
-                        onQuickClockIn != null
-                    ? _attendanceDialogClockInLabel
-                    : null,
-                actionIcon: Icons.login_outlined,
-                onAction:
-                    canManageAttendance &&
-                        !hasClockIn &&
-                        !hasClockOut &&
-                        onQuickClockIn != null
-                    ? onQuickClockIn
-                    : null,
+                onTap: !hasClockIn && !hasClockOut ? onQuickClockIn : null,
               );
               final clockOutCard = _AttendanceTimingCard(
                 label: _clockedOutLabel,
@@ -4073,29 +7105,12 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
                 accentColor: hasClockOut
                     ? _workspaceBerry
                     : (hasClockIn ? _workspaceBlue : _workspaceNavy),
-                softColor: hasClockOut
-                    ? _workspaceSoftBerry
-                    : (hasClockIn ? _workspaceSoftBlue : _workspaceSoftSlate),
                 icon: hasClockOut
                     ? Icons.logout_outlined
                     : (hasClockIn
                           ? Icons.timelapse_outlined
                           : Icons.pending_outlined),
-                actionLabel:
-                    canManageAttendance &&
-                        hasClockIn &&
-                        !hasClockOut &&
-                        onQuickClockOut != null
-                    ? _attendanceDialogClockOutLabel
-                    : null,
-                actionIcon: Icons.logout_outlined,
-                onAction:
-                    canManageAttendance &&
-                        hasClockIn &&
-                        !hasClockOut &&
-                        onQuickClockOut != null
-                    ? onQuickClockOut
-                    : null,
+                onTap: hasClockIn && !hasClockOut ? onQuickClockOut : null,
               );
               if (stacked) {
                 return Column(
@@ -4119,51 +7134,313 @@ class _AssignedStaffAttendanceRow extends StatelessWidget {
               );
             },
           ),
-          if (hasProofSummary) ...[
-            const SizedBox(height: 10),
-            _AttendanceProofAuditCard(
-              taskTitle: auditTaskTitle,
-              workDateLabel: _resolveClockOutAuditWorkDateLabel(
-                clockOutAudit,
-                fallbackDay: selectedDay,
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoChip(
+                label:
+                    "Unit contribution: ${_formatProgressAmountWithUnit(amount: personalUnitContribution, singularUnitLabel: progressUnitLabel)}",
+                icon: Icons.track_changes_outlined,
+                backgroundColor: _workspaceSoftTeal,
+                foregroundColor: _workspaceTeal,
+                borderColor: _workspaceTeal.withValues(alpha: 0.16),
               ),
-              proofUrl: proofUrl,
-              proofFilename: proofFilename,
-              proofMimeType: proofMimeType,
-              proofUploadedAt: proofUploadedAt,
-              clockInLabel: hasClockIn ? clockInValue : null,
-              clockOutLabel: hasClockOut ? clockOutValue : null,
-              unitLabel: auditUnitLabel,
-              completedLabel: auditCompletedLabel,
-              remainingLabel: auditRemainingLabel,
-              helperText: null,
-              showPreview: true,
-              accentColor: actualAccent,
-              softColor: actualSoft,
+              _InfoChip(
+                label: personalActivityType == _quantityActivityNone
+                    ? "Activity: Not tracked"
+                    : "Activity: ${_formatQuantityActivityLabel(personalActivityType)}",
+                icon: Icons.agriculture_outlined,
+                backgroundColor: _workspaceSoftBlue,
+                foregroundColor: _workspaceBlue,
+                borderColor: _workspaceBlue.withValues(alpha: 0.16),
+              ),
+              if (personalActivityType != _quantityActivityNone)
+                _InfoChip(
+                  label:
+                      "Activity qty: ${_formatProgressAmount(personalActivityQuantity)} ${personalQuantityUnit.trim()}"
+                          .trim(),
+                  icon: Icons.inventory_2_outlined,
+                  backgroundColor: _workspaceSoftAmber,
+                  foregroundColor: _workspaceAmber,
+                  borderColor: _workspaceAmber.withValues(alpha: 0.16),
+                ),
+              _InfoChip(
+                label: proofStatusLabel,
+                icon: Icons.photo_library_outlined,
+                backgroundColor: _workspaceSoftBerry,
+                foregroundColor: _workspaceBerry,
+                borderColor: _workspaceBerry.withValues(alpha: 0.16),
+              ),
+              if (delayReason.trim().isNotEmpty &&
+                  delayReason != _delayReasonNone)
+                _InfoChip(
+                  label: "Delay: ${_formatDelayReason(delayReason)}",
+                  icon: Icons.warning_amber_outlined,
+                  backgroundColor: _workspaceSoftAmber,
+                  foregroundColor: _workspaceAmber,
+                  borderColor: _workspaceAmber.withValues(alpha: 0.16),
+                ),
+            ],
+          ),
+          if (visibleProofs.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    "Proofs",
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: _workspacePrimaryContentColor(colorScheme),
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (onDownloadProofs != null)
+                  TextButton.icon(
+                    onPressed: onDownloadProofs,
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: const Text(_downloadProofMediaLabel),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final entry in visibleProofs.asMap().entries)
+                  _WorkspaceProofTile(
+                    proof: entry.value,
+                    index: entry.key,
+                    onTap: onOpenProof == null
+                        ? null
+                        : () => onOpenProof!(entry.value, entry.key),
+                  ),
+              ],
+            ),
+          ],
+          if (personalNotes.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Text(
+                personalNotes,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+          if (attendanceLockedForProgress) ...[
+            const SizedBox(height: 10),
+            const _WorkspaceCompactMessage(
+              message: _taskProgressAttendanceRequired,
+              icon: Icons.lock_outline,
+              accentColor: _workspaceAmber,
             ),
           ],
           const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Color.alphaBlend(
-                actualSoft.withValues(alpha: 0.92),
-                colorScheme.surface,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: actualAccent.withValues(alpha: 0.14)),
-            ),
+          _WorkspaceCompactMessage(
+            message: attendanceHint,
+            icon: Icons.info_outline,
+            accentColor: actualAccent,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceCompactMessage extends StatelessWidget {
+  final String message;
+  final IconData icon;
+  final Color accentColor;
+
+  const _WorkspaceCompactMessage({
+    required this.message,
+    required this.icon,
+    required this.accentColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightTintAlpha: 0.04,
+          darkTintAlpha: 0.12,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.12,
+            darkAlpha: 0.28,
+          ),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 8),
+          Expanded(
             child: Text(
-              attendanceHintText,
+              message,
               style: theme.textTheme.bodySmall?.copyWith(
-                color: actualAccent,
+                color: colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w700,
-                height: 1.35,
+                height: 1.28,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WorkspaceProofTile extends StatelessWidget {
+  final ProductionTaskProgressProofRecord proof;
+  final int index;
+  final VoidCallback? onTap;
+
+  const _WorkspaceProofTile({
+    required this.proof,
+    required this.index,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final filename = proof.filename.trim().isNotEmpty
+        ? proof.filename.trim()
+        : "Proof ${index + 1}";
+    final isImage = _isWorkspaceImageProof(proof);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 138,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: _workspaceToneSurface(
+            colorScheme: colorScheme,
+            accentColor: _workspaceBlue,
+            lightTintAlpha: 0.04,
+            darkTintAlpha: 0.12,
+            baseColor: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : colorScheme.surface,
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: colorScheme.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: double.infinity,
+                height: 88,
+                child: isImage
+                    ? Image.network(
+                        proof.url,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return _WorkspaceProofTileFallback(
+                            icon: Icons.broken_image_outlined,
+                            label: "Preview unavailable",
+                          );
+                        },
+                      )
+                    : const _WorkspaceProofTileFallback(
+                        icon: Icons.insert_drive_file_outlined,
+                        label: "Open file",
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              filename,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspacePrimaryContentColor(colorScheme),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _workspaceProofSubtitle(proof),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceProofTileFallback extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _WorkspaceProofTileFallback({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainer,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: _workspaceBlue),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -4173,262 +7450,67 @@ class _AttendanceTimingCard extends StatelessWidget {
   final String label;
   final String value;
   final Color accentColor;
-  final Color softColor;
   final IconData icon;
-  final String? actionLabel;
-  final IconData? actionIcon;
-  final VoidCallback? onAction;
+  final Future<void> Function()? onTap;
 
   const _AttendanceTimingCard({
     required this.label,
     required this.value,
     required this.accentColor,
-    required this.softColor,
     required this.icon,
-    this.actionLabel,
-    this.actionIcon,
-    this.onAction,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.96),
-              colorScheme.surface,
-            ),
-          ],
-        ),
+    final accentForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.66,
+    );
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap == null ? null : () => unawaited(onTap!.call()),
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: accentColor.withValues(alpha: 0.20)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : colorScheme.surface,
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(
+              color: _workspaceToneBorder(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightAlpha: 0.13,
+                darkAlpha: 0.32,
+              ),
+            ),
+          ),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: accentColor,
-                  borderRadius: BorderRadius.circular(12),
+                  color: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: accentColor,
+                    lightTintAlpha: 0.08,
+                    darkTintAlpha: 0.18,
+                    baseColor: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHighest
+                        : colorScheme.surface,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, color: Colors.white, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: accentColor,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      value,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: _workspaceNavy,
-                        fontWeight: FontWeight.w900,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (actionLabel != null && onAction != null) ...[
-            const SizedBox(height: 10),
-            TextButton.icon(
-              onPressed: onAction,
-              icon: Icon(actionIcon ?? icon, size: 16, color: accentColor),
-              label: Text(
-                actionLabel!,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: accentColor,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                minimumSize: Size.zero,
-                alignment: Alignment.centerLeft,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _AttendanceProofAuditCard extends StatelessWidget {
-  final String taskTitle;
-  final String workDateLabel;
-  final String? proofUrl;
-  final String? proofFilename;
-  final String? proofMimeType;
-  final DateTime? proofUploadedAt;
-  final String? clockInLabel;
-  final String? clockOutLabel;
-  final String? unitLabel;
-  final String? completedLabel;
-  final String? remainingLabel;
-  final String? helperText;
-  final bool showPreview;
-  final Color accentColor;
-  final Color softColor;
-
-  const _AttendanceProofAuditCard({
-    required this.taskTitle,
-    required this.workDateLabel,
-    required this.proofUrl,
-    required this.proofFilename,
-    required this.proofMimeType,
-    required this.proofUploadedAt,
-    required this.clockInLabel,
-    required this.clockOutLabel,
-    required this.unitLabel,
-    required this.completedLabel,
-    required this.remainingLabel,
-    required this.helperText,
-    required this.showPreview,
-    required this.accentColor,
-    required this.softColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final hasProof =
-        (proofUrl?.trim().isNotEmpty == true) ||
-        (proofFilename?.trim().isNotEmpty == true);
-    final hasProofPreview =
-        hasProof &&
-        showPreview &&
-        proofUrl?.trim().isNotEmpty == true &&
-        _isProofImage(
-          proofMimeType: proofMimeType,
-          proofFilename: proofFilename,
-        );
-    final proofLabel = proofFilename?.trim().isNotEmpty == true
-        ? proofFilename!.trim()
-        : _attendanceProofUploadedLabel;
-    final uploadedLabel = proofUploadedAt == null
-        ? ""
-        : formatDateTimeLabel(proofUploadedAt!.toLocal());
-    final chips = <Widget>[
-      _InfoChip(
-        label: workDateLabel,
-        icon: Icons.event_outlined,
-        backgroundColor: _workspaceSoftAmber,
-        foregroundColor: _workspaceAmber,
-        borderColor: _workspaceAmber.withValues(alpha: 0.16),
-      ),
-      if (clockInLabel?.trim().isNotEmpty == true)
-        _InfoChip(
-          label: "$_clockedInLabel: ${clockInLabel!.trim()}",
-          icon: Icons.login_outlined,
-          backgroundColor: _workspaceSoftTeal,
-          foregroundColor: _workspaceTeal,
-          borderColor: _workspaceTeal.withValues(alpha: 0.16),
-        ),
-      if (clockOutLabel?.trim().isNotEmpty == true)
-        _InfoChip(
-          label: "$_clockedOutLabel: ${clockOutLabel!.trim()}",
-          icon: Icons.logout_outlined,
-          backgroundColor: _workspaceSoftBerry,
-          foregroundColor: _workspaceBerry,
-          borderColor: _workspaceBerry.withValues(alpha: 0.16),
-        ),
-      if (unitLabel?.trim().isNotEmpty == true)
-        _InfoChip(
-          label: "Unit: ${unitLabel!.trim()}",
-          icon: Icons.grid_view_outlined,
-          backgroundColor: _workspaceSoftBlue,
-          foregroundColor: _workspaceBlue,
-          borderColor: _workspaceBlue.withValues(alpha: 0.16),
-        ),
-      if (completedLabel?.trim().isNotEmpty == true)
-        _InfoChip(
-          label: "Completed: ${completedLabel!.trim()}",
-          icon: Icons.task_alt_outlined,
-          backgroundColor: _workspaceSoftTeal,
-          foregroundColor: _workspaceTeal,
-          borderColor: _workspaceTeal.withValues(alpha: 0.16),
-        ),
-      if (remainingLabel?.trim().isNotEmpty == true)
-        _InfoChip(
-          label: "Remaining: ${remainingLabel!.trim()}",
-          icon: Icons.pending_actions_outlined,
-          backgroundColor: _workspaceSoftBlue,
-          foregroundColor: _workspaceBlue,
-          borderColor: _workspaceBlue.withValues(alpha: 0.16),
-        ),
-      if (uploadedLabel.isNotEmpty)
-        _InfoChip(
-          label: "Uploaded: $uploadedLabel",
-          icon: Icons.verified_outlined,
-          backgroundColor: _workspaceSoftSlate,
-          foregroundColor: _workspaceNavy,
-          borderColor: _workspaceNavy.withValues(alpha: 0.12),
-        ),
-    ];
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            colorScheme.surface,
-            Color.alphaBlend(
-              softColor.withValues(alpha: 0.96),
-              colorScheme.surface,
-            ),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: accentColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.verified_outlined,
-                  color: Colors.white,
-                  size: 18,
-                ),
+                child: Icon(icon, color: accentForeground, size: 16),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -4436,18 +7518,19 @@ class _AttendanceProofAuditCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _attendanceProofAuditCardLabel,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: accentColor,
-                        fontWeight: FontWeight.w900,
+                      label,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: accentForeground,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      taskTitle,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: _workspaceNavy,
+                      value,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: _workspacePrimaryContentColor(colorScheme),
                         fontWeight: FontWeight.w800,
+                        height: 1.25,
                       ),
                     ),
                   ],
@@ -4455,226 +7538,7 @@ class _AttendanceProofAuditCard extends StatelessWidget {
               ),
             ],
           ),
-          if (hasProof) ...[
-            const SizedBox(height: 12),
-            if (hasProofPreview)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: Image.network(
-                  proofUrl!.trim(),
-                  height: 140,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return _AttendanceProofFileTile(
-                      proofLabel: proofLabel,
-                      accentColor: accentColor,
-                      softColor: softColor,
-                    );
-                  },
-                ),
-              )
-            else
-              _AttendanceProofFileTile(
-                proofLabel: proofLabel,
-                accentColor: accentColor,
-                softColor: softColor,
-              ),
-          ],
-          if (chips.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Wrap(spacing: 8, runSpacing: 8, children: chips),
-          ],
-          if (helperText?.trim().isNotEmpty == true) ...[
-            const SizedBox(height: 12),
-            Text(
-              helperText!.trim(),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-                height: 1.35,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _AttendanceProofFileTile extends StatelessWidget {
-  final String proofLabel;
-  final Color accentColor;
-  final Color softColor;
-
-  const _AttendanceProofFileTile({
-    required this.proofLabel,
-    required this.accentColor,
-    required this.softColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: softColor.withValues(alpha: 0.74),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: accentColor.withValues(alpha: 0.16)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.attachment_outlined,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              proofLabel,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: _workspaceNavy,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AttendanceActivityRow extends StatelessWidget {
-  final _AttendanceActivityEntry entry;
-
-  const _AttendanceActivityRow({required this.entry});
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final accentColor = entry.isClockIn ? _workspaceTeal : _workspaceBerry;
-    final softColor = entry.isClockIn
-        ? _workspaceSoftTeal
-        : _workspaceSoftBerry;
-    final audit = entry.clockOutAudit;
-    final auditTaskTitle = audit?.taskTitle.trim().isNotEmpty == true
-        ? audit!.taskTitle.trim()
-        : "";
-    final auditCompletedLabel = _formatClockOutAuditAmount(
-      audit?.unitsCompleted,
-      audit,
-    );
-    final auditRemainingLabel = _formatClockOutAuditAmount(
-      audit?.unitsRemaining,
-      audit,
-    );
-    final auditUnitLabel = _resolveClockOutAuditUnitLabel(audit);
-    final hasProofSummary =
-        !entry.isClockIn &&
-        ((entry.proofUrl?.trim().isNotEmpty == true) ||
-            (entry.proofFilename?.trim().isNotEmpty == true) ||
-            audit != null);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _InfoChip(
-                label: entry.staffName,
-                icon: Icons.person_outline,
-                backgroundColor: _workspaceSoftBlue,
-                foregroundColor: _workspaceBlue,
-                borderColor: _workspaceBlue.withValues(alpha: 0.16),
-              ),
-              _InfoChip(
-                label: "Staff ID: ${entry.staffId}",
-                icon: Icons.badge_outlined,
-                backgroundColor: _workspaceSoftSlate,
-                foregroundColor: _workspaceNavy,
-                borderColor: _workspaceNavy.withValues(alpha: 0.12),
-              ),
-              _InfoChip(
-                label: entry.actionLabel,
-                icon: entry.isClockIn
-                    ? Icons.login_outlined
-                    : Icons.logout_outlined,
-                backgroundColor: softColor,
-                foregroundColor: accentColor,
-                borderColor: accentColor.withValues(alpha: 0.16),
-              ),
-              _InfoChip(
-                label: formatDateTimeLabel(entry.recordedAt),
-                icon: Icons.schedule_outlined,
-                backgroundColor: _workspaceSoftAmber,
-                foregroundColor: _workspaceAmber,
-                borderColor: _workspaceAmber.withValues(alpha: 0.16),
-              ),
-              _InfoChip(
-                label: _attendanceAuditRecordedLabel,
-                icon: Icons.verified_outlined,
-                backgroundColor: _workspaceSoftSlate,
-                foregroundColor: _workspaceNavy,
-                borderColor: _workspaceNavy.withValues(alpha: 0.12),
-              ),
-            ],
-          ),
-          if (entry.note.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              entry.note,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          if (hasProofSummary) ...[
-            const SizedBox(height: 10),
-            _AttendanceProofAuditCard(
-              taskTitle: auditTaskTitle.isNotEmpty
-                  ? auditTaskTitle
-                  : "Attendance record",
-              workDateLabel: _resolveClockOutAuditWorkDateLabel(
-                audit,
-                fallbackDay: entry.recordedAt,
-              ),
-              proofUrl: entry.proofUrl,
-              proofFilename: entry.proofFilename,
-              proofMimeType: entry.proofMimeType,
-              proofUploadedAt: entry.proofUploadedAt,
-              clockInLabel: entry.clockInAt == null
-                  ? null
-                  : formatDateTimeLabel(entry.clockInAt!),
-              clockOutLabel: entry.clockOutAt == null
-                  ? null
-                  : formatDateTimeLabel(entry.clockOutAt!),
-              unitLabel: auditUnitLabel,
-              completedLabel: auditCompletedLabel,
-              remainingLabel: auditRemainingLabel,
-              helperText: null,
-              showPreview: false,
-              accentColor: accentColor,
-              softColor: softColor,
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -4685,6 +7549,7 @@ class _TimelineLogRow extends StatelessWidget {
   final num expectedTargetAmount;
   final String singularUnitLabel;
   final bool canReviewProgress;
+  final VoidCallback? onViewProof;
   final VoidCallback? onApprove;
   final VoidCallback? onReject;
 
@@ -4693,6 +7558,7 @@ class _TimelineLogRow extends StatelessWidget {
     required this.expectedTargetAmount,
     required this.singularUnitLabel,
     required this.canReviewProgress,
+    required this.onViewProof,
     required this.onApprove,
     required this.onReject,
   });
@@ -4703,8 +7569,17 @@ class _TimelineLogRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.05,
+          darkTintAlpha: 0.12,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
+        ),
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4746,6 +7621,14 @@ class _TimelineLogRow extends StatelessWidget {
                 foregroundColor: _workspaceBerry,
                 borderColor: _workspaceBerry.withValues(alpha: 0.16),
               ),
+              if (row.proofs.isNotEmpty)
+                _InfoChip(
+                  label: "${row.proofCount} proof(s)",
+                  icon: Icons.photo_library_outlined,
+                  backgroundColor: _workspaceSoftSlate,
+                  foregroundColor: _workspaceNavy,
+                  borderColor: _workspaceNavy.withValues(alpha: 0.12),
+                ),
               if (row.quantityAmount > 0 &&
                   row.quantityActivityType.trim().isNotEmpty &&
                   row.quantityActivityType != _quantityActivityNone)
@@ -4768,6 +7651,21 @@ class _TimelineLogRow extends StatelessWidget {
               ),
             ),
           ],
+          if (row.proofs.isNotEmpty && onViewProof != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                style: AppButtonStyles.text(
+                  theme: Theme.of(context),
+                  tone: AppStatusTone.info,
+                ),
+                onPressed: onViewProof,
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text(_viewProofLabel),
+              ),
+            ),
+          ],
           if (canReviewProgress &&
               (row.approvalState == "pending_approval" ||
                   row.approvalState == "needs_review")) ...[
@@ -4776,10 +7674,18 @@ class _TimelineLogRow extends StatelessWidget {
               spacing: 8,
               children: [
                 TextButton(
+                  style: AppButtonStyles.text(
+                    theme: Theme.of(context),
+                    tone: AppStatusTone.success,
+                  ),
                   onPressed: onApprove,
                   child: const Text(_progressApproveLabel),
                 ),
                 TextButton(
+                  style: AppButtonStyles.text(
+                    theme: Theme.of(context),
+                    tone: AppStatusTone.warning,
+                  ),
                   onPressed: onReject,
                   child: const Text(_progressRejectLabel),
                 ),
@@ -4792,37 +7698,59 @@ class _TimelineLogRow extends StatelessWidget {
   }
 }
 
-class _WorkspaceLogProgressInput {
+class ProductionTaskLogProgressInput {
   final String? staffId;
   final String? unitId;
-  final num actualPlots;
-  final String quantityActivityType;
-  final num quantityAmount;
+  final bool createNewEntry;
+  final num unitContribution;
+  final List<ProductionTaskProgressProofInput> proofs;
+  final String activityType;
+  final num activityQuantity;
   final String quantityUnit;
   final String delayReason;
   final String notes;
 
-  const _WorkspaceLogProgressInput({
+  const ProductionTaskLogProgressInput({
     required this.staffId,
     required this.unitId,
-    required this.actualPlots,
-    required this.quantityActivityType,
-    required this.quantityAmount,
+    this.createNewEntry = false,
+    required this.unitContribution,
+    required this.proofs,
+    required this.activityType,
+    required this.activityQuantity,
     required this.quantityUnit,
     required this.delayReason,
     required this.notes,
   });
+
+  num get actualPlots => unitContribution;
+
+  String get quantityActivityType => activityType;
+
+  num get quantityAmount => activityQuantity;
 }
 
-class _ClockOutAuditSubmission {
-  final Map<String, dynamic> proofAuditPayload;
-  final String proofSubjectLabel;
-  final String proofTaskLabel;
+class _CreateWorkspaceTaskInput {
+  final String phaseId;
+  final String title;
+  final String roleRequired;
+  final int requiredHeadcount;
+  final int weight;
+  final List<String> assignedStaffProfileIds;
+  final String instructions;
+  final DateTime startDate;
+  final DateTime dueDate;
 
-  const _ClockOutAuditSubmission({
-    required this.proofAuditPayload,
-    required this.proofSubjectLabel,
-    required this.proofTaskLabel,
+  const _CreateWorkspaceTaskInput({
+    required this.phaseId,
+    required this.title,
+    required this.roleRequired,
+    required this.requiredHeadcount,
+    required this.weight,
+    required this.assignedStaffProfileIds,
+    required this.instructions,
+    required this.startDate,
+    required this.dueDate,
   });
 }
 
@@ -5155,21 +8083,67 @@ List<ProductionTimelineRow> _rowsForDay(
   return items;
 }
 
-ProductionAttendanceRecord? _attendanceForStaffOnDay({
+List<ProductionTimelineRow> _rowsThroughDayInclusive(
+  List<ProductionTimelineRow> rows,
+  DateTime day,
+) {
+  final lastIncludedDay = _normalizeToLocalDay(day);
+  final items = rows.where((row) {
+    final workDate = row.workDate;
+    if (workDate == null) {
+      return false;
+    }
+    return !_normalizeToLocalDay(workDate).isAfter(lastIncludedDay);
+  }).toList();
+  items.sort(_compareProgressRowsByNewest);
+  return items;
+}
+
+double _resolveSelectedDayMetricTileWidth(double maxWidth) {
+  if (maxWidth >= 720) {
+    return (maxWidth - (_cardSpacing * 2)) / 3;
+  }
+  if (maxWidth >= 460) {
+    return (maxWidth - _cardSpacing) / 2;
+  }
+  return maxWidth;
+}
+
+List<ProductionAttendanceRecord> _attendanceRowsForDay({
   required List<ProductionAttendanceRecord> attendanceRecords,
-  required String staffProfileId,
   required DateTime day,
 }) {
   final key = _toWorkDateKey(day);
   final items = attendanceRecords.where((record) {
+    return _attendanceMatchesWorkDay(record, key);
+  }).toList();
+  items.sort((left, right) {
+    final leftValue = (left.clockInAt ?? left.createdAt ?? day).toLocal();
+    final rightValue = (right.clockInAt ?? right.createdAt ?? day).toLocal();
+    return leftValue.compareTo(rightValue);
+  });
+  return items;
+}
+
+ProductionAttendanceRecord? _attendanceForStaffOnDay({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime day,
+  String? taskId,
+}) {
+  final key = _toWorkDateKey(day);
+  final normalizedTaskId = taskId?.trim() ?? "";
+  final items = attendanceRecords.where((record) {
     if (record.staffProfileId.trim() != staffProfileId.trim()) {
       return false;
     }
-    final referenceTime = record.clockInAt ?? record.createdAt;
-    if (referenceTime == null) {
-      return false;
+    if (normalizedTaskId.isNotEmpty) {
+      final recordTaskId = record.taskId.trim();
+      if (recordTaskId.isNotEmpty && recordTaskId != normalizedTaskId) {
+        return false;
+      }
     }
-    return _toWorkDateKey(referenceTime.toLocal()) == key;
+    return _attendanceMatchesWorkDay(record, key);
   }).toList();
   if (items.isEmpty) {
     return null;
@@ -5179,255 +8153,129 @@ ProductionAttendanceRecord? _attendanceForStaffOnDay({
     final rightValue = (right.clockInAt ?? right.createdAt ?? day).toLocal();
     return leftValue.compareTo(rightValue);
   });
-  return items.first;
+  return items.last;
 }
 
-String _formatAttendanceDisplayValue(
-  DateTime? value, {
-  required DateTime selectedDay,
-  required String emptyLabel,
-}) {
-  if (value == null) {
-    return emptyLabel;
-  }
-  final localValue = value.toLocal();
-  if (_isSameDay(localValue, selectedDay)) {
-    return _clockLabel(localValue);
-  }
-  return "${formatDateLabel(localValue)} • ${_clockLabel(localValue)}";
-}
-
-bool _attendanceHasProof(ProductionAttendanceRecord? attendance) {
-  if (attendance == null) {
+bool _attendanceMatchesWorkDay(
+  ProductionAttendanceRecord record,
+  String workDateKey,
+) {
+  final referenceTime = record.workDate ?? record.clockInAt ?? record.createdAt;
+  if (referenceTime == null) {
     return false;
   }
-  return (attendance.proofUrl?.trim().isNotEmpty == true) ||
-      (attendance.proofFilename?.trim().isNotEmpty == true);
+  return _toWorkDateKey(referenceTime.toLocal()) == workDateKey;
 }
 
-bool _attendanceHasProofAudit(ProductionAttendanceRecord? attendance) {
-  return _attendanceHasProof(attendance) && attendance?.clockOutAudit != null;
-}
-
-String _resolveClockOutAuditUnitLabel(
-  ProductionAttendanceClockOutAudit? audit,
-) {
-  if (audit == null) {
-    return "";
-  }
-  final unitLabel = audit.unitLabel.trim();
-  if (unitLabel.isNotEmpty) {
-    return unitLabel;
-  }
-  return audit.progressUnitLabel.trim();
-}
-
-String _formatClockOutAuditAmount(
-  num? amount,
-  ProductionAttendanceClockOutAudit? audit,
-) {
-  if (amount == null) {
-    return "";
-  }
-  return _formatProgressAmountWithUnit(
-    amount: amount,
-    singularUnitLabel: audit?.progressUnitLabel.trim() ?? "",
-  );
-}
-
-String _resolveClockOutAuditWorkDateLabel(
-  ProductionAttendanceClockOutAudit? audit, {
-  required DateTime fallbackDay,
-}) {
-  final workDate = audit?.workDate?.toLocal() ?? fallbackDay.toLocal();
-  return formatDateLabel(workDate);
-}
-
-bool _isProofImage({
-  required String? proofMimeType,
-  required String? proofFilename,
-}) {
-  final mimeType = proofMimeType?.trim().toLowerCase() ?? "";
-  if (mimeType.startsWith("image/")) {
-    return true;
-  }
-  final filename = proofFilename?.trim().toLowerCase() ?? "";
-  return filename.endsWith(".png") ||
-      filename.endsWith(".jpg") ||
-      filename.endsWith(".jpeg") ||
-      filename.endsWith(".webp");
-}
-
-ProductionAttendanceRecord? _findOpenAttendanceForStaff({
+ProductionAttendanceRecord? _openAttendanceForStaff({
   required List<ProductionAttendanceRecord> attendanceRecords,
   required String staffProfileId,
+  String? taskId,
+  DateTime? day,
 }) {
-  final normalizedStaffId = staffProfileId.trim();
-  if (normalizedStaffId.isEmpty) {
-    return null;
-  }
+  final normalizedTaskId = taskId?.trim() ?? "";
+  final dayKey = day != null ? _toWorkDateKey(day) : null;
   final items = attendanceRecords.where((record) {
-    return record.staffProfileId.trim() == normalizedStaffId &&
-        record.clockOutAt == null;
+    if (record.staffProfileId.trim() != staffProfileId.trim()) {
+      return false;
+    }
+    if (record.clockInAt == null || record.clockOutAt != null) {
+      return false;
+    }
+    if (normalizedTaskId.isNotEmpty) {
+      final recordTaskId = record.taskId.trim();
+      if (recordTaskId.isNotEmpty && recordTaskId != normalizedTaskId) {
+        return false;
+      }
+    }
+    if (dayKey != null && !_attendanceMatchesWorkDay(record, dayKey)) {
+      return false;
+    }
+    return true;
   }).toList();
   if (items.isEmpty) {
     return null;
   }
   items.sort((left, right) {
-    final leftValue =
-        (left.clockInAt ??
-                left.createdAt ??
-                DateTime.fromMillisecondsSinceEpoch(0))
-            .toLocal();
-    final rightValue =
-        (right.clockInAt ??
-                right.createdAt ??
-                DateTime.fromMillisecondsSinceEpoch(0))
-            .toLocal();
-    return rightValue.compareTo(leftValue);
+    final leftValue = (left.clockInAt ?? left.createdAt ?? DateTime(0))
+        .toLocal();
+    final rightValue = (right.clockInAt ?? right.createdAt ?? DateTime(0))
+        .toLocal();
+    return leftValue.compareTo(rightValue);
   });
-  return items.first;
+  return items.last;
 }
 
-StaffAttendanceRecord? _findLatestOpenStaffAttendanceRecord(
-  List<StaffAttendanceRecord> records,
-) {
-  final items = records.where((record) => record.isOpen).toList();
-  if (items.isEmpty) {
-    return null;
-  }
-  items.sort((left, right) {
-    final leftValue = (left.clockInAt).toLocal();
-    final rightValue = (right.clockInAt).toLocal();
-    return rightValue.compareTo(leftValue);
-  });
-  return items.first;
-}
-
-bool _isOpenAttendanceSessionError(Object error) {
-  final message = _resolveProductionWorkspaceErrorMessage(
-    error,
-    fallback: "",
-  ).toLowerCase();
-  return message.contains("open attendance session");
-}
-
-String _buildOpenAttendanceRecoveredMessage({
-  required ProductionAttendanceRecord attendance,
-  required DateTime selectedDay,
-}) {
-  final referenceTime = (attendance.clockInAt ?? attendance.createdAt)
-      ?.toLocal();
-  if (referenceTime == null) {
-    return "This staff already has an open attendance session. Close it or edit the time before starting a new shift.";
-  }
-  if (_isSameDay(referenceTime, selectedDay)) {
-    return "This staff is already clocked in at ${_clockLabel(referenceTime)}. Close it or edit the time before starting a new shift.";
-  }
-  return "Open attendance found from ${formatDateLabel(referenceTime)} at ${_clockLabel(referenceTime)}. Close it or edit the time before starting a new shift.";
-}
-
-class _AttendanceActivityEntry {
-  final String staffId;
-  final String staffName;
-  final String actionLabel;
-  final DateTime recordedAt;
-  final String note;
-  final bool isClockIn;
-  final DateTime? clockInAt;
-  final DateTime? clockOutAt;
-  final String? proofUrl;
-  final String? proofFilename;
-  final String? proofMimeType;
-  final DateTime? proofUploadedAt;
-  final ProductionAttendanceClockOutAudit? clockOutAudit;
-
-  const _AttendanceActivityEntry({
-    required this.staffId,
-    required this.staffName,
-    required this.actionLabel,
-    required this.recordedAt,
-    required this.note,
-    required this.isClockIn,
-    required this.clockInAt,
-    required this.clockOutAt,
-    required this.proofUrl,
-    required this.proofFilename,
-    required this.proofMimeType,
-    required this.proofUploadedAt,
-    required this.clockOutAudit,
-  });
-}
-
-List<_AttendanceActivityEntry> _buildAttendanceActivityEntries({
+@visibleForTesting
+ProductionAttendanceRecord? resolveProductionWorkspaceActiveClockOutAttendance({
   required List<ProductionAttendanceRecord> attendanceRecords,
-  required List<String> assignedStaffIds,
+  required String staffProfileId,
   required DateTime day,
-  required Map<String, BusinessStaffProfileSummary> staffMap,
-  required String fallbackRole,
+  required String taskId,
 }) {
-  final assignedStaffIdSet = assignedStaffIds
-      .map((staffId) => staffId.trim())
-      .where((staffId) => staffId.isNotEmpty)
-      .toSet();
-  final items = <_AttendanceActivityEntry>[];
+  return _openAttendanceForStaff(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        taskId: taskId,
+        day: day,
+      ) ??
+      _openAttendanceForStaff(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        day: day,
+      ) ??
+      _openAttendanceForStaff(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+      );
+}
 
-  for (final record in attendanceRecords) {
-    final normalizedStaffId = record.staffProfileId.trim();
-    if (!assignedStaffIdSet.contains(normalizedStaffId)) {
+@visibleForTesting
+ProductionAttendanceRecord? resolveProductionWorkspaceDisplayAttendance({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime day,
+  required String taskId,
+}) {
+  final activeClockOutAttendance =
+      resolveProductionWorkspaceActiveClockOutAttendance(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        day: day,
+        taskId: taskId,
+      );
+  final currentTaskAttendance = _attendanceForStaffOnDay(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffProfileId,
+    day: day,
+    taskId: taskId,
+  );
+
+  return activeClockOutAttendance ??
+      currentTaskAttendance ??
+      _attendanceForStaffOnDay(
+        attendanceRecords: attendanceRecords,
+        staffProfileId: staffProfileId,
+        day: day,
+      );
+}
+
+ProductionTaskDayLedger? _ledgerForTaskOnDay({
+  required List<ProductionTaskDayLedger> taskDayLedgers,
+  required String taskId,
+  required DateTime day,
+}) {
+  final normalizedTaskId = taskId.trim();
+  final dayKey = _toWorkDateKey(day);
+  for (final ledger in taskDayLedgers) {
+    if (ledger.taskId.trim() != normalizedTaskId) {
       continue;
     }
-    final staffIdentity = _resolveStaffIdentity(
-      normalizedStaffId,
-      staffMap,
-      fallbackRole: fallbackRole,
-    );
-    final note = record.notes.trim();
-    final localClockInAt = record.clockInAt?.toLocal();
-    final localClockOutAt = record.clockOutAt?.toLocal();
-    final auditNote = record.clockOutAudit?.notes.trim() ?? "";
-    if (localClockInAt != null && _isSameDay(localClockInAt, day)) {
-      items.add(
-        _AttendanceActivityEntry(
-          staffId: normalizedStaffId,
-          staffName: staffIdentity.displayName,
-          actionLabel: _clockInActivityLabel,
-          recordedAt: localClockInAt,
-          note: note,
-          isClockIn: true,
-          clockInAt: localClockInAt,
-          clockOutAt: localClockOutAt,
-          proofUrl: record.proofUrl,
-          proofFilename: record.proofFilename,
-          proofMimeType: record.proofMimeType,
-          proofUploadedAt: record.proofUploadedAt?.toLocal(),
-          clockOutAudit: record.clockOutAudit,
-        ),
-      );
-    }
-    if (localClockOutAt != null && _isSameDay(localClockOutAt, day)) {
-      items.add(
-        _AttendanceActivityEntry(
-          staffId: normalizedStaffId,
-          staffName: staffIdentity.displayName,
-          actionLabel: _clockOutActivityLabel,
-          recordedAt: localClockOutAt,
-          note: auditNote.isNotEmpty ? auditNote : note,
-          isClockIn: false,
-          clockInAt: localClockInAt,
-          clockOutAt: localClockOutAt,
-          proofUrl: record.proofUrl,
-          proofFilename: record.proofFilename,
-          proofMimeType: record.proofMimeType,
-          proofUploadedAt: record.proofUploadedAt?.toLocal(),
-          clockOutAudit: record.clockOutAudit,
-        ),
-      );
+    if (_toWorkDateKey(ledger.workDate?.toLocal()) == dayKey) {
+      return ledger;
     }
   }
-
-  items.sort((left, right) => left.recordedAt.compareTo(right.recordedAt));
-  return items;
+  return null;
 }
 
 ProductionAttendanceRecord _toProductionAttendanceRecord(
@@ -5436,9 +8284,25 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
   final computedDurationMinutes = record.clockOutAt != null
       ? record.clockOutAt!.difference(record.clockInAt).inMinutes
       : 0;
+  final proofs = record.effectiveProofs
+      .map(
+        (proof) => ProductionTaskProgressProofRecord(
+          url: proof.url,
+          publicId: proof.publicId,
+          filename: proof.filename,
+          mimeType: proof.mimeType,
+          sizeBytes: proof.sizeBytes ?? 0,
+          uploadedAt: proof.uploadedAt,
+          uploadedBy: proof.uploadedBy ?? "",
+        ),
+      )
+      .toList();
   return ProductionAttendanceRecord(
     id: record.id,
+    planId: record.planId ?? "",
+    taskId: record.taskId ?? "",
     staffProfileId: record.staffProfileId,
+    workDate: record.workDate,
     clockInAt: record.clockInAt,
     clockOutAt: record.clockOutAt,
     durationMinutes: record.durationMinutes ?? computedDurationMinutes,
@@ -5451,68 +8315,261 @@ ProductionAttendanceRecord _toProductionAttendanceRecord(
     proofSizeBytes: record.proofSizeBytes,
     proofUploadedAt: record.proofUploadedAt,
     proofUploadedBy: record.proofUploadedBy,
-    clockOutAudit: record.clockOutAudit == null
-        ? null
-        : ProductionAttendanceClockOutAudit(
-            workDate: record.clockOutAudit!.workDate,
-            planId: record.clockOutAudit!.planId,
-            taskId: record.clockOutAudit!.taskId,
-            taskTitle: record.clockOutAudit!.taskTitle,
-            staffProfileId: record.clockOutAudit!.staffProfileId,
-            staffName: record.clockOutAudit!.staffName,
-            unitId: record.clockOutAudit!.unitId,
-            unitLabel: record.clockOutAudit!.unitLabel,
-            progressUnitLabel: record.clockOutAudit!.progressUnitLabel,
-            unitsCompleted: record.clockOutAudit!.unitsCompleted,
-            unitsRemaining: record.clockOutAudit!.unitsRemaining,
-            quantityActivityType: record.clockOutAudit!.quantityActivityType,
-            quantityAmount: record.clockOutAudit!.quantityAmount,
-            quantityUnit: record.clockOutAudit!.quantityUnit,
-            notes: record.clockOutAudit!.notes,
-            capturedAt: record.clockOutAudit!.capturedAt,
-          ),
+    proofs: proofs,
+    requiredProofs: record.effectiveRequiredProofs,
+    proofStatus: record.resolvedProofStatus,
+    sessionStatus: record.resolvedSessionStatus,
   );
 }
 
-StaffAttendanceRecord _toStaffAttendanceRecord(
-  ProductionAttendanceRecord record,
+String _resolveAttendanceProofStatusLabel(
+  ProductionAttendanceRecord? attendance,
 ) {
-  return StaffAttendanceRecord(
-    id: record.id,
-    staffProfileId: record.staffProfileId,
-    clockInAt: record.clockInAt ?? record.createdAt ?? DateTime.now(),
-    clockOutAt: record.clockOutAt,
-    durationMinutes: record.durationMinutes,
-    location: null,
-    notes: record.notes,
-    createdAt: record.createdAt,
-    proofUrl: record.proofUrl,
-    proofPublicId: record.proofPublicId,
-    proofFilename: record.proofFilename,
-    proofMimeType: record.proofMimeType,
-    proofSizeBytes: record.proofSizeBytes,
-    proofUploadedAt: record.proofUploadedAt,
-    proofUploadedBy: record.proofUploadedBy,
-    clockOutAudit: record.clockOutAudit == null
-        ? null
-        : StaffAttendanceClockOutAudit(
-            workDate: record.clockOutAudit!.workDate,
-            planId: record.clockOutAudit!.planId,
-            taskId: record.clockOutAudit!.taskId,
-            taskTitle: record.clockOutAudit!.taskTitle,
-            staffProfileId: record.clockOutAudit!.staffProfileId,
-            staffName: record.clockOutAudit!.staffName,
-            unitId: record.clockOutAudit!.unitId,
-            unitLabel: record.clockOutAudit!.unitLabel,
-            progressUnitLabel: record.clockOutAudit!.progressUnitLabel,
-            unitsCompleted: record.clockOutAudit!.unitsCompleted,
-            unitsRemaining: record.clockOutAudit!.unitsRemaining,
-            quantityActivityType: record.clockOutAudit!.quantityActivityType,
-            quantityAmount: record.clockOutAudit!.quantityAmount,
-            quantityUnit: record.clockOutAudit!.quantityUnit,
-            notes: record.clockOutAudit!.notes,
-            capturedAt: record.clockOutAudit!.capturedAt,
-          ),
+  if (attendance == null) {
+    return "No proofs yet";
+  }
+  if (attendance.needsProof) {
+    return "Missing proof";
+  }
+  if (attendance.proofCountUploaded > 0) {
+    return "Proof complete";
+  }
+  return attendance.isOpen ? "Proof pending" : "No proofs yet";
+}
+
+List<ProductionTaskProgressProofRecord> _resolveWorkspaceVisibleProofs({
+  required ProductionTimelineRow? progress,
+  required ProductionAttendanceRecord? attendance,
+}) {
+  final byKey = <String, ProductionTaskProgressProofRecord>{};
+  void addAll(List<ProductionTaskProgressProofRecord> proofs) {
+    for (final proof in proofs) {
+      final key = _workspaceProofKey(proof);
+      if (key.isEmpty) {
+        continue;
+      }
+      byKey[key] = proof;
+    }
+  }
+
+  addAll(
+    attendance?.effectiveProofs ?? const <ProductionTaskProgressProofRecord>[],
+  );
+  addAll(progress?.proofs ?? const <ProductionTaskProgressProofRecord>[]);
+  return byKey.values.toList();
+}
+
+List<ProductionTaskProgressProofRecord> _downloadableWorkspaceProofs(
+  List<ProductionTaskProgressProofRecord> proofs,
+) {
+  return proofs
+      .where((proof) => proof.hasUrl && _isWorkspaceMediaProof(proof))
+      .toList(growable: false);
+}
+
+String _workspaceProofKey(ProductionTaskProgressProofRecord proof) {
+  final publicId = proof.publicId.trim();
+  if (publicId.isNotEmpty) {
+    return publicId;
+  }
+  final url = proof.url.trim();
+  if (url.isNotEmpty) {
+    return url;
+  }
+  return proof.filename.trim();
+}
+
+bool _isWorkspaceImageProof(ProductionTaskProgressProofRecord proof) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType.startsWith("image/")) {
+    return true;
+  }
+  final filename = proof.filename.trim().toLowerCase();
+  return filename.endsWith(".png") ||
+      filename.endsWith(".jpg") ||
+      filename.endsWith(".jpeg") ||
+      filename.endsWith(".gif") ||
+      filename.endsWith(".webp") ||
+      filename.endsWith(".bmp") ||
+      filename.endsWith(".heic");
+}
+
+bool _isWorkspaceVideoProof(ProductionTaskProgressProofRecord proof) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType.startsWith("video/")) {
+    return true;
+  }
+  final filename = proof.filename.trim().toLowerCase();
+  return filename.endsWith(".mp4") ||
+      filename.endsWith(".mov") ||
+      filename.endsWith(".webm") ||
+      filename.endsWith(".m4v");
+}
+
+bool _isWorkspaceMediaProof(ProductionTaskProgressProofRecord proof) {
+  return _isWorkspaceImageProof(proof) || _isWorkspaceVideoProof(proof);
+}
+
+String _workspaceProofDownloadFileName(
+  ProductionTaskProgressProofRecord proof,
+  int index,
+) {
+  final fallbackExtension = _workspaceProofDownloadExtension(proof);
+  final rawName = proof.filename.trim().isNotEmpty
+      ? proof.filename.trim()
+      : "proof-${index + 1}$fallbackExtension";
+  final sanitized = rawName
+      .replaceAll(RegExp(r'[\\/:*?"<>|]+'), "_")
+      .replaceAll(RegExp(r"\s+"), "_")
+      .trim();
+  if (sanitized.isNotEmpty) {
+    return sanitized;
+  }
+  return "proof-${index + 1}$fallbackExtension";
+}
+
+String _workspaceProofDownloadExtension(
+  ProductionTaskProgressProofRecord proof,
+) {
+  final mimeType = proof.mimeType.trim().toLowerCase();
+  if (mimeType == "image/jpeg") {
+    return ".jpg";
+  }
+  if (mimeType == "image/png") {
+    return ".png";
+  }
+  if (mimeType == "image/webp") {
+    return ".webp";
+  }
+  if (mimeType == "video/mp4") {
+    return ".mp4";
+  }
+  if (mimeType == "video/webm") {
+    return ".webm";
+  }
+  if (_isWorkspaceVideoProof(proof)) {
+    return ".mp4";
+  }
+  if (_isWorkspaceImageProof(proof)) {
+    return ".jpg";
+  }
+  return "";
+}
+
+String _workspaceProofSubtitle(ProductionTaskProgressProofRecord proof) {
+  final parts = <String>[];
+  if (proof.sizeBytes > 0) {
+    parts.add(_formatWorkspaceProofSize(proof.sizeBytes));
+  }
+  if (proof.uploadedAt != null) {
+    parts.add(formatDateLabel(proof.uploadedAt));
+  }
+  if (parts.isEmpty) {
+    return _isWorkspaceImageProof(proof) ? "Tap to preview" : "Tap to open";
+  }
+  return parts.join(" • ");
+}
+
+String _formatWorkspaceProofSize(int sizeBytes) {
+  if (sizeBytes <= 0) {
+    return "0 B";
+  }
+  if (sizeBytes < 1024) {
+    return "$sizeBytes B";
+  }
+  if (sizeBytes < 1024 * 1024) {
+    final kb = sizeBytes / 1024;
+    return "${kb.toStringAsFixed(kb >= 10 ? 0 : 1)} KB";
+  }
+  final mb = sizeBytes / (1024 * 1024);
+  return "${mb.toStringAsFixed(mb >= 10 ? 0 : 1)} MB";
+}
+
+List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
+  required ProductionPlan plan,
+  required DateTime selectedDay,
+  required List<ProductionTimelineRow> timelineRows,
+}) {
+  final plantingTargets = plan.plantingTargets;
+  // Keep the quantity cards cumulative through the selected day so the value
+  // and remaining helper stay in the same time scope.
+  final timelineRowsThroughSelectedDay = _rowsThroughDayInclusive(
+    timelineRows,
+    selectedDay,
+  );
+  final farmQuantitySummary = _summarizeFarmQuantities(
+    plan: plan,
+    timelineRows: timelineRowsThroughSelectedDay,
+  );
+  if (plantingTargets == null || farmQuantitySummary == null) {
+    return const <_SelectedDayQuantityMetric>[];
+  }
+
+  final metricsByActivityType = <String, _SelectedDayQuantityMetric>{
+    _quantityActivityPlanting: _SelectedDayQuantityMetric(
+      label: _dayQuantityPlantingLabel,
+      value:
+          "${_formatProgressAmount(farmQuantitySummary.plantingLogged)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
+      helper:
+          "${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} left ${farmQuantitySummary.plantingUnit}",
+      loggedAmount: farmQuantitySummary.plantingLogged,
+      plannedAmount: plantingTargets.plannedPlantingQuantity,
+      remainingAmount: farmQuantitySummary.plantingRemaining,
+      unitLabel: farmQuantitySummary.plantingUnit,
+      accentColor: _workspaceTeal,
+      softColor: _workspaceSoftTeal,
+      icon: Icons.grass_outlined,
+    ),
+    _quantityActivityTransplant: _SelectedDayQuantityMetric(
+      label: _dayQuantityTransplantLabel,
+      value:
+          "${_formatProgressAmount(farmQuantitySummary.transplantLogged)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
+      helper:
+          "${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} left ${farmQuantitySummary.plantingUnit}",
+      loggedAmount: farmQuantitySummary.transplantLogged,
+      plannedAmount: plantingTargets.plannedPlantingQuantity,
+      remainingAmount: farmQuantitySummary.transplantRemaining,
+      unitLabel: farmQuantitySummary.plantingUnit,
+      accentColor: _workspaceBlue,
+      softColor: _workspaceSoftBlue,
+      icon: Icons.swap_horiz_outlined,
+    ),
+    _quantityActivityHarvest: _SelectedDayQuantityMetric(
+      label: _dayQuantityHarvestLabel,
+      value:
+          "${_formatProgressAmount(farmQuantitySummary.harvestLogged)} / ${_formatProgressAmount(plantingTargets.estimatedHarvestQuantity)}",
+      helper:
+          "${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} left ${farmQuantitySummary.harvestUnit}",
+      loggedAmount: farmQuantitySummary.harvestLogged,
+      plannedAmount: plantingTargets.estimatedHarvestQuantity,
+      remainingAmount: farmQuantitySummary.harvestRemaining,
+      unitLabel: farmQuantitySummary.harvestUnit,
+      accentColor: _workspaceAmber,
+      softColor: _workspaceSoftAmber,
+      icon: Icons.agriculture_outlined,
+    ),
+  };
+  const selectedDayQuantityActivityTypes = <String>[
+    _quantityActivityPlanting,
+    _quantityActivityTransplant,
+    _quantityActivityHarvest,
+  ];
+  return selectedDayQuantityActivityTypes
+      .map((value) => metricsByActivityType[value])
+      .whereType<_SelectedDayQuantityMetric>()
+      .toList();
+}
+
+_ProductionProgressSummary _resolveProductionProgressSummary(
+  List<_SelectedDayQuantityMetric> metrics,
+) {
+  final primaryMetric = metrics.firstWhere(
+    (metric) => metric.loggedAmount > 0,
+    orElse: () => metrics.first,
+  );
+  return _ProductionProgressSummary(
+    summary: "${primaryMetric.label}: ${primaryMetric.value}",
+    helper: primaryMetric.helper,
   );
 }
 
@@ -5533,10 +8590,20 @@ Map<String, BusinessStaffProfileSummary> _buildStaffMap(
   return map;
 }
 
-String? _resolveSelfStaffRole({
+BusinessStaffProfileSummary? _resolveSelfStaffProfile({
   required List<BusinessStaffProfileSummary> staffList,
+  required String? userId,
   required String? userEmail,
 }) {
+  final normalizedUserId = (userId ?? "").trim();
+  if (normalizedUserId.isNotEmpty) {
+    for (final profile in staffList) {
+      final profileUserId = profile.userId.trim();
+      if (profileUserId.isNotEmpty && profileUserId == normalizedUserId) {
+        return profile;
+      }
+    }
+  }
   if (userEmail == null) {
     return null;
   }
@@ -5547,78 +8614,133 @@ String? _resolveSelfStaffRole({
   for (final profile in staffList) {
     final profileEmail = (profile.userEmail ?? "").toLowerCase().trim();
     if (profileEmail.isNotEmpty && profileEmail == normalizedEmail) {
-      return profile.staffRole;
+      return profile;
     }
+  }
+  return null;
+}
+
+String? _resolveSelfStaffRole({
+  required List<BusinessStaffProfileSummary> staffList,
+  required String? userId,
+  required String? userEmail,
+  required String? fallbackStaffRole,
+}) {
+  final profile = _resolveSelfStaffProfile(
+    staffList: staffList,
+    userId: userId,
+    userEmail: userEmail,
+  );
+  final resolvedRole = profile?.staffRole.trim() ?? "";
+  if (resolvedRole.isNotEmpty) {
+    return resolvedRole;
+  }
+  final fallbackRole = fallbackStaffRole?.trim() ?? "";
+  if (fallbackRole.isNotEmpty) {
+    return fallbackRole;
   }
   return null;
 }
 
 String _resolveSelfStaffId({
   required List<BusinessStaffProfileSummary> staffList,
+  required String? userId,
   required String? userEmail,
 }) {
-  if (userEmail == null) {
-    return "";
-  }
-  final normalizedEmail = userEmail.toLowerCase().trim();
-  if (normalizedEmail.isEmpty) {
-    return "";
-  }
-  for (final profile in staffList) {
-    final profileEmail = (profile.userEmail ?? "").toLowerCase().trim();
-    if (profileEmail.isNotEmpty && profileEmail == normalizedEmail) {
-      return profile.id.trim();
-    }
-  }
-  return "";
+  final profile = _resolveSelfStaffProfile(
+    staffList: staffList,
+    userId: userId,
+    userEmail: userEmail,
+  );
+  return profile?.id.trim() ?? "";
 }
 
 bool _canReviewProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == staffRoleEstateManager ||
-          staffRole == staffRoleFarmManager ||
-          staffRole == staffRoleAssetManager);
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+    staffRoleAssetManager,
+  });
+}
+
+bool _canDownloadProofMedia({
+  required String? actorRole,
+  required String? staffRole,
+}) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+  });
 }
 
 bool _canManageTaskAttendance({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == staffRoleEstateManager ||
-          staffRole == staffRoleFarmManager);
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+  });
 }
 
 bool _canManageCalendar({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
-  return actorRole == "staff" &&
-      (staffRole == staffRoleEstateManager ||
-          staffRole == staffRoleFarmManager ||
-          staffRole == staffRoleAssetManager);
+  return _matchesWorkspaceStaffRole(staffRole, const {
+    staffRoleEstateManager,
+    staffRoleFarmManager,
+    staffRoleAssetManager,
+  });
 }
 
 bool _canManagePlanLifecycle({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == "business_owner") {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
-  return actorRole == "staff" && staffRole == staffRoleEstateManager;
+  return _matchesWorkspaceStaffRole(staffRole, const {staffRoleEstateManager});
+}
+
+bool _matchesWorkspaceStaffRole(String? staffRole, Set<String> allowedRoles) {
+  final normalizedRole = (staffRole ?? "")
+      .trim()
+      .toLowerCase()
+      .replaceAll("-", "_")
+      .replaceAll(" ", "_");
+  return normalizedRole.isNotEmpty && allowedRoles.contains(normalizedRole);
 }
 
 String _resolveProductionWorkspaceErrorMessage(
@@ -5913,6 +9035,28 @@ String _pluralizeWord(String value) {
   return "${normalized}s";
 }
 
+String _singularizeWord(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final lower = normalized.toLowerCase();
+  if (lower.endsWith("ies") && normalized.length > 3) {
+    return "${normalized.substring(0, normalized.length - 3)}y";
+  }
+  if ((lower.endsWith("ches") ||
+          lower.endsWith("shes") ||
+          lower.endsWith("xes") ||
+          lower.endsWith("zes")) &&
+      normalized.length > 2) {
+    return normalized.substring(0, normalized.length - 2);
+  }
+  if (lower.endsWith("s") && !lower.endsWith("ss") && normalized.length > 1) {
+    return normalized.substring(0, normalized.length - 1);
+  }
+  return normalized;
+}
+
 String _pluralizeUnitPhrase(String value) {
   final normalized = value.trim();
   if (normalized.isEmpty) {
@@ -5927,6 +9071,23 @@ String _pluralizeUnitPhrase(String value) {
   }
   final lastToken = tokens.removeLast();
   tokens.add(_pluralizeWord(lastToken));
+  return tokens.join(" ");
+}
+
+String _singularizeUnitPhrase(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (tokens.isEmpty) {
+    return normalized;
+  }
+  final lastToken = tokens.removeLast();
+  tokens.add(_singularizeWord(lastToken));
   return tokens.join(" ");
 }
 
@@ -6010,6 +9171,9 @@ String _resolvePreferredProgressUnitStem({
   if (!_isGenericProgressUnitStem(fallbackStem)) {
     return fallbackStem;
   }
+  if (fallbackStem == "plot") {
+    return fallbackStem;
+  }
   return "";
 }
 
@@ -6089,13 +9253,26 @@ String _inferProgressUnitStemFromContext({
   return "";
 }
 
+IconData _proofUnitIcon(String unitLabel) {
+  final normalized = unitLabel.trim().toLowerCase();
+  if (normalized.contains("greenhouse") || normalized.contains("green house")) {
+    return Icons.home_work_outlined;
+  }
+  if (normalized.contains("acre") ||
+      normalized.contains("plot") ||
+      normalized.contains("field")) {
+    return Icons.crop_square_outlined;
+  }
+  return Icons.grid_view_rounded;
+}
+
 String _formatProgressAmountWithUnit({
   required num amount,
   required String singularUnitLabel,
 }) {
   final normalizedUnit = singularUnitLabel.trim().isEmpty
       ? "work unit"
-      : singularUnitLabel.trim();
+      : _singularizeUnitPhrase(singularUnitLabel.trim());
   final unitLabel = _sameProgressAmount(amount, 1)
       ? normalizedUnit
       : _pluralizeUnitPhrase(normalizedUnit);
@@ -6103,17 +9280,14 @@ String _formatProgressAmountWithUnit({
 }
 
 String _buildProgressWorkflowHint({required String singularUnitLabel}) {
-  final pluralUnitLabel = _pluralizeUnitPhrase(
-    singularUnitLabel.trim().isEmpty ? "work unit" : singularUnitLabel.trim(),
-  );
-  return "Select only what one assigned staff actually completed on this date. The combined total cannot go above the planned task target. Example: if 6 $pluralUnitLabel are planned and Aisha completed 2.5, pick 2.5 here.";
+  return "This form closes one staff session and updates the shared task/day ledger. Unit contribution always affects shared completion. Activity type is optional and only affects the shared planted, transplanted, or harvested tracker.";
 }
 
 String _buildProgressActualLabel({required String singularUnitLabel}) {
   final pluralUnitLabel = _pluralizeUnitPhrase(
     singularUnitLabel.trim().isEmpty ? "work unit" : singularUnitLabel.trim(),
   );
-  return "Actual $pluralUnitLabel this staff completed today";
+  return "Unit contribution against shared $pluralUnitLabel";
 }
 
 String _buildProgressNotesHint({required String singularUnitLabel}) {
@@ -6234,6 +9408,7 @@ num _resolveTaskProgressTargetAmount({
 _TaskUnitProgressSummary _buildTaskUnitProgressSummary({
   required ProductionTask task,
   required List<ProductionTimelineRow> timelineRows,
+  ProductionTaskDayLedger? taskDayLedger,
   required Map<String, String> planUnitLabelById,
   int fallbackTotalUnits = 0,
   String fallbackWorkUnitLabel = "",
@@ -6249,21 +9424,22 @@ _TaskUnitProgressSummary _buildTaskUnitProgressSummary({
     assignedUnitIds: assignedUnitIds,
     fallbackTotalUnits: fallbackTotalUnits,
   );
-  final loggedAmount = timelineRows.fold<num>(
-    0,
-    (sum, row) => sum + row.actualPlots,
-  );
+  final loggedAmount =
+      taskDayLedger?.unitCompleted ??
+      timelineRows.fold<num>(0, (sum, row) => sum + row.actualPlots);
   final singularUnitLabel = _resolveProgressUnitSingularLabel(
     assignedUnitIds: assignedUnitIds,
     planUnitLabelById: planUnitLabelById,
     selectedUnitId: selectedUnitId,
-    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    fallbackWorkUnitLabel: taskDayLedger?.unitType.trim().isNotEmpty == true
+        ? taskDayLedger!.unitType
+        : fallbackWorkUnitLabel,
     contextText:
         "$contextText ${task.title} ${task.instructions} ${task.taskType} $fallbackWorkUnitLabel",
   );
   return _TaskUnitProgressSummary(
     singularUnitLabel: singularUnitLabel,
-    plannedAmount: plannedAmount,
+    plannedAmount: taskDayLedger?.unitTarget ?? plannedAmount,
     loggedAmount: loggedAmount,
   );
 }
@@ -6285,8 +9461,20 @@ bool _sameProgressAmount(num left, num right) {
 
 List<num> _buildProgressAmountOptions({required num maxAmount}) {
   final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
-  final halfSteps = (normalizedMax * 2).floor();
-  final values = List<num>.generate(halfSteps + 1, (index) => index / 2);
+  final step = normalizedMax <= 10
+      ? 0.1
+      : normalizedMax <= 30
+      ? 0.5
+      : normalizedMax <= 120
+      ? 1.0
+      : normalizedMax <= 500
+      ? 5.0
+      : 10.0;
+  final stepCount = (normalizedMax / step).floor();
+  final values = List<num>.generate(
+    stepCount + 1,
+    (index) => double.parse((index * step).toStringAsFixed(2)),
+  );
   if (values.isEmpty) {
     return <num>[0];
   }
@@ -6294,6 +9482,24 @@ List<num> _buildProgressAmountOptions({required num maxAmount}) {
     values.add(normalizedMax);
   }
   return values;
+}
+
+List<num> _buildSelectableProgressAmountOptions({
+  required num maxAmount,
+  required String singularUnitLabel,
+  num? selectedAmount,
+}) {
+  final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
+  final values = <num>{0};
+  values.addAll(_buildProgressAmountOptions(maxAmount: normalizedMax));
+  if (selectedAmount != null && selectedAmount >= 0) {
+    values.add(selectedAmount.toDouble());
+  }
+  if (!_sameProgressAmount(normalizedMax, 0)) {
+    values.add(normalizedMax);
+  }
+  final ordered = values.toList()..sort((left, right) => left.compareTo(right));
+  return ordered;
 }
 
 List<num> _buildQuantityAmountOptions({required num maxAmount}) {
@@ -6324,6 +9530,33 @@ List<num> _buildQuantityAmountOptions({required num maxAmount}) {
   return ordered;
 }
 
+List<num> _buildSelectableQuantityAmountOptions({
+  required num maxAmount,
+  num? selectedAmount,
+}) {
+  final normalizedMax = maxAmount <= 0 ? 0.0 : maxAmount.toDouble();
+  final values = _buildQuantityAmountOptions(maxAmount: normalizedMax).toSet();
+  if (selectedAmount != null && selectedAmount >= 0) {
+    values.add(selectedAmount.toDouble());
+  }
+  if (!_sameProgressAmount(normalizedMax, 0)) {
+    values.add(normalizedMax);
+  }
+  final ordered = values.toList()..sort((left, right) => left.compareTo(right));
+  return ordered;
+}
+
+int _compareProgressRowsByNewest(
+  ProductionTimelineRow left,
+  ProductionTimelineRow right,
+) {
+  final entryIndexComparison = right.entryIndex.compareTo(left.entryIndex);
+  if (entryIndexComparison != 0) {
+    return entryIndexComparison;
+  }
+  return right.id.compareTo(left.id);
+}
+
 ProductionTimelineRow? _findExistingProgressRowForSelection({
   required List<ProductionTimelineRow> timelineRows,
   required String taskId,
@@ -6344,7 +9577,28 @@ ProductionTimelineRow? _findExistingProgressRowForSelection({
   if (matches.isEmpty) {
     return null;
   }
-  matches.sort((left, right) => left.id.compareTo(right.id));
+  matches.sort(_compareProgressRowsByNewest);
+  return matches.first;
+}
+
+ProductionTimelineRow? _findStaffTaskProgressRow({
+  required List<ProductionTimelineRow> timelineRows,
+  required String taskId,
+  required DateTime workDate,
+  required String staffId,
+}) {
+  final normalizedTaskId = taskId.trim();
+  final normalizedStaffId = staffId.trim();
+  final workDateKey = _toWorkDateKey(workDate);
+  final matches = timelineRows.where((row) {
+    return row.taskId.trim() == normalizedTaskId &&
+        row.staffId.trim() == normalizedStaffId &&
+        _toWorkDateKey(row.workDate) == workDateKey;
+  }).toList();
+  if (matches.isEmpty) {
+    return null;
+  }
+  matches.sort(_compareProgressRowsByNewest);
   return matches.first;
 }
 
@@ -6400,117 +9654,6 @@ String _buildProgressCountHelperText({
   return "Pick only what this one staff completed today. Planned target: $targetLabel. Already logged: $loggedLabel. Remaining now: $remainingLabel.";
 }
 
-_ClockOutAuditSubmission _buildClockOutAuditSubmission({
-  required _WorkspaceLogProgressInput input,
-  required DateTime workDate,
-  required ProductionTask task,
-  required String planId,
-  required List<ProductionTimelineRow> timelineRows,
-  required Map<String, BusinessStaffProfileSummary> staffMap,
-  required Map<String, String> planUnitLabelById,
-  required int fallbackTotalUnits,
-  required String fallbackWorkUnitLabel,
-  required String planContextText,
-}) {
-  final effectiveStaffId = input.staffId?.trim().isNotEmpty == true
-      ? input.staffId!.trim()
-      : "";
-  final assignedUnitIds = task.assignedUnitIds
-      .map((value) => value.trim())
-      .where((value) => value.isNotEmpty)
-      .toList();
-  final taskTargetAmount = _resolveTaskProgressTargetAmount(
-    task: task,
-    assignedUnitIds: assignedUnitIds,
-    fallbackTotalUnits: fallbackTotalUnits,
-  );
-  final existingSelectionRow = _findExistingProgressRowForSelection(
-    timelineRows: timelineRows,
-    taskId: task.id,
-    workDate: workDate,
-    staffId: effectiveStaffId,
-    unitId: input.unitId,
-  );
-  final loggedTotal = timelineRows
-      .where((row) => row.taskId.trim() == task.id.trim())
-      .fold<num>(0, (sum, row) => sum + row.actualPlots);
-  final existingSelectionAmount = existingSelectionRow?.actualPlots ?? 0;
-  final totalLoggedAfterSave =
-      (loggedTotal - existingSelectionAmount) + input.actualPlots;
-  final remainingAfterSave = math.max(
-    0,
-    taskTargetAmount - totalLoggedAfterSave,
-  );
-  final progressContextText = [
-    planContextText,
-    task.title,
-    task.instructions,
-    task.taskType,
-    fallbackWorkUnitLabel,
-  ].join(" ");
-  final progressUnitSingularLabel = _resolveProgressUnitSingularLabel(
-    assignedUnitIds: assignedUnitIds,
-    planUnitLabelById: planUnitLabelById,
-    selectedUnitId: input.unitId,
-    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
-    contextText: progressContextText,
-  );
-  final selectedUnitLabel = _normalizeProgressUnitDisplayLabel(
-    (input.unitId != null && input.unitId!.trim().isNotEmpty)
-        ? (planUnitLabelById[input.unitId!.trim()] ?? input.unitId!.trim())
-        : (assignedUnitIds.length == 1
-              ? (planUnitLabelById[assignedUnitIds.first] ??
-                    assignedUnitIds.first)
-              : ""),
-    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
-    contextText: progressContextText,
-  );
-  final staffLabel = effectiveStaffId.isEmpty
-      ? _assignedStaffFallbackLabel
-      : _resolveStaffDisplayLabel(
-          effectiveStaffId,
-          staffMap,
-          fallbackRole: task.roleRequired,
-        );
-  final doneLabel = _formatProgressAmountWithUnit(
-    amount: input.actualPlots,
-    singularUnitLabel: progressUnitSingularLabel,
-  );
-  final remainingLabel = _formatProgressAmountWithUnit(
-    amount: remainingAfterSave,
-    singularUnitLabel: progressUnitSingularLabel,
-  );
-
-  return _ClockOutAuditSubmission(
-    proofAuditPayload: {
-      "workDate": workDate.toUtc().toIso8601String(),
-      "planId": planId,
-      "taskId": task.id,
-      "taskTitle": task.title,
-      "staffProfileId": effectiveStaffId,
-      "staffName": staffLabel,
-      "unitId": input.unitId?.trim() ?? "",
-      "unitLabel": selectedUnitLabel,
-      "progressUnitLabel": progressUnitSingularLabel,
-      "unitsCompleted": input.actualPlots,
-      "unitsRemaining": remainingAfterSave,
-      "quantityActivityType": input.quantityActivityType,
-      "quantityAmount": input.quantityAmount,
-      "quantityUnit": input.quantityUnit,
-      "notes": input.notes,
-    },
-    proofSubjectLabel: effectiveStaffId.isEmpty
-        ? staffLabel
-        : "$staffLabel • ID $effectiveStaffId",
-    proofTaskLabel: [
-      task.title,
-      if (selectedUnitLabel.isNotEmpty) selectedUnitLabel,
-      "$doneLabel done",
-      "$remainingLabel left",
-    ].join(" • "),
-  );
-}
-
 String _normalizeRole(String value) {
   return value.trim().toLowerCase().replaceAll(RegExp(r"[^a-z0-9]+"), "_");
 }
@@ -6520,6 +9663,23 @@ List<BusinessStaffProfileSummary> _staffCandidatesForTask({
   required List<BusinessStaffProfileSummary> staffList,
 }) {
   final normalizedRole = _normalizeRole(task.roleRequired);
+  final activeStaff = staffList
+      .where((staff) => staff.status.trim().toLowerCase() != "terminated")
+      .toList();
+  final matching = activeStaff
+      .where((staff) => _normalizeRole(staff.staffRole) == normalizedRole)
+      .toList();
+  if (matching.isNotEmpty) {
+    return matching;
+  }
+  return activeStaff;
+}
+
+List<BusinessStaffProfileSummary> _staffCandidatesForRole({
+  required String roleRequired,
+  required List<BusinessStaffProfileSummary> staffList,
+}) {
+  final normalizedRole = _normalizeRole(roleRequired);
   final activeStaff = staffList
       .where((staff) => staff.status.trim().toLowerCase() != "terminated")
       .toList();
@@ -6551,6 +9711,283 @@ String? _staffListLabel(BusinessStaffProfileSummary? staff) {
   return staff.id;
 }
 
+DateTime _normalizeToLocalDay(DateTime value) {
+  final local = value.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+DateTime _buildWorkspaceTaskStartDate(DateTime day) {
+  final localDay = _normalizeToLocalDay(day);
+  return DateTime(localDay.year, localDay.month, localDay.day, 8);
+}
+
+DateTime _buildWorkspaceTaskDueDate(DateTime day) {
+  final localDay = _normalizeToLocalDay(day);
+  return DateTime(localDay.year, localDay.month, localDay.day, 17);
+}
+
+Future<_CreateWorkspaceTaskInput?> _showCreateWorkspaceTaskDialog(
+  BuildContext context, {
+  required DateTime selectedDay,
+  required List<ProductionPhase> phases,
+  required List<BusinessStaffProfileSummary> staffList,
+  required _WorkspaceWorkScopeSummary workScopeSummary,
+  String? initialPhaseId,
+  String? initialRoleRequired,
+}) async {
+  if (phases.isEmpty) {
+    return null;
+  }
+
+  final sortedPhases = [...phases]
+    ..sort((left, right) => left.order.compareTo(right.order));
+  final activeStaffById = <String, BusinessStaffProfileSummary>{};
+  for (final staff in staffList) {
+    final staffId = staff.id.trim();
+    if (staffId.isEmpty || staff.status.trim().toLowerCase() == "terminated") {
+      continue;
+    }
+    activeStaffById.putIfAbsent(staffId, () => staff);
+  }
+  final activeStaff = activeStaffById.values.toList();
+  final normalizedInitialRole = _normalizeRole(initialRoleRequired ?? "");
+  final roleOptions = <String>{
+    for (final staff in activeStaff)
+      if (staff.staffRole.trim().isNotEmpty) _normalizeRole(staff.staffRole),
+    if (normalizedInitialRole.isNotEmpty) normalizedInitialRole,
+    "farmer",
+  }.toList()..sort();
+
+  final titleController = TextEditingController();
+  final weightController = TextEditingController(text: "1");
+  final headcountController = TextEditingController(text: "1");
+  final notesController = TextEditingController();
+  var selectedPhaseId = sortedPhases.any((phase) => phase.id == initialPhaseId)
+      ? initialPhaseId!.trim()
+      : sortedPhases.first.id;
+  var selectedRole = roleOptions.contains(normalizedInitialRole)
+      ? normalizedInitialRole
+      : roleOptions.first;
+  final selectedStaffIds = <String>{};
+  var validationError = "";
+
+  final result = await showDialog<_CreateWorkspaceTaskInput>(
+    context: context,
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          final staffCandidates = _staffCandidatesForRole(
+            roleRequired: selectedRole,
+            staffList: activeStaff,
+          );
+
+          return AlertDialog(
+            title: const Text(_taskCreateDialogTitle),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      "Create a separate task for ${_formatCalendarDate(selectedDay)}. This does not require anyone to clock in first. Attendance only starts when staff actually begin that task.",
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedPhaseId,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreatePhaseLabel,
+                      ),
+                      items: sortedPhases
+                          .map(
+                            (phase) => DropdownMenuItem<String>(
+                              value: phase.id,
+                              child: Text(phase.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return;
+                        }
+                        setDialogState(() {
+                          selectedPhaseId = value.trim();
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateTitleLabel,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedRole,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateRoleLabel,
+                      ),
+                      items: roleOptions
+                          .map(
+                            (role) => DropdownMenuItem<String>(
+                              value: role,
+                              child: Text(
+                                formatStaffRoleLabel(role, fallback: role),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return;
+                        }
+                        setDialogState(() {
+                          selectedRole = value.trim();
+                          final allowedIds = _staffCandidatesForRole(
+                            roleRequired: selectedRole,
+                            staffList: activeStaff,
+                          ).map((staff) => staff.id).toSet();
+                          selectedStaffIds.removeWhere(
+                            (staffId) => !allowedIds.contains(staffId),
+                          );
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: weightController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText:
+                            "$_taskCreateExpectedLabel (${workScopeSummary.pluralLabel})",
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: headcountController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateHeadcountLabel,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: notesController,
+                      minLines: 2,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        labelText: _taskCreateNotesLabel,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _taskCreateStaffLabel,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (staffCandidates.isEmpty)
+                      Text(
+                        _staffDialogEmptyLabel,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                    else
+                      ...staffCandidates.map((staff) {
+                        final checked = selectedStaffIds.contains(staff.id);
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: checked,
+                          onChanged: (value) {
+                            setDialogState(() {
+                              if (value == true) {
+                                selectedStaffIds.add(staff.id);
+                              } else {
+                                selectedStaffIds.remove(staff.id);
+                              }
+                            });
+                          },
+                          title: Text(_staffListLabel(staff) ?? staff.id),
+                          subtitle: Text(
+                            formatStaffRoleLabel(
+                              staff.staffRole,
+                              fallback: staff.staffRole,
+                            ),
+                          ),
+                        );
+                      }),
+                    if (validationError.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        validationError,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(_taskCreateDialogCancelLabel),
+              ),
+              FilledButton(
+                onPressed: () {
+                  FocusScope.of(dialogContext).unfocus();
+                  final title = titleController.text.trim();
+                  if (title.isEmpty) {
+                    setDialogState(() {
+                      validationError = _taskCreateTitleRequired;
+                    });
+                    return;
+                  }
+
+                  final parsedWeight =
+                      int.tryParse(weightController.text.trim()) ?? 1;
+                  final parsedHeadcount =
+                      int.tryParse(headcountController.text.trim()) ?? 1;
+
+                  Navigator.of(dialogContext).pop(
+                    _CreateWorkspaceTaskInput(
+                      phaseId: selectedPhaseId,
+                      title: title,
+                      roleRequired: selectedRole,
+                      requiredHeadcount: math.max(
+                        1,
+                        math.max(parsedHeadcount, selectedStaffIds.length),
+                      ),
+                      weight: math.max(1, parsedWeight),
+                      assignedStaffProfileIds: selectedStaffIds.toList(),
+                      instructions: notesController.text.trim(),
+                      startDate: _buildWorkspaceTaskStartDate(selectedDay),
+                      dueDate: _buildWorkspaceTaskDueDate(selectedDay),
+                    ),
+                  );
+                },
+                child: const Text(_taskCreateDialogSubmitLabel),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+
+  titleController.dispose();
+  weightController.dispose();
+  headcountController.dispose();
+  notesController.dispose();
+  return result;
+}
+
 String _formatTaskWindow({
   required DateTime? startDate,
   required DateTime? dueDate,
@@ -6578,6 +10015,21 @@ String _clockLabel(DateTime value) {
   final hour = value.hour.toString().padLeft(2, "0");
   final minute = value.minute.toString().padLeft(2, "0");
   return "$hour:$minute";
+}
+
+String _formatAttendanceTimeValue(
+  DateTime? value, {
+  required String emptyLabel,
+  DateTime? referenceDay,
+}) {
+  if (value == null) {
+    return emptyLabel;
+  }
+  final localValue = value.toLocal();
+  if (referenceDay != null && !_isSameDay(localValue, referenceDay.toLocal())) {
+    return "${formatDateLabel(localValue)} • ${_clockLabel(localValue)}";
+  }
+  return _clockLabel(localValue);
 }
 
 DateTime _mergeDateAndTime(DateTime day, TimeOfDay time) {
@@ -6694,12 +10146,2371 @@ Future<List<String>?> _showTaskAssignmentDialog(
   );
 }
 
-Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
+enum _WorkspaceClockOutWizardStep { primary, proof, activity, notes }
+
+Future<bool> _showWorkspaceClockOutWizard(
   BuildContext context, {
   required DateTime workDate,
   required ProductionTask task,
   required ProductionPlan plan,
   required List<ProductionTimelineRow> timelineRows,
+  required List<ProductionTaskDayLedger> taskDayLedgers,
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required Map<String, BusinessStaffProfileSummary> staffMap,
+  required Map<String, String> planUnitLabelById,
+  required int fallbackTotalUnits,
+  required String fallbackWorkUnitLabel,
+  required String staffId,
+  required Future<void> Function(ProductionTaskLogProgressInput input) onSubmit,
+}) async {
+  final activeAttendance = resolveProductionWorkspaceActiveClockOutAttendance(
+    attendanceRecords: attendanceRecords,
+    staffProfileId: staffId,
+    day: workDate,
+    taskId: task.id,
+  );
+  if (activeAttendance == null ||
+      activeAttendance.clockInAt == null ||
+      activeAttendance.clockOutAt != null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(_clockOutWizardActiveSessionMissing)),
+    );
+    return false;
+  }
+
+  final mediaQuery = MediaQuery.of(context);
+  final isCompact = mediaQuery.size.width < 720;
+  final wizard = ProductionClockOutWizardSheet(
+    workDate: workDate,
+    task: task,
+    plan: plan,
+    timelineRows: timelineRows,
+    taskDayLedgers: taskDayLedgers,
+    attendanceRecords: attendanceRecords,
+    activeAttendance: activeAttendance,
+    staffMap: staffMap,
+    planUnitLabelById: planUnitLabelById,
+    fallbackTotalUnits: fallbackTotalUnits,
+    fallbackWorkUnitLabel: fallbackWorkUnitLabel,
+    staffId: staffId,
+    onSubmit: onSubmit,
+  );
+
+  if (isCompact) {
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return FractionallySizedBox(heightFactor: 0.96, child: wizard);
+      },
+    );
+    return result ?? false;
+  }
+
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      return Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          width: math.min(mediaQuery.size.width * 0.9, 760),
+          height: math.min(mediaQuery.size.height * 0.9, 820),
+          child: wizard,
+        ),
+      );
+    },
+  );
+  return result ?? false;
+}
+
+typedef ProductionClockOutProofCapture =
+    Future<ProductionTaskProgressProofInput?> Function({
+      required bool isVideo,
+      required int unitNumber,
+    });
+
+class ProductionClockOutWizardSheet extends StatefulWidget {
+  final DateTime workDate;
+  final ProductionTask task;
+  final ProductionPlan plan;
+  final List<ProductionTimelineRow> timelineRows;
+  final List<ProductionTaskDayLedger> taskDayLedgers;
+  final List<ProductionAttendanceRecord> attendanceRecords;
+  final ProductionAttendanceRecord activeAttendance;
+  final Map<String, BusinessStaffProfileSummary> staffMap;
+  final Map<String, String> planUnitLabelById;
+  final int fallbackTotalUnits;
+  final String fallbackWorkUnitLabel;
+  final String staffId;
+  final Future<void> Function(ProductionTaskLogProgressInput input) onSubmit;
+  final Future<List<ProductionTaskProgressProofInput>> Function()? onPickProofs;
+  final ProductionClockOutProofCapture? onCaptureProof;
+
+  const ProductionClockOutWizardSheet({
+    super.key,
+    required this.workDate,
+    required this.task,
+    required this.plan,
+    required this.timelineRows,
+    required this.taskDayLedgers,
+    required this.attendanceRecords,
+    required this.activeAttendance,
+    required this.staffMap,
+    required this.planUnitLabelById,
+    required this.fallbackTotalUnits,
+    required this.fallbackWorkUnitLabel,
+    required this.staffId,
+    required this.onSubmit,
+    this.onPickProofs,
+    this.onCaptureProof,
+  });
+
+  @override
+  State<ProductionClockOutWizardSheet> createState() =>
+      _WorkspaceClockOutWizardState();
+}
+
+class _WorkspaceClockOutWizardState
+    extends State<ProductionClockOutWizardSheet> {
+  late final TextEditingController _primaryController;
+  late final TextEditingController _activityQuantityController;
+  late final TextEditingController _notesController;
+  late String? _selectedUnitId;
+  String? _selectedActivityType;
+  String _selectedDelayReason = _delayReasonNone;
+  List<ProductionTaskProgressProofInput> _selectedProofs =
+      <ProductionTaskProgressProofInput>[];
+  final Map<int, ProductionTaskProgressProofInput> _imageProofByUnit =
+      <int, ProductionTaskProgressProofInput>{};
+  final Map<int, ProductionTaskProgressProofInput> _videoProofByUnit =
+      <int, ProductionTaskProgressProofInput>{};
+  _WorkspaceClockOutWizardStep _currentStep =
+      _WorkspaceClockOutWizardStep.primary;
+  String _inlineError = "";
+  bool _isSaving = false;
+  bool _isPickingProofs = false;
+  num? _primaryMaxOverride;
+  final Map<String, num> _activityMaxOverrides = <String, num>{};
+
+  List<String> get _assignedUnitIds => widget.task.assignedUnitIds
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList();
+
+  ProductionTaskDayLedger? get _taskDayLedger => _ledgerForTaskOnDay(
+    taskDayLedgers: widget.taskDayLedgers,
+    taskId: widget.task.id,
+    day: widget.workDate,
+  );
+
+  List<ProductionTimelineRow> get _rowsForTaskOnWorkDate => _rowsForDay(
+    widget.timelineRows,
+    widget.workDate,
+  ).where((row) => row.taskId.trim() == widget.task.id.trim()).toList();
+
+  ProductionTimelineRow? get _existingSelectionRow =>
+      _findExistingProgressRowForSelection(
+        timelineRows: widget.timelineRows,
+        taskId: widget.task.id,
+        workDate: widget.workDate,
+        staffId: widget.staffId,
+        unitId: _selectedUnitId,
+      );
+
+  _FarmQuantitySummary? get _farmQuantitySummary => _summarizeFarmQuantities(
+    plan: widget.plan,
+    timelineRows: widget.timelineRows,
+  );
+
+  DateTime get _clockInAt => widget.activeAttendance.clockInAt!.toLocal();
+
+  String get _staffLabel => _resolveStaffDisplayLabel(
+    widget.staffId,
+    widget.staffMap,
+    fallbackRole: widget.task.roleRequired,
+  );
+
+  String get _progressUnitSingularLabel => _resolveProgressUnitSingularLabel(
+    assignedUnitIds: _assignedUnitIds,
+    planUnitLabelById: widget.planUnitLabelById,
+    selectedUnitId: _selectedUnitId,
+    fallbackWorkUnitLabel: widget.fallbackWorkUnitLabel,
+    contextText:
+        "${widget.plan.title} ${widget.plan.notes} ${widget.task.title} ${widget.task.instructions} ${widget.fallbackWorkUnitLabel}",
+  );
+
+  num get _taskTargetAmount =>
+      _taskDayLedger?.unitTarget ??
+      _resolveTaskProgressTargetAmount(
+        task: widget.task,
+        assignedUnitIds: _assignedUnitIds,
+        fallbackTotalUnits: widget.fallbackTotalUnits,
+      );
+
+  num get _existingSelectionAmount =>
+      _existingSelectionRow?.unitContribution ??
+      _existingSelectionRow?.actualPlots ??
+      0;
+
+  num get _sharedCompletedBeforeEdit =>
+      _taskDayLedger?.unitCompleted ??
+      _rowsForTaskOnWorkDate.fold<num>(0, (sum, row) => sum + row.actualPlots);
+
+  num get _loggedAmountExcludingSelection =>
+      _sharedCompletedBeforeEdit - _existingSelectionAmount;
+
+  num get _maxPrimaryAmount {
+    if (_primaryMaxOverride != null) {
+      return _primaryMaxOverride!;
+    }
+    final remainingAgainstPlan =
+        _taskTargetAmount - _loggedAmountExcludingSelection;
+    return remainingAgainstPlan < 0 ? 0 : remainingAgainstPlan;
+  }
+
+  num? get _primaryAmount => _parseWizardNumber(_primaryController.text);
+
+  num get _primaryAmountValue => _primaryAmount ?? 0;
+
+  int get _requiredPhotoCount =>
+      requiredTaskProgressPhotoCount(_primaryAmountValue);
+
+  int get _requiredVideoCount =>
+      requiredTaskProgressVideoCount(_primaryAmountValue);
+
+  int get _requiredProofCount =>
+      requiredTaskProgressProofCount(_primaryAmountValue);
+
+  int get _requiredProofUnitCount =>
+      math.max(_requiredPhotoCount, _requiredVideoCount);
+
+  bool get _existingSelectionHasRequiredProofMix {
+    final existingRow = _existingSelectionRow;
+    if (existingRow == null) {
+      return false;
+    }
+    return hasRequiredTaskProgressProofRecordMix(
+      existingRow.proofs,
+      _requiredProofCount,
+    );
+  }
+
+  bool get _proofRequirementSatisfied => _requiredProofCount == 0
+      ? _selectedProofs.isEmpty
+      : _selectedProofs.isNotEmpty
+      ? hasRequiredTaskProgressProofMix(_selectedProofs, _requiredProofCount)
+      : _existingSelectionHasRequiredProofMix;
+
+  num get _remainingAfterSave {
+    final remaining =
+        _taskTargetAmount -
+        (_loggedAmountExcludingSelection + _primaryAmountValue);
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  int get _readyProofCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.length
+      : (_existingSelectionRow?.proofs.length ?? 0);
+
+  int get _readyPhotoCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.where((proof) => proof.isImage).length
+      : (_existingSelectionRow?.proofs.where((proof) => proof.isImage).length ??
+            0);
+
+  int get _readyVideoCount => _selectedProofs.isNotEmpty
+      ? _selectedProofs.where((proof) => proof.isVideo).length
+      : (_existingSelectionRow?.proofs.where((proof) => proof.isVideo).length ??
+            0);
+
+  bool get _hasLocalProofSelection =>
+      _selectedProofs.isNotEmpty ||
+      _imageProofByUnit.isNotEmpty ||
+      _videoProofByUnit.isNotEmpty;
+
+  int get _proofBackedCompletedUnitCount {
+    if (_readyProofCount <= 0) {
+      return 0;
+    }
+    if (_readyProofCount != _readyPhotoCount + _readyVideoCount) {
+      return 0;
+    }
+    if (_readyPhotoCount != _readyVideoCount) {
+      return 0;
+    }
+    return _readyPhotoCount;
+  }
+
+  num get _resolvedPrimaryAmountForSubmit {
+    final proofBackedCompletedUnitCount = _proofBackedCompletedUnitCount;
+    if (proofBackedCompletedUnitCount <= _requiredPhotoCount) {
+      return _primaryAmountValue;
+    }
+    return proofBackedCompletedUnitCount;
+  }
+
+  List<num> get _primaryAmountOptions => _buildSelectableProgressAmountOptions(
+    maxAmount: _maxPrimaryAmount,
+    singularUnitLabel: _progressUnitSingularLabel,
+    selectedAmount: _primaryAmount,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _primaryController = TextEditingController();
+    _activityQuantityController = TextEditingController();
+    _notesController = TextEditingController();
+    _selectedUnitId = _assignedUnitIds.isNotEmpty
+        ? _assignedUnitIds.first
+        : null;
+    _syncFromExistingSelection();
+  }
+
+  @override
+  void dispose() {
+    _primaryController.dispose();
+    _activityQuantityController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  void _syncFromExistingSelection() {
+    _primaryMaxOverride = null;
+    _activityMaxOverrides.clear();
+    _inlineError = "";
+    final existingRow = _existingSelectionRow;
+    final existingContribution =
+        existingRow?.unitContribution ?? existingRow?.actualPlots;
+    final defaultContribution =
+        existingContribution ?? _defaultPrimaryAmountForNewSelection();
+    _primaryController.text = defaultContribution == null
+        ? ""
+        : _formatProgressAmount(defaultContribution);
+    final existingActivityType = existingRow == null
+        ? ""
+        : (existingRow.activityType.trim().isNotEmpty
+                  ? existingRow.activityType
+                  : existingRow.quantityActivityType)
+              .trim();
+    _selectedActivityType = existingActivityType.isEmpty
+        ? null
+        : existingActivityType;
+    final existingActivityQuantity = existingRow == null
+        ? 0
+        : existingRow.activityQuantity > 0
+        ? existingRow.activityQuantity
+        : existingRow.quantityAmount;
+    _activityQuantityController.text =
+        _selectedActivityType == null ||
+            _selectedActivityType == _quantityActivityNone
+        ? ""
+        : _formatProgressAmount(existingActivityQuantity);
+    final existingDelayReason = existingRow?.delayReason.trim() ?? "";
+    _selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
+        ? existingDelayReason
+        : _delayReasonNone;
+    _notesController.text = existingRow?.notes ?? "";
+    _selectedProofs = <ProductionTaskProgressProofInput>[];
+    _imageProofByUnit.clear();
+    _videoProofByUnit.clear();
+  }
+
+  num? _defaultPrimaryAmountForNewSelection() {
+    final maxAmount = _maxPrimaryAmount;
+    if (maxAmount <= 0) {
+      return null;
+    }
+    // WHY: New clock-out sessions should start with the full currently
+    // available amount so staff only changes it when reporting less work.
+    return maxAmount;
+  }
+
+  void _setPrimaryAmount(num amount) {
+    _primaryController.text = _formatProgressAmount(amount);
+    if (_sameProgressAmount(amount, 0)) {
+      _selectedProofs = <ProductionTaskProgressProofInput>[];
+      _imageProofByUnit.clear();
+      _videoProofByUnit.clear();
+    } else {
+      _pruneLocalProofSelectionToRequirement();
+    }
+    _inlineError = "";
+  }
+
+  void _setActivityQuantity(num amount) {
+    final selectedActivityType = _selectedActivityType;
+    _activityQuantityController.text =
+        selectedActivityType == null ||
+            selectedActivityType == _quantityActivityNone
+        ? ""
+        : _formatProgressAmount(amount);
+    _inlineError = "";
+  }
+
+  void _updateActivityQuantity(num amount, {required String source}) {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null ||
+        selectedActivityType == _quantityActivityNone) {
+      return;
+    }
+    AppDebug.log(
+      _logTag,
+      _logClockOutQuantitySelection,
+      extra: {
+        "taskId": widget.task.id,
+        "staffId": widget.staffId,
+        "activityType": selectedActivityType,
+        "quantity": amount,
+        "source": source,
+      },
+    );
+    setState(() {
+      _setActivityQuantity(amount);
+    });
+  }
+
+  void _applyTypedActivityQuantity() {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null ||
+        selectedActivityType == _quantityActivityNone) {
+      return;
+    }
+    final typedQuantity = _parseWizardNumber(_activityQuantityController.text);
+    if (typedQuantity == null || typedQuantity < 0) {
+      setState(() {
+        _inlineError = _clockOutWizardActivityQuantityInvalid;
+      });
+      return;
+    }
+    final maxAllowedQuantity = _maxActivityAmountFor(selectedActivityType);
+    if (maxAllowedQuantity != null && typedQuantity > maxAllowedQuantity) {
+      setState(() {
+        _inlineError = _clockOutWizardStaleActivityTemplate.replaceFirst(
+          "%s",
+          "${_formatProgressAmount(maxAllowedQuantity)} ${_resolveQuantityUnit(selectedActivityType)}"
+              .trim(),
+        );
+      });
+      return;
+    }
+    _updateActivityQuantity(typedQuantity, source: "custom_input");
+  }
+
+  List<num> _activityQuantityOptionsFor({
+    required bool hasActivityTarget,
+    required num? activityRemaining,
+  }) {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null ||
+        selectedActivityType == _quantityActivityNone) {
+      return const <num>[0];
+    }
+    if (hasActivityTarget) {
+      return _buildSelectableQuantityAmountOptions(
+        maxAmount: activityRemaining ?? 0,
+        selectedAmount: _activityQuantity,
+      );
+    }
+    final fallbackMax = math.max(_activityQuantityValue, 100).toDouble();
+    return _buildSelectableQuantityAmountOptions(
+      maxAmount: fallbackMax,
+      selectedAmount: _activityQuantity,
+    );
+  }
+
+  String _buildProofStatusText() {
+    if (_requiredProofCount <= 0) {
+      return _clockOutWizardNoProofNeeded;
+    }
+    final unitCountLabel = _formatProgressAmountWithUnit(
+      amount: _requiredProofUnitCount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    if (_proofRequirementSatisfied) {
+      return "$unitCountLabel ready: 1 image and 1 video each.";
+    }
+    final unitVerb = _requiredProofUnitCount == 1 ? "has" : "have";
+    return "Continue stays locked until $unitCountLabel $unitVerb 1 image and 1 video each.";
+  }
+
+  List<ProductionTaskProgressProofInput> _normalizePickedProofsForRequirement(
+    List<ProductionTaskProgressProofInput> picked,
+  ) {
+    if (_requiredProofCount <= 0) {
+      return const <ProductionTaskProgressProofInput>[];
+    }
+
+    final requiredMediaCount = requiredTaskProgressProofMediaCountFromTotal(
+      _requiredProofCount,
+    );
+    final imageProofs = picked.where((proof) => proof.isImage).toList();
+    final videoProofs = picked.where((proof) => proof.isVideo).toList();
+
+    if (imageProofs.length < requiredMediaCount ||
+        videoProofs.length < requiredMediaCount) {
+      return picked;
+    }
+
+    final normalized = <ProductionTaskProgressProofInput>[
+      ...imageProofs.take(requiredMediaCount),
+      ...videoProofs.take(requiredMediaCount),
+    ];
+
+    if (normalized.length != _requiredProofCount) {
+      return picked;
+    }
+
+    return normalized;
+  }
+
+  List<ProductionTaskProgressProofInput> _sortedUnitProofs(
+    Map<int, ProductionTaskProgressProofInput> proofsByUnit,
+  ) {
+    final unitNumbers = proofsByUnit.keys.toList()..sort();
+    return unitNumbers
+        .map((unitNumber) => proofsByUnit[unitNumber])
+        .nonNulls
+        .toList();
+  }
+
+  void _syncSelectedProofsFromUnitProofs() {
+    _selectedProofs = <ProductionTaskProgressProofInput>[
+      ..._sortedUnitProofs(_imageProofByUnit),
+      ..._sortedUnitProofs(_videoProofByUnit),
+    ];
+  }
+
+  void _replaceSelectedProofs(List<ProductionTaskProgressProofInput> proofs) {
+    _imageProofByUnit.clear();
+    _videoProofByUnit.clear();
+
+    final imageProofs = proofs.where((proof) => proof.isImage).toList();
+    final videoProofs = proofs.where((proof) => proof.isVideo).toList();
+    final unitCount = _requiredProofUnitCount;
+    for (
+      var index = 0;
+      index < imageProofs.length && index < unitCount;
+      index++
+    ) {
+      _imageProofByUnit[index + 1] = imageProofs[index];
+    }
+    for (
+      var index = 0;
+      index < videoProofs.length && index < unitCount;
+      index++
+    ) {
+      _videoProofByUnit[index + 1] = videoProofs[index];
+    }
+
+    if (_imageProofByUnit.isEmpty && _videoProofByUnit.isEmpty) {
+      _selectedProofs = proofs;
+      return;
+    }
+    _syncSelectedProofsFromUnitProofs();
+  }
+
+  void _pruneLocalProofSelectionToRequirement() {
+    if (_requiredProofUnitCount <= 0) {
+      _imageProofByUnit.clear();
+      _videoProofByUnit.clear();
+      _selectedProofs = <ProductionTaskProgressProofInput>[];
+      return;
+    }
+
+    _imageProofByUnit.removeWhere(
+      (unitNumber, _) => unitNumber > _requiredProofUnitCount,
+    );
+    _videoProofByUnit.removeWhere(
+      (unitNumber, _) => unitNumber > _requiredProofUnitCount,
+    );
+
+    if (_imageProofByUnit.isNotEmpty || _videoProofByUnit.isNotEmpty) {
+      _syncSelectedProofsFromUnitProofs();
+      return;
+    }
+
+    if (_selectedProofs.length > _requiredProofCount) {
+      _replaceSelectedProofs(
+        _normalizePickedProofsForRequirement(_selectedProofs),
+      );
+    }
+  }
+
+  bool _unitImageProofReady(int unitNumber) {
+    if (_hasLocalProofSelection) {
+      return _imageProofByUnit.containsKey(unitNumber);
+    }
+    return _readyPhotoCount >= unitNumber;
+  }
+
+  bool _unitVideoProofReady(int unitNumber) {
+    if (_hasLocalProofSelection) {
+      return _videoProofByUnit.containsKey(unitNumber);
+    }
+    return _readyVideoCount >= unitNumber;
+  }
+
+  void _removeProofForUnit({required int unitNumber, required bool isVideo}) {
+    setState(() {
+      if (isVideo) {
+        _videoProofByUnit.remove(unitNumber);
+      } else {
+        _imageProofByUnit.remove(unitNumber);
+      }
+      _syncSelectedProofsFromUnitProofs();
+      _inlineError = "";
+    });
+  }
+
+  num _resolveQuantityTarget(String activityType) {
+    final sharedTarget = _taskDayLedger?.activityTargets.valueFor(activityType);
+    if (sharedTarget != null) {
+      return sharedTarget;
+    }
+    final plantingTargets = widget.plan.plantingTargets;
+    if (plantingTargets == null) {
+      return 0;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return plantingTargets.plannedPlantingQuantity;
+      case _quantityActivityHarvest:
+        return plantingTargets.estimatedHarvestQuantity;
+      default:
+        return 0;
+    }
+  }
+
+  bool _hasQuantityTarget(String activityType) {
+    if (_taskDayLedger?.activityTargets.valueFor(activityType) != null) {
+      return true;
+    }
+    final plantingTargets = widget.plan.plantingTargets;
+    if (plantingTargets == null) {
+      return false;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return true;
+      case _quantityActivityHarvest:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  num _resolveQuantityLogged(String activityType) {
+    if (_taskDayLedger != null) {
+      return _taskDayLedger!.activityCompleted.valueFor(activityType);
+    }
+    final farmQuantitySummary = _farmQuantitySummary;
+    if (farmQuantitySummary == null) {
+      return 0;
+    }
+    switch (activityType) {
+      case _quantityActivityPlanting:
+        return farmQuantitySummary.plantingLogged;
+      case _quantityActivityTransplant:
+        return farmQuantitySummary.transplantLogged;
+      case _quantityActivityHarvest:
+        return farmQuantitySummary.harvestLogged;
+      default:
+        return 0;
+    }
+  }
+
+  String _resolveQuantityUnit(String activityType) {
+    if (_taskDayLedger != null) {
+      final sharedUnit = _taskDayLedger!.activityUnits.valueFor(activityType);
+      if (sharedUnit.trim().isNotEmpty) {
+        return sharedUnit;
+      }
+    }
+    final farmQuantitySummary = _farmQuantitySummary;
+    switch (activityType) {
+      case _quantityActivityPlanting:
+      case _quantityActivityTransplant:
+        return farmQuantitySummary?.plantingUnit ?? "";
+      case _quantityActivityHarvest:
+        return farmQuantitySummary?.harvestUnit ?? "";
+      default:
+        return "";
+    }
+  }
+
+  num _existingSelectionActivityQuantity(String activityType) {
+    final existingRow = _existingSelectionRow;
+    if (existingRow == null) {
+      return 0;
+    }
+    final existingType =
+        (existingRow.activityType.trim().isNotEmpty
+                ? existingRow.activityType
+                : existingRow.quantityActivityType)
+            .trim();
+    if (existingType != activityType) {
+      return 0;
+    }
+    return existingRow.activityQuantity > 0
+        ? existingRow.activityQuantity
+        : existingRow.quantityAmount;
+  }
+
+  num? _maxActivityAmountFor(String activityType) {
+    if (!_hasQuantityTarget(activityType)) {
+      return null;
+    }
+    final override = _activityMaxOverrides[activityType];
+    if (override != null) {
+      return override;
+    }
+    final target = _resolveQuantityTarget(activityType);
+    final logged = _resolveQuantityLogged(activityType);
+    final existingSelectionQuantity = _existingSelectionActivityQuantity(
+      activityType,
+    );
+    final remaining = target - (logged - existingSelectionQuantity);
+    return remaining < 0 ? 0 : remaining;
+  }
+
+  num? get _activityQuantity =>
+      _parseWizardNumber(_activityQuantityController.text);
+
+  num get _activityQuantityValue => _activityQuantity ?? 0;
+
+  bool get _delayReasonRequired {
+    final selectedActivityType = _selectedActivityType;
+    return selectedActivityType != null &&
+        selectedActivityType != _quantityActivityNone &&
+        _primaryAmountValue <= 0 &&
+        _activityQuantityValue <= 0;
+  }
+
+  bool _validatePrimary({required bool showError}) {
+    if (_assignedUnitIds.length > 1 &&
+        (_selectedUnitId == null || _selectedUnitId!.trim().isEmpty)) {
+      if (showError) {
+        setState(() {
+          _inlineError = "Choose the work area before you continue.";
+        });
+      }
+      return false;
+    }
+    if (_primaryController.text.trim().isEmpty) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardPrimaryRequired;
+        });
+      }
+      return false;
+    }
+    final parsedAmount = _primaryAmount;
+    if (parsedAmount == null || parsedAmount < 0) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardPrimaryInvalid;
+        });
+      }
+      return false;
+    }
+    if (parsedAmount > _maxPrimaryAmount) {
+      if (showError) {
+        final allowanceLabel = _formatProgressAmountWithUnit(
+          amount: _maxPrimaryAmount,
+          singularUnitLabel: _progressUnitSingularLabel,
+        );
+        setState(() {
+          _inlineError = _clockOutWizardStalePrimaryTemplate.replaceFirst(
+            "%s",
+            allowanceLabel,
+          );
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  bool _validateProof({required bool showError}) {
+    if (_isPickingProofs) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardProofPicking;
+        });
+      }
+      return false;
+    }
+    if (_requiredProofCount == 0) {
+      if (_selectedProofs.isNotEmpty) {
+        if (showError) {
+          setState(() {
+            _inlineError = _clockOutWizardProofNotAllowed;
+          });
+        }
+        return false;
+      }
+      return true;
+    }
+    if (!_proofRequirementSatisfied) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardProofRequired;
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  bool _validateActivity({required bool showError}) {
+    final selectedActivityType = _selectedActivityType;
+    if (selectedActivityType == null || selectedActivityType.trim().isEmpty) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardActivityRequired;
+        });
+      }
+      return false;
+    }
+    if (selectedActivityType == _quantityActivityNone) {
+      return true;
+    }
+    final parsedQuantity = _activityQuantity;
+    if (parsedQuantity == null || parsedQuantity < 0) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardActivityQuantityInvalid;
+        });
+      }
+      return false;
+    }
+    final maxAllowedQuantity = _maxActivityAmountFor(selectedActivityType);
+    if (maxAllowedQuantity != null && parsedQuantity > maxAllowedQuantity) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardStaleActivityTemplate.replaceFirst(
+            "%s",
+            "${_formatProgressAmount(maxAllowedQuantity)} ${_resolveQuantityUnit(selectedActivityType)}"
+                .trim(),
+          );
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  bool _validateNotes({required bool showError}) {
+    if (_delayReasonRequired && _selectedDelayReason == _delayReasonNone) {
+      if (showError) {
+        setState(() {
+          _inlineError = _clockOutWizardDelayRequired;
+        });
+      }
+      return false;
+    }
+    if (showError && _inlineError.isNotEmpty) {
+      setState(() {
+        _inlineError = "";
+      });
+    }
+    return true;
+  }
+
+  Future<void> _captureProofForUnit({
+    required int unitNumber,
+    required bool isVideo,
+  }) async {
+    if (_requiredProofCount <= 0) {
+      setState(() {
+        _inlineError = _clockOutWizardProofNotAllowed;
+      });
+      return;
+    }
+    setState(() {
+      _isPickingProofs = true;
+      _inlineError = _clockOutWizardProofPicking;
+    });
+    try {
+      final captured = widget.onCaptureProof == null
+          ? await pickTaskProgressProofForKind(
+              kind: isVideo
+                  ? ProductionTaskProgressProofCaptureKind.video
+                  : ProductionTaskProgressProofCaptureKind.image,
+              unitNumber: unitNumber,
+            )
+          : await widget.onCaptureProof!(
+              isVideo: isVideo,
+              unitNumber: unitNumber,
+            );
+      if (!mounted || captured == null) {
+        return;
+      }
+      if (isVideo && !captured.isVideo) {
+        setState(() {
+          _inlineError = _clockOutWizardLiveVideoRequired;
+        });
+        return;
+      }
+      if (!isVideo && !captured.isImage) {
+        setState(() {
+          _inlineError = _clockOutWizardLiveImageRequired;
+        });
+        return;
+      }
+      setState(() {
+        if (isVideo) {
+          _videoProofByUnit[unitNumber] = captured;
+        } else {
+          _imageProofByUnit[unitNumber] = captured;
+        }
+        _syncSelectedProofsFromUnitProofs();
+        _inlineError = "";
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _inlineError = _resolveProductionWorkspaceErrorMessage(
+          error,
+          fallback: "Unable to capture proof right now. Try again.",
+        );
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPickingProofs = false;
+        });
+      }
+    }
+  }
+
+  void _handleSubmitError(Object error) {
+    final dioError = error is DioException ? error : null;
+    final responseData = dioError?.response?.data;
+    final responseMap = responseData is Map<String, dynamic>
+        ? responseData
+        : const <String, dynamic>{};
+    final backendError = (responseMap["error"] ?? responseMap["message"] ?? "")
+        .toString()
+        .trim();
+    final requiredProofCount = _parseWizardNumber(
+      responseMap["requiredProofCount"],
+    );
+    final requiredPhotoCount = _parseWizardNumber(
+      responseMap["requiredPhotoCount"],
+    );
+    final requiredVideoCount = _parseWizardNumber(
+      responseMap["requiredVideoCount"],
+    );
+    final providedProofCount = _parseWizardNumber(
+      responseMap["providedProofCount"],
+    );
+    final providedPhotoCount = _parseWizardNumber(
+      responseMap["providedPhotoCount"],
+    );
+    final providedVideoCount = _parseWizardNumber(
+      responseMap["providedVideoCount"],
+    );
+    final maxAllowedPlots = _parseWizardNumber(responseMap["maxAllowedPlots"]);
+    final activityType = (responseMap["activityType"] ?? "").toString().trim();
+    final maxAllowedActivityQuantity = _parseWizardNumber(
+      responseMap["maxAllowedActivityQuantity"],
+    );
+    var message = _resolveProductionWorkspaceErrorMessage(
+      error,
+      fallback: _taskProgressFailure,
+    );
+
+    AppDebug.log(
+      _logTag,
+      _logClockOutSubmitFailure,
+      extra: {
+        "taskId": widget.task.id,
+        "staffId": widget.staffId,
+        "step": _currentStep.name,
+        "backendError": backendError,
+        "requiredProofCount": requiredProofCount,
+        "requiredPhotoCount": requiredPhotoCount,
+        "requiredVideoCount": requiredVideoCount,
+        "providedProofCount": providedProofCount,
+        "providedPhotoCount": providedPhotoCount,
+        "providedVideoCount": providedVideoCount,
+        "maxAllowedPlots": maxAllowedPlots,
+        "activityType": activityType,
+        "maxAllowedActivityQuantity": maxAllowedActivityQuantity,
+      },
+    );
+
+    if (maxAllowedPlots != null) {
+      _primaryMaxOverride = maxAllowedPlots;
+      _currentStep = _WorkspaceClockOutWizardStep.primary;
+      message = _clockOutWizardStalePrimaryTemplate.replaceFirst(
+        "%s",
+        _formatProgressAmountWithUnit(
+          amount: maxAllowedPlots,
+          singularUnitLabel: _progressUnitSingularLabel,
+        ),
+      );
+    } else if (requiredProofCount != null ||
+        message.toLowerCase().contains("proof")) {
+      _currentStep = _WorkspaceClockOutWizardStep.proof;
+      final hasProofCountDetails =
+          requiredProofCount != null &&
+          providedProofCount != null &&
+          requiredPhotoCount != null &&
+          requiredVideoCount != null &&
+          providedPhotoCount != null &&
+          providedVideoCount != null;
+      if (hasProofCountDetails) {
+        final expectedCompletedUnits =
+            requiredTaskProgressProofMediaCountFromTotal(
+              requiredProofCount.toInt(),
+            );
+        message =
+            "This save currently needs ${requiredPhotoCount.toInt()} picture(s) and ${requiredVideoCount.toInt()} video(s) for ${expectedCompletedUnits.toInt()} completed unit(s). "
+            "The server received ${providedPhotoCount.toInt()} picture(s) and ${providedVideoCount.toInt()} video(s). "
+            "Replace proofs or go back to Step 1 if the completed amount should be higher.";
+      } else if (backendError.isNotEmpty) {
+        message = backendError;
+      } else if (requiredProofCount != null) {
+        message = requiredProofCount <= 0
+            ? _clockOutWizardNoProofNeeded
+            : _clockOutWizardProofRequired;
+      }
+    } else if (activityType.isNotEmpty && maxAllowedActivityQuantity != null) {
+      _activityMaxOverrides[activityType] = maxAllowedActivityQuantity;
+      _selectedActivityType = activityType;
+      _currentStep = _WorkspaceClockOutWizardStep.activity;
+      message = _clockOutWizardStaleActivityTemplate.replaceFirst(
+        "%s",
+        "${_formatProgressAmount(maxAllowedActivityQuantity)} ${_resolveQuantityUnit(activityType)}"
+            .trim(),
+      );
+    } else if (message.contains(_clockOutWizardDelayRequired) ||
+        message.contains(_logDialogDelayRequired)) {
+      _currentStep = _WorkspaceClockOutWizardStep.notes;
+      message = _clockOutWizardDelayRequired;
+    }
+
+    setState(() {
+      _isSaving = false;
+      _inlineError = message;
+    });
+  }
+
+  Future<void> _continueOrFinish() async {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        if (_validatePrimary(showError: true)) {
+          setState(() {
+            _currentStep = _WorkspaceClockOutWizardStep.proof;
+            _inlineError = "";
+          });
+        }
+        return;
+      case _WorkspaceClockOutWizardStep.proof:
+        if (_validateProof(showError: true)) {
+          setState(() {
+            _currentStep = _WorkspaceClockOutWizardStep.activity;
+            _inlineError = "";
+          });
+        }
+        return;
+      case _WorkspaceClockOutWizardStep.activity:
+        if (_validateActivity(showError: true)) {
+          setState(() {
+            _currentStep = _WorkspaceClockOutWizardStep.notes;
+            _inlineError = "";
+          });
+        }
+        return;
+      case _WorkspaceClockOutWizardStep.notes:
+        if (!_validatePrimary(showError: true) ||
+            !_validateProof(showError: true) ||
+            !_validateActivity(showError: true) ||
+            !_validateNotes(showError: true)) {
+          return;
+        }
+        final resolvedUnitContribution = _resolvedPrimaryAmountForSubmit;
+        final promotedPrimaryAmount = !_sameProgressAmount(
+          resolvedUnitContribution,
+          _primaryAmountValue,
+        );
+        if (promotedPrimaryAmount) {
+          AppDebug.log(
+            _logTag,
+            _logClockOutPrimaryPromotion,
+            extra: {
+              "taskId": widget.task.id,
+              "staffId": widget.staffId,
+              "submittedUnitContribution": _primaryAmountValue,
+              "promotedUnitContribution": resolvedUnitContribution,
+              "readyProofCount": _readyProofCount,
+              "readyPhotoCount": _readyPhotoCount,
+              "readyVideoCount": _readyVideoCount,
+            },
+          );
+        }
+        setState(() {
+          // WHY: Keep the saved completed-unit amount aligned with the proof bundle
+          // when the wizard state drifts after a valid upload.
+          if (promotedPrimaryAmount) {
+            _setPrimaryAmount(resolvedUnitContribution);
+          }
+          _isSaving = true;
+          _inlineError = "";
+        });
+        final selectedActivityType =
+            _selectedActivityType ?? _quantityActivityNone;
+        final input = ProductionTaskLogProgressInput(
+          staffId: widget.staffId,
+          unitId: _selectedUnitId,
+          unitContribution: resolvedUnitContribution,
+          proofs: List<ProductionTaskProgressProofInput>.from(_selectedProofs),
+          activityType: selectedActivityType,
+          activityQuantity: selectedActivityType == _quantityActivityNone
+              ? 0
+              : _activityQuantityValue,
+          quantityUnit: selectedActivityType == _quantityActivityNone
+              ? ""
+              : _resolveQuantityUnit(selectedActivityType),
+          delayReason: _selectedDelayReason,
+          notes: _notesController.text.trim(),
+        );
+        try {
+          await widget.onSubmit(input);
+          if (!mounted) {
+            return;
+          }
+          Navigator.of(context).pop(true);
+        } catch (error) {
+          if (!mounted) {
+            return;
+          }
+          _handleSubmitError(error);
+        }
+    }
+  }
+
+  ChoiceChip _buildWizardChoiceChip({
+    required ThemeData theme,
+    required String label,
+    required bool selected,
+    required ValueChanged<bool> onSelected,
+    Color accentColor = _workspaceBlue,
+  }) {
+    final colorScheme = theme.colorScheme;
+    // WHY: The wizard relies on chips for almost every action, so a shared style
+    // keeps the unselected text readable across dark and business themes.
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      showCheckmark: false,
+      labelStyle: theme.textTheme.bodyMedium?.copyWith(
+        color: selected
+            ? Colors.white
+            : _workspacePrimaryContentColor(colorScheme),
+        fontWeight: FontWeight.w800,
+      ),
+      selectedColor: accentColor,
+      backgroundColor: _workspaceToneSurface(
+        colorScheme: colorScheme,
+        accentColor: accentColor,
+        lightTintAlpha: 0.04,
+        darkTintAlpha: 0.12,
+        baseColor: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerHigh
+            : colorScheme.surface,
+      ),
+      side: BorderSide(
+        color: selected
+            ? accentColor
+            : _workspaceToneBorder(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightAlpha: 0.22,
+                darkAlpha: 0.46,
+              ),
+      ),
+      onSelected: onSelected,
+    );
+  }
+
+  Widget _buildCompletedSummaries(ThemeData theme) {
+    final summaries = <Widget>[];
+    if (_currentStep.index > _WorkspaceClockOutWizardStep.primary.index &&
+        _primaryController.text.trim().isNotEmpty) {
+      summaries.add(
+        _InfoChip(
+          label:
+              "Units completed: ${_formatProgressAmountWithUnit(amount: _primaryAmountValue, singularUnitLabel: _progressUnitSingularLabel)}",
+          icon: Icons.task_alt_outlined,
+          backgroundColor: _workspaceSoftTeal,
+          foregroundColor: _workspaceTeal,
+          borderColor: _workspaceTeal.withValues(alpha: 0.14),
+        ),
+      );
+    }
+    if (_currentStep.index > _WorkspaceClockOutWizardStep.proof.index) {
+      final readyProofCount = _selectedProofs.isNotEmpty
+          ? _selectedProofs.length
+          : (_existingSelectionRow?.proofs.length ?? 0);
+      summaries.add(
+        _InfoChip(
+          label: _requiredProofCount == 0
+              ? "Proofs: none required"
+              : "Proofs: $readyProofCount / $_requiredProofCount ready",
+          icon: Icons.photo_library_outlined,
+          backgroundColor: _workspaceSoftBerry,
+          foregroundColor: _workspaceBerry,
+          borderColor: _workspaceBerry.withValues(alpha: 0.14),
+        ),
+      );
+    }
+    if (_currentStep.index > _WorkspaceClockOutWizardStep.activity.index &&
+        _selectedActivityType != null) {
+      final activityType = _selectedActivityType!;
+      summaries.add(
+        _InfoChip(
+          label: activityType == _quantityActivityNone
+              ? "Activity: No quantity update"
+              : "Activity: ${_formatQuantityActivityLabel(activityType)}, ${_formatProgressAmount(_activityQuantityValue)} ${_resolveQuantityUnit(activityType)}"
+                    .trim(),
+          icon: Icons.agriculture_outlined,
+          backgroundColor: _workspaceSoftBlue,
+          foregroundColor: _workspaceBlue,
+          borderColor: _workspaceBlue.withValues(alpha: 0.14),
+        ),
+      );
+    }
+
+    if (summaries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(spacing: 8, runSpacing: 8, children: summaries),
+    );
+  }
+
+  Widget _buildPrimaryStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
+    final maxAllowedLabel = _formatProgressAmountWithUnit(
+      amount: _maxPrimaryAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final plannedLabel = _formatProgressAmountWithUnit(
+      amount: _taskTargetAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final completedLabel = _formatProgressAmountWithUnit(
+      amount: _loggedAmountExcludingSelection + _existingSelectionAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final remainingLabel = _formatProgressAmountWithUnit(
+      amount: _maxPrimaryAmount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final afterSaveLabel = _formatProgressAmountWithUnit(
+      amount: _remainingAfterSave,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
+    final snapshotCards = <Widget>[
+      _TaskSnapshotCard(
+        label: "Planned",
+        value: plannedLabel,
+        helper: "Task target for today",
+        accentColor: _workspaceAmber,
+        softColor: _workspaceSoftAmber,
+        icon: Icons.event_note_outlined,
+      ),
+      _TaskSnapshotCard(
+        label: "Completed",
+        value: completedLabel,
+        helper: "Already saved today",
+        accentColor: _workspaceTeal,
+        softColor: _workspaceSoftTeal,
+        icon: Icons.insights_outlined,
+      ),
+      _TaskSnapshotCard(
+        label: "Remaining",
+        value: remainingLabel,
+        helper: "Available right now",
+        accentColor: _workspaceBlue,
+        softColor: _workspaceSoftBlue,
+        icon: Icons.track_changes_outlined,
+      ),
+    ];
+    num? selectedPrimaryAmountOption;
+    for (final amount in _primaryAmountOptions) {
+      if (_sameProgressAmount(amount, _primaryAmountValue)) {
+        selectedPrimaryAmountOption = amount;
+        break;
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepPrimaryTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspacePrimaryContentColor(colorScheme),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "This updates today’s shared task progress.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useThreeColumns = constraints.maxWidth >= 720;
+            final tileWidth = useThreeColumns
+                ? (constraints.maxWidth - 20) / 3
+                : constraints.maxWidth;
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: snapshotCards
+                  .map((card) => SizedBox(width: tileWidth, child: card))
+                  .toList(),
+            );
+          },
+        ),
+        if (_assignedUnitIds.length > 1) ...[
+          const SizedBox(height: 12),
+          Text(
+            "Work area",
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: _workspacePrimaryContentColor(colorScheme),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Tap the area this staff finished work on.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _assignedUnitIds.map((unitId) {
+              final selected = unitId == _selectedUnitId;
+              return _buildWizardChoiceChip(
+                theme: theme,
+                label: widget.planUnitLabelById[unitId] ?? unitId,
+                selected: selected,
+                onSelected: (_) {
+                  setState(() {
+                    _selectedUnitId = unitId;
+                    _syncFromExistingSelection();
+                  });
+                },
+              );
+            }).toList(),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Text(
+          "Units completed now",
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: _workspacePrimaryContentColor(colorScheme),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "Default is the maximum available amount. Choose a lower amount only if less was completed.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 10),
+        DropdownButtonFormField<num>(
+          key: ValueKey(
+            "primary-amount-${_selectedUnitId ?? ''}-${_formatProgressAmount(_maxPrimaryAmount)}",
+          ),
+          initialValue: selectedPrimaryAmountOption,
+          isExpanded: true,
+          menuMaxHeight: 360,
+          decoration: InputDecoration(
+            labelText: "Completed amount",
+            helperText: "Maximum available: $maxAllowedLabel",
+            prefixIcon: const Icon(Icons.task_alt_outlined),
+          ),
+          items: _primaryAmountOptions.map((amount) {
+            return DropdownMenuItem<num>(
+              value: amount,
+              child: Text(
+                _formatProgressAmountWithUnit(
+                  amount: amount,
+                  singularUnitLabel: _progressUnitSingularLabel,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value == null) {
+              return;
+            }
+            setState(() {
+              _setPrimaryAmount(value);
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _workspaceToneSurface(
+              colorScheme: colorScheme,
+              accentColor: _workspaceBlue,
+              lightColor: _workspaceSoftBlue,
+              lightTintAlpha: 0.08,
+              darkTintAlpha: 0.18,
+              baseColor: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : colorScheme.surface,
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: _workspaceToneBorder(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightAlpha: 0.16,
+                darkAlpha: 0.38,
+              ),
+            ),
+          ),
+          child: Text(
+            _primaryController.text.trim().isNotEmpty
+                ? "After save, shared remaining will be $afterSaveLabel."
+                : "Choose the completed amount to preview the shared balance after save.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: _workspaceToneForeground(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                darkMix: 0.52,
+              ),
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProofSlots() {
+    if (_requiredProofCount <= 0) {
+      return const SizedBox.shrink();
+    }
+    final unitLabel = _singularizeUnitPhrase(
+      _progressUnitSingularLabel.trim().isEmpty
+          ? "work unit"
+          : _progressUnitSingularLabel,
+    );
+    final titleUnitLabel = _titleCaseProgressUnitLabel(unitLabel);
+    final unitIcon = _proofUnitIcon(unitLabel);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = constraints.maxWidth >= 760
+            ? (constraints.maxWidth - 10) / 2
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: List.generate(_requiredProofUnitCount, (index) {
+            final unitNumber = index + 1;
+            return SizedBox(
+              width: tileWidth,
+              child: _ProofUnitChecklistTile(
+                title: "$titleUnitLabel $unitNumber",
+                unitNumber: unitNumber,
+                unitIcon: unitIcon,
+                imageReady: _unitImageProofReady(unitNumber),
+                videoReady: _unitVideoProofReady(unitNumber),
+                imageProof: _imageProofByUnit[unitNumber],
+                videoProof: _videoProofByUnit[unitNumber],
+                isBusy: _isPickingProofs,
+                onCaptureImage: () => _captureProofForUnit(
+                  unitNumber: unitNumber,
+                  isVideo: false,
+                ),
+                onCaptureVideo: () =>
+                    _captureProofForUnit(unitNumber: unitNumber, isVideo: true),
+                onRemoveImage: _imageProofByUnit.containsKey(unitNumber)
+                    ? () => _removeProofForUnit(
+                        unitNumber: unitNumber,
+                        isVideo: false,
+                      )
+                    : null,
+                onRemoveVideo: _videoProofByUnit.containsKey(unitNumber)
+                    ? () => _removeProofForUnit(
+                        unitNumber: unitNumber,
+                        isVideo: true,
+                      )
+                    : null,
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
+  Widget _buildProofStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final proofStatusText = _buildProofStatusText();
+    final proofInstructionUnitLabel = _singularizeUnitPhrase(
+      _progressUnitSingularLabel.trim().isEmpty
+          ? "work unit"
+          : _progressUnitSingularLabel,
+    ).toLowerCase();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepProofTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspacePrimaryContentColor(colorScheme),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _requiredProofCount <= 0
+              ? _clockOutWizardNoProofNeeded
+              : "Upload one image and one video for each $proofInstructionUnitLabel. Each upload replaces that unit’s previous file.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildProofSlots(),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _workspaceIsDark(colorScheme)
+                ? colorScheme.surfaceContainerHigh
+                : _workspaceSoftSlate,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Text(
+            proofStatusText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: _workspacePrimaryContentColor(colorScheme),
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivityStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isDark = _workspaceIsDark(colorScheme);
+    final isCompact = MediaQuery.of(context).size.width < 720;
+    final selectedActivityType = _selectedActivityType;
+    final hasActivitySelection =
+        selectedActivityType != null && selectedActivityType.trim().isNotEmpty;
+    final showActivityQuantity =
+        hasActivitySelection && selectedActivityType != _quantityActivityNone;
+    final hasActivityTarget = hasActivitySelection
+        ? _hasQuantityTarget(selectedActivityType)
+        : false;
+    final activityTarget = hasActivitySelection
+        ? _resolveQuantityTarget(selectedActivityType)
+        : 0;
+    final activityCompleted = hasActivitySelection
+        ? _resolveQuantityLogged(selectedActivityType)
+        : 0;
+    final activityRemaining = hasActivitySelection
+        ? _maxActivityAmountFor(selectedActivityType)
+        : null;
+    final activityUnitLabel = hasActivitySelection
+        ? _resolveQuantityUnit(selectedActivityType)
+        : "";
+    final activityRemainingAfterSave = showActivityQuantity
+        ? (activityRemaining == null
+              ? null
+              : math.max(0, activityRemaining - _activityQuantityValue))
+        : activityRemaining;
+    final activityQuantityOptions = showActivityQuantity
+        ? _activityQuantityOptionsFor(
+            hasActivityTarget: hasActivityTarget,
+            activityRemaining: activityRemaining,
+          )
+        : const <num>[];
+    num? selectedActivityQuantityOption;
+    for (final amount in activityQuantityOptions) {
+      if (_sameProgressAmount(amount, _activityQuantityValue)) {
+        selectedActivityQuantityOption = amount;
+        break;
+      }
+    }
+    final activityCards = <Widget>[
+      if (hasActivityTarget)
+        _TaskSnapshotCard(
+          label: "Target",
+          value: "${_formatProgressAmount(activityTarget)} $activityUnitLabel"
+              .trim(),
+          helper: "Shared target for today",
+          accentColor: _workspaceAmber,
+          softColor: _workspaceSoftAmber,
+          icon: Icons.flag_outlined,
+        ),
+      _TaskSnapshotCard(
+        label: "Completed",
+        value: "${_formatProgressAmount(activityCompleted)} $activityUnitLabel"
+            .trim(),
+        helper: "Already recorded today",
+        accentColor: _workspaceTeal,
+        softColor: _workspaceSoftTeal,
+        icon: Icons.bar_chart_outlined,
+      ),
+      if (hasActivityTarget)
+        _TaskSnapshotCard(
+          label: "Remaining",
+          value:
+              "${_formatProgressAmount(activityRemaining ?? 0)} $activityUnitLabel"
+                  .trim(),
+          helper: "Available right now",
+          accentColor: _workspaceBlue,
+          softColor: _workspaceSoftBlue,
+          icon: Icons.insights_outlined,
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepActivityTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspacePrimaryContentColor(colorScheme),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          "Choose the production activity for this session.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children:
+              const <String?>[
+                null,
+                _quantityActivityNone,
+                _quantityActivityPlanting,
+                _quantityActivityTransplant,
+                _quantityActivityHarvest,
+              ].map((value) {
+                final selected = value == _selectedActivityType;
+                final label = switch (value) {
+                  null => "Select activity",
+                  _quantityActivityNone => "No quantity update",
+                  _quantityActivityPlanting => "Planted",
+                  _quantityActivityTransplant => "Transplanted",
+                  _quantityActivityHarvest => "Harvested",
+                  _ => "Activity",
+                };
+                return _buildWizardChoiceChip(
+                  theme: theme,
+                  label: label,
+                  selected: selected,
+                  onSelected: (_) {
+                    setState(() {
+                      _selectedActivityType = value;
+                      _setActivityQuantity(0);
+                    });
+                  },
+                );
+              }).toList(),
+        ),
+        const SizedBox(height: 12),
+        if (!hasActivitySelection)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : _workspaceSoftSlate,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colorScheme.outlineVariant),
+            ),
+            child: Text(
+              _clockOutWizardActivityRequired,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspacePrimaryContentColor(colorScheme),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        if (selectedActivityType == _quantityActivityNone)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? colorScheme.surfaceContainerHigh
+                  : _workspaceSoftSlate,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: colorScheme.outlineVariant),
+            ),
+            child: Text(
+              "No production quantity will be added.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspacePrimaryContentColor(colorScheme),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        if (showActivityQuantity) ...[
+          if (isCompact)
+            Column(
+              children: activityCards
+                  .map(
+                    (card) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: SizedBox(width: double.infinity, child: card),
+                    ),
+                  )
+                  .toList(),
+            )
+          else
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: activityCards
+                  .map((card) => SizedBox(width: 180, child: card))
+                  .toList(),
+            ),
+          if (!hasActivityTarget) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : _workspaceSoftSlate,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Text(
+                "No shared target is set for this activity today. You can still record the quantity.",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: _workspacePrimaryContentColor(colorScheme),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            "Activity quantity",
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: _workspacePrimaryContentColor(colorScheme),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            hasActivityTarget
+                ? "Tap the quantity to add to today’s shared activity total."
+                : "Tap the quantity to record for today’s activity.",
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: activityQuantityOptions.map((amount) {
+              final selected =
+                  _sameProgressAmount(amount, _activityQuantityValue) &&
+                  _activityQuantityController.text.trim().isNotEmpty;
+              return _buildWizardChoiceChip(
+                theme: theme,
+                label: "${_formatProgressAmount(amount)} $activityUnitLabel"
+                    .trim(),
+                selected: selected,
+                onSelected: (_) =>
+                    _updateActivityQuantity(amount, source: "chip"),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          // WHY: Quick-pick chips cover the common amounts, while the dropdown
+          // and numeric field keep exact counts available without allowing text.
+          DropdownButtonFormField<num>(
+            initialValue: selectedActivityQuantityOption,
+            decoration: const InputDecoration(
+              labelText: _clockOutWizardActivityPresetLabel,
+            ),
+            items: activityQuantityOptions
+                .map(
+                  (amount) => DropdownMenuItem<num>(
+                    value: amount,
+                    child: Text(
+                      "${_formatProgressAmount(amount)} $activityUnitLabel"
+                          .trim(),
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) {
+                return;
+              }
+              _updateActivityQuantity(value, source: "dropdown");
+            },
+          ),
+          const SizedBox(height: 12),
+          if (isCompact) ...[
+            TextField(
+              controller: _activityQuantityController,
+              keyboardType: const TextInputType.numberWithOptions(
+                signed: false,
+              ),
+              textInputAction: TextInputAction.done,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: _clockOutWizardActivityCustomLabel,
+                helperText: _clockOutWizardActivityCustomHelper,
+                helperMaxLines: 2,
+                suffixText: activityUnitLabel.trim().isEmpty
+                    ? null
+                    : activityUnitLabel,
+              ),
+              onChanged: (_) {
+                setState(() {
+                  _inlineError = "";
+                });
+              },
+              onSubmitted: (_) => _applyTypedActivityQuantity(),
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: _applyTypedActivityQuantity,
+                icon: const Icon(Icons.pin_outlined, size: 18),
+                label: const Text(_clockOutWizardActivityApplyLabel),
+              ),
+            ),
+          ] else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _activityQuantityController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      signed: false,
+                    ),
+                    textInputAction: TextInputAction.done,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: InputDecoration(
+                      labelText: _clockOutWizardActivityCustomLabel,
+                      helperText: _clockOutWizardActivityCustomHelper,
+                      helperMaxLines: 2,
+                      suffixText: activityUnitLabel.trim().isEmpty
+                          ? null
+                          : activityUnitLabel,
+                    ),
+                    onChanged: (_) {
+                      setState(() {
+                        _inlineError = "";
+                      });
+                    },
+                    onSubmitted: (_) => _applyTypedActivityQuantity(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: FilledButton.tonalIcon(
+                    onPressed: _applyTypedActivityQuantity,
+                    icon: const Icon(Icons.pin_outlined, size: 18),
+                    label: const Text(_clockOutWizardActivityApplyLabel),
+                  ),
+                ),
+              ],
+            ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightColor: _workspaceSoftBlue,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.18,
+                baseColor: isDark
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  lightAlpha: 0.16,
+                  darkAlpha: 0.38,
+                ),
+              ),
+            ),
+            child: Text(
+              hasActivityTarget
+                  ? "After save, ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} remaining will be ${_formatProgressAmount(activityRemainingAfterSave ?? 0)} $activityUnitLabel"
+                        .trim()
+                  : "This updates the shared ${_formatQuantityActivityLabel(selectedActivityType).toLowerCase()} total for today.",
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _workspaceToneForeground(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceBlue,
+                  darkMix: 0.52,
+                ),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildNotesStep(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final needsDelayReason = _delayReasonRequired;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _clockOutWizardStepNotesTitle,
+          style: theme.textTheme.titleLarge?.copyWith(
+            color: _workspacePrimaryContentColor(colorScheme),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          needsDelayReason
+              ? "Choose why no primary units were completed, then add any useful note."
+              : "Add a delay reason or note if you need one.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          needsDelayReason
+              ? "Pick the delay reason before you finish."
+              : "Delay reason is optional unless no work was completed.",
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _delayReasonOptions.map((value) {
+            final selected = value == _selectedDelayReason;
+            return _buildWizardChoiceChip(
+              theme: theme,
+              label: _formatDelayReason(value),
+              selected: selected,
+              onSelected: (_) {
+                setState(() {
+                  _selectedDelayReason = value;
+                  _inlineError = "";
+                });
+              },
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _notesController,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: _logDialogNotesLabel,
+            hintText: "Add any useful detail for today.",
+          ),
+          onChanged: (_) {
+            if (_inlineError.isNotEmpty) {
+              setState(() {
+                _inlineError = "";
+              });
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCurrentStep(BuildContext context) {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        return _buildPrimaryStep(context);
+      case _WorkspaceClockOutWizardStep.proof:
+        return _buildProofStep(context);
+      case _WorkspaceClockOutWizardStep.activity:
+        return _buildActivityStep(context);
+      case _WorkspaceClockOutWizardStep.notes:
+        return _buildNotesStep(context);
+    }
+  }
+
+  String _currentStepLabel() {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        return "Step 1 of 4";
+      case _WorkspaceClockOutWizardStep.proof:
+        return "Step 2 of 4";
+      case _WorkspaceClockOutWizardStep.activity:
+        return "Step 3 of 4";
+      case _WorkspaceClockOutWizardStep.notes:
+        return "Step 4 of 4";
+    }
+  }
+
+  String _primaryActionLabel() {
+    return _currentStep == _WorkspaceClockOutWizardStep.notes
+        ? _clockOutWizardFinishLabel
+        : _clockOutWizardContinueLabel;
+  }
+
+  bool _isCurrentStepValid() {
+    switch (_currentStep) {
+      case _WorkspaceClockOutWizardStep.primary:
+        return _validatePrimary(showError: false);
+      case _WorkspaceClockOutWizardStep.proof:
+        return _validateProof(showError: false);
+      case _WorkspaceClockOutWizardStep.activity:
+        return _validateActivity(showError: false);
+      case _WorkspaceClockOutWizardStep.notes:
+        return _validateNotes(showError: false);
+    }
+  }
+
+  String _resolvedInlineErrorForDisplay() {
+    if (_inlineError.isEmpty) {
+      return "";
+    }
+    if (_currentStep != _WorkspaceClockOutWizardStep.proof) {
+      return _inlineError;
+    }
+
+    if (_inlineError == _clockOutWizardProofPicking && !_isPickingProofs) {
+      return "";
+    }
+
+    if (_inlineError == _clockOutWizardProofRequired &&
+        _proofRequirementSatisfied) {
+      return "";
+    }
+
+    if (_inlineError == _clockOutWizardProofNotAllowed &&
+        _requiredProofCount > 0) {
+      return "";
+    }
+
+    return _inlineError;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final isCompact = MediaQuery.of(context).size.width < 720;
+    final visibleInlineError = _resolvedInlineErrorForDisplay();
+
+    return Material(
+      color: colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _clockOutWizardTitle,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: _workspacePrimaryContentColor(colorScheme),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "${widget.task.title} • $_staffLabel",
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _InfoChip(
+                              label: _currentStepLabel(),
+                              icon: Icons.linear_scale_outlined,
+                              backgroundColor: _workspaceSoftBlue,
+                              foregroundColor: _workspaceBlue,
+                              borderColor: _workspaceBlue.withValues(
+                                alpha: 0.14,
+                              ),
+                            ),
+                            _InfoChip(
+                              label: "Clocked in: ${_clockLabel(_clockInAt)}",
+                              icon: Icons.login_outlined,
+                              backgroundColor: _workspaceSoftTeal,
+                              foregroundColor: _workspaceTeal,
+                              borderColor: _workspaceTeal.withValues(
+                                alpha: 0.14,
+                              ),
+                            ),
+                            _InfoChip(
+                              label: formatDateLabel(widget.workDate),
+                              icon: Icons.event_outlined,
+                              backgroundColor: _workspaceSoftAmber,
+                              foregroundColor: _workspaceAmber,
+                              borderColor: _workspaceAmber.withValues(
+                                alpha: 0.14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _isSaving
+                        ? null
+                        : () => Navigator.of(context).pop(false),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(20, 16, 20, isCompact ? 20 : 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildCompletedSummaries(theme),
+                    _buildCurrentStep(context),
+                    if (visibleInlineError.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          visibleInlineError,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onErrorContainer,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 1),
+            Container(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                14,
+                20,
+                math.max(20, MediaQuery.of(context).padding.bottom + 12),
+              ),
+              child: isCompact
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton(
+                          onPressed:
+                              _isSaving ||
+                                  _isPickingProofs ||
+                                  !_isCurrentStepValid()
+                              ? null
+                              : _continueOrFinish,
+                          child: Text(
+                            _isSaving
+                                ? _clockOutWizardFinishSaving
+                                : _primaryActionLabel(),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _isSaving
+                                ? null
+                                : () {
+                                    if (_currentStep ==
+                                        _WorkspaceClockOutWizardStep.primary) {
+                                      Navigator.of(context).pop(false);
+                                      return;
+                                    }
+                                    setState(() {
+                                      _currentStep =
+                                          _WorkspaceClockOutWizardStep
+                                              .values[_currentStep.index - 1];
+                                      _inlineError = "";
+                                    });
+                                  },
+                            child: Text(
+                              _currentStep ==
+                                      _WorkspaceClockOutWizardStep.primary
+                                  ? _clockOutWizardCancelLabel
+                                  : _clockOutWizardBackLabel,
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        TextButton(
+                          onPressed: _isSaving
+                              ? null
+                              : () {
+                                  if (_currentStep ==
+                                      _WorkspaceClockOutWizardStep.primary) {
+                                    Navigator.of(context).pop(false);
+                                    return;
+                                  }
+                                  setState(() {
+                                    _currentStep = _WorkspaceClockOutWizardStep
+                                        .values[_currentStep.index - 1];
+                                    _inlineError = "";
+                                  });
+                                },
+                          child: Text(
+                            _currentStep == _WorkspaceClockOutWizardStep.primary
+                                ? _clockOutWizardCancelLabel
+                                : _clockOutWizardBackLabel,
+                          ),
+                        ),
+                        const Spacer(),
+                        FilledButton(
+                          onPressed:
+                              _isSaving ||
+                                  _isPickingProofs ||
+                                  !_isCurrentStepValid()
+                              ? null
+                              : _continueOrFinish,
+                          child: Text(
+                            _isSaving
+                                ? _clockOutWizardFinishSaving
+                                : _primaryActionLabel(),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+num? _parseWizardNumber(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is num) {
+    return value;
+  }
+  return num.tryParse(value.toString().trim());
+}
+
+Future<ProductionTaskLogProgressInput?> _showWorkspaceLogDialog(
+  BuildContext context, {
+  required DateTime workDate,
+  required ProductionTask task,
+  required ProductionPlan plan,
+  required List<ProductionTimelineRow> timelineRows,
+  required List<ProductionTaskDayLedger> taskDayLedgers,
   required List<ProductionAttendanceRecord> attendanceRecords,
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
@@ -6708,6 +12519,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   String? actorStaffId,
   required bool canPickAnyAssignedStaff,
   required bool canManageAttendance,
+  String? initialStaffId,
+  bool lockSelectedStaff = false,
+  bool createNewEntry = false,
   Future<ProductionAttendanceRecord?> Function(
     String staffProfileId,
     ProductionAttendanceRecord? existingAttendance,
@@ -6723,11 +12537,6 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
     ProductionAttendanceRecord? existingAttendance,
   )?
   onQuickClockOutForStaff,
-  String dialogTitle = _logDialogTitle,
-  String saveLabel = _logDialogSaveLabel,
-  String? workflowHintOverride,
-  bool requireCompletedActual = false,
-  String requiredActualMessage = _logDialogActualInvalid,
 }) async {
   final assignedStaffIds = _resolveAssignedStaffIds(task);
   if (assignedStaffIds.isEmpty) {
@@ -6741,20 +12550,33 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
       .where((value) => value.isNotEmpty)
       .toList();
   final normalizedActorStaffId = actorStaffId?.trim() ?? "";
+  final normalizedInitialStaffId = initialStaffId?.trim() ?? "";
+  final effectiveCanPickAnyAssignedStaff =
+      canPickAnyAssignedStaff && !lockSelectedStaff;
   String? selectedStaffId =
-      !canPickAnyAssignedStaff &&
-          normalizedActorStaffId.isNotEmpty &&
-          assignedStaffIds.contains(normalizedActorStaffId)
+      normalizedInitialStaffId.isNotEmpty &&
+          assignedStaffIds.contains(normalizedInitialStaffId)
+      ? normalizedInitialStaffId
+      : !effectiveCanPickAnyAssignedStaff &&
+            normalizedActorStaffId.isNotEmpty &&
+            assignedStaffIds.contains(normalizedActorStaffId)
       ? normalizedActorStaffId
       : (assignedStaffIds.isNotEmpty ? assignedStaffIds.first : null);
   String? selectedUnitId = assignedUnitIds.isNotEmpty
       ? assignedUnitIds.first
       : null;
-  final taskTargetAmount = _resolveTaskProgressTargetAmount(
-    task: task,
-    assignedUnitIds: assignedUnitIds,
-    fallbackTotalUnits: fallbackTotalUnits,
+  final taskDayLedger = _ledgerForTaskOnDay(
+    taskDayLedgers: taskDayLedgers,
+    taskId: task.id,
+    day: workDate,
   );
+  final taskTargetAmount =
+      taskDayLedger?.unitTarget ??
+      _resolveTaskProgressTargetAmount(
+        task: task,
+        assignedUnitIds: assignedUnitIds,
+        fallbackTotalUnits: fallbackTotalUnits,
+      );
   final progressContextText = [
     plan.title,
     plan.notes,
@@ -6767,16 +12589,24 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
     timelineRows: timelineRows,
   );
   final supportsFarmQuantityTracking = farmQuantitySummary != null;
-  final suggestedQuantityActivityType = supportsFarmQuantityTracking
+  final hasSharedActivityTargets =
+      taskDayLedger != null &&
+      ((taskDayLedger.activityTargets.planted ?? 0) > 0 ||
+          (taskDayLedger.activityTargets.transplanted ?? 0) > 0 ||
+          (taskDayLedger.activityTargets.harvested ?? 0) > 0);
+  final supportsActivityTracking =
+      supportsFarmQuantityTracking || hasSharedActivityTargets;
+  final suggestedQuantityActivityType = supportsActivityTracking
       ? _suggestQuantityActivityType(task)
       : _quantityActivityNone;
-  num selectedActualAmount = 0;
+  num? selectedActualAmount;
   var selectedQuantityActivityType = suggestedQuantityActivityType;
   num selectedQuantityAmount = 0;
   final notesController = TextEditingController();
   var selectedDelayReason = _delayReasonNone;
   var validationError = "";
   final attendanceOverridesByStaffId = <String, ProductionAttendanceRecord>{};
+  List<ProductionTaskProgressProofInput> selectedProofs = [];
 
   ProductionAttendanceRecord? resolveDialogAttendance(String? staffProfileId) {
     final normalizedStaffId = staffProfileId?.trim() ?? "";
@@ -6788,14 +12618,17 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           attendanceRecords: attendanceRecords,
           staffProfileId: normalizedStaffId,
           day: workDate,
-        ) ??
-        _findOpenAttendanceForStaff(
-          attendanceRecords: attendanceRecords,
-          staffProfileId: normalizedStaffId,
+          taskId: task.id,
         );
   }
 
   String resolveQuantityUnit(String activityType) {
+    if (taskDayLedger != null) {
+      final sharedUnit = taskDayLedger.activityUnits.valueFor(activityType);
+      if (sharedUnit.trim().isNotEmpty) {
+        return sharedUnit;
+      }
+    }
     switch (activityType) {
       case _quantityActivityPlanting:
       case _quantityActivityTransplant:
@@ -6808,6 +12641,10 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   }
 
   num resolveQuantityTarget(String activityType) {
+    final sharedTarget = taskDayLedger?.activityTargets.valueFor(activityType);
+    if (sharedTarget != null) {
+      return sharedTarget;
+    }
     final plantingTargets = plan.plantingTargets;
     if (plantingTargets == null) {
       return 0;
@@ -6824,6 +12661,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
   }
 
   num resolveQuantityLogged(String activityType) {
+    if (taskDayLedger != null) {
+      return taskDayLedger.activityCompleted.valueFor(activityType);
+    }
     if (farmQuantitySummary == null) {
       return 0;
     }
@@ -6849,26 +12689,45 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
       staffId: selectedStaffId,
       unitId: selectedUnitId,
     );
-    selectedActualAmount = existingRow?.actualPlots ?? 0;
-    final existingDelayReason = existingRow?.delayReason.trim() ?? "";
-    selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
-        ? existingDelayReason
-        : _delayReasonNone;
-    notesController.text = existingRow?.notes ?? "";
-    if (supportsFarmQuantityTracking) {
-      final existingQuantityActivityType =
-          existingRow?.quantityActivityType.trim() ?? "";
-      if (existingRow != null &&
-          existingRow.quantityAmount > 0 &&
-          existingQuantityActivityType.isNotEmpty &&
-          existingQuantityActivityType != _quantityActivityNone) {
-        selectedQuantityActivityType = existingQuantityActivityType;
-        selectedQuantityAmount = existingRow.quantityAmount;
-      } else {
+    if (createNewEntry) {
+      selectedActualAmount = null;
+      selectedDelayReason = _delayReasonNone;
+      notesController.text = "";
+      if (supportsActivityTracking) {
         if (!preserveSelectedQuantityActivity) {
           selectedQuantityActivityType = suggestedQuantityActivityType;
         }
         selectedQuantityAmount = 0;
+      }
+    } else {
+      selectedActualAmount =
+          existingRow?.unitContribution ?? existingRow?.actualPlots;
+      final existingDelayReason = existingRow?.delayReason.trim() ?? "";
+      selectedDelayReason = _delayReasonOptions.contains(existingDelayReason)
+          ? existingDelayReason
+          : _delayReasonNone;
+      notesController.text = existingRow?.notes ?? "";
+      if (supportsActivityTracking) {
+        final existingQuantityActivityType = existingRow == null
+            ? ""
+            : (existingRow.activityType.trim().isNotEmpty
+                      ? existingRow.activityType
+                      : existingRow.quantityActivityType)
+                  .trim();
+        if (existingRow != null && existingQuantityActivityType.isNotEmpty) {
+          selectedQuantityActivityType = existingQuantityActivityType;
+          selectedQuantityAmount =
+              existingQuantityActivityType == _quantityActivityNone
+              ? 0
+              : existingRow.activityQuantity > 0
+              ? existingRow.activityQuantity
+              : existingRow.quantityAmount;
+        } else {
+          if (!preserveSelectedQuantityActivity) {
+            selectedQuantityActivityType = suggestedQuantityActivityType;
+          }
+          selectedQuantityAmount = 0;
+        }
       }
     }
   }
@@ -6879,14 +12738,11 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
     workDate,
   ).where((row) => row.taskId.trim() == task.id.trim()).toList();
 
-  final result = await showDialog<_WorkspaceLogProgressInput>(
+  final result = await showDialog<ProductionTaskLogProgressInput>(
     context: context,
     builder: (dialogContext) {
       return StatefulBuilder(
         builder: (context, setDialogState) {
-          final loggedTotal = timelineRows
-              .where((row) => row.taskId.trim() == task.id.trim())
-              .fold<num>(0, (sum, row) => sum + row.actualPlots);
           final existingSelectionRow = _findExistingProgressRowForSelection(
             timelineRows: timelineRows,
             taskId: task.id,
@@ -6894,10 +12750,24 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
             staffId: selectedStaffId,
             unitId: selectedUnitId,
           );
-          final existingSelectionAmount =
-              existingSelectionRow?.actualPlots ?? 0;
+          final existingSelectionAmount = createNewEntry
+              ? 0
+              : (existingSelectionRow?.unitContribution ??
+                    existingSelectionRow?.actualPlots ??
+                    0);
+          final existingSelectionProofCount =
+              createNewEntry || existingSelectionRow == null
+              ? 0
+              : (existingSelectionRow.proofCountUploaded > 0
+                    ? existingSelectionRow.proofCountUploaded
+                    : existingSelectionRow.proofCount);
+          final sharedCompletedBeforeEdit =
+              taskDayLedger?.unitCompleted ??
+              timelineRows
+                  .where((row) => row.taskId.trim() == task.id.trim())
+                  .fold<num>(0, (sum, row) => sum + row.actualPlots);
           final loggedAmountExcludingSelection =
-              loggedTotal - existingSelectionAmount;
+              sharedCompletedBeforeEdit - existingSelectionAmount;
           final remainingAgainstPlan =
               taskTargetAmount - loggedAmountExcludingSelection;
           final cappedRemainingAgainstPlan = remainingAgainstPlan < 0
@@ -6907,12 +12777,14 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final progressOptions = _buildProgressAmountOptions(
             maxAmount: strictActualMax,
           );
-          if (progressOptions.isNotEmpty &&
-              !progressOptions.any(
-                (amount) => _sameProgressAmount(amount, selectedActualAmount),
-              )) {
-            selectedActualAmount = progressOptions.last;
-          }
+          final selectedActualAmountValue = selectedActualAmount ?? 0;
+          final hasSelectedActualAmount = selectedActualAmount != null;
+          final selectedActualSelectionValid =
+              hasSelectedActualAmount &&
+              progressOptions.any(
+                (amount) =>
+                    _sameProgressAmount(amount, selectedActualAmountValue),
+              );
           final actualHelperText = _buildProgressCountHelperText(
             targetAmount: taskTargetAmount,
             loggedAmount: loggedAmountExcludingSelection,
@@ -6933,18 +12805,16 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           final dailyTaskProgressSummary = _buildTaskUnitProgressSummary(
             task: task,
             timelineRows: rowsForTaskOnWorkDate,
+            taskDayLedger: taskDayLedger,
             planUnitLabelById: planUnitLabelById,
             fallbackTotalUnits: fallbackTotalUnits,
             fallbackWorkUnitLabel: fallbackWorkUnitLabel,
             contextText: progressContextText,
             selectedUnitId: selectedUnitId,
           );
-          final progressWorkflowHint =
-              workflowHintOverride?.trim().isNotEmpty == true
-              ? workflowHintOverride!.trim()
-              : _buildProgressWorkflowHint(
-                  singularUnitLabel: progressUnitSingularLabel,
-                );
+          final progressWorkflowHint = _buildProgressWorkflowHint(
+            singularUnitLabel: progressUnitSingularLabel,
+          );
           final progressActualLabel = _buildProgressActualLabel(
             singularUnitLabel: progressUnitSingularLabel,
           );
@@ -6953,33 +12823,73 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
             singularUnitLabel: progressUnitSingularLabel,
           );
           final totalLoggedAfterSave =
-              loggedAmountExcludingSelection + selectedActualAmount;
+              loggedAmountExcludingSelection + selectedActualAmountValue;
           final remainingAfterSave =
               (taskTargetAmount - totalLoggedAfterSave) < 0
               ? 0
               : (taskTargetAmount - totalLoggedAfterSave);
+          final shouldSkipActivityUpdates =
+              supportsActivityTracking &&
+              selectedQuantityActivityType == _quantityActivityNone;
+          final requiredProofCount = requiredTaskProgressProofCount(
+            selectedActualAmountValue,
+          );
+          final proofCountMatchesSelectedAmount = requiredProofCount == 0
+              ? selectedProofs.isEmpty
+              : selectedProofs.isNotEmpty
+              ? hasRequiredTaskProgressProofMix(
+                  selectedProofs,
+                  requiredProofCount,
+                )
+              : existingSelectionProofCount == requiredProofCount &&
+                    existingSelectionRow != null &&
+                    hasRequiredTaskProgressProofRecordMix(
+                      existingSelectionRow.proofs,
+                      requiredProofCount,
+                    );
+          final readyProofCount = selectedProofs.isNotEmpty
+              ? selectedProofs.length
+              : existingSelectionProofCount;
+          final proofInstructionText = requiredProofCount == 0
+              ? "Proof uploads are required only when a positive unit contribution is entered."
+              : proofCountMatchesSelectedAmount
+              ? selectedProofs.isEmpty
+                    ? existingSelectionProofCount > 0 &&
+                              existingSelectionProofCount == requiredProofCount
+                          ? "This staff/unit already has ${formatTaskProgressProofCountLabel(requiredProofCount)} saved."
+                          : _clockOutWizardProofRequired
+                    : "$readyProofCount / $requiredProofCount proofs ready."
+              : buildTaskProgressProofRequirementText(
+                  requiredProofCount,
+                  exact: false,
+                );
+          final proofButtonLabel =
+              selectedProofs.isNotEmpty || existingSelectionProofCount > 0
+              ? _logDialogReplaceProofLabel
+              : _logDialogUploadProofLabel;
+          final dialogTitle = createNewEntry ? _newCountLabel : _logDialogTitle;
           final selectedAttendance = resolveDialogAttendance(selectedStaffId);
           final selectedClockInAt = selectedAttendance?.clockInAt?.toLocal();
           final selectedClockOutAt = selectedAttendance?.clockOutAt?.toLocal();
-          final selectedAttendanceReferenceTime =
-              (selectedAttendance?.clockInAt ?? selectedAttendance?.createdAt)
-                  ?.toLocal();
-          final selectedClockInValue = _formatAttendanceDisplayValue(
+          final selectedClockInValue = _formatAttendanceTimeValue(
             selectedClockInAt,
-            selectedDay: workDate,
             emptyLabel: _attendanceClockInUnsetLabel,
           );
           final selectedClockOutValue = selectedClockOutAt != null
-              ? _formatAttendanceDisplayValue(
-                  selectedClockOutAt,
-                  selectedDay: workDate,
-                  emptyLabel: _attendanceClockOutUnsetLabel,
-                )
+              ? _clockLabel(selectedClockOutAt)
               : (selectedClockInAt != null
                     ? _attendanceClockOutPendingLabel
                     : _attendanceClockOutUnsetLabel);
           final hasSelectedClockIn = selectedAttendance?.clockInAt != null;
           final hasSelectedClockOut = selectedAttendance?.clockOutAt != null;
+          final selectedAttendanceReady = hasSelectedClockIn;
+          final selectedStaffIsActor =
+              normalizedActorStaffId.isNotEmpty &&
+              selectedStaffId != null &&
+              selectedStaffId!.trim() == normalizedActorStaffId;
+          final canClockSelectedStaff =
+              canManageAttendance || selectedStaffIsActor;
+          final canSubmitProgress = selectedAttendanceReady;
           final selectedStaffLabel =
               (selectedStaffId != null && selectedStaffId!.trim().isNotEmpty)
               ? _resolveStaffDisplayLabel(
@@ -6988,6 +12898,17 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                   fallbackRole: task.roleRequired,
                 )
               : _unassignedLabel;
+
+          Future<void> chooseProofs() async {
+            final picked = await pickTaskProgressProofImages();
+            if (!dialogContext.mounted || picked.isEmpty) {
+              return;
+            }
+            setDialogState(() {
+              selectedProofs = picked;
+              validationError = "";
+            });
+          }
 
           Future<void> applyAttendanceAction(
             Future<ProductionAttendanceRecord?> Function(
@@ -7013,16 +12934,25 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
           }
 
           final existingSelectionQuantityAmount =
-              existingSelectionRow?.quantityActivityType.trim() ==
-                  selectedQuantityActivityType
-              ? existingSelectionRow?.quantityAmount ?? 0
+              !createNewEntry &&
+                  existingSelectionRow != null &&
+                  ((existingSelectionRow.activityType.trim().isNotEmpty
+                              ? existingSelectionRow.activityType
+                              : existingSelectionRow.quantityActivityType)
+                          .trim() ==
+                      selectedQuantityActivityType)
+              ? existingSelectionRow.activityQuantity > 0
+                    ? existingSelectionRow.activityQuantity
+                    : existingSelectionRow.quantityAmount
               : 0;
           final quantityTarget = resolveQuantityTarget(
             selectedQuantityActivityType,
           );
-          final quantityLogged = resolveQuantityLogged(
-            selectedQuantityActivityType,
-          );
+          final quantityLogged = taskDayLedger == null
+              ? resolveQuantityLogged(selectedQuantityActivityType)
+              : taskDayLedger.activityCompleted.valueFor(
+                  selectedQuantityActivityType,
+                );
           final quantityRemaining =
               quantityTarget -
               (quantityLogged - existingSelectionQuantityAmount);
@@ -7046,10 +12976,17 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
               (cappedQuantityRemaining - selectedQuantityAmount) < 0
               ? 0
               : (cappedQuantityRemaining - selectedQuantityAmount);
+          final shouldShowFollowUpSuggestion =
+              hasSelectedActualAmount &&
+              (remainingAfterSave > 0 || quantityRemainingAfterSave > 0);
           return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 24,
+            ),
             title: Text(dialogTitle),
             content: SizedBox(
-              width: 420,
+              width: math.min(MediaQuery.of(context).size.width * 0.92, 720),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -7072,7 +13009,8 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                       ),
                     ),
                     const SizedBox(height: 12),
-                    if (assignedStaffIds.isNotEmpty && canPickAnyAssignedStaff)
+                    if (assignedStaffIds.isNotEmpty &&
+                        effectiveCanPickAnyAssignedStaff)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedStaffId,
                         decoration: const InputDecoration(
@@ -7105,9 +13043,11 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           });
                         },
                       ),
-                    if (assignedStaffIds.isNotEmpty && canPickAnyAssignedStaff)
+                    if (assignedStaffIds.isNotEmpty &&
+                        effectiveCanPickAnyAssignedStaff)
                       const SizedBox(height: 12),
-                    if (assignedStaffIds.isNotEmpty && !canPickAnyAssignedStaff)
+                    if (assignedStaffIds.isNotEmpty &&
+                        !effectiveCanPickAnyAssignedStaff)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: Text(
@@ -7170,129 +13110,185 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                     ),
                               )
                             else ...[
-                              Column(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
                                 children: [
-                                  _AttendanceTimingCard(
-                                    label: _clockedInLabel,
-                                    value: selectedClockInValue,
-                                    accentColor: hasSelectedClockIn
-                                        ? _workspaceTeal
-                                        : _workspaceBlue,
-                                    softColor: hasSelectedClockIn
+                                  _InfoChip(
+                                    label:
+                                        "$_clockedInLabel: $selectedClockInValue",
+                                    icon: Icons.login_outlined,
+                                    backgroundColor: hasSelectedClockIn
                                         ? _workspaceSoftTeal
                                         : _workspaceSoftBlue,
-                                    icon: Icons.login_outlined,
-                                    actionLabel:
-                                        canManageAttendance &&
-                                            !hasSelectedClockIn &&
-                                            !hasSelectedClockOut &&
-                                            onQuickClockInForStaff != null
-                                        ? _attendanceDialogClockInLabel
-                                        : null,
-                                    actionIcon: Icons.login_outlined,
-                                    onAction:
-                                        canManageAttendance &&
-                                            !hasSelectedClockIn &&
-                                            !hasSelectedClockOut &&
-                                            onQuickClockInForStaff != null
-                                        ? () => applyAttendanceAction(
-                                            onQuickClockInForStaff,
-                                          )
-                                        : null,
+                                    foregroundColor: hasSelectedClockIn
+                                        ? _workspaceTeal
+                                        : _workspaceBlue,
+                                    borderColor:
+                                        (hasSelectedClockIn
+                                                ? _workspaceTeal
+                                                : _workspaceBlue)
+                                            .withValues(alpha: 0.18),
                                   ),
-                                  const SizedBox(height: 10),
-                                  _AttendanceTimingCard(
-                                    label: _clockedOutLabel,
-                                    value: selectedClockOutValue,
-                                    accentColor: hasSelectedClockOut
-                                        ? _workspaceBerry
-                                        : (hasSelectedClockIn
-                                              ? _workspaceBlue
-                                              : _workspaceNavy),
-                                    softColor: hasSelectedClockOut
-                                        ? _workspaceSoftBerry
-                                        : (hasSelectedClockIn
-                                              ? _workspaceSoftBlue
-                                              : _workspaceSoftSlate),
-                                    icon: hasSelectedClockOut
-                                        ? Icons.logout_outlined
-                                        : (hasSelectedClockIn
-                                              ? Icons.timelapse_outlined
-                                              : Icons.pending_outlined),
-                                    actionLabel:
-                                        canManageAttendance &&
-                                            hasSelectedClockIn &&
-                                            !hasSelectedClockOut &&
-                                            onQuickClockOutForStaff != null
-                                        ? _attendanceDialogClockOutLabel
-                                        : null,
-                                    actionIcon: Icons.logout_outlined,
-                                    onAction:
-                                        canManageAttendance &&
-                                            hasSelectedClockIn &&
-                                            !hasSelectedClockOut &&
-                                            onQuickClockOutForStaff != null
-                                        ? () => applyAttendanceAction(
-                                            onQuickClockOutForStaff,
-                                          )
-                                        : null,
+                                  _InfoChip(
+                                    label:
+                                        "$_clockedOutLabel: $selectedClockOutValue",
+                                    icon: Icons.logout_outlined,
+                                    backgroundColor: hasSelectedClockOut
+                                        ? _workspaceSoftTeal
+                                        : _workspaceSoftSlate,
+                                    foregroundColor: hasSelectedClockOut
+                                        ? _workspaceTeal
+                                        : _workspaceNavy,
+                                    borderColor:
+                                        (hasSelectedClockOut
+                                                ? _workspaceTeal
+                                                : _workspaceNavy)
+                                            .withValues(alpha: 0.14),
                                   ),
                                 ],
                               ),
-                              if (selectedAttendanceReferenceTime != null &&
-                                  selectedAttendance?.clockOutAt == null &&
-                                  !_isSameDay(
-                                    selectedAttendanceReferenceTime,
-                                    workDate,
-                                  )) ...[
+                              if (!selectedAttendanceReady) ...[
                                 const SizedBox(height: 12),
                                 Container(
                                   width: double.infinity,
-                                  padding: const EdgeInsets.all(12),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: _workspaceSoftAmber,
                                     borderRadius: BorderRadius.circular(14),
                                     border: Border.all(
                                       color: _workspaceAmber.withValues(
-                                        alpha: 0.16,
+                                        alpha: 0.18,
                                       ),
                                     ),
                                   ),
-                                  child: Text(
-                                    "Open attendance started on ${formatDateLabel(selectedAttendanceReferenceTime)} at ${_clockLabel(selectedAttendanceReferenceTime)}. Close it or edit the time before saving ${formatDateLabel(workDate)} progress.",
-                                    style: Theme.of(context).textTheme.bodySmall
-                                        ?.copyWith(
-                                          color: _workspaceNavy,
-                                          height: 1.35,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.lock_outline,
+                                        size: 18,
+                                        color: _workspaceAmber,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          _taskProgressAttendanceRequired,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: _workspaceAmber,
+                                                fontWeight: FontWeight.w800,
+                                                height: 1.35,
+                                              ),
                                         ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ] else if (!hasSelectedClockOut) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _workspaceSoftBlue,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: _workspaceBlue.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        size: 18,
+                                        color: _workspaceBlue,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          "Clock-out will be recorded when you save this production log.",
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: _workspaceBlue,
+                                                fontWeight: FontWeight.w700,
+                                                height: 1.35,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
-                              if (canManageAttendance &&
-                                  onSetAttendanceForStaff != null) ...[
+                              if (canClockSelectedStaff &&
+                                  (onQuickClockInForStaff != null ||
+                                      onQuickClockOutForStaff != null ||
+                                      onSetAttendanceForStaff != null)) ...[
                                 const SizedBox(height: 12),
                                 Wrap(
                                   spacing: 8,
                                   runSpacing: 8,
                                   children: [
-                                    OutlinedButton.icon(
-                                      onPressed: () => applyAttendanceAction(
-                                        onSetAttendanceForStaff,
+                                    if (!hasSelectedClockIn &&
+                                        !hasSelectedClockOut &&
+                                        onQuickClockInForStaff != null)
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => applyAttendanceAction(
+                                          onQuickClockInForStaff,
+                                        ),
+                                        icon: const Icon(
+                                          Icons.login_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          _attendanceDialogClockInLabel,
+                                        ),
                                       ),
-                                      icon: Icon(
-                                        hasSelectedClockIn ||
-                                                hasSelectedClockOut
-                                            ? Icons.edit_calendar_outlined
-                                            : Icons.schedule_outlined,
-                                        size: 18,
+                                    if (hasSelectedClockIn &&
+                                        !hasSelectedClockOut &&
+                                        onQuickClockOutForStaff != null)
+                                      FilledButton.tonalIcon(
+                                        onPressed: () => applyAttendanceAction(
+                                          onQuickClockOutForStaff,
+                                        ),
+                                        icon: const Icon(
+                                          Icons.logout_outlined,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          _attendanceDialogClockOutLabel,
+                                        ),
                                       ),
-                                      label: Text(
-                                        hasSelectedClockIn ||
-                                                hasSelectedClockOut
-                                            ? _editAttendanceLabel
-                                            : _setAttendanceLabel,
+                                    if (onSetAttendanceForStaff != null)
+                                      OutlinedButton.icon(
+                                        onPressed: () => applyAttendanceAction(
+                                          onSetAttendanceForStaff,
+                                        ),
+                                        icon: Icon(
+                                          hasSelectedClockIn ||
+                                                  hasSelectedClockOut
+                                              ? Icons.edit_calendar_outlined
+                                              : Icons.schedule_outlined,
+                                          size: 18,
+                                        ),
+                                        label: Text(
+                                          hasSelectedClockIn ||
+                                                  hasSelectedClockOut
+                                              ? _editAttendanceLabel
+                                              : _setAttendanceLabel,
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                               ],
@@ -7300,6 +13296,67 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           ],
                         ),
                       ),
+                    if (supportsActivityTracking) ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedQuantityActivityType,
+                        decoration: const InputDecoration(
+                          labelText: _logDialogQuantityActivityLabel,
+                          helperText:
+                              "Leave this on No quantity update for general work like cleaning or watering. Unit contribution still updates shared completion; planted, transplanted, and harvested also update the shared activity tracker.",
+                          helperMaxLines: 3,
+                        ),
+                        items: _quantityActivityOptions
+                            .map(
+                              (value) => DropdownMenuItem<String>(
+                                value: value,
+                                child: Text(
+                                  value == _quantityActivityNone
+                                      ? "No quantity update"
+                                      : _formatQuantityActivityLabel(value),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setDialogState(() {
+                            selectedQuantityActivityType = value;
+                            selectedQuantityAmount = 0;
+                            validationError = "";
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (selectedQuantityActivityType ==
+                        _quantityActivityNone) ...[
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _workspaceSoftSlate,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _workspaceNavy.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Text(
+                          hasSelectedActualAmount &&
+                                  selectedActualAmountValue > 0
+                              ? "No secondary activity metric will change. Save will still update the shared unit tracker for this task/day."
+                              : "No secondary activity metric is selected. Save will keep attendance, notes, and audit history only unless you add a unit contribution.",
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: _workspaceNavy,
+                                fontWeight: FontWeight.w700,
+                                height: 1.35,
+                              ),
+                        ),
+                      ),
+                    ],
                     if (assignedUnitIds.isNotEmpty)
                       DropdownButtonFormField<String?>(
                         initialValue: selectedUnitId,
@@ -7414,7 +13471,7 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            existingSelectionAmount > 0
+                            !createNewEntry && existingSelectionAmount > 0
                                 ? "Allowed now: $editableAllowanceLabel. This staff/unit already has ${_formatProgressAmountWithUnit(amount: existingSelectionAmount, singularUnitLabel: progressUnitSingularLabel)} saved, so the picker frees that amount while you edit."
                                 : "Allowed now: $editableAllowanceLabel.",
                             style: Theme.of(context).textTheme.bodySmall
@@ -7430,10 +13487,12 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             spacing: 8,
                             runSpacing: 8,
                             children: progressOptions.map((amount) {
-                              final selected = _sameProgressAmount(
-                                amount,
-                                selectedActualAmount,
-                              );
+                              final selected =
+                                  hasSelectedActualAmount &&
+                                  _sameProgressAmount(
+                                    amount,
+                                    selectedActualAmountValue,
+                                  );
                               return ChoiceChip(
                                 label: Text(_formatProgressAmount(amount)),
                                 selected: selected,
@@ -7459,6 +13518,9 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                 onSelected: (_) {
                                   setDialogState(() {
                                     selectedActualAmount = amount;
+                                    if (_sameProgressAmount(amount, 0)) {
+                                      selectedProofs = [];
+                                    }
                                     validationError = "";
                                   });
                                 },
@@ -7473,13 +13535,13 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                               vertical: 10,
                             ),
                             decoration: BoxDecoration(
-                              color: selectedActualAmount > 0
+                              color: hasSelectedActualAmount
                                   ? _workspaceSoftTeal
                                   : _workspaceSoftSlate,
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
                                 color:
-                                    (selectedActualAmount > 0
+                                    (hasSelectedActualAmount
                                             ? _workspaceTeal
                                             : _workspaceBlue)
                                         .withValues(alpha: 0.14),
@@ -7488,19 +13550,19 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             child: Row(
                               children: [
                                 Icon(
-                                  selectedActualAmount > 0
+                                  hasSelectedActualAmount
                                       ? Icons.task_alt_outlined
                                       : Icons.pending_actions_outlined,
                                   size: 18,
-                                  color: selectedActualAmount > 0
+                                  color: hasSelectedActualAmount
                                       ? _workspaceTeal
                                       : _workspaceBlue,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    selectedActualAmount > 0
-                                        ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmount, singularUnitLabel: progressUnitSingularLabel)} for this staff."
+                                    hasSelectedActualAmount
+                                        ? "Selected ${_formatProgressAmountWithUnit(amount: selectedActualAmountValue, singularUnitLabel: progressUnitSingularLabel)} for this staff."
                                         : "Select the completed amount from the allowed values below.",
                                     style: Theme.of(context).textTheme.bodySmall
                                         ?.copyWith(
@@ -7523,33 +13585,160 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                                   height: 1.4,
                                 ),
                           ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest
+                                  .withValues(alpha: 0.45),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant
+                                    .withValues(alpha: 0.7),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Proof media",
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  proofInstructionText,
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                        height: 1.3,
+                                      ),
+                                ),
+                                if (selectedProofs.isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: selectedProofs
+                                        .map(
+                                          (proof) => ActionChip(
+                                            avatar: Icon(
+                                              proof.isVideo
+                                                  ? Icons.videocam_outlined
+                                                  : Icons.image_outlined,
+                                              size: 18,
+                                            ),
+                                            label: Text(proof.displayLabel),
+                                            onPressed: () {
+                                              showProductionTaskProgressPickedProofPreview(
+                                                context,
+                                                proof: proof,
+                                              );
+                                            },
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (shouldShowFollowUpSuggestion) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: _workspaceSoftAmber,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: _workspaceAmber.withValues(
+                                    alpha: 0.18,
+                                  ),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Suggested follow-up",
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          color: _workspaceAmber,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  if (remainingAfterSave > 0)
+                                    Text(
+                                      "Give the staff a 2 hour break, then create a follow-up task for ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)} remaining.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            height: 1.4,
+                                          ),
+                                    ),
+                                  if (remainingAfterSave > 0 &&
+                                      quantityRemainingAfterSave > 0)
+                                    const SizedBox(height: 8),
+                                  if (!shouldSkipActivityUpdates &&
+                                      quantityRemainingAfterSave > 0)
+                                    Text(
+                                      "Create another ${_formatQuantityActivityLabel(selectedQuantityActivityType)} task for ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel left after save.",
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: _workspaceNavy,
+                                            height: 1.4,
+                                          ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "Save preview: ${_formatProgressAmountWithUnit(amount: selectedActualAmount, singularUnitLabel: progressUnitSingularLabel)} completed by $selectedStaffLabel today. Task total after save: ${_formatProgressAmountWithUnit(amount: totalLoggedAfterSave, singularUnitLabel: progressUnitSingularLabel)} against a planned target of ${_formatProgressAmountWithUnit(amount: taskTargetAmount, singularUnitLabel: progressUnitSingularLabel)}. Remaining against plan after save: ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)}.",
+                      hasSelectedActualAmount
+                          ? "After save, shared unit remaining will be ${_formatProgressAmountWithUnit(amount: remainingAfterSave, singularUnitLabel: progressUnitSingularLabel)}. Shared done today will be ${_formatProgressAmountWithUnit(amount: totalLoggedAfterSave, singularUnitLabel: progressUnitSingularLabel)}."
+                          : shouldSkipActivityUpdates
+                          ? "No activity metric selected. Shared activity totals will stay unchanged unless you also pick a unit contribution."
+                          : "Select a unit contribution to preview the shared unit balance after save.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
-                    if (supportsFarmQuantityTracking) ...[
+                    if (supportsActivityTracking &&
+                        !shouldSkipActivityUpdates) ...[
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedQuantityActivityType,
-                        decoration: const InputDecoration(
-                          labelText: _logDialogQuantityActivityLabel,
-                          helperText: _logDialogQuantityHelper,
-                          helperMaxLines: 2,
+                      DropdownButtonFormField<num>(
+                        initialValue: selectedQuantityAmount,
+                        decoration: InputDecoration(
+                          labelText: _logDialogQuantityAmountLabel,
+                          helperText:
+                              "Shared ${_formatQuantityActivityLabel(selectedQuantityActivityType)}: ${_formatProgressAmount(quantityLogged)} / ${_formatProgressAmount(quantityTarget)} $selectedQuantityUnitLabel • remaining ${_formatProgressAmount(cappedQuantityRemaining)} $selectedQuantityUnitLabel",
+                          helperMaxLines: 3,
                         ),
-                        items: _quantityActivityOptions
+                        items: quantityOptions
                             .map(
-                              (value) => DropdownMenuItem<String>(
-                                value: value,
+                              (amount) => DropdownMenuItem<num>(
+                                value: amount,
                                 child: Text(
-                                  value == _quantityActivityNone
-                                      ? "No quantity update"
-                                      : _formatQuantityActivityLabel(value),
+                                  "${_formatProgressAmount(amount)} $selectedQuantityUnitLabel",
                                 ),
                               ),
                             )
@@ -7559,52 +13748,17 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                             return;
                           }
                           setDialogState(() {
-                            selectedQuantityActivityType = value;
-                            selectedQuantityAmount = 0;
+                            selectedQuantityAmount = value;
                           });
                         },
                       ),
-                      if (selectedQuantityActivityType !=
-                          _quantityActivityNone) ...[
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<num>(
-                          initialValue: selectedQuantityAmount,
-                          decoration: InputDecoration(
-                            labelText: _logDialogQuantityAmountLabel,
-                            helperText:
-                                "Target ${_formatProgressAmount(quantityTarget)} $selectedQuantityUnitLabel • logged ${_formatProgressAmount(quantityLogged)} $selectedQuantityUnitLabel • remaining ${_formatProgressAmount(cappedQuantityRemaining)} $selectedQuantityUnitLabel",
-                            helperMaxLines: 2,
-                          ),
-                          items: quantityOptions
-                              .map(
-                                (amount) => DropdownMenuItem<num>(
-                                  value: amount,
-                                  child: Text(
-                                    "${_formatProgressAmount(amount)} $selectedQuantityUnitLabel",
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
-                            if (value == null) {
-                              return;
-                            }
-                            setDialogState(() {
-                              selectedQuantityAmount = value;
-                            });
-                          },
+                      const SizedBox(height: 12),
+                      Text(
+                        "After save, shared ${_formatQuantityActivityLabel(selectedQuantityActivityType).toLowerCase()} remaining will be ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel.",
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          "${_formatQuantityActivityLabel(selectedQuantityActivityType)} preview: ${_formatProgressAmount(selectedQuantityAmount)} $selectedQuantityUnitLabel today • ${_formatProgressAmount(quantityRemainingAfterSave)} $selectedQuantityUnitLabel left after save.",
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ],
+                      ),
                     ],
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -7660,49 +13814,77 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text(_logDialogCancelLabel),
               ),
+              OutlinedButton.icon(
+                onPressed: requiredProofCount == 0 ? null : chooseProofs,
+                icon: Icon(
+                  selectedProofs.isEmpty
+                      ? Icons.add_photo_alternate_outlined
+                      : Icons.refresh_outlined,
+                ),
+                label: Text(proofButtonLabel),
+              ),
               FilledButton(
-                onPressed: () {
-                  final isValidActualSelection = progressOptions.any(
-                    (amount) =>
-                        _sameProgressAmount(amount, selectedActualAmount),
-                  );
-                  if (!isValidActualSelection) {
-                    setDialogState(() {
-                      validationError = _logDialogActualInvalid;
-                    });
-                    return;
-                  }
-                  if (requireCompletedActual && selectedActualAmount <= 0) {
-                    setDialogState(() {
-                      validationError = requiredActualMessage;
-                    });
-                    return;
-                  }
-                  if (selectedActualAmount == 0 &&
-                      selectedQuantityAmount == 0 &&
-                      selectedDelayReason == _delayReasonNone) {
-                    setDialogState(() {
-                      validationError = _logDialogDelayRequired;
-                    });
-                    return;
-                  }
-                  Navigator.of(dialogContext).pop(
-                    _WorkspaceLogProgressInput(
-                      staffId: selectedStaffId,
-                      unitId: selectedUnitId,
-                      actualPlots: selectedActualAmount,
-                      quantityActivityType: selectedQuantityActivityType,
-                      quantityAmount: selectedQuantityAmount,
-                      quantityUnit:
-                          selectedQuantityActivityType == _quantityActivityNone
-                          ? ""
-                          : resolveQuantityUnit(selectedQuantityActivityType),
-                      delayReason: selectedDelayReason,
-                      notes: notesController.text.trim(),
-                    ),
-                  );
-                },
-                child: Text(saveLabel),
+                onPressed: canSubmitProgress
+                    ? () {
+                        if (!selectedAttendanceReady) {
+                          setDialogState(() {
+                            validationError = _taskProgressAttendanceRequired;
+                          });
+                          return;
+                        }
+                        if (hasSelectedActualAmount &&
+                            !selectedActualSelectionValid) {
+                          setDialogState(() {
+                            validationError = _logDialogActualInvalid;
+                          });
+                          return;
+                        }
+                        if (!proofCountMatchesSelectedAmount) {
+                          setDialogState(() {
+                            validationError = requiredProofCount == 0
+                                ? _clockOutWizardProofNotAllowed
+                                : _clockOutWizardProofRequired;
+                          });
+                          return;
+                        }
+                        if (!shouldSkipActivityUpdates &&
+                            selectedActualAmountValue == 0 &&
+                            selectedQuantityAmount == 0 &&
+                            selectedDelayReason == _delayReasonNone) {
+                          setDialogState(() {
+                            validationError = _logDialogDelayRequired;
+                          });
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(
+                          ProductionTaskLogProgressInput(
+                            staffId: selectedStaffId,
+                            unitId: selectedUnitId,
+                            createNewEntry: createNewEntry,
+                            unitContribution: selectedActualAmountValue,
+                            proofs: List<ProductionTaskProgressProofInput>.from(
+                              selectedProofs,
+                            ),
+                            activityType: selectedQuantityActivityType,
+                            activityQuantity:
+                                selectedQuantityActivityType ==
+                                    _quantityActivityNone
+                                ? 0
+                                : selectedQuantityAmount,
+                            quantityUnit:
+                                selectedQuantityActivityType ==
+                                    _quantityActivityNone
+                                ? ""
+                                : resolveQuantityUnit(
+                                    selectedQuantityActivityType,
+                                  ),
+                            delayReason: selectedDelayReason,
+                            notes: notesController.text.trim(),
+                          ),
+                        );
+                      }
+                    : null,
+                child: const Text(_logDialogSubmitLabel),
               ),
             ],
           );
@@ -7713,80 +13895,6 @@ Future<_WorkspaceLogProgressInput?> _showWorkspaceLogDialog(
 
   notesController.dispose();
   return result;
-}
-
-Future<bool> _showClockOutProofReviewDialog(
-  BuildContext context, {
-  required String taskTitle,
-  required DateTime workDate,
-  required DateTime plannedClockOutAt,
-  required ProductionAttendanceRecord attendance,
-}) async {
-  final audit = attendance.clockOutAudit;
-  final resolvedTaskTitle = audit?.taskTitle.trim().isNotEmpty == true
-      ? audit!.taskTitle.trim()
-      : taskTitle;
-  final shouldClockOut = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) {
-      return AlertDialog(
-        title: const Text(_attendanceProofReviewTitle),
-        content: SizedBox(
-          width: 460,
-          child: SingleChildScrollView(
-            child: _AttendanceProofAuditCard(
-              taskTitle: resolvedTaskTitle,
-              workDateLabel: _resolveClockOutAuditWorkDateLabel(
-                audit,
-                fallbackDay: workDate,
-              ),
-              proofUrl: attendance.proofUrl,
-              proofFilename: attendance.proofFilename,
-              proofMimeType: attendance.proofMimeType,
-              proofUploadedAt: attendance.proofUploadedAt?.toLocal(),
-              clockInLabel: attendance.clockInAt == null
-                  ? null
-                  : _formatAttendanceDisplayValue(
-                      attendance.clockInAt,
-                      selectedDay: workDate,
-                      emptyLabel: _attendanceClockInUnsetLabel,
-                    ),
-              clockOutLabel: _formatAttendanceDisplayValue(
-                plannedClockOutAt,
-                selectedDay: workDate,
-                emptyLabel: _attendanceClockOutUnsetLabel,
-              ),
-              unitLabel: _resolveClockOutAuditUnitLabel(audit),
-              completedLabel: _formatClockOutAuditAmount(
-                audit?.unitsCompleted,
-                audit,
-              ),
-              remainingLabel: _formatClockOutAuditAmount(
-                audit?.unitsRemaining,
-                audit,
-              ),
-              helperText: _attendanceProofReadyHint,
-              showPreview: true,
-              accentColor: _workspaceBlue,
-              softColor: _workspaceSoftBlue,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text(_logDialogCancelLabel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(_attendanceProofReviewClockOutLabel),
-          ),
-        ],
-      );
-    },
-  );
-
-  return shouldClockOut == true;
 }
 
 Future<_AttendanceEditInput?> _showAttendanceDialog(

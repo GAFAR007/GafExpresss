@@ -67,7 +67,7 @@ class AppTheme {
       surface: AppColors.darkSurface,
       surfaceAlt: AppColors.darkSurfaceAlt,
       surfaceMuted: AppColors.darkSurfaceMuted,
-      surfaceTinted: Color(0xFF243455),
+      surfaceTinted: Color(0xFF17263D),
       textPrimary: AppColors.darkTextPrimary,
       textSecondary: AppColors.darkTextSecondary,
       border: AppColors.darkBorder,
@@ -95,7 +95,7 @@ class AppTheme {
       surface: AppColors.businessSurface,
       surfaceAlt: AppColors.businessSurfaceAlt,
       surfaceMuted: AppColors.businessCard,
-      surfaceTinted: Color(0xFF25385C),
+      surfaceTinted: Color(0xFF182943),
       textPrimary: AppColors.businessTextPrimary,
       textSecondary: AppColors.businessTextSecondary,
       border: AppColors.businessBorder,
@@ -164,6 +164,7 @@ class AppTheme {
       palette: palette,
       isDark: isDark,
     );
+    final resolvedTheme = baseTheme.copyWith(textTheme: textTheme);
     final subtleShadow = palette.shadow.withValues(alpha: isDark ? 0.34 : 0.08);
     final deepShadow = palette.shadow.withValues(alpha: isDark ? 0.46 : 0.14);
 
@@ -173,7 +174,7 @@ class AppTheme {
       textTheme: textTheme,
       dividerColor: palette.outlineVariant,
       appBarTheme: AppBarTheme(
-        backgroundColor: palette.background,
+        backgroundColor: isDark ? palette.surface : palette.background,
         foregroundColor: palette.textPrimary,
         centerTitle: false,
         elevation: 0,
@@ -239,14 +240,14 @@ class AppTheme {
         space: 1,
       ),
       chipTheme: baseTheme.chipTheme.copyWith(
-        backgroundColor: palette.surfaceAlt,
+        backgroundColor: isDark ? palette.surface : palette.surfaceAlt,
         selectedColor: palette.primaryContainer,
         disabledColor: palette.surfaceMuted,
         side: BorderSide(color: palette.outlineVariant),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.pill),
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         labelStyle: textTheme.labelMedium?.copyWith(
           color: palette.textPrimary,
           fontWeight: FontWeight.w700,
@@ -269,10 +270,10 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: palette.surfaceAlt,
+        fillColor: isDark ? palette.surface : palette.surfaceAlt,
         contentPadding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 16,
+          horizontal: 16,
+          vertical: 14,
         ),
         labelStyle: textTheme.bodySmall?.copyWith(color: palette.textSecondary),
         floatingLabelStyle: textTheme.bodySmall?.copyWith(
@@ -338,48 +339,27 @@ class AppTheme {
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: palette.textPrimary,
-          backgroundColor: palette.surface.withValues(
-            alpha: isDark ? 0.14 : 0.88,
-          ),
-          side: BorderSide(color: palette.border),
-          minimumSize: const Size(0, 50),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-          ),
+        style: AppButtonStyles.outlined(
+          theme: resolvedTheme,
+          tone: AppStatusTone.info,
           textStyle: textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          foregroundColor: palette.primary,
-          minimumSize: const Size(0, 40),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-          ),
+        style: AppButtonStyles.text(
+          theme: resolvedTheme,
+          tone: AppStatusTone.info,
           textStyle: textTheme.labelLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
       ),
       iconButtonTheme: IconButtonThemeData(
-        style: IconButton.styleFrom(
-          foregroundColor: palette.textPrimary,
-          backgroundColor: palette.surfaceAlt.withValues(
-            alpha: isDark ? 0.8 : 0.92,
-          ),
-          minimumSize: const Size(40, 40),
-          padding: const EdgeInsets.all(10),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            side: BorderSide(color: palette.outlineVariant),
-          ),
+        style: AppButtonStyles.icon(
+          theme: resolvedTheme,
+          tone: AppStatusTone.neutral,
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
@@ -394,36 +374,36 @@ class AppTheme {
         ),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.onPrimary;
           }
           return palette.surface;
         }),
-        trackColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.primary;
           }
           return palette.surfaceMuted;
         }),
-        trackOutlineColor: MaterialStateProperty.all(Colors.transparent),
+        trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
       ),
       radioTheme: RadioThemeData(
-        fillColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.primary;
           }
           return palette.textSecondary;
         }),
       ),
       checkboxTheme: CheckboxThemeData(
-        fillColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return palette.primary;
           }
           return Colors.transparent;
         }),
-        checkColor: MaterialStateProperty.all(palette.onPrimary),
+        checkColor: WidgetStateProperty.all(palette.onPrimary),
         side: BorderSide(color: palette.border),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -438,8 +418,8 @@ class AppTheme {
         ),
       ),
       dataTableTheme: DataTableThemeData(
-        headingRowColor: MaterialStateProperty.all(palette.surfaceAlt),
-        dataRowColor: MaterialStateProperty.all(palette.surface),
+        headingRowColor: WidgetStateProperty.all(palette.surfaceAlt),
+        dataRowColor: WidgetStateProperty.all(palette.surface),
         headingTextStyle: textTheme.labelLarge?.copyWith(
           color: palette.textPrimary,
           fontWeight: FontWeight.w800,
@@ -480,15 +460,15 @@ class AppTheme {
         indicatorColor: palette.primaryContainer,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         height: 76,
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          final isSelected = states.contains(MaterialState.selected);
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
           return textTheme.labelSmall?.copyWith(
             color: isSelected ? palette.primary : palette.textSecondary,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
           );
         }),
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          final isSelected = states.contains(MaterialState.selected);
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final isSelected = states.contains(WidgetState.selected);
           return IconThemeData(
             color: isSelected ? palette.primary : palette.textSecondary,
             size: 22,
@@ -514,30 +494,30 @@ class AppTheme {
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: ButtonStyle(
-          backgroundColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.selected)) {
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
               return palette.primaryContainer;
             }
             return palette.surfaceAlt;
           }),
-          foregroundColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.selected)) {
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
               return palette.onPrimaryContainer;
             }
             return palette.textSecondary;
           }),
-          side: MaterialStateProperty.all(
+          side: WidgetStateProperty.all(
             BorderSide(color: palette.outlineVariant),
           ),
-          shape: MaterialStateProperty.all(
+          shape: WidgetStateProperty.all(
             RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadius.lg),
             ),
           ),
-          padding: MaterialStateProperty.all(
+          padding: WidgetStateProperty.all(
             const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
-          textStyle: MaterialStateProperty.all(
+          textStyle: WidgetStateProperty.all(
             textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
         ),
@@ -727,7 +707,7 @@ class AppStatusBadgeColors {
     }
 
     return AppStatusBadgeColors(
-      background: base.withValues(alpha: isDark ? 0.24 : 0.14),
+      background: base.withValues(alpha: isDark ? 0.18 : 0.14),
       foreground: base.withValues(alpha: isDark ? 0.96 : 0.92),
     );
   }
@@ -756,8 +736,208 @@ class AppStatusBadgeColors {
     }
 
     return AppStatusBadgeColors(
-      background: base.withValues(alpha: isDark ? 0.24 : 0.14),
+      background: base.withValues(alpha: isDark ? 0.18 : 0.14),
       foreground: base.withValues(alpha: isDark ? 0.96 : 0.92),
+    );
+  }
+}
+
+class AppButtonStyles {
+  AppButtonStyles._();
+
+  static ButtonStyle filled({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 52),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 18,
+      vertical: 14,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return FilledButton.styleFrom(
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      backgroundColor: palette.fill,
+      foregroundColor: palette.onFill,
+      disabledBackgroundColor: theme.colorScheme.surfaceContainerHigh,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    );
+  }
+
+  static ButtonStyle tonal({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 52),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 18,
+      vertical: 14,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return FilledButton.styleFrom(
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      backgroundColor: palette.surface,
+      foregroundColor: palette.accent,
+      disabledBackgroundColor: theme.colorScheme.surfaceContainerHigh,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: palette.border),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+    );
+  }
+
+  static ButtonStyle outlined({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 50),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 16,
+      vertical: 14,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return OutlinedButton.styleFrom(
+      foregroundColor: palette.accent,
+      backgroundColor: palette.surface,
+      disabledBackgroundColor: theme.colorScheme.surfaceContainerHigh,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      side: BorderSide(color: palette.border),
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+
+  static ButtonStyle text({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(0, 40),
+    EdgeInsetsGeometry padding = const EdgeInsets.symmetric(
+      horizontal: 10,
+      vertical: 6,
+    ),
+    TextStyle? textStyle,
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return TextButton.styleFrom(
+      foregroundColor: palette.accent,
+      backgroundColor: tone == AppStatusTone.neutral ? null : palette.surface,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      textStyle:
+          textStyle ??
+          theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+    );
+  }
+
+  static ButtonStyle icon({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+    Size minimumSize = const Size(40, 40),
+    EdgeInsetsGeometry padding = const EdgeInsets.all(10),
+  }) {
+    final palette = _AppButtonPalette.resolve(theme: theme, tone: tone);
+    return IconButton.styleFrom(
+      foregroundColor: palette.accent,
+      backgroundColor: palette.surface,
+      disabledForegroundColor: theme.colorScheme.onSurfaceVariant,
+      minimumSize: minimumSize,
+      padding: padding,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: palette.border),
+      ),
+    );
+  }
+
+  static Color accentColor({
+    required ThemeData theme,
+    AppStatusTone tone = AppStatusTone.info,
+  }) {
+    return _AppButtonPalette.resolve(theme: theme, tone: tone).accent;
+  }
+}
+
+class _AppButtonPalette {
+  final Color accent;
+  final Color surface;
+  final Color border;
+  final Color fill;
+  final Color onFill;
+
+  const _AppButtonPalette({
+    required this.accent,
+    required this.surface,
+    required this.border,
+    required this.fill,
+    required this.onFill,
+  });
+
+  static _AppButtonPalette resolve({
+    required ThemeData theme,
+    required AppStatusTone tone,
+  }) {
+    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    if (tone == AppStatusTone.neutral) {
+      final neutralFill = colorScheme.surfaceContainerHigh;
+      return _AppButtonPalette(
+        accent: colorScheme.onSurface,
+        surface: colorScheme.surfaceContainerLow,
+        border: colorScheme.outlineVariant,
+        fill: neutralFill,
+        onFill: colorScheme.onSurface,
+      );
+    }
+
+    final Color base = switch (tone) {
+      AppStatusTone.success => AppColors.success,
+      AppStatusTone.info => AppColors.analyticsAccent,
+      AppStatusTone.warning => AppColors.warning,
+      AppStatusTone.danger => AppColors.error,
+      AppStatusTone.neutral => colorScheme.onSurfaceVariant,
+    };
+    final fill = base;
+    final onFill = ThemeData.estimateBrightnessForColor(fill) == Brightness.dark
+        ? Colors.white
+        : colorScheme.onSurface;
+
+    return _AppButtonPalette(
+      accent: base.withValues(alpha: isDark ? 0.98 : 0.9),
+      surface: base.withValues(alpha: isDark ? 0.22 : 0.1),
+      border: base.withValues(alpha: isDark ? 0.4 : 0.22),
+      fill: fill,
+      onFill: onFill,
     );
   }
 }

@@ -24,6 +24,7 @@ import 'package:frontend/app/features/home/presentation/staff_attendance_provide
 
 class StaffAttendanceActionsContainer extends ConsumerWidget {
   final bool canManage;
+  final bool canClockSelf;
   final List<BusinessStaffProfileSummary> staffOptions;
   final String? selectedStaffId;
   final ValueChanged<String?> onStaffChanged;
@@ -32,6 +33,7 @@ class StaffAttendanceActionsContainer extends ConsumerWidget {
   const StaffAttendanceActionsContainer({
     super.key,
     required this.canManage,
+    required this.canClockSelf,
     required this.staffOptions,
     required this.selectedStaffId,
     required this.onStaffChanged,
@@ -42,6 +44,7 @@ class StaffAttendanceActionsContainer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return StaffAttendanceActionsSection(
       canManage: canManage,
+      canClockSelf: canClockSelf,
       staffOptions: staffOptions,
       selectedStaffId: selectedStaffId,
       onStaffChanged: onStaffChanged,

@@ -10,11 +10,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
+import 'package:frontend/app/features/home/presentation/chat_providers.dart';
 import 'package:frontend/app/theme/app_radius.dart';
 
-class HomeBottomNav extends StatelessWidget {
+class HomeBottomNav extends ConsumerWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
   final int cartBadgeCount;
@@ -31,9 +33,10 @@ class HomeBottomNav extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     AppDebug.log("HOME_NAV", "build()", extra: {"index": currentIndex});
     final colorScheme = Theme.of(context).colorScheme;
+    final chatBadgeCount = ref.watch(chatUnreadCountProvider);
 
     final destinations = <NavigationDestination>[
       const NavigationDestination(
@@ -53,9 +56,9 @@ class HomeBottomNav extends StatelessWidget {
           selectedIcon: Icon(Icons.receipt_long_rounded),
           label: "Orders",
         ),
-      const NavigationDestination(
-        icon: Icon(Icons.chat_bubble_outline_rounded),
-        selectedIcon: Icon(Icons.chat_bubble_rounded),
+      NavigationDestination(
+        icon: _ChatIcon(count: chatBadgeCount, selected: false),
+        selectedIcon: _ChatIcon(count: chatBadgeCount, selected: true),
         label: "Chat",
       ),
     ];
@@ -103,6 +106,51 @@ class HomeBottomNav extends StatelessWidget {
           destinations: destinations,
         ),
       ),
+    );
+  }
+}
+
+class _ChatIcon extends StatelessWidget {
+  final int count;
+  final bool selected;
+
+  const _ChatIcon({required this.count, required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final icon = selected
+        ? Icons.chat_bubble_rounded
+        : Icons.chat_bubble_outline_rounded;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Icon(icon),
+        if (count > 0)
+          Positioned(
+            right: -8,
+            top: -6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: colorScheme.error,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                border: Border.all(color: colorScheme.surface, width: 1.2),
+              ),
+              constraints: const BoxConstraints(minWidth: 18, minHeight: 16),
+              child: Text(
+                count > 99 ? "99+" : "$count",
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onError,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 9.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

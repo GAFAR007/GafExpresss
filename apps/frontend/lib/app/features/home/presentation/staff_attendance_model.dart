@@ -20,7 +20,10 @@ const String _logKpi = "buildKpis()";
 
 const String _keyId = "_id";
 const String _keyAltId = "id";
+const String _keyPlanId = "planId";
+const String _keyTaskId = "taskId";
 const String _keyStaffProfileId = "staffProfileId";
+const String _keyWorkDate = "workDate";
 const String _keyClockInAt = "clockInAt";
 const String _keyClockOutAt = "clockOutAt";
 const String _keyDurationMinutes = "durationMinutes";
@@ -34,9 +37,17 @@ const String _keyProofMimeType = "proofMimeType";
 const String _keyProofSizeBytes = "proofSizeBytes";
 const String _keyProofUploadedAt = "proofUploadedAt";
 const String _keyProofUploadedBy = "proofUploadedBy";
+const String _keyProofEntryUrl = "url";
+const String _keyProofEntryPublicId = "publicId";
+const String _keyProofEntryFilename = "filename";
+const String _keyProofEntryMimeType = "mimeType";
+const String _keyProofEntrySizeBytes = "sizeBytes";
+const String _keyProofEntryUploadedAt = "uploadedAt";
+const String _keyProofEntryUploadedBy = "uploadedBy";
+const String _keyProofs = "proofs";
+const String _keyUnitIndex = "unitIndex";
+const String _keyType = "type";
 const String _keyClockOutAudit = "clockOutAudit";
-const String _keyPlanId = "planId";
-const String _keyTaskId = "taskId";
 const String _keyTaskTitle = "taskTitle";
 const String _keyStaffName = "staffName";
 const String _keyUnitId = "unitId";
@@ -44,11 +55,89 @@ const String _keyUnitLabel = "unitLabel";
 const String _keyProgressUnitLabel = "progressUnitLabel";
 const String _keyUnitsCompleted = "unitsCompleted";
 const String _keyUnitsRemaining = "unitsRemaining";
+const String _keyNumberOfUnitsCompleted = "numberOfUnitsCompleted";
+const String _keyRequiredProofs = "requiredProofs";
+const String _keyUnitType = "unitType";
 const String _keyQuantityActivityType = "quantityActivityType";
 const String _keyQuantityAmount = "quantityAmount";
 const String _keyQuantityUnit = "quantityUnit";
-const String _keyWorkDate = "workDate";
 const String _keyCapturedAt = "capturedAt";
+const String _keyProofStatus = "proofStatus";
+const String _keySessionStatus = "sessionStatus";
+const String _keyUpdatedAt = "updatedAt";
+
+class StaffAttendanceProof {
+  final int unitIndex;
+  final String url;
+  final String publicId;
+  final String filename;
+  final String mimeType;
+  final String type;
+  final int? sizeBytes;
+  final DateTime? uploadedAt;
+  final String? uploadedBy;
+
+  const StaffAttendanceProof({
+    required this.unitIndex,
+    required this.url,
+    required this.publicId,
+    required this.filename,
+    required this.mimeType,
+    required this.type,
+    required this.sizeBytes,
+    required this.uploadedAt,
+    required this.uploadedBy,
+  });
+
+  factory StaffAttendanceProof.fromJson(Map<String, dynamic> json) {
+    return StaffAttendanceProof(
+      unitIndex: _parseNullableInt(json[_keyUnitIndex]) ?? 1,
+      url: (json[_keyProofEntryUrl] ?? json[_keyProofUrl] ?? "").toString(),
+      publicId: (json[_keyProofEntryPublicId] ?? json[_keyProofPublicId] ?? "")
+          .toString(),
+      filename: (json[_keyProofEntryFilename] ?? json[_keyProofFilename] ?? "")
+          .toString(),
+      mimeType: (json[_keyProofEntryMimeType] ?? json[_keyProofMimeType] ?? "")
+          .toString(),
+      type: (json[_keyType] ?? "").toString(),
+      sizeBytes: _parseNullableInt(
+        json[_keyProofEntrySizeBytes] ?? json[_keyProofSizeBytes],
+      ),
+      uploadedAt: _parseDate(
+        json[_keyProofEntryUploadedAt] ?? json[_keyProofUploadedAt],
+      ),
+      uploadedBy: _parseNullableString(
+        json[_keyProofEntryUploadedBy] ?? json[_keyProofUploadedBy],
+      ),
+    );
+  }
+
+  bool get isUploaded => url.trim().isNotEmpty && filename.trim().isNotEmpty;
+
+  bool get isImage {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.startsWith("image/")) {
+      return true;
+    }
+    final normalizedFilename = filename.trim().toLowerCase();
+    return normalizedFilename.endsWith(".png") ||
+        normalizedFilename.endsWith(".jpg") ||
+        normalizedFilename.endsWith(".jpeg") ||
+        normalizedFilename.endsWith(".webp");
+  }
+
+  bool get isVideo {
+    final normalizedMimeType = mimeType.trim().toLowerCase();
+    if (normalizedMimeType.startsWith("video/")) {
+      return true;
+    }
+    final normalizedFilename = filename.trim().toLowerCase();
+    return normalizedFilename.endsWith(".mp4") ||
+        normalizedFilename.endsWith(".mov") ||
+        normalizedFilename.endsWith(".webm") ||
+        normalizedFilename.endsWith(".m4v");
+  }
+}
 
 class StaffAttendanceClockOutAudit {
   final DateTime? workDate;
@@ -62,6 +151,8 @@ class StaffAttendanceClockOutAudit {
   final String progressUnitLabel;
   final num? unitsCompleted;
   final num? unitsRemaining;
+  final int? requiredProofs;
+  final String unitType;
   final String quantityActivityType;
   final num? quantityAmount;
   final String quantityUnit;
@@ -80,6 +171,8 @@ class StaffAttendanceClockOutAudit {
     required this.progressUnitLabel,
     required this.unitsCompleted,
     required this.unitsRemaining,
+    required this.requiredProofs,
+    required this.unitType,
     required this.quantityActivityType,
     required this.quantityAmount,
     required this.quantityUnit,
@@ -100,6 +193,8 @@ class StaffAttendanceClockOutAudit {
       progressUnitLabel: (json[_keyProgressUnitLabel] ?? "").toString(),
       unitsCompleted: _parseNullableNum(json[_keyUnitsCompleted]),
       unitsRemaining: _parseNullableNum(json[_keyUnitsRemaining]),
+      requiredProofs: _parseNullableInt(json[_keyRequiredProofs]),
+      unitType: (json[_keyUnitType] ?? "").toString(),
       quantityActivityType: (json[_keyQuantityActivityType] ?? "").toString(),
       quantityAmount: _parseNullableNum(json[_keyQuantityAmount]),
       quantityUnit: (json[_keyQuantityUnit] ?? "").toString(),
@@ -111,7 +206,10 @@ class StaffAttendanceClockOutAudit {
 
 class StaffAttendanceRecord {
   final String id;
+  final String? planId;
+  final String? taskId;
   final String staffProfileId;
+  final DateTime? workDate;
   final DateTime clockInAt;
   final DateTime? clockOutAt;
   final int? durationMinutes;
@@ -125,11 +223,21 @@ class StaffAttendanceRecord {
   final int? proofSizeBytes;
   final DateTime? proofUploadedAt;
   final String? proofUploadedBy;
+  final List<StaffAttendanceProof> proofs;
   final StaffAttendanceClockOutAudit? clockOutAudit;
+  final String proofStatus;
+  final String sessionStatus;
+  final num? numberOfUnitsCompleted;
+  final int? requiredProofs;
+  final String unitType;
+  final DateTime? updatedAt;
 
   const StaffAttendanceRecord({
     required this.id,
+    required this.planId,
+    required this.taskId,
     required this.staffProfileId,
+    required this.workDate,
     required this.clockInAt,
     required this.clockOutAt,
     required this.durationMinutes,
@@ -143,7 +251,14 @@ class StaffAttendanceRecord {
     required this.proofSizeBytes,
     required this.proofUploadedAt,
     required this.proofUploadedBy,
+    required this.proofs,
     required this.clockOutAudit,
+    required this.proofStatus,
+    required this.sessionStatus,
+    required this.numberOfUnitsCompleted,
+    required this.requiredProofs,
+    required this.unitType,
+    required this.updatedAt,
   });
 
   factory StaffAttendanceRecord.fromJson(Map<String, dynamic> json) {
@@ -154,8 +269,11 @@ class StaffAttendanceRecord {
 
     return StaffAttendanceRecord(
       id: id,
+      planId: _parseNullableString(json[_keyPlanId]),
+      taskId: _parseNullableString(json[_keyTaskId]),
       // WHY: Always coerce ids to strings for UI keys.
       staffProfileId: (json[_keyStaffProfileId] ?? "").toString(),
+      workDate: _parseDate(json[_keyWorkDate]),
       // WHY: Fallback prevents crashes if backend sends null dates.
       clockInAt: _parseDate(json[_keyClockInAt]) ?? DateTime.now(),
       clockOutAt: _parseDate(json[_keyClockOutAt]),
@@ -170,12 +288,88 @@ class StaffAttendanceRecord {
       proofSizeBytes: _parseNullableInt(json[_keyProofSizeBytes]),
       proofUploadedAt: _parseDate(json[_keyProofUploadedAt]),
       proofUploadedBy: _parseNullableString(json[_keyProofUploadedBy]),
+      proofs: _parseProofs(json[_keyProofs]),
       clockOutAudit: _parseClockOutAudit(json[_keyClockOutAudit]),
+      proofStatus: _parseNullableString(json[_keyProofStatus]) ?? "",
+      sessionStatus: _parseNullableString(json[_keySessionStatus]) ?? "",
+      numberOfUnitsCompleted: _parseNullableNum(
+        json[_keyNumberOfUnitsCompleted],
+      ),
+      requiredProofs: _parseNullableInt(json[_keyRequiredProofs]),
+      unitType: _parseNullableString(json[_keyUnitType]) ?? "",
+      updatedAt: _parseDate(json[_keyUpdatedAt]),
     );
   }
 
-  // WHY: Open sessions are the ones without a clock-out time.
-  bool get isOpen => clockOutAt == null;
+  List<StaffAttendanceProof> get effectiveProofs {
+    if (proofs.isNotEmpty) {
+      return proofs.where((proof) => proof.isUploaded).toList();
+    }
+    final hasLegacyProof =
+        proofUrl?.trim().isNotEmpty == true &&
+        proofFilename?.trim().isNotEmpty == true;
+    if (!hasLegacyProof) {
+      return const <StaffAttendanceProof>[];
+    }
+    return <StaffAttendanceProof>[
+      StaffAttendanceProof(
+        unitIndex: 1,
+        url: proofUrl!.trim(),
+        publicId: proofPublicId?.trim() ?? "",
+        filename: proofFilename!.trim(),
+        mimeType: proofMimeType?.trim() ?? "",
+        type: _resolveProofType(proofMimeType),
+        sizeBytes: proofSizeBytes,
+        uploadedAt: proofUploadedAt,
+        uploadedBy: proofUploadedBy,
+      ),
+    ];
+  }
+
+  int get effectiveRequiredProofs {
+    final auditRequired = clockOutAudit?.requiredProofs;
+    if (auditRequired != null && auditRequired > 0) {
+      return auditRequired;
+    }
+    if (requiredProofs != null && requiredProofs! > 0) {
+      return requiredProofs!;
+    }
+    return clockOutAt == null ? 0 : 1;
+  }
+
+  String get resolvedProofStatus {
+    final normalized = proofStatus.trim().toLowerCase();
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+    if (effectiveRequiredProofs <= 0) {
+      return "not_required";
+    }
+    return effectiveProofs.length >= effectiveRequiredProofs
+        ? "complete"
+        : "missing";
+  }
+
+  String get resolvedSessionStatus {
+    final normalized = sessionStatus.trim().toLowerCase();
+    if (normalized.isNotEmpty && normalized != "active") {
+      return normalized;
+    }
+    if (clockOutAt == null) {
+      return "open";
+    }
+    return needsProof ? "pending_proof" : "completed";
+  }
+
+  bool get isOpen => resolvedSessionStatus == "open";
+
+  bool get isPendingProof => resolvedSessionStatus == "pending_proof";
+
+  bool get isCompleted => resolvedSessionStatus == "completed";
+
+  bool get needsProof =>
+      effectiveRequiredProofs > 0 &&
+      effectiveProofs.length < effectiveRequiredProofs;
 
   int? get effectiveDurationMinutes {
     // WHY: Prefer server-calculated duration for accuracy.
@@ -210,7 +404,7 @@ class StaffAttendanceKpiSummary {
 
     // WHY: Derive counts to power KPI tiles without backend summaries.
     final total = records.length;
-    final completed = records.where((r) => !r.isOpen).length;
+    final completed = records.where((r) => r.isCompleted).length;
     final open = total - completed;
     final durations = records
         .map((record) => record.effectiveDurationMinutes)
@@ -238,6 +432,20 @@ DateTime? _parseDate(dynamic value) {
   return DateTime.tryParse(value.toString());
 }
 
+String _resolveProofType(String? mimeType) {
+  final normalizedMimeType = mimeType?.trim().toLowerCase() ?? "";
+  if (normalizedMimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/")) {
+    return "video";
+  }
+  if (normalizedMimeType.isNotEmpty) {
+    return "document";
+  }
+  return "";
+}
+
 int? _parseNullableInt(dynamic value) {
   if (value == null) return null;
   if (value is int) return value;
@@ -255,6 +463,22 @@ String? _parseNullableString(dynamic value) {
   final text = value.toString();
   if (text.trim().isEmpty) return null;
   return text;
+}
+
+List<StaffAttendanceProof> _parseProofs(dynamic value) {
+  if (value is! List) {
+    return const <StaffAttendanceProof>[];
+  }
+  return value
+      .whereType<Map>()
+      .map(
+        (item) => item.map((key, fieldValue) {
+          return MapEntry(key.toString(), fieldValue);
+        }),
+      )
+      .map(StaffAttendanceProof.fromJson)
+      .toList()
+    ..sort((left, right) => left.unitIndex.compareTo(right.unitIndex));
 }
 
 StaffAttendanceClockOutAudit? _parseClockOutAudit(dynamic value) {

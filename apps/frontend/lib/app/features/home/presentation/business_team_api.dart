@@ -11,6 +11,7 @@
 /// - GET /business/users/lookup (userId/email/phone)
 /// - PATCH /business/users/:id/role (staff/tenant)
 /// - POST /business/invites (email invite link)
+/// - POST /business/tenant/request-links (copyable tenant request link)
 /// - POST /business/invites/accept (accept invite)
 ///
 /// DEBUGGING:
@@ -33,10 +34,7 @@ class BusinessInviteAcceptance {
   final BusinessTeamUser user;
   final String? token;
 
-  const BusinessInviteAcceptance({
-    required this.user,
-    required this.token,
-  });
+  const BusinessInviteAcceptance({required this.user, required this.token});
 }
 
 class BusinessTeamApi {
@@ -114,7 +112,11 @@ class BusinessTeamApi {
     AppDebug.log(
       "BUSINESS_TEAM_API",
       "updateUserRole() start",
-      extra: {"userId": userId, "role": role, "hasEstate": estateAssetId != null},
+      extra: {
+        "userId": userId,
+        "role": role,
+        "hasEstate": estateAssetId != null,
+      },
     );
 
     final resp = await _dio.patch(
@@ -150,6 +152,7 @@ class BusinessTeamApi {
     String? staffRole,
     String? estateAssetId,
     String? agreementText,
+    bool sendEmail = true,
   }) async {
     AppDebug.log(
       "BUSINESS_TEAM_API",
@@ -158,6 +161,7 @@ class BusinessTeamApi {
         "role": role,
         "staffRole": staffRole,
         "hasEstate": estateAssetId != null,
+        "sendEmail": sendEmail,
       },
     );
 
@@ -166,6 +170,7 @@ class BusinessTeamApi {
       data: {
         "email": email.trim(),
         "role": role,
+        "sendEmail": sendEmail,
         if (staffRole != null && staffRole.trim().isNotEmpty)
           "staffRole": staffRole.trim(),
         if (estateAssetId != null && estateAssetId.trim().isNotEmpty)
@@ -180,7 +185,39 @@ class BusinessTeamApi {
     AppDebug.log(
       "BUSINESS_TEAM_API",
       "createInvite() success",
-      extra: {"email": email.trim(), "role": role},
+      extra: {"email": email.trim(), "role": role, "sendEmail": sendEmail},
+    );
+
+    return data;
+  }
+
+  /// ------------------------------------------------------
+  /// CREATE TENANT REQUEST LINK
+  /// ------------------------------------------------------
+  Future<Map<String, dynamic>> createTenantRequestLink({
+    required String? token,
+    required String estateAssetId,
+  }) async {
+    AppDebug.log(
+      "BUSINESS_TEAM_API",
+      "createTenantRequestLink() start",
+      extra: {"hasEstate": estateAssetId.trim().isNotEmpty},
+    );
+
+    final resp = await _dio.post(
+      "/business/tenant/request-links",
+      data: {"estateAssetId": estateAssetId.trim()},
+      options: _authOptions(token),
+    );
+
+    final data = resp.data as Map<String, dynamic>;
+    AppDebug.log(
+      "BUSINESS_TEAM_API",
+      "createTenantRequestLink() success",
+      extra: {
+        "hasRequestLink":
+            data["requestLink"]?.toString().trim().isNotEmpty == true,
+      },
     );
 
     return data;

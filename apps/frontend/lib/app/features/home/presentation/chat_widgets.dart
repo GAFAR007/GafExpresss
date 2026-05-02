@@ -50,6 +50,7 @@ const String _kAttachmentOpenTap = "attachment_open_tap";
 const String _kAttachmentOpenFail = "attachment_open_fail";
 const String _kAttachmentOpenSuccess = "attachment_open_success";
 const String _kAttachmentTypeImage = "image";
+const String _kAttachmentTypeAudio = "audio";
 const int _kBytesInKb = 1024;
 const int _kBytesInMb = 1024 * 1024;
 
@@ -69,6 +70,7 @@ class _ChatAttachmentCopy {
   static const String fallbackName = "Attachment";
   static const String imageLabel = "Image";
   static const String documentLabel = "Document";
+  static const String voiceNoteLabel = "Voice note";
   static const String openFail = "Unable to open attachment.";
   static const String missingUrl = "Attachment link is unavailable.";
 }
@@ -613,6 +615,10 @@ class ChatConversationTile extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (conversation.unreadCount > 0) ...[
+                  const SizedBox(height: 6),
+                  _UnreadCountBadge(count: conversation.unreadCount),
+                ],
                 const SizedBox(height: _kSpacingXs),
                 Container(
                   padding: const EdgeInsets.all(4),
@@ -631,6 +637,37 @@ class ChatConversationTile extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UnreadCountBadge extends StatelessWidget {
+  final int count;
+
+  const _UnreadCountBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = count > 99 ? "99+" : "$count";
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.18)),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: scheme.onPrimaryContainer,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.02,
         ),
       ),
     );
@@ -665,39 +702,33 @@ class ChatMessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     final label = isMine
         ? "You"
         : (senderLabel.trim().isNotEmpty ? senderLabel.trim() : "Message");
-    final accentColor = _messageAccentForRole(
-      isMine: isMine,
-      senderRoleLabel: senderRoleLabel,
-      fallbackName: label,
-      scheme: scheme,
-    );
     final timeLabel = _formatConversationTime(message.createdAt);
     final isAssistantMessage =
         (message.eventData?["presentation"] ?? "").toString() == "assistant";
     final isSystemMessage =
         message.type == "system" || message.eventType.trim().isNotEmpty;
     final outerMargin = EdgeInsets.only(
-      top: mergeWithPrevious ? 3 : 10,
-      bottom: mergeWithNext ? 2 : 10,
+      top: mergeWithPrevious ? 2 : 6,
+      bottom: mergeWithNext ? 1 : 6,
     );
 
     if (isAssistantMessage) {
       const assistantAccent = Color(0xFF1FE0C5);
-      final bubbleColor = Color.alphaBlend(
-        assistantAccent.withValues(alpha: 0.18),
-        theme.colorScheme.surfaceContainerLow,
-      );
+      final bubbleColor = isDark
+          ? const Color(0xFF143238)
+          : const Color(0xFFE4FBF7);
       final assistantName = (message.eventData?["assistantName"] ?? "Amara")
           .toString();
       return Align(
         alignment: Alignment.centerLeft,
         child: Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
           margin: outerMargin,
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 408),
           decoration: BoxDecoration(
             color: bubbleColor,
             borderRadius: _bubbleRadius(
@@ -705,12 +736,14 @@ class ChatMessageBubble extends StatelessWidget {
               mergeWithPrevious: mergeWithPrevious,
               mergeWithNext: mergeWithNext,
             ),
-            border: Border.all(color: assistantAccent.withValues(alpha: 0.42)),
+            border: Border.all(
+              color: isDark ? const Color(0xFF235158) : const Color(0xFF9BDED2),
+            ),
             boxShadow: [
               BoxShadow(
-                color: assistantAccent.withValues(alpha: 0.12),
-                blurRadius: 16,
-                offset: const Offset(0, 10),
+                color: assistantAccent.withValues(alpha: isDark ? 0.1 : 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
@@ -720,35 +753,39 @@ class ChatMessageBubble extends StatelessWidget {
               if (showSenderLabel)
                 DecoratedBox(
                   decoration: BoxDecoration(
-                    color: assistantAccent.withValues(alpha: 0.18),
+                    color: isDark
+                        ? const Color(0xFF1C4A51)
+                        : const Color(0xFFBFECE3),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+                      horizontal: 8,
+                      vertical: 3,
                     ),
                     child: Text(
                       "$assistantName • Customer care",
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontWeight: FontWeight.w700,
+                        letterSpacing: 0,
                         color: assistantAccent,
                       ),
                     ),
                   ),
                 ),
               if (message.body.isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   message.body,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurface,
-                    height: 1.38,
+                    fontWeight: FontWeight.w500,
+                    height: 1.42,
                   ),
                 ),
               ],
               if (message.attachments.isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -759,7 +796,7 @@ class ChatMessageBubble extends StatelessWidget {
                       .toList(),
                 ),
               ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Align(
                 alignment: Alignment.centerRight,
                 child: Text(
@@ -777,24 +814,32 @@ class ChatMessageBubble extends StatelessWidget {
     }
     if (isSystemMessage) {
       final systemAccent = _systemEventAccent(message.eventType);
-      final systemBackground = Color.alphaBlend(
-        systemAccent.withValues(alpha: 0.18),
-        theme.colorScheme.surfaceContainerHigh,
-      );
+      final systemBackground = isDark
+          ? _blendMessageSurface(
+              systemAccent,
+              theme.colorScheme.surfaceContainerHigh,
+              darkAlpha: 0.24,
+              lightAlpha: 0.1,
+              isDark: isDark,
+            )
+          : Color.alphaBlend(
+              systemAccent.withValues(alpha: 0.14),
+              Colors.white,
+            );
       return Center(
         child: Container(
           margin: outerMargin,
-          padding: const EdgeInsets.all(14),
-          constraints: const BoxConstraints(maxWidth: 360),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          constraints: const BoxConstraints(maxWidth: 344),
           decoration: BoxDecoration(
             color: systemBackground,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: systemAccent.withValues(alpha: 0.34)),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: systemAccent.withValues(alpha: 0.24)),
             boxShadow: [
               BoxShadow(
-                color: systemAccent.withValues(alpha: 0.1),
-                blurRadius: 12,
-                offset: const Offset(0, 8),
+                color: systemAccent.withValues(alpha: 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 5),
               ),
             ],
           ),
@@ -810,17 +855,18 @@ class ChatMessageBubble extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
               if (message.body.isNotEmpty) ...[
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
                   message.body,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurface,
+                    height: 1.28,
                   ),
                   textAlign: TextAlign.center,
                 ),
               ],
               if (message.attachments.isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
@@ -831,7 +877,7 @@ class ChatMessageBubble extends StatelessWidget {
                       .toList(),
                 ),
               ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 timeLabel,
                 style: theme.textTheme.labelSmall?.copyWith(
@@ -846,15 +892,28 @@ class ChatMessageBubble extends StatelessWidget {
     }
 
     final bubbleColor = isMine
-        ? Color.alphaBlend(
-            const Color(0xFF6C88FF).withValues(alpha: 0.56),
-            scheme.surface,
+        ? (isDark ? const Color(0xFF6079DA) : const Color(0xFF7189E2))
+        : (isDark ? const Color(0xFF182338) : const Color(0xFFF5F8FF));
+    final bubbleGradient = isMine
+        ? const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF3366F6), Color(0xFF1D4ED8)],
           )
-        : Color.alphaBlend(
-            accentColor.withValues(alpha: 0.18),
-            scheme.surfaceContainerLow,
+        : isDark
+        ? null
+        : const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFFFFFFF), Color(0xFFF3F7FF)],
           );
-    final textColor = isMine ? Colors.white : scheme.onSurface;
+    final textColor = isMine ? Colors.white : const Color(0xFF0F172A);
+    final senderPillBackground = isMine
+        ? Colors.white.withValues(alpha: 0.18)
+        : (isDark ? const Color(0xFF26334A) : const Color(0xFFE0E9FB));
+    final senderPillText = isMine
+        ? Colors.white
+        : (isDark ? const Color(0xFFDCE6FA) : const Color(0xFF29457D));
     final namePillLabel = isMine
         ? "You"
         : senderRoleLabel.trim().isNotEmpty
@@ -869,11 +928,12 @@ class ChatMessageBubble extends StatelessWidget {
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        padding: const EdgeInsets.fromLTRB(14, 11, 14, 9),
         margin: outerMargin,
-        constraints: const BoxConstraints(maxWidth: 430),
+        constraints: const BoxConstraints(maxWidth: 418),
         decoration: BoxDecoration(
-          color: bubbleColor,
+          color: isMine ? null : bubbleColor,
+          gradient: bubbleGradient,
           borderRadius: _bubbleRadius(
             isMine: isMine,
             mergeWithPrevious: mergeWithPrevious,
@@ -881,14 +941,16 @@ class ChatMessageBubble extends StatelessWidget {
           ),
           border: Border.all(
             color: isMine
-                ? Colors.white.withValues(alpha: 0.08)
-                : accentColor.withValues(alpha: 0.28),
+                ? (isDark ? const Color(0xFF7E94E8) : const Color(0xFF2E5DEE))
+                : (isDark ? const Color(0xFF273550) : const Color(0xFFD6E3F7)),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.14),
-              blurRadius: 16,
-              offset: const Offset(0, 10),
+              color: (isDark ? Colors.black : scheme.shadow).withValues(
+                alpha: isDark ? 0.12 : 0.09,
+              ),
+              blurRadius: isDark ? 10 : 12,
+              offset: const Offset(0, 5),
             ),
           ],
         ),
@@ -898,36 +960,36 @@ class ChatMessageBubble extends StatelessWidget {
             if (showSenderLabel)
               DecoratedBox(
                 decoration: BoxDecoration(
-                  color: isMine
-                      ? Colors.white.withValues(alpha: 0.14)
-                      : accentColor.withValues(alpha: 0.14),
+                  color: senderPillBackground,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
+                    horizontal: 8,
+                    vertical: 3,
                   ),
                   child: Text(
                     namePillLabel,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: isMine ? Colors.white : accentColor,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: senderPillText,
                       fontWeight: FontWeight.w800,
+                      letterSpacing: 0,
                     ),
                   ),
                 ),
               ),
-            SizedBox(height: showSenderLabel ? 8 : 0),
+            SizedBox(height: showSenderLabel ? 6 : 0),
             if (message.body.isNotEmpty)
               Text(
                 message.body,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: textColor,
-                  height: 1.38,
+                  fontWeight: FontWeight.w500,
+                  height: 1.42,
                 ),
               ),
             if (message.attachments.isNotEmpty) ...[
-              if (message.body.isNotEmpty) const SizedBox(height: 8),
+              if (message.body.isNotEmpty) const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -938,10 +1000,10 @@ class ChatMessageBubble extends StatelessWidget {
                     .toList(),
               ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Align(alignment: Alignment.centerRight, child: statusRow),
             if (status == ChatMessageStatus.failed && onRetry != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Align(
                 alignment: isMine
                     ? Alignment.centerRight
@@ -989,6 +1051,18 @@ String _systemEventLabel(String eventType) {
       return "Request Cancelled";
     case "seller_attending":
       return "Seller Attending";
+    case "call_started":
+      return "Voice Call Started";
+    case "call_ended":
+      return "Voice Call Ended";
+    case "call_declined":
+      return "Voice Call Declined";
+    case "call_missed":
+      return "Missed Voice Call";
+    case "call_cancelled":
+      return "Voice Call Cancelled";
+    case "call_busy":
+      return "Line Busy";
     default:
       return "System Update";
   }
@@ -1008,33 +1082,32 @@ Color _systemEventAccent(String eventType) {
       return AppColors.error;
     case "seller_attending":
       return AppColors.paid;
+    case "call_started":
+      return AppColors.businessAccent;
+    case "call_ended":
+      return AppColors.recordsAccent;
+    case "call_declined":
+    case "call_cancelled":
+      return AppColors.error;
+    case "call_missed":
+    case "call_busy":
+      return AppColors.commerceAccent;
     default:
       return AppColors.recordsAccent;
   }
 }
 
-Color _messageAccentForRole({
-  required bool isMine,
-  required String senderRoleLabel,
-  required String fallbackName,
-  required ColorScheme scheme,
+Color _blendMessageSurface(
+  Color accent,
+  Color base, {
+  required double darkAlpha,
+  required double lightAlpha,
+  required bool isDark,
 }) {
-  if (isMine) {
-    return const Color(0xFF89A4FF);
-  }
-
-  final normalizedRole = senderRoleLabel.trim().toLowerCase();
-  if (normalizedRole.contains("customer") ||
-      normalizedRole.contains("tenant")) {
-    return const Color(0xFF5E8CFF);
-  }
-  if (normalizedRole.contains("owner") ||
-      normalizedRole.contains("manager") ||
-      normalizedRole.contains("care") ||
-      normalizedRole.contains("staff")) {
-    return const Color(0xFFFF8A5B);
-  }
-  return _accentForName(fallbackName);
+  return Color.alphaBlend(
+    accent.withValues(alpha: isDark ? darkAlpha : lightAlpha),
+    base,
+  );
 }
 
 String _rolePresentation(String value) {
@@ -1056,10 +1129,10 @@ BorderRadius _bubbleRadius({
   required bool mergeWithNext,
 }) {
   return BorderRadius.only(
-    topLeft: Radius.circular(isMine ? 24 : (mergeWithPrevious ? 14 : 24)),
-    topRight: Radius.circular(isMine ? (mergeWithPrevious ? 14 : 24) : 24),
-    bottomLeft: Radius.circular(isMine ? 24 : (mergeWithNext ? 14 : 24)),
-    bottomRight: Radius.circular(isMine ? (mergeWithNext ? 14 : 24) : 24),
+    topLeft: Radius.circular(isMine ? 20 : (mergeWithPrevious ? 12 : 20)),
+    topRight: Radius.circular(isMine ? (mergeWithPrevious ? 12 : 20) : 20),
+    bottomLeft: Radius.circular(isMine ? 20 : (mergeWithNext ? 12 : 20)),
+    bottomRight: Radius.circular(isMine ? (mergeWithNext ? 12 : 20) : 20),
   );
 }
 
@@ -1094,12 +1167,12 @@ class _MessageStatusRow extends StatelessWidget {
           timeLabel,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
             color: timeColor,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w600,
           ),
         ),
         if (isMine && icon != null) ...[
-          const SizedBox(width: 6),
-          Icon(icon, size: 15, color: iconColor),
+          const SizedBox(width: 4),
+          Icon(icon, size: 14, color: iconColor),
         ],
       ],
     );
@@ -1272,6 +1345,7 @@ class _AttachmentPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isImage = _isImageAttachment(attachment);
+    final isAudio = _isAudioAttachment(attachment);
     // WHY: Show a neutral placeholder for documents and unknown types.
     if (!isImage) {
       return Container(
@@ -1282,9 +1356,11 @@ class _AttachmentPreview extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
-          Icons.insert_drive_file,
+          isAudio ? Icons.mic_rounded : Icons.insert_drive_file,
           size: 20,
-          color: theme.colorScheme.onSurfaceVariant,
+          color: isAudio
+              ? const Color(0xFF1D4ED8)
+              : theme.colorScheme.onSurfaceVariant,
         ),
       );
     }
@@ -1386,6 +1462,9 @@ String _attachmentTypeLabel(ChatAttachment attachment) {
   if (_isImageAttachment(attachment)) {
     return _ChatAttachmentCopy.imageLabel;
   }
+  if (_isAudioAttachment(attachment)) {
+    return _ChatAttachmentCopy.voiceNoteLabel;
+  }
   // WHY: Default unknown types to document for safe user expectations.
   if (attachment.mimeType.isNotEmpty || attachment.type.isNotEmpty) {
     return _ChatAttachmentCopy.documentLabel;
@@ -1399,6 +1478,13 @@ bool _isImageAttachment(ChatAttachment attachment) {
     return true;
   }
   return attachment.mimeType.toLowerCase().startsWith("image/");
+}
+
+bool _isAudioAttachment(ChatAttachment attachment) {
+  if (attachment.type.toLowerCase() == _kAttachmentTypeAudio) {
+    return true;
+  }
+  return attachment.mimeType.toLowerCase().startsWith("audio/");
 }
 
 String _formatBytes(int bytes) {

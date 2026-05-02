@@ -21,6 +21,7 @@ import 'package:frontend/app/core/debug/app_debug.dart';
 import '../app/theme/app_theme.dart';
 import 'package:frontend/app/theme/app_theme_mode.dart';
 import 'router.dart';
+import 'features/home/presentation/chat_call_overlay.dart';
 import 'features/home/presentation/presentation/providers/auth_providers.dart';
 
 class AppRoot extends ConsumerStatefulWidget {
@@ -31,32 +32,53 @@ class AppRoot extends ConsumerStatefulWidget {
 }
 
 class _AppRootState extends ConsumerState<AppRoot> {
+  bool _bootReady = false;
+
   @override
   void initState() {
     super.initState();
+    _bootstrapApp();
+  }
 
-    // WHY: restore session once on app boot.
-    Future.microtask(() async {
-      AppDebug.log("BOOT", "Restoring session");
-      await ref.read(authSessionProvider.notifier).restoreSession();
+  Future<void> _bootstrapApp() async {
+    AppDebug.log("BOOT", "bootstrap() start");
+    try {
+      await Future.wait([
+        ref.read(authSessionProvider.notifier).restoreSession(),
+        ref.read(appThemeModeProvider.notifier).load(),
+      ]);
+    } catch (error) {
+      AppDebug.log("BOOT", "bootstrap() failed", extra: {"error": "$error"});
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _bootReady = true;
     });
-
-    // WHY: Load persisted theme mode once on app boot.
-    Future.microtask(() async {
-      AppDebug.log("THEME", "Boot load requested");
-      await ref.read(appThemeModeProvider.notifier).load();
-    });
+    AppDebug.log("BOOT", "bootstrap() complete");
   }
 
   @override
   Widget build(BuildContext context) {
-    AppDebug.log("BOOT", "AppRoot build()");
+    AppDebug.log("BOOT", "AppRoot build()", extra: {"bootReady": _bootReady});
+    final mode = ref.watch(appThemeModeProvider);
+    final themeMode = mode == AppThemeMode.dark
+        ? ThemeMode.dark
+        : ThemeMode.light;
+    AppDebug.log("THEME", "AppRoot theme", extra: {"mode": mode.name});
+
+    if (!_bootReady) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light(),
+        darkTheme: AppTheme.dark(),
+        themeMode: themeMode,
+        home: const Scaffold(body: Center(child: CircularProgressIndicator())),
+      );
+    }
 
     final router = ref.watch(routerProvider);
-    final mode = ref.watch(appThemeModeProvider);
-    final themeMode =
-        mode == AppThemeMode.dark ? ThemeMode.dark : ThemeMode.light;
-    AppDebug.log("THEME", "AppRoot theme", extra: {"mode": mode.name});
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
@@ -64,6 +86,17 @@ class _AppRootState extends ConsumerState<AppRoot> {
       darkTheme: AppTheme.dark(),
       themeMode: themeMode,
       routerConfig: router,
+      builder: (context, child) {
+        return Stack(
+          // WHY: Route pages must receive tight screen constraints; otherwise
+          // nested Scaffolds can shrink and pull footer actions under system UI.
+          fit: StackFit.expand,
+          children: [
+            child ?? const SizedBox.shrink(),
+            const ChatCallOverlayHost(),
+          ],
+        );
+      },
     );
   }
 }

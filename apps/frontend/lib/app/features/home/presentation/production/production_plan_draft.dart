@@ -200,6 +200,7 @@ const String _extraIssueTypeKey = "issueType";
 const List<String> productionPlantingMaterialTypeValues = [
   "seed",
   "seedling",
+  "stand",
   "root",
   "stem",
   "cutting",
@@ -225,6 +226,7 @@ const List<String> productionPlantingTargetUnitValues = [
   "tray",
   "seed",
   "seedling",
+  "stand",
   "piece",
   "plant",
 ];
@@ -261,6 +263,9 @@ String formatProductionPlantingMaterialType(String value) {
       return "Seed";
     case "seedling":
       return "Seedling";
+    case "stand":
+    case "stands":
+      return "Stand";
     case "root":
       return "Root";
     case "stem":
@@ -317,6 +322,8 @@ String normalizeProductionPlantingTargetUnit(String? value) {
       return "seed";
     case "seedlings":
       return "seedling";
+    case "stands":
+      return "stand";
     case "pieces":
       return "piece";
     case "plants":
@@ -358,6 +365,8 @@ String formatProductionPlantingTargetUnit(String value) {
       return "Seed";
     case "seedling":
       return "Seedling";
+    case "stand":
+      return "Stand";
     case "piece":
       return "Piece";
     case "plant":
@@ -392,9 +401,9 @@ class ProductionPlantingTargetsDraft {
 
   bool get isComplete {
     return materialType.trim().isNotEmpty &&
-        (plannedPlantingQuantity ?? 0) > 0 &&
+        plannedPlantingQuantity != null &&
         plannedPlantingUnit.trim().isNotEmpty &&
-        (estimatedHarvestQuantity ?? 0) > 0 &&
+        estimatedHarvestQuantity != null &&
         estimatedHarvestUnit.trim().isNotEmpty;
   }
 
@@ -434,13 +443,13 @@ class ProductionPlantingTargetsDraft {
           .toString()
           .trim()
           .toLowerCase(),
-      plannedPlantingQuantity: _parsePositiveDraftDouble(
+      plannedPlantingQuantity: _parseNonNegativeDraftDouble(
         json[_payloadPlannedPlantingQuantity],
       ),
       plannedPlantingUnit: normalizeProductionPlantingTargetUnit(
         json[_payloadPlannedPlantingUnit] ?? json["plantingUnit"],
       ),
-      estimatedHarvestQuantity: _parsePositiveDraftDouble(
+      estimatedHarvestQuantity: _parseNonNegativeDraftDouble(
         json[_payloadEstimatedHarvestQuantity],
       ),
       estimatedHarvestUnit: normalizeProductionPlantingTargetUnit(
@@ -458,13 +467,13 @@ class ProductionPlantingTargetsDraft {
     if (materialType.trim().isEmpty) {
       errors.add(_errorPlantingMaterialRequired);
     }
-    if ((plannedPlantingQuantity ?? 0) <= 0) {
+    if (plannedPlantingQuantity == null) {
       errors.add(_errorPlannedPlantingQuantityRequired);
     }
     if (plannedPlantingUnit.trim().isEmpty) {
       errors.add(_errorPlannedPlantingUnitRequired);
     }
-    if ((estimatedHarvestQuantity ?? 0) <= 0) {
+    if (estimatedHarvestQuantity == null) {
       errors.add(_errorEstimatedHarvestQuantityRequired);
     }
     if (estimatedHarvestUnit.trim().isEmpty) {
@@ -509,15 +518,13 @@ ProductionPlantingTargetsDraft withDefaultProductionPlantingTargetsForDomain(
     materialType: current.materialType.trim().isEmpty
         ? defaults.materialType
         : current.materialType,
-    plannedPlantingQuantity: (current.plannedPlantingQuantity ?? 0) <= 0
-        ? defaults.plannedPlantingQuantity
-        : current.plannedPlantingQuantity,
+    plannedPlantingQuantity:
+        current.plannedPlantingQuantity ?? defaults.plannedPlantingQuantity,
     plannedPlantingUnit: current.plannedPlantingUnit.trim().isEmpty
         ? defaults.plannedPlantingUnit
         : current.plannedPlantingUnit,
-    estimatedHarvestQuantity: (current.estimatedHarvestQuantity ?? 0) <= 0
-        ? defaults.estimatedHarvestQuantity
-        : current.estimatedHarvestQuantity,
+    estimatedHarvestQuantity:
+        current.estimatedHarvestQuantity ?? defaults.estimatedHarvestQuantity,
     estimatedHarvestUnit: current.estimatedHarvestUnit.trim().isEmpty
         ? defaults.estimatedHarvestUnit
         : current.estimatedHarvestUnit,
@@ -1201,7 +1208,7 @@ class ProductionPlanDraftController
   void updatePlannedPlantingQuantity(double? value) {
     state = state.copyWith(
       plantingTargets: state.plantingTargets.copyWith(
-        plannedPlantingQuantity: value == null || value <= 0 ? null : value,
+        plannedPlantingQuantity: value == null || value < 0 ? null : value,
       ),
     );
     AppDebug.log(
@@ -1227,7 +1234,7 @@ class ProductionPlanDraftController
   void updateEstimatedHarvestQuantity(double? value) {
     state = state.copyWith(
       plantingTargets: state.plantingTargets.copyWith(
-        estimatedHarvestQuantity: value == null || value <= 0 ? null : value,
+        estimatedHarvestQuantity: value == null || value < 0 ? null : value,
       ),
     );
     AppDebug.log(
@@ -2723,12 +2730,12 @@ bool _isValidRequiredString(dynamic value) {
   return value.toString().trim().isNotEmpty;
 }
 
-double? _parsePositiveDraftDouble(dynamic value) {
+double? _parseNonNegativeDraftDouble(dynamic value) {
   if (value == null) {
     return null;
   }
   final parsed = double.tryParse(value.toString().trim());
-  if (parsed == null || parsed <= 0) {
+  if (parsed == null || parsed < 0) {
     return null;
   }
   return parsed;

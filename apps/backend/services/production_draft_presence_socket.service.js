@@ -23,8 +23,13 @@ const {
 } = require("./business_context.service");
 const {
   PRODUCTION_DRAFT_PRESENCE_EVENTS,
-  PRODUCTION_DRAFT_PRESENCE_ROOM_PREFIX,
 } = require("../utils/production_draft_presence.constants");
+const {
+  buildActiveDraftPresenceViewers,
+  getDraftRoomId,
+  recordDraftPresenceJoin,
+  recordDraftPresenceLeave,
+} = require("./production_draft_presence_session.service");
 
 // WHY: Store the active Socket.IO instance so we can broadcast snapshots.
 let socketServer = null;
@@ -122,10 +127,6 @@ function buildViewerSummary({ actor, staffProfile }) {
   };
 }
 
-function getDraftRoomId(planId) {
-  return `${PRODUCTION_DRAFT_PRESENCE_ROOM_PREFIX}${planId}`;
-}
-
 async function resolveSocketViewer(socket) {
   const token = parseSocketToken(socket);
   if (!token) {
@@ -173,34 +174,7 @@ async function resolveSocketViewer(socket) {
   };
 }
 
-async function collectRoomViewers(roomId) {
-  if (!socketServer) {
-    return [];
-  }
-
-  const sockets = await socketServer.in(roomId).fetchSockets();
-  const viewersByUserId = new Map();
-
-  for (const participant of sockets) {
-    const viewer = participant.data?.viewer;
-    if (!viewer || !viewer.userId) {
-      continue;
-    }
-    viewersByUserId.set(viewer.userId, viewer);
-  }
-
-  return Array.from(viewersByUserId.values()).sort((left, right) => {
-    const leftName = left.displayName || "";
-    const rightName = right.displayName || "";
-    const nameCompare = leftName.localeCompare(rightName);
-    if (nameCompare !== 0) {
-      return nameCompare;
-    }
-    return (left.userId || "").localeCompare(right.userId || "");
-  });
-}
-
-async function emitPresenceSnapshot(planId) {
+async function emitPresenceSnapshot({ businessId, planId }) {
   if (!socketServer) {
     return;
   }
@@ -211,7 +185,10 @@ async function emitPresenceSnapshot(planId) {
   }
 
   const roomId = getDraftRoomId(normalizedPlanId);
-  const viewers = await collectRoomViewers(roomId);
+  const viewers = await buildActiveDraftPresenceViewers({
+    businessId,
+    planId: normalizedPlanId,
+  });
 
   socketServer.to(roomId).emit(
     PRODUCTION_DRAFT_PRESENCE_EVENTS.UPDATE,
@@ -282,19 +259,6 @@ function registerDraftPresenceSocket(io) {
             planId,
             businessId: socket.data.businessId,
           });
-
-          const roomId = getDraftRoomId(planId);
-          socket.join(roomId);
-          socket.data.joinedDraftPlanIds.add(planId);
-
-          debug(LOG_TAG, {
-            step: "JOIN_OK",
-            planId,
-            userId: socket.data.viewer?.userId,
-            role: socket.data.viewer?.displayRoleKey,
-          });
-
-          await emitPresenceSnapshot(planId);
         } catch (error) {
           debug(LOG_TAG, {
             step: "JOIN_FAIL",
@@ -306,6 +270,48 @@ function registerDraftPresenceSocket(io) {
             socket,
             "Access denied for this draft plan",
           );
+          return;
+        }
+
+        const roomId = getDraftRoomId(planId);
+        socket.join(roomId);
+        socket.data.joinedDraftPlanIds.add(planId);
+
+        try {
+          await recordDraftPresenceJoin({
+            businessId: socket.data.businessId,
+            planId,
+            roomId,
+            viewer: socket.data.viewer,
+          });
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "JOIN_RECORD_FAIL",
+            planId,
+            userId: socket.data.viewer?.userId,
+            reason: error?.message,
+          });
+        }
+
+        debug(LOG_TAG, {
+          step: "JOIN_OK",
+          planId,
+          userId: socket.data.viewer?.userId,
+          role: socket.data.viewer?.displayRoleKey,
+        });
+
+        try {
+          await emitPresenceSnapshot({
+            businessId: socket.data.businessId,
+            planId,
+          });
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "JOIN_SNAPSHOT_FAIL",
+            planId,
+            userId: socket.data.viewer?.userId,
+            reason: error?.message,
+          });
         }
       },
     );
@@ -320,6 +326,20 @@ function registerDraftPresenceSocket(io) {
         }
 
         const roomId = getDraftRoomId(planId);
+        try {
+          await recordDraftPresenceLeave({
+            businessId: socket.data.businessId,
+            planId,
+            viewer: socket.data.viewer,
+          });
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "LEAVE_RECORD_FAIL",
+            planId,
+            userId: socket.data.viewer?.userId,
+            reason: error?.message,
+          });
+        }
         socket.leave(roomId);
         socket.data.joinedDraftPlanIds.delete(planId);
 
@@ -329,7 +349,19 @@ function registerDraftPresenceSocket(io) {
           userId: socket.data.viewer?.userId,
         });
 
-        await emitPresenceSnapshot(planId);
+        try {
+          await emitPresenceSnapshot({
+            businessId: socket.data.businessId,
+            planId,
+          });
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "LEAVE_SNAPSHOT_FAIL",
+            planId,
+            userId: socket.data.viewer?.userId,
+            reason: error?.message,
+          });
+        }
       },
     );
 
@@ -342,7 +374,34 @@ function registerDraftPresenceSocket(io) {
       }
 
       for (const planId of planIds) {
-        await emitPresenceSnapshot(planId);
+        try {
+          await recordDraftPresenceLeave({
+            businessId: socket.data.businessId,
+            planId,
+            viewer: socket.data.viewer,
+          });
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "DISCONNECT_RECORD_FAIL",
+            planId,
+            userId: socket.data.viewer?.userId,
+            reason: error?.message,
+          });
+        }
+
+        try {
+          await emitPresenceSnapshot({
+            businessId: socket.data.businessId,
+            planId,
+          });
+        } catch (error) {
+          debug(LOG_TAG, {
+            step: "DISCONNECT_SNAPSHOT_FAIL",
+            planId,
+            userId: socket.data.viewer?.userId,
+            reason: error?.message,
+          });
+        }
       }
     });
   });
@@ -350,4 +409,5 @@ function registerDraftPresenceSocket(io) {
 
 module.exports = {
   registerDraftPresenceSocket,
+  emitDraftPresenceSnapshot: emitPresenceSnapshot,
 };

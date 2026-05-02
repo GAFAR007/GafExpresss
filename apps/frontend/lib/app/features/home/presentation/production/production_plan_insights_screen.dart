@@ -14,11 +14,16 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 
 class ProductionPlanInsightsScreen extends StatelessWidget {
   final String planId;
+  final String initialView;
 
-  const ProductionPlanInsightsScreen({super.key, required this.planId});
+  const ProductionPlanInsightsScreen({
+    super.key,
+    required this.planId,
+    this.initialView = "",
+  });
 
   @override
   Widget build(BuildContext context) {
-    return ProductionPlanDetailScreen(planId: planId);
+    return ProductionPlanDetailScreen(planId: planId, initialView: initialView);
   }
 }

@@ -18,6 +18,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:frontend/app/core/platform/web_route_memory.dart';
 import 'package:frontend/app/features/home/presentation/presentation/login_screen.dart';
 import 'package:frontend/app/features/home/presentation/presentation/register_screen.dart';
 import 'package:frontend/app/features/home/presentation/presentation/forgot_password_screen.dart';
@@ -65,12 +66,16 @@ import 'package:frontend/app/features/home/presentation/paystack_checkout_screen
 import 'package:frontend/app/features/home/presentation/product_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/settings_screen.dart';
 import 'package:frontend/app/features/home/presentation/tenant_verification_screen.dart';
+import 'package:frontend/app/features/home/presentation/tenant_request_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_list_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_archive_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_calendar_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_assistant_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_draft_editor_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_insights_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_phase_detail_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_presence_stats_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
@@ -79,7 +84,12 @@ import 'package:frontend/app/theme/business_theme_wrapper.dart';
 // WHY: Keep route keys centralized for payment history navigation extras.
 const String _tenantNameExtraKey = "tenantName";
 const String _productionPlanIdParam = "id";
+const String _productionPhaseIdParam = "phaseId";
+const String _productionTaskIdParam = "taskId";
 const String _staffProfileIdParam = "id";
+const String _businessLoginRoute = "/business-login";
+const String _routeRootLog = "-> /";
+const String _routeBusinessLoginLog = "-> /business-login";
 const String _routeProductionListLog = "-> /business-production";
 const String _routeProductionArchiveLog = "-> /business-production/archive";
 const String _routeProductionCalendarLog = "-> /business-production/calendar";
@@ -92,27 +102,177 @@ const String _routeProductionPreorderReservationsLog =
     "-> /business-production/preorder-reservations";
 const String _routeProductionInsightsLog =
     "-> /business-production/:id/insights";
+const String _routeProductionTaskDetailLog =
+    "-> /business-production/:id/task/:taskId";
+const String _routeProductionPhaseDetailLog =
+    "-> /business-production/:id/phase/:phaseId";
+const String _routeProductionPresenceStatsLog =
+    "-> /business-production/:id/presence-stats";
 const String _routeProductionDetailLog = "-> /business-production/:id";
 const String _routeStaffDirectoryLog = "-> /business-staff-directory";
 const String _routeStaffDetailLog = "-> /business-staff/:id";
 const String _routeChatInboxLog = "-> /chat";
 const String _routeChatThreadLog = "-> /chat/:id";
 
+// WHY: Keep one navigator identity and remember the last resolved location so
+// router rebuilds during session restoration do not bounce the user back to a
+// parent list page after a browser refresh.
+final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
+GoRouter? _previousRouter;
+
+String? _resolveAuthRedirectTarget(String? rawRedirect) {
+  if (rawRedirect == null || rawRedirect.trim().isEmpty) {
+    return null;
+  }
+
+  final decodedRedirect = Uri.decodeComponent(rawRedirect.trim());
+  final internalRoute = _extractInternalAppRoute(decodedRedirect);
+  if (internalRoute == null) {
+    return null;
+  }
+
+  return _normalizeProductionAuthTarget(internalRoute);
+}
+
+String? _extractInternalAppRoute(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+
+  // WHY: External protected links can carry Flutter hash routes in next=.
+  if (trimmed.startsWith('/#/')) {
+    return trimmed.substring(2);
+  }
+  if (trimmed.startsWith('#/')) {
+    return trimmed.substring(1);
+  }
+  if (trimmed.startsWith('/')) {
+    return trimmed;
+  }
+
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null) {
+    return null;
+  }
+
+  final fragment = uri.fragment.trim();
+  if (fragment.startsWith('/')) {
+    return fragment;
+  }
+
+  final path = uri.path.trim();
+  if (!path.startsWith('/')) {
+    return null;
+  }
+  return uri.query.trim().isEmpty ? path : '$path?${uri.query}';
+}
+
+String _normalizeProductionAuthTarget(String route) {
+  final path = Uri.tryParse(route)?.path ?? route.split('?').first;
+  // WHY: Production protected login should land staff on the active plans list,
+  // not a stale deep workspace URL from an earlier shared link.
+  if (path == productionPlansRoute ||
+      path.startsWith('$productionPlansRoute/')) {
+    return productionPlansRoute;
+  }
+  return route;
+}
+
+String _resolveInitialRouterLocation() {
+  // WHY: Browser refresh on Flutter web keeps the active hash route in the
+  // fragment. Seed GoRouter from that fragment so reloads stay on the same
+  // production page instead of falling back to login/home.
+  final browserFragment = Uri.base.fragment.trim();
+  final browserPath = Uri.base.path.trim();
+  final browserQuery = Uri.base.query.trim();
+  final rememberedRoute = readRememberedWebRoute();
+  if (browserFragment.isNotEmpty) {
+    final normalizedFragment = browserFragment.startsWith('/')
+        ? browserFragment
+        : '/$browserFragment';
+    // WHY: If the browser only restores the base production list route but
+    // this session already knows about a deeper production detail path, prefer
+    // the deeper path so refresh stays on the current plan page.
+    if (normalizedFragment == productionPlansRoute &&
+        rememberedRoute != null &&
+        rememberedRoute.startsWith('$productionPlansRoute/')) {
+      return rememberedRoute;
+    }
+    return normalizedFragment;
+  }
+
+  // WHY: Netlify serves this Flutter app with path URLs. On a hard browser
+  // refresh, GoRouter must start from the address-bar path before falling back
+  // to session route memory, otherwise a stale remembered route can reopen a
+  // blank production shell.
+  if (browserPath.isNotEmpty && browserPath != '/') {
+    final normalizedPath = browserPath.startsWith('/')
+        ? browserPath
+        : '/$browserPath';
+    final routeFromPath = browserQuery.isEmpty
+        ? normalizedPath
+        : '$normalizedPath?$browserQuery';
+    // WHY: Preserve the existing parent-list recovery for production routes:
+    // if the browser only restores the list shell but this tab remembers a
+    // deeper production detail path, keep the user on the deeper screen.
+    if (normalizedPath == productionPlansRoute &&
+        rememberedRoute != null &&
+        rememberedRoute.startsWith('$productionPlansRoute/')) {
+      return rememberedRoute;
+    }
+    return routeFromPath;
+  }
+
+  final previousLocation = _previousRouter
+      ?.routerDelegate
+      .currentConfiguration
+      .uri
+      .toString();
+  // WHY: Only reuse the previous in-memory route when the address bar has no
+  // explicit route. Production links must not be overridden by a stale /home.
+  if (previousLocation != null && previousLocation.trim().isNotEmpty) {
+    return previousLocation;
+  }
+
+  if (rememberedRoute != null && rememberedRoute.trim().isNotEmpty) {
+    return rememberedRoute;
+  }
+
+  return '/login';
+}
+
 final routerProvider = Provider<GoRouter>((ref) {
   final session = ref.watch(authSessionProvider);
   final bool isAuthed = session != null && session.isTokenValid;
+  final initialLocation = _resolveInitialRouterLocation();
 
-  AppDebug.log("ROUTER", "buildRouter()", extra: {"isAuthed": isAuthed});
+  AppDebug.log(
+    "ROUTER",
+    "buildRouter()",
+    extra: {"isAuthed": isAuthed, "initialLocation": initialLocation},
+  );
 
-  return GoRouter(
-    initialLocation: '/login',
+  final router = GoRouter(
+    navigatorKey: _rootNavigatorKey,
+    initialLocation: initialLocation,
+    // WHY: On web refresh, the browser may reopen the base production list
+    // route even when this app has already remembered a deeper plan page for
+    // the current session. Let the resolved initial location win so refresh
+    // restores the active production detail screen.
+    overridePlatformDefaultLocation: true,
     redirect: (context, state) {
       final String path = state.matchedLocation;
+      final bool isBusinessLoginRoute = path == _businessLoginRoute;
       final bool isAuthRoute =
-          path == '/login' || path == '/register' || path == '/forgot-password';
+          path == '/login' ||
+          isBusinessLoginRoute ||
+          path == '/register' ||
+          path == '/forgot-password';
       final bool isPublicProduct = path.startsWith('/product/');
       final bool isPaymentSuccess = path == '/payment-success';
       final bool isBusinessInvite = path.startsWith('/business-invite');
+      final bool isTenantRequest = path == '/tenant-request';
       final bool isTenantVerification = path == '/tenant-verification';
       final bool isTenantDashboard = path.startsWith('/tenant-dashboard');
       final bool isBuyerProtectedRoute =
@@ -121,7 +281,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           isAuthRoute ||
           isPublicProduct ||
           isPaymentSuccess ||
-          isBusinessInvite;
+          isBusinessInvite ||
+          isTenantRequest;
       final bool isBusinessProtectedRoute =
           path.startsWith('/business-dashboard') ||
           path.startsWith('/business-products') ||
@@ -138,20 +299,24 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // WHY: If not logged in, block protected routes.
       if (!isAuthed && !isPublicRoute) {
-        AppDebug.log("ROUTER", "redirect -> /login", extra: {"from": path});
-        return '/login';
+        final nextTarget = state.uri.toString();
+        AppDebug.log(
+          "ROUTER",
+          "redirect -> /login",
+          extra: {"from": path, "next": nextTarget},
+        );
+        if (path.startsWith(productionPlansRoute)) {
+          return '$_businessLoginRoute?next=${Uri.encodeComponent(nextTarget)}';
+        }
+        return '/login?next=${Uri.encodeComponent(nextTarget)}';
       }
 
       // WHY: If logged in, keep user out of auth screens.
       if (isAuthed && isAuthRoute) {
         final nextParam = state.uri.queryParameters['next'];
         final tokenParam = state.uri.queryParameters['token'];
-        final decodedNext = nextParam == null || nextParam.trim().isEmpty
-            ? null
-            : Uri.decodeComponent(nextParam.trim());
-        String? nextTarget = decodedNext != null && decodedNext.startsWith('/')
-            ? decodedNext
-            : null;
+        final hasRawNext = nextParam != null && nextParam.trim().isNotEmpty;
+        String? nextTarget = _resolveAuthRedirectTarget(nextParam);
         // WHY: Recover invite token when next params are not encoded properly.
         if ((nextTarget == null || nextTarget.isEmpty) &&
             tokenParam != null &&
@@ -164,10 +329,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
         // WHY: Use pending invite token if present (synchronous router redirect).
         final pendingInvite = ref.read(pendingInviteTokenProvider);
-        final resolvedTarget =
-            pendingInvite != null && pendingInvite.trim().isNotEmpty
+        final resolvedTarget = isBusinessLoginRoute
+            ? productionPlansRoute
+            : pendingInvite != null && pendingInvite.trim().isNotEmpty
             ? '/business-invite?token=${pendingInvite.trim()}'
-            : nextTarget ?? '/home';
+            : nextTarget ?? (hasRawNext ? productionPlansRoute : '/home');
         final safeTarget = resolvedTarget.startsWith('/business-invite')
             ? '/business-invite?token=***'
             : resolvedTarget;
@@ -244,6 +410,42 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(
+        path: '/',
+        redirect: (context, state) {
+          final pendingInvite = ref.read(pendingInviteTokenProvider);
+          // WHY: The browser can reopen the app on "/" even though this app's
+          // real entry points are login/home. Redirect root explicitly so web
+          // boots never fall into the router error screen.
+          final target = !isAuthed
+              ? '/login'
+              : pendingInvite != null && pendingInvite.trim().isNotEmpty
+              ? '/business-invite?token=${pendingInvite.trim()}'
+              : '/home';
+          final safeTarget = target.startsWith('/business-invite')
+              ? '/business-invite?token=***'
+              : target;
+          AppDebug.log(
+            "ROUTER",
+            _routeRootLog,
+            extra: {"isAuthed": isAuthed, "to": safeTarget},
+          );
+          return target;
+        },
+      ),
+      GoRoute(
+        path: _businessLoginRoute,
+        builder: (context, state) {
+          final nextParam = state.uri.queryParameters['next'];
+          final emailParam = state.uri.queryParameters['email'];
+          AppDebug.log("ROUTER", _routeBusinessLoginLog);
+          return LoginScreen(
+            redirectTo: nextParam ?? productionPlansRoute,
+            initialEmail: emailParam,
+            useDirectSignIn: true,
+          );
+        },
+      ),
+      GoRoute(
         path: '/login',
         builder: (context, state) {
           final nextParam = state.uri.queryParameters['next'];
@@ -260,8 +462,18 @@ final routerProvider = Provider<GoRouter>((ref) {
               tokenParam.trim().isNotEmpty) {
             redirectTo = '/business-invite?token=${tokenParam.trim()}';
           }
-          AppDebug.log("ROUTER", "-> /login");
-          return LoginScreen(redirectTo: redirectTo, initialEmail: emailParam);
+          final useDirectSignIn =
+              redirectTo != null && redirectTo.trim().isNotEmpty;
+          AppDebug.log(
+            "ROUTER",
+            "-> /login",
+            extra: {"direct": useDirectSignIn},
+          );
+          return LoginScreen(
+            redirectTo: redirectTo,
+            initialEmail: emailParam,
+            useDirectSignIn: useDirectSignIn,
+          );
         },
       ),
       GoRoute(
@@ -354,6 +566,18 @@ final routerProvider = Provider<GoRouter>((ref) {
           );
           // WHY: Allow invite links to open without auth so users see instructions.
           return BusinessInviteScreen(token: token);
+        },
+      ),
+      GoRoute(
+        path: '/tenant-request',
+        builder: (context, state) {
+          final token = state.uri.queryParameters['token'] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            "-> /tenant-request",
+            extra: {"hasToken": token.isNotEmpty},
+          );
+          return BusinessThemeWrapper(child: TenantRequestScreen(token: token));
         },
       ),
       GoRoute(
@@ -629,13 +853,74 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: productionPlanInsightsRoute,
         builder: (context, state) {
           final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          final initialView =
+              state.uri.queryParameters[productionPlanInsightsViewQuery] ?? '';
           AppDebug.log(
             "ROUTER",
             _routeProductionInsightsLog,
+            extra: {
+              _productionPlanIdParam: planId,
+              productionPlanInsightsViewQuery: initialView,
+            },
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPlanInsightsScreen(
+              planId: planId,
+              initialView: initialView,
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanTaskDetailRoute,
+        builder: (context, state) {
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          final taskId = state.pathParameters[_productionTaskIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionTaskDetailLog,
+            extra: {
+              _productionPlanIdParam: planId,
+              _productionTaskIdParam: taskId,
+            },
+          );
+          return BusinessThemeWrapper(
+            child: ProductionTaskDetailScreen(planId: planId, taskId: taskId),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanPresenceStatsRoute,
+        builder: (context, state) {
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionPresenceStatsLog,
             extra: {_productionPlanIdParam: planId},
           );
           return BusinessThemeWrapper(
-            child: ProductionPlanInsightsScreen(planId: planId),
+            child: ProductionPresenceStatsScreen(planId: planId),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionPlanPhaseDetailRoute,
+        builder: (context, state) {
+          final planId = state.pathParameters[_productionPlanIdParam] ?? '';
+          final phaseId = state.pathParameters[_productionPhaseIdParam] ?? '';
+          AppDebug.log(
+            "ROUTER",
+            _routeProductionPhaseDetailLog,
+            extra: {
+              _productionPlanIdParam: planId,
+              _productionPhaseIdParam: phaseId,
+            },
+          );
+          return BusinessThemeWrapper(
+            child: ProductionPhaseDetailScreen(
+              planId: planId,
+              phaseId: phaseId,
+            ),
           );
         },
       ),
@@ -767,4 +1052,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       return Scaffold(body: Center(child: Text('Route error: ${state.error}')));
     },
   );
+
+  router.routerDelegate.addListener(() {
+    final currentRoute = router.routerDelegate.currentConfiguration.uri
+        .toString();
+    writeRememberedWebRoute(currentRoute);
+  });
+  _previousRouter = router;
+  return router;
 });

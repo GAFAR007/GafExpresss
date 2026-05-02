@@ -13,32 +13,41 @@
 /// - Logs build, refresh, and action taps.
 library;
 
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:frontend/app/core/debug/app_debug.dart';
 import 'package:frontend/app/core/formatters/date_formatter.dart';
+import 'package:frontend/app/core/platform/text_file_download.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/production/production_domain_context.dart';
+import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/features/home/presentation/production/production_models.dart';
+import 'package:frontend/app/features/home/presentation/production/production_progress_report_dialogs.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
+import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
+import 'package:frontend/app/theme/app_theme.dart';
 
 const String _logTag = "PRODUCTION_DETAIL";
 const String _buildMessage = "build()";
 const String _refreshAction = "refresh_action";
 const String _refreshPull = "refresh_pull";
 const String _statusChangeAction = "status_change";
-const String _preorderConfigAction = "preorder_config_action";
 const String _logProgressAction = "log_progress_action";
 const String _batchLogProgressAction = "batch_log_progress_action";
 const String _approveProgressAction = "approve_progress_action";
 const String _rejectProgressAction = "reject_progress_action";
 const String _approveAction = "approve_action";
 const String _rejectAction = "reject_action";
-const String _reconcilePreorderAction = "reconcile_preorder_action";
 const String _acceptVarianceAction = "accept_variance_action";
 const String _replanUnitAction = "replan_unit_action";
 const String _backTap = "back_tap";
@@ -48,9 +57,18 @@ const String _overviewViewTitle = "Overview";
 const String _executionViewTitle = "Execution";
 const String _peopleViewTitle = "People";
 const String _riskViewTitle = "Risk";
+const String _downloadProgressLabel = "Download progress";
+const String _emailProgressLabel = "Email progress";
+const String _copyProgressLinkLabel = "Copy view link";
+const String _downloadProgressSuccess = "Progress report downloaded.";
+const String _downloadProgressFailure = "Unable to download progress report.";
+const String _emailProgressFailure = "Unable to email progress report.";
+const String _copyProgressLinkSuccess = "View link copied.";
+const String _copyProgressLinkFailure = "Unable to copy view link.";
+const String _presenceRefreshSkipped = "presence_refresh_skipped";
 const String _kpiTitle = "KPIs";
 const String _attendanceImpactTitle = "HR impact KPIs";
-const String _dailyRollupTitle = "Daily execution rollup";
+const String _dailyRollupTitle = "Stacked task progress by day";
 const String _weeklyRollupTitle = "Weekly execution rollup";
 const String _monthlyRollupTitle = "Monthly execution rollup";
 const String _staffProgressTitle = "Farmer progress";
@@ -74,16 +92,6 @@ const String _deviationUnlockedTag = "Unlocked";
 const String _deviationSummaryEmptyTitle = "No governance alerts";
 const String _deviationSummaryEmptyMessage =
     "Unit drift alerts will appear here when thresholds are exceeded.";
-const String _planConfidenceTitle = "Lifecycle confidence";
-const String _planConfidenceCurrentLabel = "Current";
-const String _planConfidenceBaselineLabel = "Baseline";
-const String _planConfidenceDeltaLabel = "Delta";
-const String _planConfidenceCapacityLabel = "Capacity";
-const String _planConfidenceScheduleLabel = "Schedule stability";
-const String _planConfidenceReliabilityLabel = "Historical reliability";
-const String _planConfidenceComplexityLabel = "Complexity risk";
-const String _planConfidenceFallback =
-    "Confidence will appear after the first deterministic recompute trigger.";
 const String _tasksTitle = "Tasks";
 const String _assignedLabel = "Assigned";
 const String _assignedUnitsLabel = "Assigned units";
@@ -99,6 +107,38 @@ const String _timelineDelayLabel = "Delay";
 const String _timelineEmptyTitle = "No timeline data yet";
 const String _timelineEmptyMessage =
     "Task schedule rows will appear when tasks are added.";
+const String _executionChartSubtitle =
+    "Follow the work week at a glance. Each column represents an operational day, and each visible task uses one equal-height block so the chart compares workload structure, not raw numeric values.";
+const String _executionChartVisibleTasksLabel = "Visible tasks";
+const String _executionChartBestDayLabel = "Best day";
+const String _executionChartApprovedSegmentsLabel = "Approved segments";
+const String _executionChartInProgressLabel = "In progress";
+const String _executionChartCompletedApprovedLabel = "Completed / approved";
+const String _executionChartTaskCountLabel = "Task count";
+const String _executionChartSnapshotSummaryLabel = "Snapshot";
+const String _executionChartAssignedPeopleLabel = "Assigned people";
+const String _executionChartTaskDetailsTitle = "Task details";
+const String _executionChartTaskDetailsMessage =
+    "Tap any day column to inspect the visible tasks and jump directly to the task detail screen.";
+const String _executionChartEmptyTitle = "No execution activity yet";
+const String _executionChartEmptyMessage =
+    "Scheduled task blocks and saved execution rows will appear here once work is planned.";
+const String _executionChartCurrentProgressLabel = "Current progress";
+const String _executionChartExpectedQuantityLabel = "Expected quantity";
+const String _executionChartActualQuantityLabel = "Actual quantity";
+const String _executionChartDateLabel = "Date";
+const String _executionChartDetailsAction = "selectExecutionChartDay()";
+const String _executionChartTaskNavigationAction =
+    "openExecutionChartTaskDetail()";
+const String _executionChartRevealAction = "revealExecutionChartSection()";
+const double _executionChartColumnMinWidth = 80;
+const double _executionChartUnitHeight = 72;
+const double _executionChartSegmentHeight = 64;
+const double _executionChartSegmentWidth = 36;
+const double _executionChartSegmentGap = 2;
+const double _executionChartBaselineThickness = 2;
+const double _executionChartTopLabelHeight = 32;
+const double _executionChartXAxisLabelHeight = 54;
 const String _weeklyRollupEmptyTitle = "No weekly rollups yet";
 const String _weeklyRollupEmptyMessage =
     "Weekly rollups are derived from the saved daily execution rows.";
@@ -112,35 +152,7 @@ const String _productionStateLabel = "Product state";
 const String _planUnitsLabel = "Plan units";
 const String _planUnitsLoadingLabel = "Loading...";
 const String _planUnitsUnavailableLabel = "Unavailable";
-const String _preorderLabel = "Pre-order";
-const String _preorderCapLabel = "Pre-order cap";
-const String _effectiveCapLabel = "Effective cap";
-const String _confidenceLabel = "Confidence";
-const String _preorderRemainingLabel = "Pre-order remaining";
-const String _configurePreorderButtonLabel = "Configure pre-order";
-const String _preorderConfigTitle = "Pre-order settings";
-const String _preorderEnableLabel = "Enable pre-order";
-const String _preorderYieldLabel = "Conservative yield quantity";
-const String _preorderYieldUnitLabel = "Yield unit";
-const String _preorderCapRatioLabel = "Cap ratio (0.1 - 0.9)";
-const String _preorderConfigValidation =
-    "Provide a positive yield and valid cap ratio.";
-const String _preorderConfigSaveLabel = "Save";
-const String _preorderConfigCancelLabel = "Cancel";
-const String _reconcileButtonLabel = "Reconcile expired holds";
-const String _reconcileSummaryTitle = "Reconcile summary";
-const String _reconcileSummaryScanned = "Scanned";
-const String _reconcileSummaryExpired = "Expired";
-const String _reconcileSummarySkipped = "Skipped";
-const String _reconcileSummaryErrors = "Errors";
-const String _reconcileSummaryDoneLabel = "Done";
-const String _reconcileSuccess = "Expired holds reconciled.";
-const String _reconcileFailure = "Unable to reconcile expired holds.";
-const String _preorderUpdateSuccess = "Pre-order settings updated.";
-const String _preorderUpdateFailure = "Unable to update pre-order settings.";
 const String _dash = "-";
-const String _preorderEnabledLabel = "Enabled";
-const String _preorderDisabledLabel = "Disabled";
 const String _logProgressLabel = "Log progress";
 const String _batchLogProgressLabel = "Batch log progress";
 const String _batchLogDialogTitle = "Batch daily logging";
@@ -165,22 +177,29 @@ const String _batchLogHint =
 const String _batchLogValidationFix = "Fix row errors before submitting.";
 const String _batchLogValidationSelectRows =
     "Select at least one row to submit.";
-const String _batchLogActualRequired = "Enter actual plots";
+const String _batchLogActualRequired = "Enter actual amount";
 const String _batchLogActualInvalid = "Use a non-negative number";
 const String _batchLogZeroDelayRequired =
-    "Select a delay reason when actual is zero";
+    "Select a delay reason when actual amount is zero";
 const String _logProgressDialogTitle = "Log daily work";
 const String _logProgressDateLabel = "Date";
 const String _logProgressFarmerLabel = "Farmer";
 const String _logProgressUnitLabel = "Unit";
-const String _logProgressActualPlotsLabel = "Actual plots";
+const String _logProgressActualPlotsLabel = "Actual amount";
 const String _logProgressDelayReasonLabel = "Delay reason";
 const String _logProgressZeroHelperText =
     "Use this to record absence or blocked workdays";
 const String _logProgressNotesLabel = "Notes";
 const String _logProgressNotesHint = "Optional context";
+const String _logProgressActualInvalidText =
+    "Enter a valid non-negative amount";
+const String _logProgressStaffRequiredText = "Select a staff member";
+const String _logProgressUnitRequiredText = "Select a unit";
+const String _logProgressAttendanceRequiredText =
+    "Clock in before logging progress";
 const String _logProgressZeroDelayValidationText =
-    "Select a delay reason when actual plots is zero";
+    "Select a delay reason when actual amount is zero";
+const String _viewProofLabel = "View proof";
 const String _logProgressSaveLabel = "Save";
 const String _logProgressCancelLabel = "Cancel";
 const String _delayReasonNone = "none";
@@ -218,7 +237,6 @@ const String _kpiAbsenteeImpact = "Absentee impact";
 const String _kpiLinkedProgress = "Progress linked";
 const String _kpiPlotsPerHour = "Plots/attended hr";
 const String _kpiTrackedDays = "Tracked days";
-const String _phaseCompletionLabel = "Completion";
 const String _dailyRollupBlocksLabel = "Blocks";
 const String _dailyRollupAssignedLabel = "Assigned";
 const String _dailyRollupAttendedAssignedLabel = "Attended(assign)";
@@ -236,9 +254,6 @@ const String _kpiEmptyMessage = "KPI cards will appear once tasks are tracked.";
 const String _attendanceImpactEmptyTitle = "No attendance impact data yet";
 const String _attendanceImpactEmptyMessage =
     "Attendance-linked KPI cards appear after attendance and progress logs are recorded.";
-const String _dailyRollupEmptyTitle = "No daily rollups yet";
-const String _dailyRollupEmptyMessage =
-    "Daily rollups appear after schedules, attendance, or progress updates.";
 const String _phaseEmptyTitle = "No phase progress yet";
 const String _phaseEmptyMessage =
     "Phase completion will appear once tasks are created.";
@@ -290,7 +305,6 @@ const String _extraPlanIdKey = "planId";
 const String _extraTaskIdKey = "taskId";
 const String _extraProgressIdKey = "progressId";
 const String _extraErrorKey = "error";
-const String _ownerRole = "business_owner";
 const String _staffRole = "staff";
 const String _staffRoleEstateManager = "estate_manager";
 const String _staffRoleFarmManager = "farm_manager";
@@ -303,9 +317,9 @@ const double _sectionSpacing = 16;
 const double _cardSpacing = 12;
 const double _summaryCardRadius = 16;
 const double _summaryCardPadding = 16;
-const double _summaryTitleSpacing = 8;
 const double _summaryMetaSpacing = 4;
 const double _phaseProgressSpacing = 6;
+const double _compactBottomNavOffset = 12;
 const double _taskCardMarginHorizontal = 16;
 const double _taskCardMarginVertical = 8;
 const double _taskCardPadding = 12;
@@ -324,6 +338,9 @@ const int _percentFixedDigits = 0;
 const int _delayFixedDigits = 1;
 const double _detailSplitBreakpoint = 940;
 const double _detailWideSplitBreakpoint = 1120;
+const Color _summaryLightSurface = Color(0xFFFFFFFF);
+const Color _summaryLightSubtleSurface = Color(0xFFF8FAFC);
+const Color _summaryLightBorder = Color(0xFFE5EAF1);
 
 const String _taskStatusPending = "pending";
 const String _taskStatusInProgress = "in_progress";
@@ -343,26 +360,210 @@ const String _progressApprovalNeedsReview = "needs_review";
 
 enum _DetailViewMode { overview, execution, people, risk }
 
+_DetailViewMode _parseDetailViewMode(String rawValue) {
+  switch (rawValue.trim().toLowerCase()) {
+    case "execution":
+      return _DetailViewMode.execution;
+    case "people":
+      return _DetailViewMode.people;
+    case "risk":
+      return _DetailViewMode.risk;
+    case "overview":
+    default:
+      return _DetailViewMode.overview;
+  }
+}
+
+String? _detailViewModeQueryValue(_DetailViewMode mode) {
+  switch (mode) {
+    case _DetailViewMode.overview:
+      return null;
+    case _DetailViewMode.execution:
+      return "execution";
+    case _DetailViewMode.people:
+      return "people";
+    case _DetailViewMode.risk:
+      return "risk";
+  }
+}
+
 class ProductionPlanDetailScreen extends ConsumerWidget {
   final String planId;
+  final String initialView;
 
-  const ProductionPlanDetailScreen({super.key, required this.planId});
+  const ProductionPlanDetailScreen({
+    super.key,
+    required this.planId,
+    this.initialView = "",
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     AppDebug.log(_logTag, _buildMessage, extra: {_extraPlanIdKey: planId});
     final detailAsync = ref.watch(productionPlanDetailProvider(planId));
+    final cachedDetail = ref.watch(
+      productionPlanDetailSnapshotProvider.select(
+        (snapshots) => snapshots[planId],
+      ),
+    );
+    final displayDetailAsync =
+        detailAsync.valueOrNull == null && cachedDetail != null
+        ? AsyncValue<ProductionPlanDetail>.data(cachedDetail)
+        : detailAsync;
+    final isRefreshingDetail =
+        detailAsync.isLoading &&
+        (detailAsync.valueOrNull != null || cachedDetail != null);
     final staffAsync = ref.watch(productionStaffProvider);
     final session = ref.watch(authSessionProvider);
     final profileAsync = ref.watch(userProfileProvider);
     final profileRole = profileAsync.valueOrNull?.role ?? "";
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
-    final isOwner = actorRole == _ownerRole;
+    final selfStaffRole = _resolveSelfStaffRole(
+      staffList:
+          staffAsync.valueOrNull ?? const <BusinessStaffProfileSummary>[],
+      userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
+    );
+    final isOwner = canUseBusinessOwnerEquivalentAccess(
+      role: actorRole,
+      staffRole: selfStaffRole,
+    );
+    final preferredEmail =
+        (profileAsync.valueOrNull?.email ?? session?.user.email ?? "").trim();
+
+    Future<void> downloadProgressReport() async {
+      try {
+        final report = await ref
+            .read(productionPlanActionsProvider)
+            .fetchPlanProgressReport(
+              planId: planId,
+              routePath: productionPlanInsightsPath(planId),
+            );
+        await downloadPlainTextFile(
+          fileName: report.fileName,
+          contents: report.html,
+          mimeType: "text/html",
+        );
+        if (context.mounted) {
+          _showSnack(context, _downloadProgressSuccess);
+        }
+      } catch (error) {
+        if (context.mounted) {
+          _showSnack(
+            context,
+            _resolveProductionDetailErrorMessage(
+              error,
+              fallback: _downloadProgressFailure,
+            ),
+          );
+        }
+      }
+    }
+
+    Future<void> emailProgressReport() async {
+      final toEmail = await showProductionProgressReportEmailDialog(
+        context,
+        initialEmail: preferredEmail,
+      );
+      if (toEmail == null || toEmail.trim().isEmpty) {
+        return;
+      }
+
+      try {
+        final response = await ref
+            .read(productionPlanActionsProvider)
+            .emailPlanProgressReport(
+              planId: planId,
+              toEmail: toEmail.trim(),
+              routePath: productionPlanInsightsPath(planId),
+            );
+        if (context.mounted) {
+          _showSnack(context, "${response.message} to ${response.toEmail}.");
+        }
+      } catch (error) {
+        if (context.mounted) {
+          _showSnack(
+            context,
+            _resolveProductionDetailErrorMessage(
+              error,
+              fallback: _emailProgressFailure,
+            ),
+          );
+        }
+      }
+    }
+
+    Future<void> copyProgressReportLink() async {
+      final toEmail = await showProductionProgressReportLinkDialog(
+        context,
+        initialEmail: preferredEmail,
+      );
+      if (toEmail == null || toEmail.trim().isEmpty) {
+        return;
+      }
+
+      try {
+        final report = await ref
+            .read(productionPlanActionsProvider)
+            .fetchPlanProgressReport(
+              planId: planId,
+              routePath: productionPlanInsightsPath(planId),
+              toEmail: toEmail.trim(),
+            );
+        await Clipboard.setData(ClipboardData(text: report.reportUrl));
+        if (context.mounted) {
+          _showSnack(
+            context,
+            "$_copyProgressLinkSuccess for ${toEmail.trim()}.",
+          );
+        }
+      } catch (error) {
+        if (context.mounted) {
+          _showSnack(
+            context,
+            _resolveProductionDetailErrorMessage(
+              error,
+              fallback: _copyProgressLinkFailure,
+            ),
+          );
+        }
+      }
+    }
+
+    ref.listen<ProductionDraftPresenceState>(
+      productionDraftPresenceProvider(planId),
+      (previous, next) {
+        if (previous?.updatedAt == next.updatedAt) {
+          return;
+        }
+        final currentDetailState = ref.read(
+          productionPlanDetailProvider(planId),
+        );
+        // WHY: Presence updates can arrive while the first browser-refresh
+        // detail request is still loading. Refreshing at that moment restarts
+        // the same provider and can leave the route stuck on first-load UI.
+        if (currentDetailState.isLoading) {
+          AppDebug.log(
+            _logTag,
+            _presenceRefreshSkipped,
+            extra: {
+              _extraPlanIdKey: planId,
+              "reason": "detail_provider_loading",
+            },
+          );
+          return;
+        }
+        unawaited(ref.refresh(productionPlanDetailProvider(planId).future));
+      },
+    );
 
     return Scaffold(
       appBar: AppBar(
         title: const Text(_screenTitle),
         leading: IconButton(
+          style: AppButtonStyles.icon(
+            theme: Theme.of(context),
+            tone: AppStatusTone.neutral,
+          ),
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
             AppDebug.log(_logTag, _backTap);
@@ -375,10 +576,16 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
         ),
         actions: [
           IconButton(
+            style: AppButtonStyles.icon(
+              theme: Theme.of(context),
+              tone: AppStatusTone.info,
+            ),
             icon: const Icon(Icons.refresh),
             onPressed: () {
               AppDebug.log(_logTag, _refreshAction);
-              ref.invalidate(productionPlanDetailProvider(planId));
+              unawaited(
+                ref.refresh(productionPlanDetailProvider(planId).future),
+              );
             },
           ),
         ],
@@ -390,14 +597,12 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
             productionPlanDetailProvider(planId).future,
           );
         },
-        child: detailAsync.when(
+        child: displayDetailAsync.when(
+          skipError: cachedDetail != null,
+          skipLoadingOnReload: true,
           data: (detail) {
             final staffList = staffAsync.valueOrNull ?? [];
             final staffMap = _buildStaffMap(staffList);
-            final selfStaffRole = _resolveSelfStaffRole(
-              staffList: staffList,
-              userEmail: profileAsync.valueOrNull?.email ?? session?.user.email,
-            );
             final canLogProgress = _canLogTaskProgress(
               actorRole: actorRole,
               staffRole: selfStaffRole,
@@ -407,10 +612,6 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
               staffRole: selfStaffRole,
             );
             final canViewPlanUnits = _canViewPlanUnits(
-              actorRole: actorRole,
-              staffRole: selfStaffRole,
-            );
-            final canViewPlanConfidence = _canViewPlanConfidence(
               actorRole: actorRole,
               staffRole: selfStaffRole,
             );
@@ -429,316 +630,288 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
                       const <ProductionPlanUnit>[])
                 unit.id: unit.label,
             };
-            return _PlanDetailBody(
-              detail: detail,
-              staffMap: staffMap,
-              isOwner: isOwner,
-              canLogProgress: canLogProgress,
-              canReviewProgress: canReviewProgress,
-              showPlanUnits: canViewPlanUnits,
-              showPlanConfidence: canViewPlanConfidence,
-              showDeviationGovernance: canManageDeviationGovernance,
-              planUnitLabelById: planUnitLabelById,
-              planUnitsCount: unitsAsync?.valueOrNull?.totalUnits,
-              planUnitsLoading: unitsAsync?.isLoading == true,
-              planUnitsHasError: unitsAsync?.hasError == true,
-              onAcceptDeviationVariance: (alertId, note) async {
-                AppDebug.log(
-                  _logTag,
-                  _acceptVarianceAction,
-                  extra: {_extraPlanIdKey: planId, "alertId": alertId},
-                );
-                try {
-                  final message = await ref
-                      .read(productionPlanActionsProvider)
-                      .acceptDeviationVariance(
-                        planId: planId,
-                        alertId: alertId,
-                        note: note,
-                      );
-                  _showSnack(
-                    context,
-                    message.trim().isEmpty
-                        ? _deviationVarianceSuccess
-                        : message,
-                  );
-                } catch (err) {
+            return ProductionRefreshOverlay(
+              isRefreshing: isRefreshingDetail,
+              child: _PlanDetailBody(
+                detail: detail,
+                initialViewMode: _parseDetailViewMode(initialView),
+                staffMap: staffMap,
+                isOwner: isOwner,
+                canLogProgress: canLogProgress,
+                canReviewProgress: canReviewProgress,
+                showPlanUnits: canViewPlanUnits,
+                showDeviationGovernance: canManageDeviationGovernance,
+                planUnitLabelById: planUnitLabelById,
+                planUnits:
+                    unitsAsync?.valueOrNull?.units ??
+                    const <ProductionPlanUnit>[],
+                planUnitsCount: unitsAsync?.valueOrNull?.totalUnits,
+                planUnitsLoading: unitsAsync?.isLoading == true,
+                planUnitsHasError: unitsAsync?.hasError == true,
+                onAcceptDeviationVariance: (alertId, note) async {
                   AppDebug.log(
                     _logTag,
-                    _deviationVarianceFailure,
-                    extra: {_extraErrorKey: err.toString()},
+                    _acceptVarianceAction,
+                    extra: {_extraPlanIdKey: planId, "alertId": alertId},
                   );
-                  _showSnack(context, _deviationVarianceFailure);
-                }
-              },
-              onReplanDeviationUnit: (alertId, taskAdjustments, note) async {
-                AppDebug.log(
-                  _logTag,
-                  _replanUnitAction,
-                  extra: {
-                    _extraPlanIdKey: planId,
-                    "alertId": alertId,
-                    "adjustments": taskAdjustments.length,
-                  },
-                );
-                try {
-                  final message = await ref
-                      .read(productionPlanActionsProvider)
-                      .replanDeviationUnit(
-                        planId: planId,
-                        alertId: alertId,
-                        taskAdjustments: taskAdjustments,
-                        note: note,
-                      );
-                  _showSnack(
-                    context,
-                    message.trim().isEmpty ? _deviationReplanSuccess : message,
-                  );
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _deviationReplanFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _deviationReplanFailure);
-                }
-              },
-              onReconcilePreorders: () async {
-                AppDebug.log(
-                  _logTag,
-                  _reconcilePreorderAction,
-                  extra: {_extraPlanIdKey: planId},
-                );
-                try {
-                  final summary = await ref
-                      .read(productionPlanActionsProvider)
-                      .reconcileExpiredPreorders(planId: planId);
-                  _showSnack(context, _reconcileSuccess);
-                  await _showReconcileSummaryDialog(context, summary: summary);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _reconcileFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _reconcileFailure);
-                }
-              },
-              onUpdatePreorder: (payload) async {
-                AppDebug.log(
-                  _logTag,
-                  _preorderConfigAction,
-                  extra: {
-                    _extraPlanIdKey: planId,
-                    "intent": "update_preorder_settings",
-                  },
-                );
-                try {
-                  await ref
-                      .read(productionPlanActionsProvider)
-                      .updatePlanPreorder(planId: planId, payload: payload);
-                  _showSnack(context, _preorderUpdateSuccess);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _preorderUpdateFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _preorderUpdateFailure);
-                }
-              },
-              onStatusChange: (taskId, status) async {
-                AppDebug.log(
-                  _logTag,
-                  _statusChangeAction,
-                  extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
-                );
-                try {
-                  await ref
-                      .read(productionPlanActionsProvider)
-                      .updateTaskStatus(
-                        taskId: taskId,
-                        status: status,
-                        planId: planId,
-                      );
-                  _showSnack(context, _taskUpdateSuccess);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _taskUpdateFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _taskUpdateFailure);
-                }
-              },
-              onBatchLogProgress: (workDate, entries) async {
-                AppDebug.log(
-                  _logTag,
-                  _batchLogProgressAction,
-                  extra: {_extraPlanIdKey: planId, _extraTaskIdKey: "batch"},
-                );
-                try {
-                  final result = await ref
-                      .read(productionPlanActionsProvider)
-                      .logTaskProgressBatch(
-                        workDate: workDate,
-                        entries: entries,
-                        planId: planId,
-                      );
-                  final hasErrors = result.summary.errorCount > 0;
-                  _showSnack(
-                    context,
-                    hasErrors
-                        ? _taskProgressBatchPartial
-                        : _taskProgressBatchSuccess,
-                  );
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _taskProgressBatchFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _taskProgressBatchFailure);
-                }
-              },
-              onApproveProgress: (progressId) async {
-                AppDebug.log(
-                  _logTag,
-                  _approveProgressAction,
-                  extra: {
-                    _extraProgressIdKey: progressId,
-                    _extraPlanIdKey: planId,
-                  },
-                );
-                try {
-                  await ref
-                      .read(productionPlanActionsProvider)
-                      .approveTaskProgress(
-                        progressId: progressId,
-                        planId: planId,
-                      );
-                  _showSnack(context, _progressApproveSuccess);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _progressApproveFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _progressApproveFailure);
-                }
-              },
-              onRejectProgress: (progressId, reason) async {
-                AppDebug.log(
-                  _logTag,
-                  _rejectProgressAction,
-                  extra: {
-                    _extraProgressIdKey: progressId,
-                    _extraPlanIdKey: planId,
-                  },
-                );
-                try {
-                  await ref
-                      .read(productionPlanActionsProvider)
-                      .rejectTaskProgress(
-                        progressId: progressId,
-                        reason: reason,
-                        planId: planId,
-                      );
-                  _showSnack(context, _progressRejectSuccess);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _progressRejectFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _progressRejectFailure);
-                }
-              },
-              onApprove: (taskId) async {
-                AppDebug.log(
-                  _logTag,
-                  _approveAction,
-                  extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
-                );
-                try {
-                  await ref
-                      .read(productionPlanActionsProvider)
-                      .approveTask(taskId: taskId, planId: planId);
-                  _showSnack(context, _approveSuccess);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _approveFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _approveFailure);
-                }
-              },
-              onReject: (taskId, reason) async {
-                AppDebug.log(
-                  _logTag,
-                  _rejectAction,
-                  extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
-                );
-                try {
-                  await ref
-                      .read(productionPlanActionsProvider)
-                      .rejectTask(
-                        taskId: taskId,
-                        reason: reason,
-                        planId: planId,
-                      );
-                  _showSnack(context, _rejectSuccess);
-                } catch (err) {
-                  AppDebug.log(
-                    _logTag,
-                    _rejectFailure,
-                    extra: {_extraErrorKey: err.toString()},
-                  );
-                  _showSnack(context, _rejectFailure);
-                }
-              },
-              onLogProgress:
-                  (
-                    taskId,
-                    staffId,
-                    unitId,
-                    workDate,
-                    actualPlots,
-                    delayReason,
-                    notes,
-                  ) async {
+                  try {
+                    final message = await ref
+                        .read(productionPlanActionsProvider)
+                        .acceptDeviationVariance(
+                          planId: planId,
+                          alertId: alertId,
+                          note: note,
+                        );
+                    _showSnack(
+                      context,
+                      message.trim().isEmpty
+                          ? _deviationVarianceSuccess
+                          : message,
+                    );
+                  } catch (err) {
                     AppDebug.log(
                       _logTag,
-                      _logProgressAction,
-                      extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
+                      _deviationVarianceFailure,
+                      extra: {_extraErrorKey: err.toString()},
                     );
-                    try {
-                      await ref
-                          .read(productionPlanActionsProvider)
-                          .logTaskProgress(
-                            taskId: taskId,
-                            workDate: workDate,
-                            staffId: staffId,
-                            unitId: unitId,
-                            actualPlots: actualPlots,
-                            delayReason: delayReason,
-                            notes: notes,
-                            planId: planId,
-                          );
-                      _showSnack(context, _taskProgressSuccess);
-                    } catch (err) {
+                    _showSnack(context, _deviationVarianceFailure);
+                  }
+                },
+                onReplanDeviationUnit: (alertId, taskAdjustments, note) async {
+                  AppDebug.log(
+                    _logTag,
+                    _replanUnitAction,
+                    extra: {
+                      _extraPlanIdKey: planId,
+                      "alertId": alertId,
+                      "adjustments": taskAdjustments.length,
+                    },
+                  );
+                  try {
+                    final message = await ref
+                        .read(productionPlanActionsProvider)
+                        .replanDeviationUnit(
+                          planId: planId,
+                          alertId: alertId,
+                          taskAdjustments: taskAdjustments,
+                          note: note,
+                        );
+                    _showSnack(
+                      context,
+                      message.trim().isEmpty
+                          ? _deviationReplanSuccess
+                          : message,
+                    );
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _deviationReplanFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _deviationReplanFailure);
+                  }
+                },
+                onDownloadProgressReport: downloadProgressReport,
+                onEmailProgressReport: emailProgressReport,
+                onCopyProgressReportLink: copyProgressReportLink,
+                onStatusChange: (taskId, status) async {
+                  AppDebug.log(
+                    _logTag,
+                    _statusChangeAction,
+                    extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
+                  );
+                  try {
+                    await ref
+                        .read(productionPlanActionsProvider)
+                        .updateTaskStatus(
+                          taskId: taskId,
+                          status: status,
+                          planId: planId,
+                        );
+                    _showSnack(context, _taskUpdateSuccess);
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _taskUpdateFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _taskUpdateFailure);
+                  }
+                },
+                onBatchLogProgress: (workDate, entries) async {
+                  AppDebug.log(
+                    _logTag,
+                    _batchLogProgressAction,
+                    extra: {_extraPlanIdKey: planId, _extraTaskIdKey: "batch"},
+                  );
+                  try {
+                    final result = await ref
+                        .read(productionPlanActionsProvider)
+                        .logTaskProgressBatch(
+                          workDate: workDate,
+                          entries: entries,
+                          planId: planId,
+                        );
+                    final hasErrors = result.summary.errorCount > 0;
+                    _showSnack(
+                      context,
+                      hasErrors
+                          ? _taskProgressBatchPartial
+                          : _taskProgressBatchSuccess,
+                    );
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _taskProgressBatchFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _taskProgressBatchFailure);
+                  }
+                },
+                onApproveProgress: (progressId) async {
+                  AppDebug.log(
+                    _logTag,
+                    _approveProgressAction,
+                    extra: {
+                      _extraProgressIdKey: progressId,
+                      _extraPlanIdKey: planId,
+                    },
+                  );
+                  try {
+                    await ref
+                        .read(productionPlanActionsProvider)
+                        .approveTaskProgress(
+                          progressId: progressId,
+                          planId: planId,
+                        );
+                    _showSnack(context, _progressApproveSuccess);
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _progressApproveFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _progressApproveFailure);
+                  }
+                },
+                onRejectProgress: (progressId, reason) async {
+                  AppDebug.log(
+                    _logTag,
+                    _rejectProgressAction,
+                    extra: {
+                      _extraProgressIdKey: progressId,
+                      _extraPlanIdKey: planId,
+                    },
+                  );
+                  try {
+                    await ref
+                        .read(productionPlanActionsProvider)
+                        .rejectTaskProgress(
+                          progressId: progressId,
+                          reason: reason,
+                          planId: planId,
+                        );
+                    _showSnack(context, _progressRejectSuccess);
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _progressRejectFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _progressRejectFailure);
+                  }
+                },
+                onApprove: (taskId) async {
+                  AppDebug.log(
+                    _logTag,
+                    _approveAction,
+                    extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
+                  );
+                  try {
+                    await ref
+                        .read(productionPlanActionsProvider)
+                        .approveTask(taskId: taskId, planId: planId);
+                    _showSnack(context, _approveSuccess);
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _approveFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _approveFailure);
+                  }
+                },
+                onReject: (taskId, reason) async {
+                  AppDebug.log(
+                    _logTag,
+                    _rejectAction,
+                    extra: {_extraTaskIdKey: taskId, _extraPlanIdKey: planId},
+                  );
+                  try {
+                    await ref
+                        .read(productionPlanActionsProvider)
+                        .rejectTask(
+                          taskId: taskId,
+                          reason: reason,
+                          planId: planId,
+                        );
+                    _showSnack(context, _rejectSuccess);
+                  } catch (err) {
+                    AppDebug.log(
+                      _logTag,
+                      _rejectFailure,
+                      extra: {_extraErrorKey: err.toString()},
+                    );
+                    _showSnack(context, _rejectFailure);
+                  }
+                },
+                onLogProgress:
+                    (
+                      taskId,
+                      staffId,
+                      unitId,
+                      workDate,
+                      actualPlots,
+                      proofs,
+                      delayReason,
+                      notes,
+                    ) async {
                       AppDebug.log(
                         _logTag,
-                        _taskProgressFailure,
-                        extra: {_extraErrorKey: err.toString()},
+                        _logProgressAction,
+                        extra: {
+                          _extraTaskIdKey: taskId,
+                          _extraPlanIdKey: planId,
+                        },
                       );
-                      _showSnack(context, _taskProgressFailure);
-                    }
-                  },
+                      try {
+                        await ref
+                            .read(productionPlanActionsProvider)
+                            .logTaskProgress(
+                              taskId: taskId,
+                              workDate: workDate,
+                              staffId: staffId,
+                              unitId: unitId,
+                              actualPlots: actualPlots,
+                              proofs: proofs,
+                              delayReason: delayReason,
+                              notes: notes,
+                              planId: planId,
+                            );
+                        _showSnack(context, _taskProgressSuccess);
+                      } catch (err) {
+                        AppDebug.log(
+                          _logTag,
+                          _taskProgressFailure,
+                          extra: {_extraErrorKey: err.toString()},
+                        );
+                        _showSnack(context, _taskProgressFailure);
+                      }
+                    },
+              ),
             );
           },
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => const ProductionLoadingState(),
           error: (err, _) => Center(
             child: Padding(
               padding: const EdgeInsets.all(_pagePadding),
@@ -753,14 +926,15 @@ class ProductionPlanDetailScreen extends ConsumerWidget {
 
 class _PlanDetailBody extends StatefulWidget {
   final ProductionPlanDetail detail;
+  final _DetailViewMode initialViewMode;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
   final bool canReviewProgress;
   final bool showPlanUnits;
-  final bool showPlanConfidence;
   final bool showDeviationGovernance;
   final Map<String, String> planUnitLabelById;
+  final List<ProductionPlanUnit> planUnits;
   final int? planUnitsCount;
   final bool planUnitsLoading;
   final bool planUnitsHasError;
@@ -772,8 +946,9 @@ class _PlanDetailBody extends StatefulWidget {
     String note,
   )
   onReplanDeviationUnit;
-  final Future<void> Function() onReconcilePreorders;
-  final Future<void> Function(Map<String, dynamic> payload) onUpdatePreorder;
+  final Future<void> Function() onDownloadProgressReport;
+  final Future<void> Function() onEmailProgressReport;
+  final Future<void> Function() onCopyProgressReportLink;
   final Future<void> Function(String taskId, String status) onStatusChange;
   final Future<void> Function(
     DateTime workDate,
@@ -789,6 +964,7 @@ class _PlanDetailBody extends StatefulWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -798,21 +974,23 @@ class _PlanDetailBody extends StatefulWidget {
 
   const _PlanDetailBody({
     required this.detail,
+    required this.initialViewMode,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
     required this.canReviewProgress,
     required this.showPlanUnits,
-    required this.showPlanConfidence,
     required this.showDeviationGovernance,
     required this.planUnitLabelById,
+    required this.planUnits,
     required this.planUnitsCount,
     required this.planUnitsLoading,
     required this.planUnitsHasError,
     required this.onAcceptDeviationVariance,
     required this.onReplanDeviationUnit,
-    required this.onReconcilePreorders,
-    required this.onUpdatePreorder,
+    required this.onDownloadProgressReport,
+    required this.onEmailProgressReport,
+    required this.onCopyProgressReportLink,
     required this.onStatusChange,
     required this.onBatchLogProgress,
     required this.onApproveProgress,
@@ -828,6 +1006,116 @@ class _PlanDetailBody extends StatefulWidget {
 
 class _PlanDetailBodyState extends State<_PlanDetailBody> {
   _DetailViewMode _viewMode = _DetailViewMode.overview;
+  final ScrollController _contentScrollController = ScrollController();
+  final GlobalKey _executionChartSectionKey = GlobalKey();
+  Timer? _dayRefreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _viewMode = widget.initialViewMode;
+    _scheduleDayRefresh();
+    if (_viewMode == _DetailViewMode.execution) {
+      _revealExecutionChartSection();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _PlanDetailBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialViewMode != widget.initialViewMode &&
+        widget.initialViewMode != _viewMode) {
+      _viewMode = widget.initialViewMode;
+      if (_viewMode == _DetailViewMode.execution) {
+        _revealExecutionChartSection();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _dayRefreshTimer?.cancel();
+    _contentScrollController.dispose();
+    super.dispose();
+  }
+
+  void _updateViewMode(_DetailViewMode mode) {
+    final modeChanged = _viewMode != mode;
+    if (modeChanged) {
+      setState(() => _viewMode = mode);
+      context.go(
+        productionPlanInsightsPath(
+          widget.detail.plan.id,
+          view: _detailViewModeQueryValue(mode),
+        ),
+      );
+    }
+    if (mode == _DetailViewMode.execution) {
+      _revealExecutionChartSection();
+    }
+  }
+
+  void _revealExecutionChartSection({int remainingAttempts = 2}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final sectionContext = _executionChartSectionKey.currentContext;
+      AppDebug.log(
+        _logTag,
+        _executionChartRevealAction,
+        extra: {
+          _extraPlanIdKey: widget.detail.plan.id,
+          "hasSectionContext": sectionContext != null,
+          "remainingAttempts": remainingAttempts,
+        },
+      );
+      if (sectionContext == null) {
+        if (_contentScrollController.hasClients) {
+          final position = _contentScrollController.position;
+          final fallbackOffset =
+              (position.pixels + (position.viewportDimension * 0.9)).clamp(
+                0.0,
+                position.maxScrollExtent,
+              );
+          if ((fallbackOffset - position.pixels).abs() > 1) {
+            // WHY: On compact lists Flutter may not build the off-screen chart
+            // section yet. Move the list near the execution region first, then
+            // retry with ensureVisible once the section mounts.
+            _contentScrollController.jumpTo(fallbackOffset);
+          }
+        }
+        if (remainingAttempts > 0) {
+          _revealExecutionChartSection(
+            remainingAttempts: remainingAttempts - 1,
+          );
+        }
+        return;
+      }
+      Scrollable.ensureVisible(
+        sectionContext,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: 0.02,
+      );
+    });
+  }
+
+  void _scheduleDayRefresh() {
+    _dayRefreshTimer?.cancel();
+    final now = DateTime.now();
+    final nextLocalMidnight = DateTime(now.year, now.month, now.day + 1);
+    _dayRefreshTimer = Timer(
+      nextLocalMidnight.difference(now) + const Duration(seconds: 1),
+      () {
+        if (!mounted) {
+          return;
+        }
+        setState(() {});
+        _scheduleDayRefresh();
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -841,45 +1129,78 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
         final maxWidth = constraints.maxWidth >= 1320
             ? 1180.0
             : double.infinity;
+        final isCompact = constraints.maxWidth < 760;
+        final contentChildren = <Widget>[
+          _PlanSummaryCard(
+            plan: widget.detail.plan,
+            timelineRows: widget.detail.timelineRows,
+            preorderSummary: widget.detail.preorderSummary,
+            showPlanUnits: widget.showPlanUnits,
+            planUnits: widget.planUnits,
+            planUnitsCount: widget.planUnitsCount,
+            planUnitsLoading: widget.planUnitsLoading,
+            planUnitsHasError: widget.planUnitsHasError,
+            onDownloadProgressReport: widget.onDownloadProgressReport,
+            onEmailProgressReport: widget.onEmailProgressReport,
+            onCopyProgressReportLink: widget.onCopyProgressReportLink,
+          ),
+          const SizedBox(height: _sectionSpacing),
+          if (!isCompact) ...[
+            _DetailViewModePicker(
+              selectedMode: _viewMode,
+              onChanged: _updateViewMode,
+            ),
+            const SizedBox(height: _sectionSpacing),
+          ],
+          ...switch (_viewMode) {
+            _DetailViewMode.overview => _buildOverviewSections(context),
+            _DetailViewMode.execution => _buildExecutionSections(
+              context,
+              tasksByPhase,
+            ),
+            _DetailViewMode.people => _buildPeopleSections(context),
+            _DetailViewMode.risk => _buildRiskSections(context),
+          },
+        ];
+        final contentList = ListView(
+          controller: _contentScrollController,
+          padding: EdgeInsets.fromLTRB(
+            _pagePadding,
+            _pagePadding,
+            _pagePadding,
+            isCompact ? 104 : _pagePadding,
+          ),
+          children: contentChildren,
+        );
+        final content = isCompact
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  contentList,
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: SafeArea(
+                      minimum: const EdgeInsets.fromLTRB(
+                        _pagePadding,
+                        0,
+                        _pagePadding,
+                        _compactBottomNavOffset,
+                      ),
+                      child: _DetailViewModePicker(
+                        selectedMode: _viewMode,
+                        compact: true,
+                        onChanged: _updateViewMode,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : contentList;
         return Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),
-            child: ListView(
-              padding: const EdgeInsets.all(_pagePadding),
-              children: [
-                _PlanSummaryCard(
-                  plan: widget.detail.plan,
-                  preorderSummary: widget.detail.preorderSummary,
-                  isOwner: widget.isOwner,
-                  showPlanUnits: widget.showPlanUnits,
-                  showPlanConfidence: widget.showPlanConfidence,
-                  planUnitsCount: widget.planUnitsCount,
-                  planUnitsLoading: widget.planUnitsLoading,
-                  planUnitsHasError: widget.planUnitsHasError,
-                  onReconcilePreorders: widget.onReconcilePreorders,
-                  onUpdatePreorder: widget.onUpdatePreorder,
-                ),
-                const SizedBox(height: _sectionSpacing),
-                _DetailViewModePicker(
-                  selectedMode: _viewMode,
-                  onChanged: (mode) {
-                    if (_viewMode == mode) return;
-                    setState(() => _viewMode = mode);
-                  },
-                ),
-                const SizedBox(height: _sectionSpacing),
-                ...switch (_viewMode) {
-                  _DetailViewMode.overview => _buildOverviewSections(context),
-                  _DetailViewMode.execution => _buildExecutionSections(
-                    context,
-                    tasksByPhase,
-                  ),
-                  _DetailViewMode.people => _buildPeopleSections(context),
-                  _DetailViewMode.risk => _buildRiskSections(context),
-                },
-              ],
-            ),
+            child: content,
           ),
         );
       },
@@ -906,47 +1227,15 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
         leftFlex: 6,
         rightFlex: 5,
       ),
-      _ResponsiveSplit(
-        left: _buildSectionPane(
-          title: _phaseTitle,
-          subtitle: "Which phases are moving and which ones are stalled.",
-          child: _PhaseProgressList(kpis: widget.detail.kpis),
+      _buildSectionPane(
+        title: _phaseTitle,
+        subtitle: "Which phases are moving and which ones are stalled.",
+        child: _PhaseProgressList(
+          planId: widget.detail.plan.id,
+          kpis: widget.detail.kpis,
         ),
-        right: _buildSectionPane(
-          title: widget.showPlanConfidence
-              ? _planConfidenceTitle
-              : "Latest activity",
-          subtitle: widget.showPlanConfidence
-              ? "Confidence, capacity, and schedule stability in one place."
-              : "Most recent task logs, approvals, and delays.",
-          child: widget.showPlanConfidence
-              ? _PlanConfidenceSection(confidence: widget.detail.confidence)
-              : _TimelineTaskTable(
-                  rows: widget.detail.timelineRows.take(8).toList(),
-                  canReviewProgress: widget.canReviewProgress,
-                  onApproveProgress: widget.onApproveProgress,
-                  onRejectProgress: widget.onRejectProgress,
-                ),
-        ),
-        leftFlex: 6,
-        rightFlex: 5,
       ),
     ];
-
-    if (widget.showPlanConfidence) {
-      overviewSections.add(
-        _buildSectionPane(
-          title: "Latest activity",
-          subtitle: "Most recent task logs, approvals, and delays.",
-          child: _TimelineTaskTable(
-            rows: widget.detail.timelineRows.take(8).toList(),
-            canReviewProgress: widget.canReviewProgress,
-            onApproveProgress: widget.onApproveProgress,
-            onRejectProgress: widget.onRejectProgress,
-          ),
-        ),
-      );
-    }
 
     return _withVerticalSpacing(overviewSections);
   }
@@ -955,49 +1244,68 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
     BuildContext context,
     Map<String, List<ProductionTask>> tasksByPhase,
   ) {
+    // WHY: The chart should cover the full scheduled workload, while the feed
+    // still exposes every saved execution row for approvals and review.
+    final executionRows = widget.detail.timelineRows;
+    final taskById = <String, ProductionTask>{
+      for (final phaseTasks in tasksByPhase.values)
+        for (final task in phaseTasks) task.id: task,
+    };
+
     return _withVerticalSpacing([
-      _ResponsiveSplit(
-        left: _buildSectionPane(
-          title: _dailyRollupTitle,
-          subtitle:
-              "Daily execution, attendance coverage, and how each day landed against plan.",
-          child: _DailyRollupTable(rollups: widget.detail.dailyRollups),
-        ),
-        right: _buildSectionPane(
-          title: "Execution feed",
-          subtitle:
-              "Clean task-by-task activity for approvals and progress review.",
-          action: widget.canLogProgress
-              ? OutlinedButton.icon(
-                  onPressed: () async {
-                    final batchInput = await _showBatchLogProgressDialog(
-                      context,
-                      detail: widget.detail,
-                      staffMap: widget.staffMap,
-                      planUnitLabelById: widget.planUnitLabelById,
-                    );
-                    if (batchInput == null) {
-                      return;
-                    }
-                    await widget.onBatchLogProgress(
-                      batchInput.workDate,
-                      batchInput.entries,
-                    );
-                  },
-                  icon: const Icon(Icons.playlist_add_check_circle_outlined),
-                  label: const Text(_batchLogProgressLabel),
-                )
-              : null,
-          child: _TimelineTaskTable(
-            rows: widget.detail.timelineRows.take(12).toList(),
-            canReviewProgress: widget.canReviewProgress,
-            onApproveProgress: widget.onApproveProgress,
-            onRejectProgress: widget.onRejectProgress,
+      Container(
+        key: _executionChartSectionKey,
+        child: _ResponsiveSplit(
+          left: _buildSectionPane(
+            title: _dailyRollupTitle,
+            subtitle: _executionChartSubtitle,
+            child: _ExecutionDayStackChart(
+              planId: widget.detail.plan.id,
+              rows: executionRows,
+              taskById: taskById,
+              staffMap: widget.staffMap,
+            ),
           ),
+          right: _buildSectionPane(
+            title: "Execution feed",
+            subtitle:
+                "Clean task-by-task activity for approvals and progress review.",
+            action: widget.canLogProgress
+                ? OutlinedButton.icon(
+                    style: AppButtonStyles.outlined(
+                      theme: Theme.of(context),
+                      tone: AppStatusTone.warning,
+                    ),
+                    onPressed: () async {
+                      final batchInput = await _showBatchLogProgressDialog(
+                        context,
+                        detail: widget.detail,
+                        staffMap: widget.staffMap,
+                        planUnitLabelById: widget.planUnitLabelById,
+                      );
+                      if (batchInput == null) {
+                        return;
+                      }
+                      await widget.onBatchLogProgress(
+                        batchInput.workDate,
+                        batchInput.entries,
+                      );
+                    },
+                    icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                    label: const Text(_batchLogProgressLabel),
+                  )
+                : null,
+            child: _TimelineTaskTable(
+              rows: executionRows,
+              canReviewProgress: widget.canReviewProgress,
+              onApproveProgress: widget.onApproveProgress,
+              onRejectProgress: widget.onRejectProgress,
+            ),
+          ),
+          breakpoint: _detailWideSplitBreakpoint,
+          leftFlex: 6,
+          rightFlex: 5,
         ),
-        breakpoint: _detailWideSplitBreakpoint,
-        leftFlex: 6,
-        rightFlex: 5,
       ),
       _ResponsiveSplit(
         left: _buildSectionPane(
@@ -1034,6 +1342,7 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
             return _PhaseTaskSection(
               phase: phase,
               tasks: phaseTasks,
+              attendanceRecords: widget.detail.attendanceRecords,
               staffMap: widget.staffMap,
               isOwner: widget.isOwner,
               canLogProgress: widget.canLogProgress,
@@ -1085,16 +1394,6 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
     final leftColumn = <Widget>[];
     final rightColumn = <Widget>[];
 
-    if (widget.showPlanConfidence) {
-      leftColumn.add(
-        _buildSectionPane(
-          title: _planConfidenceTitle,
-          subtitle: "Confidence and baseline drift for the full lifecycle.",
-          child: _PlanConfidenceSection(confidence: widget.detail.confidence),
-        ),
-      );
-    }
-
     if (widget.showPlanUnits) {
       leftColumn.add(
         _buildSectionPane(
@@ -1126,11 +1425,11 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
         _buildSectionPane(
           title: _riskViewTitle,
           subtitle:
-              "This view opens once confidence, unit drift, or governance data is available.",
+              "This view opens once unit drift or governance data is available.",
           child: const _InlineEmptyState(
             title: "No operational risk data yet",
             message:
-                "Confidence, unit drift, and governance alerts will appear after the first real production updates.",
+                "Unit drift and governance alerts will appear after the first real production updates.",
           ),
         ),
       ]);
@@ -1221,49 +1520,249 @@ class _PlanDetailBodyState extends State<_PlanDetailBody> {
 class _DetailViewModePicker extends StatelessWidget {
   final _DetailViewMode selectedMode;
   final ValueChanged<_DetailViewMode> onChanged;
+  final bool compact;
 
   const _DetailViewModePicker({
     required this.selectedMode,
     required this.onChanged,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final options = <(_DetailViewMode, IconData, String)>[
+    final theme = Theme.of(context);
+    final options = <(_DetailViewMode, IconData, String, AppStatusTone)>[
       (
         _DetailViewMode.overview,
         Icons.dashboard_customize_outlined,
         _overviewViewTitle,
+        AppStatusTone.info,
       ),
       (
         _DetailViewMode.execution,
         Icons.playlist_play_outlined,
         _executionViewTitle,
+        AppStatusTone.warning,
       ),
-      (_DetailViewMode.people, Icons.groups_2_outlined, _peopleViewTitle),
-      (_DetailViewMode.risk, Icons.shield_outlined, _riskViewTitle),
+      (
+        _DetailViewMode.people,
+        Icons.groups_2_outlined,
+        _peopleViewTitle,
+        AppStatusTone.success,
+      ),
+      (
+        _DetailViewMode.risk,
+        Icons.shield_outlined,
+        _riskViewTitle,
+        AppStatusTone.danger,
+      ),
     ];
+
+    if (compact) {
+      return Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: _summarySurfaceColor(theme),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _summaryBorderColor(theme)),
+          boxShadow: _summarySoftShadow(theme),
+        ),
+        child: Row(
+          children: options
+              .map(
+                (option) => Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: option == options.last ? 0 : 6,
+                    ),
+                    child: _DetailViewModeButton(
+                      icon: option.$2,
+                      label: option.$3,
+                      tone: option.$4,
+                      compact: true,
+                      isSelected: selectedMode == option.$1,
+                      onTap: () => onChanged(option.$1),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    }
 
     return Wrap(
       spacing: _cardSpacing,
       runSpacing: _cardSpacing,
-      children: options.map((option) {
-        final isSelected = selectedMode == option.$1;
-        return ChoiceChip(
-          selected: isSelected,
-          label: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(option.$2, size: 18),
-              const SizedBox(width: 8),
-              Text(option.$3),
-            ],
-          ),
-          onSelected: (_) => onChanged(option.$1),
-        );
-      }).toList(),
+      children: options
+          .map(
+            (option) => _DetailViewModeButton(
+              icon: option.$2,
+              label: option.$3,
+              tone: option.$4,
+              isSelected: selectedMode == option.$1,
+              onTap: () => onChanged(option.$1),
+            ),
+          )
+          .toList(),
     );
   }
+}
+
+class _DetailViewModeButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final AppStatusTone tone;
+  final bool isSelected;
+  final bool compact;
+  final VoidCallback onTap;
+
+  const _DetailViewModeButton({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.isSelected,
+    required this.onTap,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+    final accent = _toneAccentColor(context, tone);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Ink(
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 6 : 12,
+            vertical: compact ? 8 : 10,
+          ),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? badgeColors.background
+                : _summarySurfaceColor(theme),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? accent.withValues(alpha: 0.22)
+                  : _summaryBorderColor(theme),
+            ),
+          ),
+          child: compact
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: badgeColors.background,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        icon,
+                        size: 16,
+                        color: badgeColors.foreground,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: isSelected
+                            ? colorScheme.onSurface
+                            : colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: badgeColors.background,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        icon,
+                        size: 16,
+                        color: badgeColors.foreground,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: isSelected
+                            ? colorScheme.onSurface
+                            : colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+ProductionAttendanceRecord? _findCompletedAttendanceForStaffOnDate({
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required String staffProfileId,
+  required DateTime workDate,
+}) {
+  final normalizedStaffId = staffProfileId.trim();
+  if (normalizedStaffId.isEmpty) {
+    return null;
+  }
+
+  final dayStart = DateTime(workDate.year, workDate.month, workDate.day);
+  final dayEnd = dayStart.add(const Duration(days: 1));
+  for (final record in attendanceRecords) {
+    if (record.staffProfileId.trim() != normalizedStaffId) {
+      continue;
+    }
+    final recordWorkDate = record.workDate;
+    if (recordWorkDate != null) {
+      final recordDayStart = DateTime(
+        recordWorkDate.year,
+        recordWorkDate.month,
+        recordWorkDate.day,
+      );
+      if (recordDayStart == dayStart && record.clockInAt != null) {
+        return record;
+      }
+    }
+    final clockInAt = record.clockInAt;
+    final clockOutAt = record.clockOutAt;
+    if (clockInAt == null) {
+      continue;
+    }
+    if (clockOutAt == null) {
+      if (clockInAt.isBefore(dayEnd) && !clockInAt.isBefore(dayStart)) {
+        return record;
+      }
+      continue;
+    }
+    if (clockInAt.isBefore(dayEnd) && !clockOutAt.isBefore(dayStart)) {
+      return record;
+    }
+  }
+  return null;
 }
 
 class _DetailPanel extends StatelessWidget {
@@ -1330,34 +1829,319 @@ class _ResponsiveSplit extends StatelessWidget {
   }
 }
 
+AppStatusBadgeColors _toneBadgeColors(
+  BuildContext context,
+  AppStatusTone tone,
+) {
+  return AppStatusBadgeColors.fromTheme(theme: Theme.of(context), tone: tone);
+}
+
+Color _toneAccentColor(BuildContext context, AppStatusTone tone) {
+  final theme = Theme.of(context);
+  if (tone == AppStatusTone.neutral) {
+    return theme.colorScheme.primary;
+  }
+  return AppButtonStyles.accentColor(theme: theme, tone: tone);
+}
+
+Color _summarySurfaceColor(ThemeData theme) {
+  return theme.brightness == Brightness.dark
+      ? theme.colorScheme.surface
+      : _summaryLightSurface;
+}
+
+Color _summarySubtleSurfaceColor(ThemeData theme) {
+  return theme.brightness == Brightness.dark
+      ? theme.colorScheme.surfaceContainerLow
+      : _summaryLightSubtleSurface;
+}
+
+Color _summaryBorderColor(ThemeData theme) {
+  return theme.brightness == Brightness.dark
+      ? theme.colorScheme.outlineVariant
+      : _summaryLightBorder;
+}
+
+List<BoxShadow> _summarySoftShadow(ThemeData theme) {
+  if (theme.brightness == Brightness.dark) {
+    return const [];
+  }
+  return [
+    BoxShadow(
+      color: theme.colorScheme.shadow.withValues(alpha: 0.035),
+      blurRadius: 24,
+      offset: const Offset(0, 8),
+    ),
+  ];
+}
+
+double _resolveSummaryMetricWidth(double maxWidth) {
+  if (maxWidth >= 900) {
+    return (maxWidth - (_cardSpacing * 2)) / 3;
+  }
+  if (maxWidth >= 360) {
+    return (maxWidth - _cardSpacing) / 2;
+  }
+  return maxWidth;
+}
+
+AppStatusTone _summaryStatusTone(String rawLabel) {
+  switch (rawLabel.trim().toLowerCase()) {
+    case "active":
+    case "approved":
+    case "completed":
+    case "done":
+    case "in_progress":
+    case "on_track":
+    case "enabled":
+      return AppStatusTone.success;
+    case "pending":
+    case "paused":
+    case "needs_review":
+      return AppStatusTone.warning;
+    case "blocked":
+    case "rejected":
+    case "delayed":
+    case "disabled":
+    case "archived":
+      return AppStatusTone.danger;
+    case _dash:
+    case "":
+      return AppStatusTone.neutral;
+    default:
+      return AppStatusTone.info;
+  }
+}
+
+const String _quantityActivityTransplant = "transplanted";
+const String _quantityActivityHarvest = "harvested";
+
+class _PlanFarmQuantitySummary {
+  final String plantingUnit;
+  final String harvestUnit;
+  final num transplantLogged;
+  final num harvestLogged;
+  final num transplantRemaining;
+  final num harvestRemaining;
+
+  const _PlanFarmQuantitySummary({
+    required this.plantingUnit,
+    required this.harvestUnit,
+    required this.transplantLogged,
+    required this.harvestLogged,
+    required this.transplantRemaining,
+    required this.harvestRemaining,
+  });
+}
+
+num _sumPlanQuantityForActivity({
+  required List<ProductionTimelineRow> timelineRows,
+  required String activityType,
+}) {
+  return timelineRows
+      .where(
+        (row) =>
+            row.quantityActivityType.trim().toLowerCase() == activityType &&
+            row.approvalState != _progressApprovalNeedsReview,
+      )
+      .fold<num>(0, (sum, row) => sum + row.quantityAmount);
+}
+
+_PlanFarmQuantitySummary? _summarizePlanFarmQuantities({
+  required ProductionPlan plan,
+  required List<ProductionTimelineRow> timelineRows,
+}) {
+  final plantingTargets = plan.plantingTargets;
+  if (plantingTargets?.isConfigured != true) {
+    return null;
+  }
+
+  final configuredTargets = plantingTargets!;
+  final transplantLogged = _sumPlanQuantityForActivity(
+    timelineRows: timelineRows,
+    activityType: _quantityActivityTransplant,
+  );
+  final harvestLogged = _sumPlanQuantityForActivity(
+    timelineRows: timelineRows,
+    activityType: _quantityActivityHarvest,
+  );
+  final transplantRemaining =
+      configuredTargets.plannedPlantingQuantity > transplantLogged
+      ? configuredTargets.plannedPlantingQuantity - transplantLogged
+      : 0;
+  final harvestRemaining =
+      configuredTargets.estimatedHarvestQuantity > harvestLogged
+      ? configuredTargets.estimatedHarvestQuantity - harvestLogged
+      : 0;
+
+  return _PlanFarmQuantitySummary(
+    plantingUnit: configuredTargets.plannedPlantingUnit,
+    harvestUnit: configuredTargets.estimatedHarvestUnit,
+    transplantLogged: transplantLogged,
+    harvestLogged: harvestLogged,
+    transplantRemaining: transplantRemaining,
+    harvestRemaining: harvestRemaining,
+  );
+}
+
+DateTime? _resolvePlanLatestUpdate({
+  required ProductionPlan plan,
+  required List<ProductionTimelineRow> timelineRows,
+}) {
+  var latest = _latestDateTime(plan.updatedAt, plan.lastDraftSavedAt);
+  for (final row in timelineRows) {
+    latest = _latestDateTime(
+      latest,
+      row.approvedAt,
+      row.clockOutTime,
+      row.clockInTime,
+      row.workDate,
+    );
+  }
+  return latest;
+}
+
+DateTime? _latestDateTime(
+  DateTime? current, [
+  DateTime? next,
+  DateTime? third,
+  DateTime? fourth,
+  DateTime? fifth,
+]) {
+  final values = <DateTime?>[current, next, third, fourth, fifth];
+  DateTime? latest;
+  for (final value in values) {
+    if (value == null) {
+      continue;
+    }
+    if (latest == null || value.isAfter(latest)) {
+      latest = value;
+    }
+  }
+  return latest;
+}
+
+String _formatPlanProgressAmount(num value) {
+  final normalized = value.toDouble();
+  if ((normalized - normalized.roundToDouble()).abs() < 0.001) {
+    return normalized.round().toString();
+  }
+  if (((normalized * 10) - (normalized * 10).roundToDouble()).abs() < 0.001) {
+    return normalized.toStringAsFixed(1);
+  }
+  return normalized.toStringAsFixed(2);
+}
+
+AppStatusTone _progressTone(double value) {
+  if (value >= 1) {
+    return AppStatusTone.success;
+  }
+  if (value > 0) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.neutral;
+}
+
+AppStatusTone _ratioTone(double value) {
+  if (value >= 0.75) {
+    return AppStatusTone.success;
+  }
+  if (value >= 0.3) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.danger;
+}
+
+AppStatusTone _inverseRatioTone(double value) {
+  if (value <= 0.05) {
+    return AppStatusTone.success;
+  }
+  if (value <= 0.2) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.danger;
+}
+
+AppStatusTone _delayTone(double value) {
+  if (value <= 0.25) {
+    return AppStatusTone.success;
+  }
+  if (value <= 1) {
+    return AppStatusTone.warning;
+  }
+  return AppStatusTone.danger;
+}
+
+AppStatusTone _severityTone(String severity) {
+  switch (severity.trim().toLowerCase()) {
+    case "critical":
+    case "high":
+      return AppStatusTone.danger;
+    case "medium":
+      return AppStatusTone.warning;
+    case "low":
+      return AppStatusTone.info;
+    default:
+      return AppStatusTone.neutral;
+  }
+}
+
 class _InfoPill extends StatelessWidget {
   final IconData? icon;
   final String label;
+  final AppStatusTone tone;
 
-  const _InfoPill({required this.label, this.icon});
+  const _InfoPill({
+    required this.label,
+    this.icon,
+    this.tone = AppStatusTone.neutral,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+    final usesTone = tone != AppStatusTone.neutral;
+    final isDark = theme.brightness == Brightness.dark;
+    final iconBackground = usesTone
+        ? badgeColors.background.withValues(alpha: isDark ? 0.72 : 0.44)
+        : colorScheme.surfaceContainerHighest;
+    final iconForeground = usesTone
+        ? badgeColors.foreground.withValues(alpha: isDark ? 0.96 : 0.88)
+        : colorScheme.onSurfaceVariant;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: _summarySurfaceColor(theme),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: usesTone
+              ? badgeColors.foreground.withValues(alpha: isDark ? 0.24 : 0.16)
+              : _summaryBorderColor(theme),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 16, color: colorScheme.primary),
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: iconBackground,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Icon(icon, size: 14, color: iconForeground),
+            ),
             const SizedBox(width: 6),
           ],
           Text(
             label,
             style: textTheme.labelMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: usesTone ? iconForeground : colorScheme.onSurfaceVariant,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -1370,27 +2154,32 @@ class _InfoPill extends StatelessWidget {
 class _MiniMetricCard extends StatelessWidget {
   final String label;
   final String value;
-  final Color? accentColor;
+  final AppStatusTone tone;
 
   const _MiniMetricCard({
     required this.label,
     required this.value,
-    this.accentColor,
+    this.tone = AppStatusTone.neutral,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final resolvedAccent = tone == AppStatusTone.neutral
+        ? null
+        : _toneAccentColor(context, tone);
     return Container(
       constraints: const BoxConstraints(minWidth: 120),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: resolvedAccent == null
+            ? colorScheme.surfaceContainerHighest
+            : resolvedAccent.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color:
-              accentColor?.withValues(alpha: 0.18) ??
+              resolvedAccent?.withValues(alpha: 0.22) ??
               colorScheme.outlineVariant,
         ),
       ),
@@ -1400,7 +2189,9 @@ class _MiniMetricCard extends StatelessWidget {
           Text(
             label,
             style: textTheme.labelSmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color:
+                  resolvedAccent?.withValues(alpha: 0.88) ??
+                  colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 6),
@@ -1408,7 +2199,7 @@ class _MiniMetricCard extends StatelessWidget {
             value,
             style: textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
-              color: accentColor,
+              color: resolvedAccent,
             ),
           ),
         ],
@@ -1451,8 +2242,15 @@ class _OutputSummarySection extends StatelessWidget {
               _MiniMetricCard(
                 label: "Output records",
                 value: "${outputs.length}",
+                tone: AppStatusTone.info,
               ),
-              _MiniMetricCard(label: "Ready for sale", value: "$readyCount"),
+              _MiniMetricCard(
+                label: "Ready for sale",
+                value: "$readyCount",
+                tone: readyCount > 0
+                    ? AppStatusTone.success
+                    : AppStatusTone.neutral,
+              ),
             ],
           ),
           if (entries.isNotEmpty) ...[
@@ -1465,6 +2263,7 @@ class _OutputSummarySection extends StatelessWidget {
                     (entry) => _InfoPill(
                       icon: Icons.inventory_2_outlined,
                       label: "${entry.value} ${entry.key}",
+                      tone: AppStatusTone.info,
                     ),
                   )
                   .toList(),
@@ -1535,6 +2334,7 @@ class _AttendanceRecordSection extends StatelessWidget {
                     _InfoPill(
                       icon: Icons.schedule_outlined,
                       label: "${record.durationMinutes} mins",
+                      tone: AppStatusTone.info,
                     ),
                   ],
                 ),
@@ -1558,118 +2358,38 @@ class _AttendanceRecordSection extends StatelessWidget {
   }
 }
 
-class _PlanConfidenceSection extends StatelessWidget {
-  final ProductionPlanConfidence? confidence;
-
-  const _PlanConfidenceSection({required this.confidence});
-
-  @override
-  Widget build(BuildContext context) {
-    if (confidence == null) {
-      return const _InlineEmptyState(
-        title: _planConfidenceTitle,
-        message: _planConfidenceFallback,
-      );
-    }
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final currentPercent =
-        "${_formatPercent(confidence!.currentConfidenceScore)}$_percentSuffix";
-    final baselinePercent =
-        "${_formatPercent(confidence!.baselineConfidenceScore)}$_percentSuffix";
-    final deltaRaw = confidence!.confidenceScoreDelta * _percentMultiplier;
-    final deltaPercent =
-        "${deltaRaw >= 0 ? "+" : ""}${deltaRaw.toStringAsFixed(1)}$_percentSuffix";
-
-    Widget buildRow(String label, String value) {
-      return Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-        ],
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(_summaryCardPadding),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(_summaryCardRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          buildRow(_planConfidenceCurrentLabel, currentPercent),
-          const SizedBox(height: _summaryMetaSpacing),
-          buildRow(_planConfidenceBaselineLabel, baselinePercent),
-          const SizedBox(height: _summaryMetaSpacing),
-          buildRow(_planConfidenceDeltaLabel, deltaPercent),
-          const SizedBox(height: _summaryTitleSpacing),
-          buildRow(
-            _planConfidenceCapacityLabel,
-            "${_formatPercent(confidence!.currentBreakdown.capacity)}$_percentSuffix",
-          ),
-          const SizedBox(height: _summaryMetaSpacing),
-          buildRow(
-            _planConfidenceScheduleLabel,
-            "${_formatPercent(confidence!.currentBreakdown.scheduleStability)}$_percentSuffix",
-          ),
-          const SizedBox(height: _summaryMetaSpacing),
-          buildRow(
-            _planConfidenceReliabilityLabel,
-            "${_formatPercent(confidence!.currentBreakdown.historicalReliability)}$_percentSuffix",
-          ),
-          const SizedBox(height: _summaryMetaSpacing),
-          buildRow(
-            _planConfidenceComplexityLabel,
-            "${_formatPercent(confidence!.currentBreakdown.complexityRisk)}$_percentSuffix",
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _PlanSummaryCard extends StatelessWidget {
   final ProductionPlan plan;
+  final List<ProductionTimelineRow> timelineRows;
   final ProductionPreorderSummary? preorderSummary;
-  final bool isOwner;
   final bool showPlanUnits;
-  final bool showPlanConfidence;
+  final List<ProductionPlanUnit> planUnits;
   final int? planUnitsCount;
   final bool planUnitsLoading;
   final bool planUnitsHasError;
-  final Future<void> Function() onReconcilePreorders;
-  final Future<void> Function(Map<String, dynamic> payload) onUpdatePreorder;
+  final Future<void> Function() onDownloadProgressReport;
+  final Future<void> Function() onEmailProgressReport;
+  final Future<void> Function() onCopyProgressReportLink;
 
   const _PlanSummaryCard({
     required this.plan,
+    required this.timelineRows,
     required this.preorderSummary,
-    required this.isOwner,
     required this.showPlanUnits,
-    required this.showPlanConfidence,
+    required this.planUnits,
     required this.planUnitsCount,
     required this.planUnitsLoading,
     required this.planUnitsHasError,
-    required this.onReconcilePreorders,
-    required this.onUpdatePreorder,
+    required this.onDownloadProgressReport,
+    required this.onEmailProgressReport,
+    required this.onCopyProgressReportLink,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
     final domainLabel = formatProductionDomainLabel(plan.domainContext);
     final plantingTargets = plan.plantingTargets;
     String formatTargetNumber(double value) {
@@ -1706,252 +2426,592 @@ class _PlanSummaryCard extends StatelessWidget {
       }
     }
 
-    final confidencePercent = preorderSummary == null
-        ? 0
-        : (preorderSummary!.confidenceScore * _percentMultiplier)
-              .clamp(_percentMin, _percentMultiplier)
-              .toDouble()
-              .round();
-    final coveragePercent = preorderSummary == null
-        ? 0
-        : (preorderSummary!.approvedProgressCoverage * _percentMultiplier)
-              .clamp(_percentMin, _percentMultiplier)
-              .toDouble()
-              .round();
-    final planUnitsValue = planUnitsLoading
-        ? _planUnitsLoadingLabel
-        : planUnitsHasError
-        ? _planUnitsUnavailableLabel
-        : "${planUnitsCount ?? 0}";
+    final planUnitsSummary = _resolvePlanUnitDisplaySummary(
+      plan: plan,
+      planUnits: planUnits,
+      planUnitsCount: planUnitsCount,
+      planUnitsLoading: planUnitsLoading,
+      planUnitsHasError: planUnitsHasError,
+    );
     final scheduleRange = _formatReadableDateRange(
       plan.startDate,
       plan.endDate,
     );
     final durationLabel = _formatPlanDuration(plan.startDate, plan.endDate);
-    final summaryActions = preorderSummary != null && isOwner
-        ? Wrap(
-            spacing: _summaryMetaSpacing,
-            runSpacing: _summaryMetaSpacing,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () async {
-                  final payload = await _showPreorderConfigDialog(
-                    context,
-                    summary: preorderSummary,
-                  );
-                  if (payload == null) {
-                    return;
-                  }
-                  await onUpdatePreorder(payload);
-                },
-                icon: const Icon(Icons.tune),
-                label: const Text(_configurePreorderButtonLabel),
-              ),
-              OutlinedButton.icon(
-                onPressed: () async {
-                  await onReconcilePreorders();
-                },
-                icon: const Icon(Icons.restore_from_trash_outlined),
-                label: const Text(_reconcileButtonLabel),
-              ),
-            ],
-          )
+    // WHY: Keep plan details aligned with the execution workspace so the
+    // baseline targets and current quantity progress stay visible together.
+    final farmQuantitySummary = _summarizePlanFarmQuantities(
+      plan: plan,
+      timelineRows: timelineRows,
+    );
+    // WHY: Operators need the freshest saved timestamp even when the newest
+    // change came from a task log rather than the plan record itself.
+    final latestUpdateAt = _resolvePlanLatestUpdate(
+      plan: plan,
+      timelineRows: timelineRows,
+    );
+    final configuredPlantingTargets = plantingTargets?.isConfigured == true
+        ? plantingTargets!
         : null;
-
-    return Container(
-      padding: const EdgeInsets.all(_summaryCardPadding),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(_summaryCardRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
+    final plantingSummary = configuredPlantingTargets == null
+        ? null
+        : "${formatTargetNumber(configuredPlantingTargets.plannedPlantingQuantity)} ${configuredPlantingTargets.plannedPlantingUnit}";
+    final plantingDetail = configuredPlantingTargets == null
+        ? null
+        : "${formatTargetNumber(configuredPlantingTargets.plannedPlantingQuantity)} ${configuredPlantingTargets.plannedPlantingUnit} (${formatMaterialLabel(configuredPlantingTargets.materialType)})";
+    final plantingHelper = configuredPlantingTargets == null
+        ? null
+        : "Harvest est. ${formatTargetNumber(configuredPlantingTargets.estimatedHarvestQuantity)} ${configuredPlantingTargets.estimatedHarvestUnit}";
+    final productionStateValue =
+        preorderSummary?.productionState.isNotEmpty == true
+        ? preorderSummary!.productionState
+        : _dash;
+    final headerChips = <_SummaryHeaderChipData>[
+      _SummaryHeaderChipData(
+        icon: Icons.agriculture_outlined,
+        label: domainLabel,
+        tone: AppStatusTone.success,
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= _detailSplitBreakpoint;
-          final signalTiles = Wrap(
-            spacing: _cardSpacing,
-            runSpacing: _cardSpacing,
-            children: [
-              _SummarySignalTile(
-                icon: Icons.category_outlined,
-                label: "Context",
-                value: domainLabel,
-              ),
-              _SummarySignalTile(
-                icon: Icons.date_range_outlined,
-                label: "Window",
-                value: scheduleRange,
-              ),
-              _SummarySignalTile(
-                icon: Icons.timelapse_outlined,
-                label: "Duration",
-                value: durationLabel,
-              ),
-              if (plantingTargets?.isConfigured == true)
-                _SummarySignalTile(
-                  icon: Icons.grass_outlined,
-                  label: "Planting",
-                  value:
-                      "${formatTargetNumber(plantingTargets!.plannedPlantingQuantity)} ${plantingTargets.plannedPlantingUnit} (${formatMaterialLabel(plantingTargets.materialType)})",
-                  helper:
-                      "Harvest est. ${formatTargetNumber(plantingTargets.estimatedHarvestQuantity)} ${plantingTargets.estimatedHarvestUnit}",
-                ),
-              if (showPlanUnits)
-                _SummarySignalTile(
-                  icon: Icons.grid_view_outlined,
-                  label: _planUnitsLabel,
-                  value: planUnitsValue,
-                ),
-              _SummarySignalTile(
-                icon: Icons.inventory_2_outlined,
-                label: _productionStateLabel,
-                value: preorderSummary?.productionState.isNotEmpty == true
-                    ? preorderSummary!.productionState
-                    : _dash,
-              ),
-              _SummarySignalTile(
-                icon: Icons.sell_outlined,
-                label: _preorderLabel,
-                value: preorderSummary?.preorderEnabled == true
-                    ? _preorderEnabledLabel
-                    : _preorderDisabledLabel,
-              ),
-              if (preorderSummary != null)
-                _SummarySignalTile(
-                  icon: Icons.stacked_bar_chart_outlined,
-                  label: _preorderCapLabel,
-                  value: "${preorderSummary!.preorderCapQuantity}",
-                ),
-              if (preorderSummary != null)
-                _SummarySignalTile(
-                  icon: Icons.precision_manufacturing_outlined,
-                  label: _effectiveCapLabel,
-                  value: "${preorderSummary!.effectiveCap}",
-                ),
-              if (preorderSummary != null)
-                _SummarySignalTile(
-                  icon: Icons.shopping_bag_outlined,
-                  label: _preorderRemainingLabel,
-                  value: "${preorderSummary!.preorderRemainingQuantity}",
-                ),
-              if (showPlanConfidence && preorderSummary != null)
-                _SummarySignalTile(
-                  icon: Icons.verified_outlined,
-                  label: _confidenceLabel,
-                  value: "$confidencePercent%",
-                  helper: "Coverage $coveragePercent%",
-                ),
-            ],
-          );
+      _SummaryHeaderChipData(
+        icon: Icons.calendar_today_outlined,
+        label: scheduleRange,
+        tone: AppStatusTone.info,
+      ),
+      _SummaryHeaderChipData(
+        icon: Icons.schedule_outlined,
+        label: durationLabel,
+        tone: AppStatusTone.warning,
+      ),
+      if (plantingSummary != null)
+        _SummaryHeaderChipData(
+          icon: Icons.grass_outlined,
+          label: plantingSummary,
+          tone: AppStatusTone.success,
+        ),
+    ];
 
-          final leadColumn = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _summaryTitle,
-                style: textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+    final coreMetrics = <_SummaryMetricData>[
+      _SummaryMetricData(
+        icon: Icons.inventory_2_outlined,
+        label: _productionStateLabel,
+        value: productionStateValue,
+        tone: _summaryStatusTone(productionStateValue),
+      ),
+      if (showPlanUnits)
+        _SummaryMetricData(
+          icon: Icons.grid_view_outlined,
+          label: _planUnitsLabel,
+          value: planUnitsSummary.value,
+          helper: planUnitsSummary.helper,
+          tone: planUnitsSummary.tone,
+        ),
+    ];
+
+    final planDetailsMetrics = <_SummaryMetricData>[
+      _SummaryMetricData(
+        icon: Icons.agriculture_outlined,
+        label: "Farm",
+        value: domainLabel,
+        tone: AppStatusTone.success,
+      ),
+      _SummaryMetricData(
+        icon: Icons.calendar_today_outlined,
+        label: "Date range",
+        value: scheduleRange,
+        tone: AppStatusTone.info,
+      ),
+      _SummaryMetricData(
+        icon: Icons.schedule_outlined,
+        label: "Duration",
+        value: durationLabel,
+        tone: AppStatusTone.warning,
+      ),
+      if (plantingDetail != null)
+        _SummaryMetricData(
+          icon: Icons.grass_outlined,
+          label: "Planting",
+          value: plantingDetail,
+          helper: plantingHelper,
+          tone: AppStatusTone.success,
+        ),
+      if (configuredPlantingTargets != null && farmQuantitySummary != null)
+        _SummaryMetricData(
+          icon: Icons.swap_horiz_outlined,
+          label: "Transplant",
+          value:
+              "${_formatPlanProgressAmount(farmQuantitySummary.transplantLogged)} / ${_formatPlanProgressAmount(configuredPlantingTargets.plannedPlantingQuantity)}",
+          helper:
+              "${_formatPlanProgressAmount(farmQuantitySummary.transplantRemaining)} left ${farmQuantitySummary.plantingUnit}",
+          tone: AppStatusTone.info,
+        ),
+      if (configuredPlantingTargets != null && farmQuantitySummary != null)
+        _SummaryMetricData(
+          icon: Icons.agriculture_outlined,
+          label: "Remaining harvest",
+          value:
+              "${_formatPlanProgressAmount(farmQuantitySummary.harvestRemaining)} ${farmQuantitySummary.harvestUnit}",
+          helper:
+              "${_formatPlanProgressAmount(farmQuantitySummary.harvestLogged)} / ${_formatPlanProgressAmount(configuredPlantingTargets.estimatedHarvestQuantity)} harvested",
+          tone: farmQuantitySummary.harvestRemaining > 0
+              ? AppStatusTone.warning
+              : AppStatusTone.success,
+        ),
+      _SummaryMetricData(
+        icon: Icons.update_outlined,
+        label: "Latest update",
+        value: formatDateTimeLabel(latestUpdateAt, fallback: _dash),
+        helper: latestUpdateAt == null
+            ? "No saved plan or progress updates yet."
+            : "Most recent saved plan or execution activity.",
+        tone: latestUpdateAt == null
+            ? AppStatusTone.neutral
+            : AppStatusTone.info,
+      ),
+    ];
+
+    final actionItems =
+        <
+          ({
+            IconData icon,
+            String label,
+            AppStatusTone tone,
+            Future<void> Function() onPressed,
+          })
+        >[
+          (
+            icon: Icons.download_outlined,
+            label: _downloadProgressLabel,
+            tone: AppStatusTone.info,
+            onPressed: onDownloadProgressReport,
+          ),
+          (
+            icon: Icons.mail_outline,
+            label: _emailProgressLabel,
+            tone: AppStatusTone.info,
+            onPressed: onEmailProgressReport,
+          ),
+          (
+            icon: Icons.link_outlined,
+            label: _copyProgressLinkLabel,
+            tone: AppStatusTone.info,
+            onPressed: onCopyProgressReportLink,
+          ),
+        ];
+
+    Widget buildPlanDetailsSection({required bool compact}) {
+      return _SummaryMetricWrap(
+        metrics: planDetailsMetrics,
+        compact: compact,
+        singleColumn: compact,
+      );
+    }
+
+    Widget buildActionList({required bool compact}) {
+      if (compact) {
+        return Column(
+          children: [
+            for (int index = 0; index < actionItems.length; index++) ...[
+              SizedBox(
+                width: double.infinity,
+                child: _SummaryActionButton(
+                  icon: actionItems[index].icon,
+                  label: actionItems[index].label,
+                  tone: actionItems[index].tone,
+                  onPressed: () async {
+                    await actionItems[index].onPressed();
+                  },
                 ),
               ),
-              const SizedBox(height: _summaryTitleSpacing),
+              if (index < actionItems.length - 1)
+                const SizedBox(height: _summaryMetaSpacing),
+            ],
+          ],
+        );
+      }
+      return Wrap(
+        spacing: _summaryMetaSpacing,
+        runSpacing: _summaryMetaSpacing,
+        children: actionItems
+            .map(
+              (action) => _SummaryActionButton(
+                icon: action.icon,
+                label: action.label,
+                tone: action.tone,
+                onPressed: () async {
+                  await action.onPressed();
+                },
+              ),
+            )
+            .toList(),
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 760;
+        final cardPadding = isCompact ? 12.0 : 16.0;
+
+        final header = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _summaryTitle,
+              style: textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (isCompact)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    plan.title,
+                    style: textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _SummaryStatusBadge(label: plan.status),
+                ],
+              )
+            else
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          plan.title,
-                          style: textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            _InfoPill(
-                              icon: Icons.spa_outlined,
-                              label: domainLabel,
-                            ),
-                            _InfoPill(
-                              icon: Icons.event_available_outlined,
-                              label: scheduleRange,
-                            ),
-                            _InfoPill(
-                              icon: Icons.history_toggle_off_outlined,
-                              label: durationLabel,
-                            ),
-                            if (plantingTargets?.isConfigured == true)
-                              _InfoPill(
-                                icon: Icons.grass_outlined,
-                                label:
-                                    "${formatTargetNumber(plantingTargets!.plannedPlantingQuantity)} ${plantingTargets.plannedPlantingUnit} (${formatMaterialLabel(plantingTargets.materialType)})",
-                              ),
-                          ],
-                        ),
-                      ],
+                    child: Text(
+                      plan.title,
+                      style: textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        height: 1.08,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: _cardSpacing),
-                  ProductionStatusPill(label: plan.status),
+                  const SizedBox(width: 12),
+                  _SummaryStatusBadge(label: plan.status),
                 ],
               ),
-              const SizedBox(height: _sectionSpacing),
-              signalTiles,
-            ],
-          );
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: headerChips
+                  .map(
+                    (chip) => _SummaryHeaderChip(
+                      icon: chip.icon,
+                      label: chip.label,
+                      tone: chip.tone,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+        );
 
-          if (!isWide) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                leadColumn,
-                if (summaryActions != null) ...[
-                  const SizedBox(height: _sectionSpacing),
-                  summaryActions,
-                ],
-              ],
-            );
-          }
+        final coreMetricsSection = _SummaryMetricWrap(
+          metrics: coreMetrics,
+          compact: isCompact,
+        );
 
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 3, child: leadColumn),
-              const SizedBox(width: _sectionSpacing),
-              if (summaryActions != null)
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Owner actions",
-                        style: textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: _summaryTitleSpacing),
-                      Text(
-                        "Keep pre-order controls and expired hold clean-up in one place.",
-                        style: textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: _cardSpacing),
-                      summaryActions,
-                    ],
+        final detailsDesktopSection = _SummaryAccordionSection(
+          title: "Plan details",
+          subtitle: "Context, window, quantities, and latest update.",
+          initiallyExpanded: true,
+          child: buildPlanDetailsSection(compact: false),
+        );
+        final actionDesktopSection = _SummaryAccordionSection(
+          title: "Plan actions",
+          subtitle: "Download and share progress reports from one panel.",
+          initiallyExpanded: true,
+          child: buildActionList(compact: false),
+        );
+
+        final content = isCompact
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  header,
+                  const SizedBox(height: 12),
+                  coreMetricsSection,
+                  const SizedBox(height: 12),
+                  _SummaryAccordionSection(
+                    title: "Plan details",
+                    subtitle: "Context, window, quantities, latest update",
+                    initiallyExpanded: true,
+                    child: buildPlanDetailsSection(compact: true),
                   ),
-                ),
-            ],
-          );
-        },
-      ),
+                  const SizedBox(height: 8),
+                  _SummaryAccordionSection(
+                    title: "Plan actions",
+                    subtitle: "Download, email, and copy progress reports",
+                    child: buildActionList(compact: true),
+                  ),
+                ],
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 7,
+                    child: LayoutBuilder(
+                      builder: (context, leftConstraints) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            header,
+                            const SizedBox(height: 14),
+                            coreMetricsSection,
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              width: leftConstraints.maxWidth,
+                              child: detailsDesktopSection,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(flex: 4, child: actionDesktopSection),
+                ],
+              );
+
+        return Container(
+          padding: EdgeInsets.all(cardPadding),
+          decoration: BoxDecoration(
+            color: _summarySurfaceColor(theme),
+            borderRadius: BorderRadius.circular(_summaryCardRadius),
+            border: Border.all(color: _summaryBorderColor(theme)),
+            boxShadow: _summarySoftShadow(theme),
+          ),
+          child: content,
+        );
+      },
     );
   }
+}
+
+class _PlanUnitDisplaySummary {
+  final String value;
+  final String? helper;
+  final AppStatusTone tone;
+
+  const _PlanUnitDisplaySummary({
+    required this.value,
+    required this.helper,
+    required this.tone,
+  });
+}
+
+_PlanUnitDisplaySummary _resolvePlanUnitDisplaySummary({
+  required ProductionPlan plan,
+  required List<ProductionPlanUnit> planUnits,
+  required int? planUnitsCount,
+  required bool planUnitsLoading,
+  required bool planUnitsHasError,
+}) {
+  final responseCount = planUnitsCount ?? 0;
+  final listedCount = planUnits.length;
+  final workloadCount = plan.workloadContext?.totalWorkUnits ?? 0;
+  final resolvedCount = responseCount > 0
+      ? responseCount
+      : listedCount > 0
+      ? listedCount
+      : workloadCount > 0
+      ? workloadCount
+      : 0;
+
+  if (planUnitsLoading && resolvedCount <= 0) {
+    return const _PlanUnitDisplaySummary(
+      value: _planUnitsLoadingLabel,
+      helper: null,
+      tone: AppStatusTone.warning,
+    );
+  }
+
+  if (planUnitsHasError && resolvedCount <= 0) {
+    return const _PlanUnitDisplaySummary(
+      value: _planUnitsUnavailableLabel,
+      helper: null,
+      tone: AppStatusTone.danger,
+    );
+  }
+
+  final baseLabel = _resolvePlanUnitDisplayBaseLabel(
+    plan: plan,
+    planUnits: planUnits,
+  );
+  final unitLabel = resolvedCount == 1
+      ? _singularizePlanUnitPhrase(baseLabel)
+      : _pluralizePlanUnitPhrase(baseLabel);
+  final helper = planUnitsLoading
+      ? "Syncing backend unit list."
+      : planUnitsHasError
+      ? "Using saved workload context."
+      : null;
+
+  return _PlanUnitDisplaySummary(
+    value: "$resolvedCount $unitLabel",
+    helper: helper,
+    tone: resolvedCount > 0 ? AppStatusTone.info : AppStatusTone.neutral,
+  );
+}
+
+String _resolvePlanUnitDisplayBaseLabel({
+  required ProductionPlan plan,
+  required List<ProductionPlanUnit> planUnits,
+}) {
+  final inferredUnitLabel = _resolvePlanUnitStemFromPlanUnits(planUnits);
+  final contextUnitLabel = _extractPlanUnitStem(
+    plan.workloadContext?.resolvedWorkUnitLabel ?? "",
+  );
+
+  if (!_isGenericPlanUnitStem(inferredUnitLabel)) {
+    return inferredUnitLabel;
+  }
+  if (!_isGenericPlanUnitStem(contextUnitLabel)) {
+    return contextUnitLabel;
+  }
+  if (inferredUnitLabel.isNotEmpty) {
+    return inferredUnitLabel;
+  }
+  if (contextUnitLabel.isNotEmpty) {
+    return contextUnitLabel;
+  }
+  return "work unit";
+}
+
+String _resolvePlanUnitStemFromPlanUnits(List<ProductionPlanUnit> planUnits) {
+  final stems =
+      planUnits
+          .map((unit) => _extractPlanUnitStem(unit.label))
+          .where((stem) => stem.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+  if (stems.length == 1) {
+    return stems.first;
+  }
+  return "";
+}
+
+bool _isGenericPlanUnitStem(String value) {
+  final normalized = _extractPlanUnitStem(value);
+  return normalized.isEmpty ||
+      normalized == "unit" ||
+      normalized == "work unit";
+}
+
+bool _looksLikePlanUnitIdentifierToken(String token) {
+  final normalized = token.trim().replaceAll("#", "");
+  if (normalized.isEmpty) {
+    return false;
+  }
+  return RegExp(r"^[A-Za-z]?\d+[A-Za-z]?$").hasMatch(normalized) ||
+      RegExp(r"^[A-Za-z]$").hasMatch(normalized);
+}
+
+String _extractPlanUnitStem(String label) {
+  final normalized = label
+      .trim()
+      .replaceAll(RegExp(r"[_-]+"), " ")
+      .replaceAll(RegExp(r"\s+"), " ");
+  if (normalized.isEmpty) {
+    return "";
+  }
+  if (RegExp(r"^[a-f0-9]{24}$", caseSensitive: false).hasMatch(normalized)) {
+    return "";
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  while (tokens.length > 1 && _looksLikePlanUnitIdentifierToken(tokens.last)) {
+    tokens.removeLast();
+  }
+  final stem = tokens.join(" ").trim().toLowerCase();
+  return stem.isEmpty ? normalized.toLowerCase() : stem;
+}
+
+String _pluralizePlanUnitWord(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final lower = normalized.toLowerCase();
+  if (lower.endsWith("s")) {
+    return normalized;
+  }
+  if (RegExp(r"[^aeiou]y$").hasMatch(lower)) {
+    return "${normalized.substring(0, normalized.length - 1)}ies";
+  }
+  if (lower.endsWith("ch") ||
+      lower.endsWith("sh") ||
+      lower.endsWith("x") ||
+      lower.endsWith("z")) {
+    return "${normalized}es";
+  }
+  return "${normalized}s";
+}
+
+String _singularizePlanUnitWord(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return normalized;
+  }
+  final lower = normalized.toLowerCase();
+  if (lower.endsWith("ies") && normalized.length > 3) {
+    return "${normalized.substring(0, normalized.length - 3)}y";
+  }
+  if ((lower.endsWith("ches") ||
+          lower.endsWith("shes") ||
+          lower.endsWith("xes") ||
+          lower.endsWith("zes")) &&
+      normalized.length > 2) {
+    return normalized.substring(0, normalized.length - 2);
+  }
+  if (lower.endsWith("s") && !lower.endsWith("ss") && normalized.length > 1) {
+    return normalized.substring(0, normalized.length - 1);
+  }
+  return normalized;
+}
+
+String _pluralizePlanUnitPhrase(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return "work units";
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (tokens.isEmpty) {
+    return "work units";
+  }
+  final lastToken = tokens.removeLast();
+  tokens.add(_pluralizePlanUnitWord(lastToken));
+  return tokens.join(" ");
+}
+
+String _singularizePlanUnitPhrase(String value) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    return "work unit";
+  }
+  final tokens = normalized
+      .split(" ")
+      .where((token) => token.isNotEmpty)
+      .toList();
+  if (tokens.isEmpty) {
+    return "work unit";
+  }
+  final lastToken = tokens.removeLast();
+  tokens.add(_singularizePlanUnitWord(lastToken));
+  return tokens.join(" ");
 }
 
 class _KpiRow extends StatelessWidget {
@@ -1968,11 +3028,6 @@ class _KpiRow extends StatelessWidget {
       );
     }
 
-    final completion = "${_formatPercent(kpis!.completionRate)}$_percentSuffix";
-    final onTime = "${_formatPercent(kpis!.onTimeRate)}$_percentSuffix";
-    final avgDelay =
-        "${kpis!.avgDelayDays.toStringAsFixed(_delayFixedDigits)} $_daysSuffix";
-
     return _DetailPanel(
       child: Wrap(
         spacing: _cardSpacing,
@@ -1981,14 +3036,28 @@ class _KpiRow extends StatelessWidget {
           ProductionKpiCard(
             label: _kpiTotalTasks,
             value: "${kpis!.totalTasks}",
+            icon: Icons.format_list_numbered_rounded,
+            tone: AppStatusTone.info,
           ),
           ProductionKpiCard(
             label: _kpiCompleted,
             value: "${kpis!.completedTasks}",
+            icon: Icons.check_circle_outline_rounded,
+            tone: AppStatusTone.success,
           ),
-          ProductionKpiCard(label: _kpiOnTime, value: onTime),
-          ProductionKpiCard(label: _kpiAvgDelay, value: avgDelay),
-          ProductionKpiCard(label: _phaseCompletionLabel, value: completion),
+          ProductionKpiCard(
+            label: _kpiOnTime,
+            value: "${_formatPercent(kpis!.onTimeRate)}$_percentSuffix",
+            icon: Icons.schedule_rounded,
+            tone: _ratioTone(kpis!.onTimeRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiAvgDelay,
+            value:
+                "${kpis!.avgDelayDays.toStringAsFixed(_delayFixedDigits)} $_daysSuffix",
+            icon: Icons.timelapse_rounded,
+            tone: _delayTone(kpis!.avgDelayDays),
+          ),
         ],
       ),
     );
@@ -2024,14 +3093,36 @@ class _AttendanceImpactSection extends StatelessWidget {
         spacing: _cardSpacing,
         runSpacing: _cardSpacing,
         children: [
-          ProductionKpiCard(label: _kpiAttendanceCoverage, value: coverage),
-          ProductionKpiCard(label: _kpiAbsenteeImpact, value: absenteeImpact),
-          ProductionKpiCard(label: _kpiLinkedProgress, value: linkedProgress),
-          ProductionKpiCard(label: _kpiPlotsPerHour, value: plotsPerHour),
+          ProductionKpiCard(
+            label: _kpiAttendanceCoverage,
+            value: coverage,
+            icon: Icons.groups_rounded,
+            tone: _ratioTone(attendanceImpact!.attendanceCoverageRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiAbsenteeImpact,
+            value: absenteeImpact,
+            icon: Icons.person_off_rounded,
+            tone: _inverseRatioTone(attendanceImpact!.absenteeImpactRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiLinkedProgress,
+            value: linkedProgress,
+            icon: Icons.link_rounded,
+            tone: _ratioTone(attendanceImpact!.attendanceLinkedProgressRate),
+          ),
+          ProductionKpiCard(
+            label: _kpiPlotsPerHour,
+            value: plotsPerHour,
+            icon: Icons.speed_rounded,
+            tone: AppStatusTone.info,
+          ),
           ProductionKpiCard(
             label: _kpiTrackedDays,
             value:
                 "${attendanceImpact!.scheduledDays}/${attendanceImpact!.totalRollupDays}",
+            icon: Icons.event_note_rounded,
+            tone: AppStatusTone.info,
           ),
         ],
       ),
@@ -2039,124 +3130,1370 @@ class _AttendanceImpactSection extends StatelessWidget {
   }
 }
 
-class _DailyRollupTable extends StatelessWidget {
-  final List<ProductionDailyRollup> rollups;
+class _ExecutionChartTaskEntry {
+  final ProductionTimelineRow row;
+  final ProductionTask? task;
+  final String workerLabel;
+  final bool isCompleted;
+  final String statusLabel;
 
-  const _DailyRollupTable({required this.rollups});
+  const _ExecutionChartTaskEntry({
+    required this.row,
+    required this.task,
+    required this.workerLabel,
+    required this.isCompleted,
+    required this.statusLabel,
+  });
+
+  String get approvalLabel => _formatProgressApprovalLabel(row.approvalState);
+
+  String get delayLabel {
+    final delay = row.delay.trim();
+    if (delay.isNotEmpty) {
+      return delay;
+    }
+    final delayReason = row.delayReason.trim();
+    if (delayReason.isNotEmpty && delayReason != _delayReasonNone) {
+      return delayReason;
+    }
+    return _dash;
+  }
+
+  String get progressLabel {
+    if (row.expectedPlots <= 0) {
+      return row.actualPlots > 0 ? "Saved" : _dash;
+    }
+    final ratio = (row.actualPlots / row.expectedPlots).clamp(0, 1).toDouble();
+    return "${_formatPercent(ratio)}$_percentSuffix";
+  }
+}
+
+class _ExecutionChartDayGroup {
+  final String dayKey;
+  final DateTime? workDate;
+  final List<_ExecutionChartTaskEntry> tasks;
+
+  const _ExecutionChartDayGroup({
+    required this.dayKey,
+    required this.workDate,
+    required this.tasks,
+  });
+
+  int get totalTasks => tasks.length;
+
+  int get completedCount => tasks.where((task) => task.isCompleted).length;
+
+  int get inProgressCount => totalTasks - completedCount;
+
+  String get assignedPeopleSummary =>
+      _buildExecutionChartAssignedPeopleSummary(tasks);
+
+  String get completionSnapshot {
+    if (totalTasks == 0) {
+      return _dash;
+    }
+    final ratio = completedCount / totalTasks;
+    return "$completedCount/$totalTasks (${_formatPercent(ratio)}$_percentSuffix)";
+  }
+}
+
+List<_ExecutionChartDayGroup> _buildExecutionChartDayGroups({
+  required List<ProductionTimelineRow> rows,
+  required Map<String, ProductionTask> taskById,
+  required Map<String, BusinessStaffProfileSummary> staffMap,
+}) {
+  final sortedRows = [...rows]
+    ..sort((left, right) {
+      final leftDate = left.workDate ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final rightDate =
+          right.workDate ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final dateCompare = leftDate.compareTo(rightDate);
+      if (dateCompare != 0) {
+        return dateCompare;
+      }
+      return left.taskTitle.compareTo(right.taskTitle);
+    });
+  final rowsByTaskDay = <String, List<ProductionTimelineRow>>{};
+  final taskIdsByDay = <String, Set<String>>{};
+  final workDateByKey = <String, DateTime?>{};
+
+  void registerTaskDay({
+    required String dayKey,
+    required DateTime? workDate,
+    required String taskId,
+  }) {
+    final normalizedTaskId = taskId.trim();
+    if (normalizedTaskId.isNotEmpty) {
+      taskIdsByDay.putIfAbsent(dayKey, () => <String>{}).add(normalizedTaskId);
+    } else {
+      taskIdsByDay.putIfAbsent(dayKey, () => <String>{});
+    }
+    final normalizedWorkDate = workDate == null ? null : _toDayStart(workDate);
+    if (!workDateByKey.containsKey(dayKey) || workDateByKey[dayKey] == null) {
+      workDateByKey[dayKey] = normalizedWorkDate;
+    }
+  }
+
+  for (final task in taskById.values) {
+    for (final scheduledDate in _resolveExecutionChartTaskDates(task)) {
+      final dayKey = _toExecutionChartDayKey(scheduledDate);
+      registerTaskDay(dayKey: dayKey, workDate: scheduledDate, taskId: task.id);
+    }
+  }
+
+  for (final row in sortedRows) {
+    final normalizedWorkDate = row.workDate == null
+        ? null
+        : _toDayStart(row.workDate!);
+    final dayKey = _toExecutionChartDayKey(normalizedWorkDate);
+    registerTaskDay(
+      dayKey: dayKey,
+      workDate: normalizedWorkDate,
+      taskId: row.taskId,
+    );
+    rowsByTaskDay
+        .putIfAbsent("${row.taskId}|$dayKey", () => <ProductionTimelineRow>[])
+        .add(row);
+  }
+
+  final sortedGroupKeys = taskIdsByDay.keys.toList()
+    ..sort((left, right) {
+      final leftDate = workDateByKey[left];
+      final rightDate = workDateByKey[right];
+      if (leftDate == null && rightDate == null) {
+        return left.compareTo(right);
+      }
+      if (leftDate == null) {
+        return 1;
+      }
+      if (rightDate == null) {
+        return -1;
+      }
+      final dateCompare = leftDate.compareTo(rightDate);
+      if (dateCompare != 0) {
+        return dateCompare;
+      }
+      return left.compareTo(right);
+    });
+
+  return sortedGroupKeys.map((groupKey) {
+    final entries = taskIdsByDay[groupKey]!.map((taskId) {
+      final task = taskById[taskId];
+      final groupedTaskRows = [...?rowsByTaskDay["$taskId|$groupKey"]]
+        ..sort((left, right) {
+          final leftEntryIndex = left.entryIndex;
+          final rightEntryIndex = right.entryIndex;
+          final entryCompare = leftEntryIndex.compareTo(rightEntryIndex);
+          if (entryCompare != 0) {
+            return entryCompare;
+          }
+          return left.taskTitle.compareTo(right.taskTitle);
+        });
+      final aggregateRow = _buildExecutionChartAggregateRow(
+        task: task,
+        rows: groupedTaskRows,
+        workDate: workDateByKey[groupKey],
+      );
+      return _ExecutionChartTaskEntry(
+        row: aggregateRow,
+        task: task,
+        workerLabel: _resolveExecutionChartWorkerLabel(
+          rows: groupedTaskRows,
+          task: task,
+          staffMap: staffMap,
+        ),
+        isCompleted: _isExecutionChartTaskCompleted(
+          task: task,
+          rows: groupedTaskRows,
+        ),
+        statusLabel: _resolveExecutionChartTaskStatusLabel(
+          task: task,
+          rows: groupedTaskRows,
+          aggregateRow: aggregateRow,
+        ),
+      );
+    }).toList()..sort(_compareExecutionChartTaskEntriesByTime);
+    return _ExecutionChartDayGroup(
+      dayKey: groupKey,
+      workDate:
+          workDateByKey[groupKey] ??
+          (entries.isEmpty ? null : entries.first.row.workDate),
+      tasks: entries,
+    );
+  }).toList();
+}
+
+String _toExecutionChartDayKey(DateTime? workDate) {
+  final key = _toWorkDateKey(workDate);
+  return key.isEmpty ? "undated" : key;
+}
+
+int _compareExecutionChartTaskEntriesByTime(
+  _ExecutionChartTaskEntry left,
+  _ExecutionChartTaskEntry right,
+) {
+  final timeCompare = _compareExecutionChartNullableDate(
+    _resolveExecutionChartEntrySortTime(left),
+    _resolveExecutionChartEntrySortTime(right),
+  );
+  if (timeCompare != 0) {
+    return timeCompare;
+  }
+
+  final entryCompare = left.row.entryIndex.compareTo(right.row.entryIndex);
+  if (entryCompare != 0) {
+    return entryCompare;
+  }
+
+  final manualOrderCompare =
+      (left.task?.manualSortOrder ?? 0) - (right.task?.manualSortOrder ?? 0);
+  if (manualOrderCompare != 0) {
+    return manualOrderCompare;
+  }
+
+  final occurrenceCompare =
+      (left.task?.occurrenceIndex ?? 0) - (right.task?.occurrenceIndex ?? 0);
+  if (occurrenceCompare != 0) {
+    return occurrenceCompare;
+  }
+
+  return left.row.taskTitle.toLowerCase().compareTo(
+    right.row.taskTitle.toLowerCase(),
+  );
+}
+
+DateTime? _resolveExecutionChartEntrySortTime(_ExecutionChartTaskEntry entry) {
+  // WHY: Logged work can have clock times, while scheduled-only tasks only
+  // have dates. Prefer the most precise operational time before falling back
+  // to the task schedule so the visual stack reads in execution order.
+  return entry.row.clockInTime ??
+      entry.row.clockOutTime ??
+      entry.row.workDate ??
+      entry.task?.startDate ??
+      entry.task?.dueDate;
+}
+
+int _compareExecutionChartNullableDate(DateTime? left, DateTime? right) {
+  if (left == null && right == null) {
+    return 0;
+  }
+  if (left == null) {
+    return 1;
+  }
+  if (right == null) {
+    return -1;
+  }
+  return left.compareTo(right);
+}
+
+Iterable<DateTime?> _resolveExecutionChartTaskDates(ProductionTask task) sync* {
+  final normalizedStart = task.startDate == null
+      ? null
+      : _toDayStart(task.startDate!);
+  final normalizedDue = task.dueDate == null
+      ? null
+      : _toDayStart(task.dueDate!);
+
+  if (normalizedStart == null && normalizedDue == null) {
+    yield null;
+    return;
+  }
+
+  var rangeStart = normalizedStart ?? normalizedDue!;
+  var rangeEnd = normalizedDue ?? normalizedStart!;
+  if (rangeEnd.isBefore(rangeStart)) {
+    final originalStart = rangeStart;
+    rangeStart = rangeEnd;
+    rangeEnd = originalStart;
+  }
+
+  for (
+    DateTime current = rangeStart;
+    !current.isAfter(rangeEnd);
+    current = current.add(const Duration(days: 1))
+  ) {
+    yield current;
+  }
+}
+
+ProductionTimelineRow _buildExecutionChartAggregateRow({
+  required ProductionTask? task,
+  required List<ProductionTimelineRow> rows,
+  required DateTime? workDate,
+}) {
+  final exemplar = rows.isEmpty ? null : rows.last;
+  final proofs = rows.expand((row) => row.proofs).toList();
+  final approvalState = _resolveExecutionChartAggregateApprovalState(
+    task: task,
+    rows: rows,
+  );
+  final status = _resolveExecutionChartAggregateStatus(
+    task: task,
+    rows: rows,
+    approvalState: approvalState,
+  );
+
+  return ProductionTimelineRow(
+    id:
+        exemplar?.id ??
+        "${task?.id ?? "execution-task"}-${_toExecutionChartDayKey(workDate)}",
+    workDate: workDate ?? exemplar?.workDate,
+    taskId: task?.id ?? exemplar?.taskId ?? "",
+    planId: task?.planId ?? exemplar?.planId ?? "",
+    entryIndex: exemplar?.entryIndex ?? 1,
+    staffId: exemplar?.staffId ?? "",
+    attendanceId: exemplar?.attendanceId ?? "",
+    unitId: exemplar?.unitId ?? "",
+    taskDayLedgerId: exemplar?.taskDayLedgerId ?? "",
+    taskTitle: _resolveExecutionChartTaskTitle(task: task, rows: rows),
+    phaseName: exemplar?.phaseName ?? "",
+    farmerName: exemplar?.farmerName ?? "",
+    expectedPlots: rows.fold<num>(0, (sum, row) => sum + row.expectedPlots),
+    actualPlots: rows.fold<num>(0, (sum, row) => sum + row.actualPlots),
+    unitContribution: rows.fold<num>(
+      0,
+      (sum, row) => sum + row.unitContribution,
+    ),
+    quantityActivityType: exemplar?.quantityActivityType ?? "",
+    quantityAmount: rows.fold<num>(0, (sum, row) => sum + row.quantityAmount),
+    activityType: exemplar?.activityType ?? "",
+    activityQuantity: rows.fold<num>(
+      0,
+      (sum, row) => sum + row.activityQuantity,
+    ),
+    quantityUnit: exemplar?.quantityUnit ?? "",
+    status: status,
+    delay: _firstExecutionChartNonEmptyValue(
+      rows.map((row) => row.delay.trim()),
+    ),
+    delayReason: _firstExecutionChartNonEmptyValue(
+      rows.map((row) => row.delayReason.trim()),
+    ),
+    approvalState: approvalState,
+    approvedBy: exemplar?.approvedBy ?? "",
+    approvedAt: _resolveExecutionChartLatestApprovedAt(rows),
+    notes: exemplar?.notes ?? "",
+    proofs: proofs,
+    proofCount: rows.fold<int>(0, (sum, row) => sum + row.proofCount),
+    proofCountRequired: rows.fold<int>(
+      0,
+      (currentMax, row) => row.proofCountRequired > currentMax
+          ? row.proofCountRequired
+          : currentMax,
+    ),
+    proofCountUploaded: rows.fold<int>(
+      0,
+      (sum, row) => sum + row.proofCountUploaded,
+    ),
+    sessionStatus: exemplar?.sessionStatus ?? "",
+    clockInTime: exemplar?.clockInTime,
+    clockOutTime: exemplar?.clockOutTime,
+  );
+}
+
+String _resolveExecutionChartTaskTitle({
+  required ProductionTask? task,
+  required List<ProductionTimelineRow> rows,
+}) {
+  final taskTitle = task?.title.trim() ?? "";
+  if (taskTitle.isNotEmpty) {
+    return taskTitle;
+  }
+  return rows.isEmpty ? _dash : rows.first.taskTitle;
+}
+
+String _resolveExecutionChartAggregateApprovalState({
+  required ProductionTask? task,
+  required List<ProductionTimelineRow> rows,
+}) {
+  if (rows.isNotEmpty) {
+    if (rows.any((row) => row.approvalState == _progressApprovalNeedsReview)) {
+      return _progressApprovalNeedsReview;
+    }
+    if (rows.every((row) => row.approvalState == _progressApprovalApproved)) {
+      return _progressApprovalApproved;
+    }
+    return _progressApprovalPending;
+  }
+
+  final taskApprovalStatus = task?.approvalStatus.trim().toLowerCase() ?? "";
+  if (taskApprovalStatus == _approvalApproved) {
+    return _progressApprovalApproved;
+  }
+  if (taskApprovalStatus == _approvalRejected) {
+    return _progressApprovalNeedsReview;
+  }
+  return _progressApprovalPending;
+}
+
+String _resolveExecutionChartAggregateStatus({
+  required ProductionTask? task,
+  required List<ProductionTimelineRow> rows,
+  required String approvalState,
+}) {
+  if (approvalState == _progressApprovalApproved) {
+    return _taskStatusDone;
+  }
+  final taskStatus = task?.status.trim() ?? "";
+  if (taskStatus.isNotEmpty) {
+    return taskStatus;
+  }
+  if (rows.isNotEmpty) {
+    return rows.last.status;
+  }
+  return _taskStatusPending;
+}
+
+bool _isExecutionChartTaskCompleted({
+  required ProductionTask? task,
+  required List<ProductionTimelineRow> rows,
+}) {
+  final taskStatus = task?.status.trim().toLowerCase() ?? "";
+  final taskApprovalStatus = task?.approvalStatus.trim().toLowerCase() ?? "";
+  if (taskApprovalStatus == _approvalApproved ||
+      taskStatus == _taskStatusDone ||
+      taskStatus == "completed" ||
+      taskStatus == _approvalApproved) {
+    return true;
+  }
+  if (rows.isEmpty) {
+    return false;
+  }
+  return rows.every(_isExecutionChartRowCompleted);
+}
+
+String _resolveExecutionChartTaskStatusLabel({
+  required ProductionTask? task,
+  required List<ProductionTimelineRow> rows,
+  required ProductionTimelineRow aggregateRow,
+}) {
+  final taskStatus = task?.status.trim() ?? "";
+  if (aggregateRow.approvalState == _progressApprovalApproved) {
+    return "completed";
+  }
+  if (taskStatus.isNotEmpty) {
+    return taskStatus;
+  }
+  if (rows.isNotEmpty) {
+    return _resolveTimelineStatusLabel(aggregateRow);
+  }
+  return _taskStatusPending;
+}
+
+DateTime? _resolveExecutionChartLatestApprovedAt(
+  List<ProductionTimelineRow> rows,
+) {
+  DateTime? latestApprovedAt;
+  for (final row in rows) {
+    final approvedAt = row.approvedAt;
+    if (approvedAt == null) {
+      continue;
+    }
+    if (latestApprovedAt == null || approvedAt.isAfter(latestApprovedAt)) {
+      latestApprovedAt = approvedAt;
+    }
+  }
+  return latestApprovedAt;
+}
+
+String _firstExecutionChartNonEmptyValue(Iterable<String> values) {
+  for (final value in values) {
+    if (value.trim().isNotEmpty) {
+      return value;
+    }
+  }
+  return "";
+}
+
+bool _isExecutionChartRowCompleted(ProductionTimelineRow row) {
+  if (row.approvalState == _progressApprovalApproved) {
+    return true;
+  }
+  final normalizedStatus = row.status.trim().toLowerCase();
+  return normalizedStatus == _taskStatusDone ||
+      normalizedStatus == "completed" ||
+      normalizedStatus == _approvalApproved;
+}
+
+String _resolveExecutionChartWorkerLabel({
+  required List<ProductionTimelineRow> rows,
+  required ProductionTask? task,
+  required Map<String, BusinessStaffProfileSummary> staffMap,
+}) {
+  for (final row in rows) {
+    if (row.farmerName.trim().isNotEmpty) {
+      return row.farmerName;
+    }
+  }
+  if (task != null) {
+    final assignedStaffLabel = _buildAssignedStaffLabel(
+      _resolveAssignedStaffIds(task),
+      staffMap,
+    );
+    if (assignedStaffLabel.trim().isNotEmpty && assignedStaffLabel != _dash) {
+      return assignedStaffLabel;
+    }
+  }
+  for (final row in rows) {
+    if (row.staffId.trim().isNotEmpty) {
+      return _resolveStaffDisplayName(row.staffId, staffMap);
+    }
+  }
+  return _dash;
+}
+
+String _buildExecutionChartAssignedPeopleSummary(
+  List<_ExecutionChartTaskEntry> tasks,
+) {
+  final uniqueNames = tasks
+      .map((task) => task.workerLabel.trim())
+      .where((label) => label.isNotEmpty && label != _dash)
+      .toSet()
+      .toList();
+  if (uniqueNames.isEmpty) {
+    return _dash;
+  }
+  if (uniqueNames.length <= 2) {
+    return uniqueNames.join(", ");
+  }
+  return "${uniqueNames.take(2).join(", ")} +${uniqueNames.length - 2}";
+}
+
+String _formatExecutionChartWeekday(DateTime? date) {
+  if (date == null) {
+    return "Day";
+  }
+  const weekdayLabels = <String>[
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+    "Sun",
+  ];
+  return weekdayLabels[date.weekday - 1];
+}
+
+String _formatExecutionChartDayDate(DateTime? date) {
+  if (date == null) {
+    return _dash;
+  }
+  const monthLabels = <String>[
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  return "${date.day.toString().padLeft(2, "0")} ${monthLabels[date.month - 1]}";
+}
+
+_ExecutionChartDayGroup? _resolveExecutionChartBestDay(
+  List<_ExecutionChartDayGroup> groups,
+) {
+  if (groups.isEmpty) {
+    return null;
+  }
+  var bestDay = groups.first;
+  for (final group in groups.skip(1)) {
+    if (group.completedCount > bestDay.completedCount) {
+      bestDay = group;
+      continue;
+    }
+    if (group.completedCount == bestDay.completedCount &&
+        group.totalTasks > bestDay.totalTasks) {
+      bestDay = group;
+      continue;
+    }
+    final groupDate = group.workDate;
+    final bestDayDate = bestDay.workDate;
+    if (group.completedCount == bestDay.completedCount &&
+        group.totalTasks == bestDay.totalTasks &&
+        groupDate != null &&
+        bestDayDate != null &&
+        groupDate.isAfter(bestDayDate)) {
+      bestDay = group;
+    }
+  }
+  return bestDay;
+}
+
+String _resolveInitialExecutionChartDayKey(
+  List<_ExecutionChartDayGroup> groups, {
+  DateTime? referenceDate,
+}) {
+  if (groups.isEmpty) {
+    return "";
+  }
+
+  final normalizedReferenceDate = _toDayStart(referenceDate ?? DateTime.now());
+  final referenceDayKey = _toExecutionChartDayKey(normalizedReferenceDate);
+  for (final group in groups) {
+    if (group.dayKey == referenceDayKey) {
+      return group.dayKey;
+    }
+  }
+
+  _ExecutionChartDayGroup? latestPastGroup;
+  for (final group in groups) {
+    final workDate = group.workDate;
+    if (workDate == null) {
+      continue;
+    }
+    if (_toDayStart(workDate).isAfter(normalizedReferenceDate)) {
+      break;
+    }
+    latestPastGroup = group;
+  }
+
+  if (latestPastGroup != null) {
+    return latestPastGroup.dayKey;
+  }
+  return groups.first.dayKey;
+}
+
+String _buildExecutionChartBestDayLabel(_ExecutionChartDayGroup? group) {
+  if (group == null) {
+    return _dash;
+  }
+  return "${_formatExecutionChartWeekday(group.workDate)} ${group.completedCount}";
+}
+
+String _buildExecutionChartTooltip(_ExecutionChartDayGroup group) {
+  return "${formatDateLabel(group.workDate)}\n"
+      "Total visible tasks: ${group.totalTasks}\n"
+      "In progress: ${group.inProgressCount}\n"
+      "Completed / approved: ${group.completedCount}\n"
+      "Assigned people: ${group.assignedPeopleSummary}\n"
+      "Snapshot: ${group.completionSnapshot}";
+}
+
+class _ExecutionDayStackChart extends StatefulWidget {
+  final String planId;
+  final List<ProductionTimelineRow> rows;
+  final Map<String, ProductionTask> taskById;
+  final Map<String, BusinessStaffProfileSummary> staffMap;
+
+  const _ExecutionDayStackChart({
+    required this.planId,
+    required this.rows,
+    required this.taskById,
+    required this.staffMap,
+  });
+
+  @override
+  State<_ExecutionDayStackChart> createState() =>
+      _ExecutionDayStackChartState();
+}
+
+class _ExecutionDayStackChartState extends State<_ExecutionDayStackChart> {
+  final ScrollController _chartScrollController = ScrollController();
+  String? _selectedDayKey;
+  String? _lastAutoAlignedDayKey;
+  int? _lastAutoAlignedGroupCount;
+
+  void _selectDay(_ExecutionChartDayGroup group) {
+    AppDebug.log(
+      _logTag,
+      _executionChartDetailsAction,
+      extra: {
+        _extraPlanIdKey: widget.planId,
+        "dayKey": group.dayKey,
+        "visibleTasks": group.totalTasks,
+      },
+    );
+    setState(() {
+      _selectedDayKey = group.dayKey;
+    });
+  }
+
+  void _alignDefaultSelectedDay({
+    required List<_ExecutionChartDayGroup> groups,
+    required String selectedDayKey,
+    required double barWidth,
+    required bool requiresScroll,
+  }) {
+    if (_selectedDayKey != null || !requiresScroll) {
+      return;
+    }
+    if (_lastAutoAlignedDayKey == selectedDayKey &&
+        _lastAutoAlignedGroupCount == groups.length) {
+      return;
+    }
+
+    _lastAutoAlignedDayKey = selectedDayKey;
+    _lastAutoAlignedGroupCount = groups.length;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_chartScrollController.hasClients) {
+        return;
+      }
+      final selectedIndex = groups.indexWhere(
+        (group) => group.dayKey == selectedDayKey,
+      );
+      if (selectedIndex < 0) {
+        return;
+      }
+
+      final position = _chartScrollController.position;
+      final targetOffset =
+          (selectedIndex * barWidth) -
+          ((position.viewportDimension - barWidth) / 2);
+      final clampedOffset = targetOffset.clamp(0.0, position.maxScrollExtent);
+      if ((_chartScrollController.offset - clampedOffset).abs() < 1) {
+        return;
+      }
+
+      // WHY: The default selected day should be visible immediately so the
+      // chart and the detail card open on the same operational date.
+      _chartScrollController.jumpTo(clampedOffset);
+    });
+  }
+
+  void _openTaskDetail(_ExecutionChartTaskEntry taskEntry) {
+    AppDebug.log(
+      _logTag,
+      _executionChartTaskNavigationAction,
+      extra: {
+        _extraPlanIdKey: widget.planId,
+        _extraTaskIdKey: taskEntry.row.taskId,
+        "workDate": _toWorkDateKey(taskEntry.row.workDate),
+      },
+    );
+    context.push(
+      productionPlanTaskDetailPath(
+        planId: widget.planId,
+        taskId: taskEntry.row.taskId,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (rollups.isEmpty) {
+    final groups = _buildExecutionChartDayGroups(
+      rows: widget.rows,
+      taskById: widget.taskById,
+      staffMap: widget.staffMap,
+    );
+    if (groups.isEmpty) {
       return const _InlineEmptyState(
-        title: _dailyRollupEmptyTitle,
-        message: _dailyRollupEmptyMessage,
+        title: _executionChartEmptyTitle,
+        message: _executionChartEmptyMessage,
       );
     }
 
-    final sortedRollups = [...rollups]
-      ..sort((left, right) {
-        final leftDate =
-            left.workDate ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final rightDate =
-            right.workDate ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return rightDate.compareTo(leftDate);
-      });
+    final selectedDayKey =
+        _selectedDayKey ?? _resolveInitialExecutionChartDayKey(groups);
+    final selectedGroup = groups.firstWhere(
+      (group) => group.dayKey == selectedDayKey,
+      orElse: () => groups.last,
+    );
+    final totalVisibleTasks = groups
+        .expand((group) => group.tasks.map((task) => task.row.taskId.trim()))
+        .where((taskId) => taskId.isNotEmpty)
+        .toSet()
+        .length;
+    final approvedSegments = groups.fold<int>(
+      0,
+      (sum, group) => sum + group.completedCount,
+    );
+    final bestDay = _resolveExecutionChartBestDay(groups);
+    final maxTasks = groups.fold<int>(
+      0,
+      (currentMax, group) =>
+          group.totalTasks > currentMax ? group.totalTasks : currentMax,
+    );
+    final chartTaskCount = maxTasks == 0 ? 1 : maxTasks;
+    final chartHeight = chartTaskCount * _executionChartUnitHeight;
+    final chartFrameHeight =
+        chartHeight +
+        _executionChartTopLabelHeight +
+        _executionChartXAxisLabelHeight;
 
     return Column(
-      children: sortedRollups.map((rollup) {
-        final coverage =
-            "${_formatPercent(rollup.attendanceCoverageRate)}$_percentSuffix";
-        final completion =
-            "${_formatPercent(rollup.completionRate)}$_percentSuffix";
-        final plotsPerHour = rollup.plotsPerAttendedHour.toStringAsFixed(
-          _delayFixedDigits,
-        );
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: _cardSpacing),
-          child: _DetailPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: _cardSpacing,
+          runSpacing: _cardSpacing,
+          children: const [
+            _InfoPill(
+              icon: Icons.hourglass_top_outlined,
+              label: _executionChartInProgressLabel,
+              tone: AppStatusTone.warning,
+            ),
+            _InfoPill(
+              icon: Icons.check_circle_outline,
+              label: _executionChartCompletedApprovedLabel,
+              tone: AppStatusTone.success,
+            ),
+          ],
+        ),
+        const SizedBox(height: _cardSpacing),
+        Wrap(
+          spacing: _cardSpacing,
+          runSpacing: _cardSpacing,
+          children: [
+            ProductionKpiCard(
+              label: _executionChartVisibleTasksLabel,
+              value: "$totalVisibleTasks",
+              icon: Icons.stacked_bar_chart_outlined,
+              tone: AppStatusTone.info,
+            ),
+            ProductionKpiCard(
+              label: _executionChartBestDayLabel,
+              value: _buildExecutionChartBestDayLabel(bestDay),
+              icon: Icons.emoji_events_outlined,
+              tone: bestDay == null || bestDay.completedCount == 0
+                  ? AppStatusTone.neutral
+                  : AppStatusTone.success,
+            ),
+            ProductionKpiCard(
+              label: _executionChartApprovedSegmentsLabel,
+              value: "$approvedSegments",
+              icon: Icons.verified_outlined,
+              tone: approvedSegments > 0
+                  ? AppStatusTone.success
+                  : AppStatusTone.neutral,
+            ),
+          ],
+        ),
+        const SizedBox(height: _cardSpacing),
+        _DetailPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _executionChartTaskCountLabel.toUpperCase(),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: chartFrameHeight,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    SizedBox(
+                      width: 40,
+                      height: chartFrameHeight,
+                      child: Column(
+                        children: [
+                          const SizedBox(height: _executionChartTopLabelHeight),
+                          SizedBox(
+                            height: chartHeight,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                for (
+                                  int level = chartTaskCount;
+                                  level >= 0;
+                                  level--
+                                )
+                                  Text(
+                                    "$level",
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(
+                            height: _executionChartXAxisLabelHeight,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final requiresScroll =
+                              groups.length * _executionChartColumnMinWidth >
+                              constraints.maxWidth;
+                          final barWidth = requiresScroll
+                              ? _executionChartColumnMinWidth
+                              : constraints.maxWidth / groups.length;
+                          final chartWidth = requiresScroll
+                              ? groups.length * _executionChartColumnMinWidth
+                              : constraints.maxWidth;
+
+                          _alignDefaultSelectedDay(
+                            groups: groups,
+                            selectedDayKey: selectedGroup.dayKey,
+                            barWidth: barWidth,
+                            requiresScroll: requiresScroll,
+                          );
+
+                          return SingleChildScrollView(
+                            key: const ValueKey("execution-chart-scroll"),
+                            controller: _chartScrollController,
+                            scrollDirection: Axis.horizontal,
+                            child: SizedBox(
+                              width: chartWidth,
+                              height: chartFrameHeight,
+                              child: Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: groups.map((group) {
+                                        return SizedBox(
+                                          width: barWidth,
+                                          height: chartFrameHeight,
+                                          child: _ExecutionChartBar(
+                                            interactionKey: ValueKey(
+                                              "execution-chart-bar-${group.dayKey}",
+                                            ),
+                                            group: group,
+                                            plotHeight: chartHeight,
+                                            isSelected:
+                                                selectedGroup.dayKey ==
+                                                group.dayKey,
+                                            onTap: () => _selectDay(group),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    top:
+                                        _executionChartTopLabelHeight +
+                                        chartHeight -
+                                        _executionChartBaselineThickness,
+                                    child: IgnorePointer(
+                                      child: Container(
+                                        key: const ValueKey(
+                                          "execution-chart-zero-baseline",
+                                        ),
+                                        height:
+                                            _executionChartBaselineThickness,
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .outlineVariant
+                                              .withValues(alpha: 0.95),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: _cardSpacing),
+        _DetailPanel(
+          child: Column(
+            key: const ValueKey("execution-chart-day-details"),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: ProductionSectionHeader(
+                      title:
+                          "$_executionChartTaskDetailsTitle · ${formatDateLabel(selectedGroup.workDate)}",
+                      subtitle: _executionChartTaskDetailsMessage,
+                    ),
+                  ),
+                  const SizedBox(width: _cardSpacing),
+                  _InfoPill(
+                    icon: Icons.event_note_outlined,
+                    label: "${selectedGroup.totalTasks} $_tasksSuffix",
+                    tone: AppStatusTone.info,
+                  ),
+                ],
+              ),
+              const SizedBox(height: _cardSpacing),
+              Wrap(
+                spacing: _cardSpacing,
+                runSpacing: _cardSpacing,
+                children: [
+                  _InfoPill(
+                    icon: Icons.analytics_outlined,
+                    label:
+                        "$_executionChartSnapshotSummaryLabel: ${selectedGroup.completionSnapshot}",
+                    tone: selectedGroup.completedCount > 0
+                        ? AppStatusTone.success
+                        : AppStatusTone.warning,
+                  ),
+                  _InfoPill(
+                    icon: Icons.groups_outlined,
+                    label:
+                        "$_executionChartAssignedPeopleLabel: ${selectedGroup.assignedPeopleSummary}",
+                    tone: AppStatusTone.info,
+                  ),
+                ],
+              ),
+              const SizedBox(height: _cardSpacing),
+              Column(
+                children: selectedGroup.tasks.map((taskEntry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: _cardSpacing),
+                    child: _ExecutionChartTaskCard(
+                      interactionKey: ValueKey(
+                        "execution-chart-task-${taskEntry.row.taskId}",
+                      ),
+                      entry: taskEntry,
+                      onTap: () => _openTaskDetail(taskEntry),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _chartScrollController.dispose();
+    super.dispose();
+  }
+}
+
+class _ExecutionChartBar extends StatelessWidget {
+  final Key? interactionKey;
+  final _ExecutionChartDayGroup group;
+  final double plotHeight;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _ExecutionChartBar({
+    this.interactionKey,
+    required this.group,
+    required this.plotHeight,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final selectedBorder = isSelected
+        ? colorScheme.primary.withValues(alpha: 0.22)
+        : Colors.transparent;
+    final selectedSurface = isSelected
+        ? colorScheme.surfaceContainerLow
+        : Colors.transparent;
+    final orderedSegments = [
+      for (int index = 0; index < group.tasks.length; index++)
+        (entry: group.tasks[index], segmentIndex: index + 1),
+    ];
+
+    return Tooltip(
+      message: _buildExecutionChartTooltip(group),
+      waitDuration: const Duration(milliseconds: 150),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: interactionKey,
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: Container(
+              width: double.infinity,
+              height:
+                  _executionChartTopLabelHeight +
+                  plotHeight +
+                  _executionChartXAxisLabelHeight,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: selectedSurface,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              foregroundDecoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: selectedBorder),
+              ),
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: _executionChartTopLabelHeight,
+                    child: Center(
                       child: Text(
-                        formatDateLabel(rollup.workDate),
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        "${group.totalTasks}",
+                        style: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
-                    ProductionStatusPill(
-                      label: rollup.completionRate >= 1
-                          ? _taskStatusDone
-                          : rollup.actualPlots > 0
-                          ? _taskStatusInProgress
-                          : _taskStatusPending,
+                  ),
+                  SizedBox(
+                    height: plotHeight,
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: _executionChartBaselineThickness,
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            // WHY: Reversing only the render pass keeps the
+                            // chronological task order intact while placing
+                            // segment 1 on the zero line and stacking upward.
+                            for (final segment in orderedSegments.reversed)
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  bottom: segment.segmentIndex == 1
+                                      ? 0
+                                      : _executionChartSegmentGap,
+                                ),
+                                child: _ExecutionChartSegment(
+                                  entry: segment.entry,
+                                  segmentIndex: segment.segmentIndex,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: _cardSpacing),
-                Wrap(
-                  spacing: _cardSpacing,
-                  runSpacing: _cardSpacing,
-                  children: [
-                    _MiniMetricCard(
-                      label: _dailyRollupBlocksLabel,
-                      value: "${rollup.scheduledTaskBlocks}",
+                  ),
+                  SizedBox(
+                    height: _executionChartXAxisLabelHeight,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _formatExecutionChartWeekday(group.workDate),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _formatExecutionChartDayDate(group.workDate),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
-                    _MiniMetricCard(
-                      label: _dailyRollupAssignedLabel,
-                      value: "${rollup.assignedStaffCount}",
-                    ),
-                    _MiniMetricCard(
-                      label: _dailyRollupAttendedAssignedLabel,
-                      value: "${rollup.attendedAssignedStaffCount}",
-                    ),
-                    _MiniMetricCard(
-                      label: _dailyRollupAbsentLabel,
-                      value: "${rollup.absentAssignedStaffCount}",
-                    ),
-                  ],
-                ),
-                const SizedBox(height: _cardSpacing),
-                Wrap(
-                  spacing: _cardSpacing,
-                  runSpacing: _cardSpacing,
-                  children: [
-                    _InfoPill(
-                      icon: Icons.track_changes_outlined,
-                      label:
-                          "$_dailyRollupExpectedLabel: ${rollup.expectedPlots}",
-                    ),
-                    _InfoPill(
-                      icon: Icons.done_all_outlined,
-                      label: "$_dailyRollupActualLabel: ${rollup.actualPlots}",
-                    ),
-                    _InfoPill(
-                      icon: Icons.groups_outlined,
-                      label: "$_dailyRollupCoverageLabel: $coverage",
-                    ),
-                    _InfoPill(
-                      icon: Icons.speed_outlined,
-                      label: "$_dailyRollupPlotsPerHourLabel: $plotsPerHour",
-                    ),
-                    _InfoPill(
-                      icon: Icons.event_note_outlined,
-                      label: "${rollup.rowsLogged} logs",
-                    ),
-                    _InfoPill(
-                      icon: Icons.flag_outlined,
-                      label: "$_dailyRollupCompletionLabel: $completion",
-                    ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
-        );
-      }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExecutionChartSegment extends StatelessWidget {
+  final _ExecutionChartTaskEntry entry;
+  final int segmentIndex;
+
+  const _ExecutionChartSegment({
+    required this.entry,
+    required this.segmentIndex,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = entry.isCompleted
+        ? AppStatusTone.success
+        : AppStatusTone.warning;
+    final accent = _toneAccentColor(context, tone);
+
+    return Container(
+      key: ValueKey(
+        "execution-chart-segment-${entry.row.taskId}-${_toExecutionChartDayKey(entry.row.workDate)}",
+      ),
+      height: _executionChartSegmentHeight,
+      width: _executionChartSegmentWidth,
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.34)),
+      ),
+      child: Center(
+        child: Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: Theme.of(
+              context,
+            ).colorScheme.surface.withValues(alpha: 0.94),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              "$segmentIndex",
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExecutionChartTaskCard extends StatelessWidget {
+  final Key? interactionKey;
+  final _ExecutionChartTaskEntry entry;
+  final VoidCallback onTap;
+
+  const _ExecutionChartTaskCard({
+    this.interactionKey,
+    required this.entry,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: interactionKey,
+        borderRadius: BorderRadius.circular(_summaryCardRadius),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.all(_summaryCardPadding),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(_summaryCardRadius),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.row.taskTitle,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          entry.workerLabel,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: _cardSpacing),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      ProductionStatusPill(label: entry.statusLabel),
+                      const SizedBox(height: 8),
+                      _InfoPill(
+                        icon: Icons.verified_outlined,
+                        label: entry.approvalLabel,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: _cardSpacing),
+              Wrap(
+                spacing: _cardSpacing,
+                runSpacing: _cardSpacing,
+                children: [
+                  _MiniMetricCard(
+                    label: _executionChartCurrentProgressLabel,
+                    value: entry.progressLabel,
+                    tone: entry.isCompleted
+                        ? AppStatusTone.success
+                        : AppStatusTone.warning,
+                  ),
+                  _MiniMetricCard(
+                    label: _executionChartExpectedQuantityLabel,
+                    value: _formatPlanProgressAmount(entry.row.expectedPlots),
+                    tone: AppStatusTone.info,
+                  ),
+                  _MiniMetricCard(
+                    label: _executionChartActualQuantityLabel,
+                    value: _formatPlanProgressAmount(entry.row.actualPlots),
+                    tone: entry.row.actualPlots > 0
+                        ? AppStatusTone.success
+                        : AppStatusTone.neutral,
+                  ),
+                ],
+              ),
+              const SizedBox(height: _cardSpacing),
+              Wrap(
+                spacing: _cardSpacing,
+                runSpacing: _cardSpacing,
+                children: [
+                  _InfoPill(
+                    icon: Icons.warning_amber_outlined,
+                    label: "Delay: ${entry.delayLabel}",
+                    tone: entry.delayLabel == _dash
+                        ? AppStatusTone.neutral
+                        : AppStatusTone.warning,
+                  ),
+                  _InfoPill(
+                    icon: Icons.photo_library_outlined,
+                    label: "${entry.row.proofCount} proof(s)",
+                    tone: entry.row.proofCount > 0
+                        ? AppStatusTone.info
+                        : AppStatusTone.neutral,
+                  ),
+                  _InfoPill(
+                    icon: Icons.event_note_outlined,
+                    label:
+                        "$_executionChartDateLabel: ${formatDateLabel(entry.row.workDate)}",
+                    tone: AppStatusTone.info,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2228,18 +4565,24 @@ class _PeriodRollupTable extends StatelessWidget {
                     _MiniMetricCard(
                       label: _dailyRollupBlocksLabel,
                       value: "${rollup.scheduledTaskBlocks}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAssignedLabel,
                       value: "${rollup.assignedStaffCount}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAttendedAssignedLabel,
                       value: "${rollup.attendedAssignedStaffCount}",
+                      tone: AppStatusTone.success,
                     ),
                     _MiniMetricCard(
                       label: _dailyRollupAbsentLabel,
                       value: "${rollup.absentAssignedStaffCount}",
+                      tone: rollup.absentAssignedStaffCount > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2252,26 +4595,34 @@ class _PeriodRollupTable extends StatelessWidget {
                       icon: Icons.track_changes_outlined,
                       label:
                           "$_dailyRollupExpectedLabel: ${rollup.expectedPlots}",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.done_all_outlined,
                       label: "$_dailyRollupActualLabel: ${rollup.actualPlots}",
+                      tone: rollup.actualPlots > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _InfoPill(
                       icon: Icons.groups_outlined,
                       label: "$_dailyRollupCoverageLabel: $coverage",
+                      tone: _ratioTone(rollup.attendanceCoverageRate),
                     ),
                     _InfoPill(
                       icon: Icons.speed_outlined,
                       label: "$_dailyRollupPlotsPerHourLabel: $plotsPerHour",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.event_note_outlined,
                       label: "${rollup.rowsLogged} logs",
+                      tone: AppStatusTone.info,
                     ),
                     _InfoPill(
                       icon: Icons.flag_outlined,
                       label: "$_dailyRollupCompletionLabel: $completion",
+                      tone: _ratioTone(rollup.completionRate),
                     ),
                   ],
                 ),
@@ -2336,14 +4687,19 @@ class _StaffProgressList extends StatelessWidget {
                     _MiniMetricCard(
                       label: "Expected",
                       value: "${score.totalExpected}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: "Actual",
                       value: "${score.totalActual}",
+                      tone: score.totalActual > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _MiniMetricCard(
                       label: "Completion",
                       value: "$percent$_percentSuffix",
+                      tone: _ratioTone(score.completionRatio),
                     ),
                   ],
                 ),
@@ -2357,9 +4713,10 @@ class _StaffProgressList extends StatelessWidget {
 }
 
 class _PhaseProgressList extends StatelessWidget {
+  final String planId;
   final ProductionKpis? kpis;
 
-  const _PhaseProgressList({required this.kpis});
+  const _PhaseProgressList({required this.planId, required this.kpis});
 
   @override
   Widget build(BuildContext context) {
@@ -2374,33 +4731,87 @@ class _PhaseProgressList extends StatelessWidget {
     return _DetailPanel(
       child: Column(
         children: phaseCompletion.map((phase) {
+          final colorScheme = Theme.of(context).colorScheme;
           final progressValue = phase.completionRate
               .clamp(_progressMin, _progressMax)
               .toDouble();
+          final tone = _progressTone(progressValue);
+          final accent = tone == AppStatusTone.neutral
+              ? colorScheme.outline
+              : _toneAccentColor(context, tone);
           final percent =
               "${_formatPercent(phase.completionRate)}$_percentSuffix";
           return Padding(
             padding: const EdgeInsets.only(bottom: _cardSpacing),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  phase.name,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(_summaryCardRadius),
+                onTap: () {
+                  context.push(
+                    productionPlanPhaseDetailPath(
+                      planId: planId,
+                      phaseId: phase.phaseId,
+                    ),
+                  );
+                },
+                child: Ink(
+                  padding: const EdgeInsets.all(_cardSpacing),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(_summaryCardRadius),
+                    border: Border.all(
+                      color: tone == AppStatusTone.neutral
+                          ? colorScheme.outlineVariant
+                          : accent.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              phase.name,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: tone == AppStatusTone.neutral
+                                ? colorScheme.onSurfaceVariant
+                                : accent,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: _phaseProgressSpacing),
+                      LinearProgressIndicator(
+                        value: progressValue,
+                        minHeight: _progressIndicatorHeight,
+                        color: accent,
+                        backgroundColor: colorScheme.surfaceContainerHighest,
+                      ),
+                      const SizedBox(height: _phaseProgressSpacing),
+                      Text(
+                        "${phase.completedTasks}/${phase.totalTasks} ($percent)",
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: tone == AppStatusTone.neutral ? null : accent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Open ${phase.name} tasks, proof, and remaining work.",
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: _phaseProgressSpacing),
-                LinearProgressIndicator(
-                  value: progressValue,
-                  minHeight: _progressIndicatorHeight,
-                ),
-                const SizedBox(height: _phaseProgressSpacing),
-                Text(
-                  "${phase.completedTasks}/${phase.totalTasks} ($percent)",
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ],
+              ),
             ),
           );
         }).toList(),
@@ -2445,6 +4856,7 @@ class _PhaseUnitProgressTable extends StatelessWidget {
                       const _InfoPill(
                         icon: Icons.lock_outline,
                         label: _deviationLockedTag,
+                        tone: AppStatusTone.danger,
                       ),
                   ],
                 ),
@@ -2456,14 +4868,21 @@ class _PhaseUnitProgressTable extends StatelessWidget {
                     _MiniMetricCard(
                       label: _phaseUnitRequiredLabel,
                       value: "${row.requiredUnits}",
+                      tone: AppStatusTone.info,
                     ),
                     _MiniMetricCard(
                       label: _phaseUnitCompletedLabel,
                       value: "${row.completedUnitCount}",
+                      tone: row.completedUnitCount > 0
+                          ? AppStatusTone.success
+                          : AppStatusTone.neutral,
                     ),
                     _MiniMetricCard(
                       label: _phaseUnitRemainingLabel,
                       value: "${row.remainingUnits}",
+                      tone: row.remainingUnits > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2523,6 +4942,7 @@ class _UnitDivergenceSection extends StatelessWidget {
                       _InfoPill(
                         icon: Icons.update_outlined,
                         label: formatDateLabel(row.updatedAt),
+                        tone: AppStatusTone.info,
                       ),
                   ],
                 ),
@@ -2534,17 +4954,23 @@ class _UnitDivergenceSection extends StatelessWidget {
                     _MiniMetricCard(
                       label: _unitDivergenceDelayLabel,
                       value: "${row.delayedByDays}",
-                      accentColor: row.delayedByDays > 0
-                          ? Theme.of(context).colorScheme.error
-                          : null,
+                      tone: row.delayedByDays > 0
+                          ? AppStatusTone.danger
+                          : AppStatusTone.success,
                     ),
                     _MiniMetricCard(
                       label: _unitDivergenceShiftedTasksLabel,
                       value: "${row.shiftedTaskCount}",
+                      tone: row.shiftedTaskCount > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.neutral,
                     ),
                     _MiniMetricCard(
                       label: _unitDivergenceWarningCountLabel,
                       value: "${row.warningCount}",
+                      tone: row.warningCount > 0
+                          ? AppStatusTone.danger
+                          : AppStatusTone.success,
                     ),
                   ],
                 ),
@@ -2601,6 +5027,7 @@ class _UnitWarningList extends StatelessWidget {
                     _InfoPill(
                       icon: Icons.warning_amber_rounded,
                       label: "${warning.severity} • ${warning.warningType}",
+                      tone: _severityTone(warning.severity),
                     ),
                   ],
                 ),
@@ -2626,10 +5053,14 @@ class _UnitWarningList extends StatelessWidget {
                     _InfoPill(
                       icon: Icons.swap_horiz_outlined,
                       label: "${warning.shiftDays} $_daysSuffix",
+                      tone: warning.shiftDays > 0
+                          ? AppStatusTone.warning
+                          : AppStatusTone.neutral,
                     ),
                     _InfoPill(
                       icon: Icons.event_outlined,
                       label: formatDateLabel(warning.createdAt),
+                      tone: AppStatusTone.info,
                     ),
                   ],
                 ),
@@ -2698,14 +5129,23 @@ class _DeviationGovernanceSection extends StatelessWidget {
               _DeviationMetricCard(
                 title: _deviationSummaryTotalAlerts,
                 value: "${summary!.totalAlerts}",
+                tone: summary!.totalAlerts > 0
+                    ? AppStatusTone.info
+                    : AppStatusTone.neutral,
               ),
               _DeviationMetricCard(
                 title: _deviationSummaryOpenAlerts,
                 value: "${summary!.openAlerts}",
+                tone: summary!.openAlerts > 0
+                    ? AppStatusTone.warning
+                    : AppStatusTone.success,
               ),
               _DeviationMetricCard(
                 title: _deviationSummaryLockedUnits,
                 value: "${summary!.lockedUnits}",
+                tone: summary!.lockedUnits > 0
+                    ? AppStatusTone.danger
+                    : AppStatusTone.success,
               ),
             ],
           ),
@@ -2764,12 +5204,18 @@ class _DeviationGovernanceSection extends StatelessWidget {
                               _InfoPill(
                                 icon: Icons.policy_outlined,
                                 label: statusLabel,
+                                tone: alert.status == "open"
+                                    ? AppStatusTone.warning
+                                    : AppStatusTone.success,
                               ),
                               _InfoPill(
                                 icon: alert.unitLocked
                                     ? Icons.lock_outline
                                     : Icons.lock_open_outlined,
                                 label: lockLabel,
+                                tone: alert.unitLocked
+                                    ? AppStatusTone.danger
+                                    : AppStatusTone.success,
                               ),
                             ],
                           ),
@@ -2789,10 +5235,14 @@ class _DeviationGovernanceSection extends StatelessWidget {
                             label: _deviationAlertDeviationLabel,
                             value:
                                 "${alert.cumulativeDeviationDays} $_daysSuffix",
+                            tone: alert.cumulativeDeviationDays > 0
+                                ? AppStatusTone.danger
+                                : AppStatusTone.success,
                           ),
                           _MiniMetricCard(
                             label: _deviationAlertThresholdLabel,
                             value: "${alert.thresholdDays} $_daysSuffix",
+                            tone: AppStatusTone.warning,
                           ),
                         ],
                       ),
@@ -2804,18 +5254,21 @@ class _DeviationGovernanceSection extends StatelessWidget {
                           _InfoPill(
                             icon: Icons.event_outlined,
                             label: formatDateLabel(alert.triggeredAt),
+                            tone: AppStatusTone.info,
                           ),
                           if (alert.resolvedAt != null)
                             _InfoPill(
                               icon: Icons.task_alt_outlined,
                               label:
                                   "Resolved ${formatDateLabel(alert.resolvedAt)}",
+                              tone: AppStatusTone.success,
                             ),
                           if (alert.unitLockedAt != null)
                             _InfoPill(
                               icon: Icons.schedule_outlined,
                               label:
                                   "Locked ${formatDateLabel(alert.unitLockedAt)}",
+                              tone: AppStatusTone.warning,
                             ),
                         ],
                       ),
@@ -2837,6 +5290,10 @@ class _DeviationGovernanceSection extends StatelessWidget {
                         runSpacing: _cardSpacing,
                         children: [
                           OutlinedButton.icon(
+                            style: AppButtonStyles.outlined(
+                              theme: Theme.of(context),
+                              tone: AppStatusTone.success,
+                            ),
                             onPressed: () async {
                               final note = await _showDeviationVarianceDialog(
                                 context,
@@ -2851,6 +5308,10 @@ class _DeviationGovernanceSection extends StatelessWidget {
                             label: const Text(_deviationAcceptLabel),
                           ),
                           OutlinedButton.icon(
+                            style: AppButtonStyles.outlined(
+                              theme: Theme.of(context),
+                              tone: AppStatusTone.warning,
+                            ),
                             onPressed: canReplan
                                 ? () async {
                                     final input =
@@ -2889,21 +5350,34 @@ class _DeviationGovernanceSection extends StatelessWidget {
 class _DeviationMetricCard extends StatelessWidget {
   final String title;
   final String value;
+  final AppStatusTone tone;
 
-  const _DeviationMetricCard({required this.title, required this.value});
+  const _DeviationMetricCard({
+    required this.title,
+    required this.value,
+    this.tone = AppStatusTone.neutral,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+    final usesTone = tone != AppStatusTone.neutral;
 
     return Container(
       width: 170,
       padding: const EdgeInsets.all(_summaryCardPadding),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: usesTone
+            ? badgeColors.background
+            : colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(_summaryCardRadius),
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: usesTone
+              ? badgeColors.foreground.withValues(alpha: 0.18)
+              : colorScheme.outlineVariant,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2911,13 +5385,18 @@ class _DeviationMetricCard extends StatelessWidget {
           Text(
             title,
             style: textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: usesTone
+                  ? badgeColors.foreground.withValues(alpha: 0.88)
+                  : colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: _summaryMetaSpacing),
           Text(
             value,
-            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: usesTone ? badgeColors.foreground : null,
+            ),
           ),
         ],
       ),
@@ -2925,45 +5404,217 @@ class _DeviationMetricCard extends StatelessWidget {
   }
 }
 
-class _SummarySignalTile extends StatelessWidget {
+class _SummaryHeaderChipData {
+  final IconData icon;
+  final String label;
+  final AppStatusTone tone;
+
+  const _SummaryHeaderChipData({
+    required this.icon,
+    required this.label,
+    required this.tone,
+  });
+}
+
+class _SummaryMetricData {
   final IconData icon;
   final String label;
   final String value;
   final String? helper;
+  final AppStatusTone tone;
 
-  const _SummarySignalTile({
+  const _SummaryMetricData({
     required this.icon,
     required this.label,
     required this.value,
     this.helper,
+    this.tone = AppStatusTone.neutral,
+  });
+}
+
+class _SummaryMetricWrap extends StatelessWidget {
+  final List<_SummaryMetricData> metrics;
+  final bool compact;
+  final bool singleColumn;
+
+  const _SummaryMetricWrap({
+    required this.metrics,
+    this.compact = false,
+    this.singleColumn = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    if (metrics.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = singleColumn
+            ? constraints.maxWidth
+            : _resolveSummaryMetricWidth(constraints.maxWidth);
+        return Wrap(
+          spacing: compact ? 8 : _cardSpacing,
+          runSpacing: compact ? 8 : _cardSpacing,
+          children: metrics
+              .map(
+                (metric) => SizedBox(
+                  width: tileWidth,
+                  child: _SummaryMetricCard(
+                    icon: metric.icon,
+                    label: metric.label,
+                    value: metric.value,
+                    helper: metric.helper,
+                    tone: metric.tone,
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _SummaryStatusBadge extends StatelessWidget {
+  final String label;
+
+  const _SummaryStatusBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final badgeColors = _toneBadgeColors(context, _summaryStatusTone(label));
 
     return Container(
-      constraints: const BoxConstraints(minWidth: 150, maxWidth: 220),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colorScheme.outlineVariant),
+        color: badgeColors.background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: badgeColors.foreground.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Text(
+        formatProductionStatusLabel(label),
+        style: textTheme.labelSmall?.copyWith(
+          color: badgeColors.foreground,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.1,
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryHeaderChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final AppStatusTone tone;
+
+  const _SummaryHeaderChip({
+    required this.icon,
+    required this.label,
+    this.tone = AppStatusTone.neutral,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _summarySurfaceColor(theme),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _summaryBorderColor(theme)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: badgeColors.background,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(icon, size: 12, color: badgeColors.foreground),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryMetricCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? helper;
+  final AppStatusTone tone;
+
+  const _SummaryMetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.helper,
+    this.tone = AppStatusTone.neutral,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+
+    return Container(
+      constraints: const BoxConstraints(minHeight: 108),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _summarySurfaceColor(theme),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _summaryBorderColor(theme)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 18, color: colorScheme.primary),
-              const SizedBox(width: 8),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: badgeColors.background,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 18, color: badgeColors.foreground),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   label,
                   style: textTheme.labelSmall?.copyWith(
                     color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
                   ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -2971,10 +5622,13 @@ class _SummarySignalTile extends StatelessWidget {
           const SizedBox(height: 10),
           Text(
             value,
-            style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            style: textTheme.titleMedium?.copyWith(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           if (helper != null && helper!.trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Text(
               helper!,
               style: textTheme.bodySmall?.copyWith(
@@ -2983,6 +5637,129 @@ class _SummarySignalTile extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _SummaryActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final AppStatusTone tone;
+  final Future<void> Function() onPressed;
+
+  const _SummaryActionButton({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final badgeColors = _toneBadgeColors(context, tone);
+
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 38),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        backgroundColor: _summarySurfaceColor(theme),
+        side: BorderSide(color: _summaryBorderColor(theme)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        alignment: Alignment.centerLeft,
+      ),
+      onPressed: () async {
+        await onPressed();
+      },
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: badgeColors.background,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 16, color: badgeColors.foreground),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryAccordionSection extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final Widget child;
+  final bool initiallyExpanded;
+
+  const _SummaryAccordionSection({
+    required this.title,
+    this.subtitle,
+    required this.child,
+    this.initiallyExpanded = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Theme(
+      data: theme.copyWith(dividerColor: Colors.transparent),
+      child: Container(
+        decoration: BoxDecoration(
+          color: _summarySubtleSurfaceColor(theme),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _summaryBorderColor(theme)),
+        ),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          childrenPadding: EdgeInsets.zero,
+          title: Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          subtitle: subtitle == null
+              ? null
+              : Text(
+                  subtitle!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Divider(color: _summaryBorderColor(theme), height: 1),
+                  const SizedBox(height: 12),
+                  child,
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3130,6 +5907,9 @@ class _TimelineTaskTable extends StatelessWidget {
                     final approvalLabel = _formatProgressApprovalLabel(
                       row.approvalState,
                     );
+                    final effectiveStatusLabel = _resolveTimelineStatusLabel(
+                      row,
+                    );
                     final canAction =
                         canReviewProgress &&
                         row.approvalState != _progressApprovalApproved;
@@ -3184,7 +5964,9 @@ class _TimelineTaskTable extends StatelessWidget {
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  ProductionStatusPill(label: row.status),
+                                  ProductionStatusPill(
+                                    label: effectiveStatusLabel,
+                                  ),
                                   const SizedBox(height: 8),
                                   _InfoPill(
                                     icon: Icons.verified_outlined,
@@ -3237,6 +6019,11 @@ class _TimelineTaskTable extends StatelessWidget {
                                   icon: Icons.person_outline,
                                   label: row.approvedBy,
                                 ),
+                              if (row.proofs.isNotEmpty)
+                                _InfoPill(
+                                  icon: Icons.photo_library_outlined,
+                                  label: "${row.proofCount} proof(s)",
+                                ),
                             ],
                           ),
                           if (notes.isNotEmpty) ...[
@@ -3251,6 +6038,27 @@ class _TimelineTaskTable extends StatelessWidget {
                                   ),
                             ),
                           ],
+                          if (row.proofs.isNotEmpty) ...[
+                            const SizedBox(height: _cardSpacing),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                style: AppButtonStyles.text(
+                                  theme: Theme.of(context),
+                                  tone: AppStatusTone.info,
+                                ),
+                                onPressed: () {
+                                  showProductionTaskProgressProofBrowser(
+                                    context,
+                                    rows: rows,
+                                    initialDate: row.workDate,
+                                  );
+                                },
+                                icon: const Icon(Icons.visibility_outlined),
+                                label: const Text(_viewProofLabel),
+                              ),
+                            ),
+                          ],
                           if (canAction) ...[
                             const SizedBox(height: _cardSpacing),
                             Wrap(
@@ -3258,6 +6066,10 @@ class _TimelineTaskTable extends StatelessWidget {
                               runSpacing: _cardSpacing,
                               children: [
                                 OutlinedButton.icon(
+                                  style: AppButtonStyles.outlined(
+                                    theme: Theme.of(context),
+                                    tone: AppStatusTone.success,
+                                  ),
                                   onPressed: () async {
                                     await onApproveProgress(row.id);
                                   },
@@ -3265,6 +6077,10 @@ class _TimelineTaskTable extends StatelessWidget {
                                   label: const Text(_approveLabel),
                                 ),
                                 OutlinedButton.icon(
+                                  style: AppButtonStyles.outlined(
+                                    theme: Theme.of(context),
+                                    tone: AppStatusTone.warning,
+                                  ),
                                   onPressed: () async {
                                     await _showProgressRejectDialog(
                                       context,
@@ -3295,6 +6111,7 @@ class _TimelineTaskTable extends StatelessWidget {
 class _PhaseTaskSection extends StatelessWidget {
   final ProductionPhase phase;
   final List<ProductionTask> tasks;
+  final List<ProductionAttendanceRecord> attendanceRecords;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
@@ -3307,6 +6124,7 @@ class _PhaseTaskSection extends StatelessWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3317,6 +6135,7 @@ class _PhaseTaskSection extends StatelessWidget {
   const _PhaseTaskSection({
     required this.phase,
     required this.tasks,
+    required this.attendanceRecords,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
@@ -3344,6 +6163,7 @@ class _PhaseTaskSection extends StatelessWidget {
                 .map(
                   (task) => _TaskCard(
                     task: task,
+                    attendanceRecords: attendanceRecords,
                     staffMap: staffMap,
                     isOwner: isOwner,
                     canLogProgress: canLogProgress,
@@ -3362,6 +6182,7 @@ class _PhaseTaskSection extends StatelessWidget {
 
 class _TaskCard extends StatelessWidget {
   final ProductionTask task;
+  final List<ProductionAttendanceRecord> attendanceRecords;
   final Map<String, BusinessStaffProfileSummary> staffMap;
   final bool isOwner;
   final bool canLogProgress;
@@ -3374,6 +6195,7 @@ class _TaskCard extends StatelessWidget {
     String? unitId,
     DateTime workDate,
     num actualPlots,
+    List<ProductionTaskProgressProofInput> proofs,
     String delayReason,
     String notes,
   )
@@ -3383,6 +6205,7 @@ class _TaskCard extends StatelessWidget {
 
   const _TaskCard({
     required this.task,
+    required this.attendanceRecords,
     required this.staffMap,
     required this.isOwner,
     required this.canLogProgress,
@@ -3475,6 +6298,10 @@ class _TaskCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: _approvalTopSpacing),
               child: OutlinedButton.icon(
+                style: AppButtonStyles.outlined(
+                  theme: Theme.of(context),
+                  tone: AppStatusTone.info,
+                ),
                 onPressed: () async {
                   final input = await _showLogProgressDialog(
                     context,
@@ -3482,6 +6309,8 @@ class _TaskCard extends StatelessWidget {
                     assignedUnitIds: task.assignedUnitIds,
                     staffMap: staffMap,
                     planUnitLabelById: planUnitLabelById,
+                    attendanceRecords: attendanceRecords,
+                    taskTargetPlots: task.weight,
                   );
                   if (input == null) {
                     return;
@@ -3492,6 +6321,7 @@ class _TaskCard extends StatelessWidget {
                     input.unitId,
                     input.workDate,
                     input.actualPlots,
+                    input.proofs,
                     input.delayReason,
                     input.notes,
                   );
@@ -3579,8 +6409,22 @@ class _ApprovalActions extends StatelessWidget {
       child: Wrap(
         spacing: _taskActionsSpacing,
         children: [
-          TextButton(onPressed: onApprove, child: const Text(_approveLabel)),
-          TextButton(onPressed: onReject, child: const Text(_rejectLabel)),
+          TextButton(
+            onPressed: onApprove,
+            style: AppButtonStyles.text(
+              theme: Theme.of(context),
+              tone: AppStatusTone.success,
+            ),
+            child: const Text(_approveLabel),
+          ),
+          TextButton(
+            onPressed: onReject,
+            style: AppButtonStyles.text(
+              theme: Theme.of(context),
+              tone: AppStatusTone.danger,
+            ),
+            child: const Text(_rejectLabel),
+          ),
         ],
       ),
     );
@@ -3592,6 +6436,7 @@ class _LogProgressInput {
   final String? unitId;
   final DateTime workDate;
   final num actualPlots;
+  final List<ProductionTaskProgressProofInput> proofs;
   final String delayReason;
   final String notes;
 
@@ -3600,6 +6445,7 @@ class _LogProgressInput {
     required this.unitId,
     required this.workDate,
     required this.actualPlots,
+    required this.proofs,
     required this.delayReason,
     required this.notes,
   });
@@ -4122,6 +6968,8 @@ Future<_LogProgressInput?> _showLogProgressDialog(
   required List<String> assignedUnitIds,
   required Map<String, BusinessStaffProfileSummary> staffMap,
   required Map<String, String> planUnitLabelById,
+  required List<ProductionAttendanceRecord> attendanceRecords,
+  required num taskTargetPlots,
 }) async {
   // WHY: Managers need a small, focused form for daily execution logging.
   DateTime selectedDate = DateTime.now();
@@ -4149,12 +6997,64 @@ Future<_LogProgressInput?> _showLogProgressDialog(
       : null;
   final actualPlotsCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
+  final attendanceRecordsSnapshot = attendanceRecords;
+  List<ProductionTaskProgressProofInput> selectedProofs = [];
 
   final result = await showDialog<_LogProgressInput>(
     context: context,
     builder: (ctx) {
       return StatefulBuilder(
         builder: (dialogContext, setDialogState) {
+          final parsedActualPlots = num.tryParse(actualPlotsCtrl.text.trim());
+          final requiredProofCount = parsedActualPlots == null
+              ? 0
+              : requiredTaskProgressProofCount(parsedActualPlots);
+          final proofCountMatches = requiredProofCount == 0
+              ? selectedProofs.isEmpty
+              : hasRequiredTaskProgressProofMix(
+                  selectedProofs,
+                  requiredProofCount,
+                );
+          final readyProofCount = selectedProofs.length;
+          final remainingAfterSave = parsedActualPlots == null
+              ? 0
+              : (taskTargetPlots - parsedActualPlots) < 0
+              ? 0
+              : (taskTargetPlots - parsedActualPlots);
+          final remainingAfterSaveLabel = remainingAfterSave % 1 == 0
+              ? remainingAfterSave.toStringAsFixed(0)
+              : remainingAfterSave.toStringAsFixed(1);
+          final shouldShowFollowUpSuggestion =
+              parsedActualPlots != null &&
+              parsedActualPlots > 0 &&
+              remainingAfterSave > 0;
+
+          Future<void> chooseProofs() async {
+            final picked = await pickTaskProgressProofImages();
+            if (!dialogContext.mounted || picked.isEmpty) {
+              return;
+            }
+            setDialogState(() {
+              selectedProofs = picked;
+              validationMessage = "";
+            });
+          }
+
+          final selectedAttendanceStaffId = hasMultipleAssignedStaff
+              ? selectedStaffId
+              : (normalizedAssignedStaffIds.isNotEmpty
+                    ? normalizedAssignedStaffIds.first
+                    : null);
+          final selectedAttendance = selectedAttendanceStaffId == null
+              ? null
+              : _findCompletedAttendanceForStaffOnDate(
+                  attendanceRecords: attendanceRecordsSnapshot,
+                  staffProfileId: selectedAttendanceStaffId,
+                  workDate: selectedDate,
+                );
+          final selectedAttendanceReady = selectedAttendance?.clockInAt != null;
+          final selectedAttendanceComplete =
+              selectedAttendance?.clockOutAt != null;
           return AlertDialog(
             title: const Text(_logProgressDialogTitle),
             content: SingleChildScrollView(
@@ -4188,6 +7088,17 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     decoration: const InputDecoration(
                       labelText: _logProgressActualPlotsLabel,
                     ),
+                    onChanged: (_) {
+                      setDialogState(() {
+                        validationMessage = "";
+                        if (requiredTaskProgressProofCount(
+                              num.tryParse(actualPlotsCtrl.text.trim()) ?? 0,
+                            ) ==
+                            0) {
+                          selectedProofs = [];
+                        }
+                      });
+                    },
                   ),
                   const SizedBox(height: _summaryMetaSpacing),
                   Text(
@@ -4241,6 +7152,195 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                     ),
                   ],
                   const SizedBox(height: _summaryMetaSpacing),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: selectedAttendanceReady
+                          ? Theme.of(dialogContext).colorScheme.primaryContainer
+                          : Theme.of(
+                              dialogContext,
+                            ).colorScheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selectedAttendanceReady
+                            ? Theme.of(
+                                dialogContext,
+                              ).colorScheme.primary.withValues(alpha: 0.18)
+                            : Theme.of(
+                                dialogContext,
+                              ).colorScheme.tertiary.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          selectedAttendanceComplete
+                              ? Icons.verified_outlined
+                              : selectedAttendanceReady
+                              ? Icons.logout_outlined
+                              : Icons.lock_outline,
+                          size: 18,
+                          color: selectedAttendanceReady
+                              ? Theme.of(dialogContext).colorScheme.primary
+                              : Theme.of(dialogContext).colorScheme.tertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            selectedAttendanceComplete
+                                ? "Attendance complete for this staff on ${formatDateLabel(selectedDate)}."
+                                : selectedAttendanceReady
+                                ? "Clocked in for this staff on ${formatDateLabel(selectedDate)}. Submit will clock them out automatically."
+                                : _logProgressAttendanceRequiredText,
+                            style: Theme.of(dialogContext).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: selectedAttendanceReady
+                                      ? Theme.of(
+                                          dialogContext,
+                                        ).colorScheme.primary
+                                      : Theme.of(
+                                          dialogContext,
+                                        ).colorScheme.tertiary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: _summaryMetaSpacing),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Theme.of(dialogContext)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.outlineVariant.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Proof media",
+                          style: Theme.of(dialogContext).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          requiredProofCount == 0
+                              ? "Enter a positive actual amount to unlock proof uploads."
+                              : proofCountMatches
+                              ? "$readyProofCount / $requiredProofCount proofs ready."
+                              : buildTaskProgressProofRequirementText(
+                                  requiredProofCount,
+                                  exact: false,
+                                ),
+                          style: Theme.of(dialogContext).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  dialogContext,
+                                ).colorScheme.onSurfaceVariant,
+                                height: 1.3,
+                              ),
+                        ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          style: AppButtonStyles.outlined(
+                            theme: Theme.of(dialogContext),
+                            tone: AppStatusTone.info,
+                          ),
+                          onPressed: requiredProofCount == 0
+                              ? null
+                              : chooseProofs,
+                          icon: Icon(
+                            selectedProofs.isEmpty
+                                ? Icons.add_photo_alternate_outlined
+                                : Icons.refresh_outlined,
+                          ),
+                          label: Text(
+                            selectedProofs.isEmpty
+                                ? "Add proofs"
+                                : "Replace proofs",
+                          ),
+                        ),
+                        if (selectedProofs.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: selectedProofs
+                                .map(
+                                  (proof) => ActionChip(
+                                    avatar: Icon(
+                                      proof.isVideo
+                                          ? Icons.videocam_outlined
+                                          : Icons.image_outlined,
+                                      size: 18,
+                                    ),
+                                    label: Text(proof.displayLabel),
+                                    onPressed: () {
+                                      showProductionTaskProgressPickedProofPreview(
+                                        dialogContext,
+                                        proof: proof,
+                                      );
+                                    },
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (shouldShowFollowUpSuggestion) ...[
+                    const SizedBox(height: _summaryMetaSpacing),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.tertiaryContainer.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.tertiary.withValues(alpha: 0.18),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Suggested follow-up",
+                            style: Theme.of(dialogContext).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            "Give the staff a 2 hour break, then create a follow-up task for $remainingAfterSaveLabel work unit(s) remaining.",
+                            style: Theme.of(dialogContext).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    dialogContext,
+                                  ).colorScheme.onSurfaceVariant,
+                                  height: 1.4,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: _summaryMetaSpacing),
                   DropdownButtonFormField<String>(
                     initialValue: selectedDelayReason,
                     decoration: const InputDecoration(
@@ -4288,46 +7388,79 @@ Future<_LogProgressInput?> _showLogProgressDialog(
                 child: const Text(_logProgressCancelLabel),
               ),
               TextButton(
-                onPressed: () {
-                  final actualPlots = num.tryParse(actualPlotsCtrl.text.trim());
-                  if (actualPlots == null || actualPlots < 0) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (hasMultipleAssignedStaff && selectedStaffId == null) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (hasMultipleAssignedUnits && selectedUnitId == null) {
-                    setDialogState(() {
-                      validationMessage = "";
-                    });
-                    return;
-                  }
-                  if (actualPlots == 0 &&
-                      selectedDelayReason == _delayReasonNone) {
-                    setDialogState(() {
-                      validationMessage = _logProgressZeroDelayValidationText;
-                    });
-                    return;
-                  }
-                  Navigator.of(dialogContext).pop(
-                    _LogProgressInput(
-                      staffId: hasMultipleAssignedStaff
-                          ? selectedStaffId
-                          : null,
-                      unitId: selectedUnitId,
-                      workDate: selectedDate,
-                      actualPlots: actualPlots,
-                      delayReason: selectedDelayReason,
-                      notes: notesCtrl.text.trim(),
-                    ),
-                  );
-                },
+                onPressed: selectedAttendanceReady
+                    ? () {
+                        final actualPlots = num.tryParse(
+                          actualPlotsCtrl.text.trim(),
+                        );
+                        if (actualPlots == null || actualPlots < 0) {
+                          setDialogState(() {
+                            validationMessage = _logProgressActualInvalidText;
+                          });
+                          return;
+                        }
+                        final requiredProofCount =
+                            requiredTaskProgressProofCount(actualPlots);
+                        if (requiredProofCount == 0 &&
+                            selectedProofs.isNotEmpty) {
+                          setDialogState(() {
+                            validationMessage =
+                                "Proof uploads are not allowed when actual amount is 0.";
+                          });
+                          return;
+                        }
+                        if (requiredProofCount > 0 &&
+                            !hasRequiredTaskProgressProofMix(
+                              selectedProofs,
+                              requiredProofCount,
+                            )) {
+                          setDialogState(() {
+                            validationMessage =
+                                buildTaskProgressProofRequirementText(
+                                  requiredProofCount,
+                                );
+                          });
+                          return;
+                        }
+                        if (hasMultipleAssignedStaff &&
+                            selectedStaffId == null) {
+                          setDialogState(() {
+                            validationMessage = _logProgressStaffRequiredText;
+                          });
+                          return;
+                        }
+                        if (hasMultipleAssignedUnits &&
+                            selectedUnitId == null) {
+                          setDialogState(() {
+                            validationMessage = _logProgressUnitRequiredText;
+                          });
+                          return;
+                        }
+                        if (actualPlots == 0 &&
+                            selectedDelayReason == _delayReasonNone) {
+                          setDialogState(() {
+                            validationMessage =
+                                _logProgressZeroDelayValidationText;
+                          });
+                          return;
+                        }
+                        Navigator.of(dialogContext).pop(
+                          _LogProgressInput(
+                            staffId: hasMultipleAssignedStaff
+                                ? selectedStaffId
+                                : null,
+                            unitId: selectedUnitId,
+                            workDate: selectedDate,
+                            actualPlots: actualPlots,
+                            proofs: List<ProductionTaskProgressProofInput>.from(
+                              selectedProofs,
+                            ),
+                            delayReason: selectedDelayReason,
+                            notes: notesCtrl.text.trim(),
+                          ),
+                        );
+                      }
+                    : null,
                 child: const Text(_logProgressSaveLabel),
               ),
             ],
@@ -4469,7 +7602,7 @@ Future<_DeviationReplanInput?> _showDeviationReplanDialog(
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(_reconcileSummaryDoneLabel),
+              child: const Text("Done"),
             ),
           ],
         );
@@ -4487,7 +7620,7 @@ Future<_DeviationReplanInput?> _showDeviationReplanDialog(
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(_reconcileSummaryDoneLabel),
+              child: const Text("Done"),
             ),
           ],
         );
@@ -4682,6 +7815,13 @@ String _formatProgressApprovalLabel(String approvalState) {
   return "Pending approval";
 }
 
+String _resolveTimelineStatusLabel(ProductionTimelineRow row) {
+  if (row.approvalState == _progressApprovalApproved) {
+    return "completed";
+  }
+  return row.status;
+}
+
 String _formatDeviationStatus(String status) {
   final normalized = status.trim().toLowerCase();
   if (normalized == "open") {
@@ -4723,7 +7863,10 @@ bool _canReviewTaskProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 
@@ -4737,7 +7880,10 @@ bool _canLogTaskProgress({
   required String? actorRole,
   required String? staffRole,
 }) {
-  if (actorRole == _ownerRole) {
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
     return true;
   }
 
@@ -4752,15 +7898,12 @@ bool _canViewPlanUnits({
   required String? staffRole,
 }) {
   // WHY: Unit visibility follows operational manager permissions used for production execution.
-  return _canLogTaskProgress(actorRole: actorRole, staffRole: staffRole);
-}
-
-bool _canViewPlanConfidence({
-  required String? actorRole,
-  required String? staffRole,
-}) {
-  // CONFIDENCE-SCORE
-  // WHY: Confidence visibility follows manager/owner governance permissions.
+  if (canUseBusinessOwnerEquivalentAccess(
+    role: actorRole,
+    staffRole: staffRole,
+  )) {
+    return true;
+  }
   return _canLogTaskProgress(actorRole: actorRole, staffRole: staffRole);
 }
 
@@ -4887,181 +8030,26 @@ Map<String, List<ProductionTask>> _groupTasksByPhase(
   return map;
 }
 
-double _deriveCapRatio(ProductionPreorderSummary? summary) {
-  if (summary == null) {
-    return 0.5;
+String _resolveProductionDetailErrorMessage(
+  Object error, {
+  required String fallback,
+}) {
+  final dioError = error is DioException ? error : null;
+  final responseData = dioError?.response?.data;
+  final responseMap = responseData is Map<String, dynamic>
+      ? responseData
+      : const <String, dynamic>{};
+  final backendError = (responseMap["error"] ?? responseMap["message"] ?? "")
+      .toString()
+      .trim();
+  if (backendError.isNotEmpty) {
+    return backendError;
   }
-  final yieldQuantity = summary.conservativeYieldQuantity;
-  final cap = summary.preorderCapQuantity;
-  if (yieldQuantity == null || yieldQuantity <= 0 || cap <= 0) {
-    return 0.5;
+  final rawMessage = error.toString().trim();
+  if (rawMessage.isNotEmpty && rawMessage != "Exception") {
+    return rawMessage;
   }
-
-  final raw = cap / yieldQuantity;
-  return raw.clamp(0.1, 0.9).toDouble();
-}
-
-Future<Map<String, dynamic>?> _showPreorderConfigDialog(
-  BuildContext context, {
-  required ProductionPreorderSummary? summary,
-}) async {
-  bool allowPreorder = summary?.preorderEnabled == true;
-  final yieldController = TextEditingController(
-    text: summary?.conservativeYieldQuantity?.toString() ?? "",
-  );
-  final unitController = TextEditingController(
-    text: (summary?.conservativeYieldUnit ?? "").trim().isEmpty
-        ? "units"
-        : summary!.conservativeYieldUnit,
-  );
-  final ratioController = TextEditingController(
-    text: _deriveCapRatio(summary).toStringAsFixed(2),
-  );
-  String validationError = "";
-
-  final result = await showDialog<Map<String, dynamic>>(
-    context: context,
-    builder: (dialogContext) {
-      return StatefulBuilder(
-        builder: (statefulContext, setDialogState) {
-          return AlertDialog(
-            title: const Text(_preorderConfigTitle),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(_preorderEnableLabel),
-                  value: allowPreorder,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      allowPreorder = value;
-                      validationError = "";
-                    });
-                  },
-                ),
-                if (allowPreorder) ...[
-                  TextField(
-                    controller: yieldController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: _preorderYieldLabel,
-                    ),
-                  ),
-                  const SizedBox(height: _summaryMetaSpacing),
-                  TextField(
-                    controller: unitController,
-                    decoration: const InputDecoration(
-                      labelText: _preorderYieldUnitLabel,
-                    ),
-                  ),
-                  const SizedBox(height: _summaryMetaSpacing),
-                  TextField(
-                    controller: ratioController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: _preorderCapRatioLabel,
-                    ),
-                  ),
-                ],
-                if (validationError.isNotEmpty) ...[
-                  const SizedBox(height: _summaryMetaSpacing),
-                  Text(
-                    validationError,
-                    style: Theme.of(statefulContext).textTheme.bodySmall
-                        ?.copyWith(
-                          color: Theme.of(statefulContext).colorScheme.error,
-                        ),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(null),
-                child: const Text(_preorderConfigCancelLabel),
-              ),
-              TextButton(
-                onPressed: () {
-                  if (!allowPreorder) {
-                    Navigator.of(dialogContext).pop({"allowPreorder": false});
-                    return;
-                  }
-
-                  final yieldQuantity = num.tryParse(
-                    yieldController.text.trim(),
-                  );
-                  final capRatio = num.tryParse(ratioController.text.trim());
-                  final unit = unitController.text.trim().isEmpty
-                      ? "units"
-                      : unitController.text.trim();
-
-                  final isValidYield =
-                      yieldQuantity != null && yieldQuantity > 0;
-                  final isValidRatio =
-                      capRatio != null && capRatio >= 0.1 && capRatio <= 0.9;
-                  if (!isValidYield || !isValidRatio) {
-                    setDialogState(() {
-                      validationError = _preorderConfigValidation;
-                    });
-                    return;
-                  }
-
-                  Navigator.of(dialogContext).pop({
-                    "allowPreorder": true,
-                    "conservativeYieldQuantity": yieldQuantity,
-                    "conservativeYieldUnit": unit,
-                    "preorderCapRatio": capRatio,
-                  });
-                },
-                child: const Text(_preorderConfigSaveLabel),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-
-  yieldController.dispose();
-  unitController.dispose();
-  ratioController.dispose();
-  return result;
-}
-
-Future<void> _showReconcileSummaryDialog(
-  BuildContext context, {
-  required ProductionPreorderReconcileSummary summary,
-}) async {
-  await showDialog<void>(
-    context: context,
-    builder: (dialogContext) {
-      return AlertDialog(
-        title: const Text(_reconcileSummaryTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("$_reconcileSummaryScanned: ${summary.scannedCount}"),
-            Text("$_reconcileSummaryExpired: ${summary.expiredCount}"),
-            Text("$_reconcileSummarySkipped: ${summary.skippedCount}"),
-            Text("$_reconcileSummaryErrors: ${summary.errorCount}"),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text(_reconcileSummaryDoneLabel),
-          ),
-        ],
-      );
-    },
-  );
+  return fallback;
 }
 
 void _showSnack(BuildContext context, String message) {

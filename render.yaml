@@ -12,6 +12,8 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22"
+      - key: EMAIL_PROVIDER
+        value: brevo
       - key: CLIENT_ORIGIN
         value: https://gafarsexpress.gafarstechnologies.com
       - key: FRONTEND_BASE_URL

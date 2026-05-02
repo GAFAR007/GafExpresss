@@ -8,3 +8,6 @@
 # Local archive and patch artifacts kept outside version control
 /apps/**/*.zip
 /apps/**/*.patch
+
+# Local Netlify folder
+.netlify

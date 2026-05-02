@@ -52,6 +52,12 @@ const String _reasonPlanStatusMissing =
     "production_plan_status_session_missing";
 const String _reasonPlanDeleteMissing =
     "production_plan_delete_session_missing";
+const String _reasonPlanProgressReportMissing =
+    "production_plan_progress_report_session_missing";
+const String _reasonPlanProgressReportEmailMissing =
+    "production_plan_progress_report_email_session_missing";
+const String _reasonProofDownloadAuditMissing =
+    "production_proof_download_audit_session_missing";
 const String _reasonSchedulePolicyMissing =
     "production_schedule_policy_session_missing";
 const String _reasonSchedulePolicyUpdateMissing =
@@ -62,6 +68,10 @@ const String _reasonStaffCapacityMissing =
     "production_staff_capacity_session_missing";
 const String _reasonTaskStatusMissing =
     "production_task_status_session_missing";
+const String _reasonTaskDeleteMissing =
+    "production_task_delete_session_missing";
+const String _reasonTaskResetHistoryMissing =
+    "production_task_reset_history_session_missing";
 const String _reasonTaskProgressMissing =
     "production_task_progress_session_missing";
 const String _reasonTaskProgressBatchMissing =
@@ -263,6 +273,26 @@ final productionPortfolioConfidenceProvider =
       );
     });
 
+final productionPlanDetailSnapshotProvider =
+    StateProvider<Map<String, ProductionPlanDetail>>((ref) {
+      // WHY: Detail screens can keep rendering the last good payload while a
+      // manual or realtime refresh asks the backend for newer mutable rows.
+      return const <String, ProductionPlanDetail>{};
+    });
+
+void _storePlanDetailSnapshot(Ref ref, ProductionPlanDetail detail) {
+  final planId = detail.plan.id.trim();
+  if (planId.isEmpty) {
+    return;
+  }
+  ref.read(productionPlanDetailSnapshotProvider.notifier).update((current) {
+    return Map<String, ProductionPlanDetail>.unmodifiable({
+      ...current,
+      planId: detail,
+    });
+  });
+}
+
 final productionPlanDetailProvider =
     FutureProvider.family<ProductionPlanDetail, String>((ref, planId) async {
       AppDebug.log(
@@ -286,7 +316,12 @@ final productionPlanDetailProvider =
       }
 
       final api = ref.read(productionApiProvider);
-      return api.fetchPlanDetail(token: session.token, planId: planId);
+      final detail = await api.fetchPlanDetail(
+        token: session.token,
+        planId: planId,
+      );
+      _storePlanDetailSnapshot(ref, detail);
+      return detail;
     });
 
 final productionPlanUnitsProvider =
@@ -413,6 +448,7 @@ class ProductionPlanActions {
       payload: {...payload, "saveMode": "draft"},
     );
 
+    _storePlanDetailSnapshot(_ref, detail);
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPlanDetailProvider(detail.plan.id));
     _ref.invalidate(productionPortfolioConfidenceProvider);
@@ -439,6 +475,7 @@ class ProductionPlanActions {
     final detail = await api.createPlan(token: session.token, payload: payload);
 
     // WHY: Refresh list + detail caches after plan creation.
+    _storePlanDetailSnapshot(_ref, detail);
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPlanDetailProvider(detail.plan.id));
     _ref.invalidate(productionPortfolioConfidenceProvider);
@@ -471,6 +508,7 @@ class ProductionPlanActions {
       payload: payload,
     );
 
+    _storePlanDetailSnapshot(_ref, detail);
     _ref.invalidate(productionPlansProvider);
     _ref.invalidate(productionPlanDetailProvider(planId));
     _ref.invalidate(productionPortfolioConfidenceProvider);
@@ -497,6 +535,94 @@ class ProductionPlanActions {
     final api = _ref.read(productionApiProvider);
     // WHY: AI drafts are read-only and do not affect caches.
     return api.generatePlanDraft(token: session.token, payload: payload);
+  }
+
+  Future<ProductionProgressReportResponse> fetchPlanProgressReport({
+    required String planId,
+    required String routePath,
+    String? toEmail,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonPlanProgressReportMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    return api.fetchPlanProgressReport(
+      token: session.token,
+      planId: planId,
+      routePath: routePath,
+      toEmail: toEmail,
+    );
+  }
+
+  Future<ProductionProgressReportEmailResponse> emailPlanProgressReport({
+    required String planId,
+    required String toEmail,
+    required String routePath,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonPlanProgressReportEmailMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    return api.emailPlanProgressReport(
+      token: session.token,
+      planId: planId,
+      toEmail: toEmail,
+      routePath: routePath,
+    );
+  }
+
+  Future<void> auditProofDownload({
+    required String planId,
+    required String taskId,
+    required String staffId,
+    required DateTime workDate,
+    required List<ProductionTaskProgressProofRecord> proofs,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonProofDownloadAuditMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    await api.auditProofDownload(
+      token: session.token,
+      planId: planId,
+      taskId: taskId,
+      staffId: staffId,
+      workDate: workDate,
+      proofs: proofs,
+    );
   }
 
   Future<ProductionPlan> updatePlanStatus({
@@ -661,6 +787,64 @@ class ProductionPlanActions {
     return updated;
   }
 
+  Future<ProductionTask> createTask({
+    required String planId,
+    required Map<String, dynamic> payload,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskStatusMissing,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final task = await api.createTask(
+      token: session.token,
+      planId: planId,
+      payload: payload,
+    );
+
+    // Task creation changes the open plan detail. The plans list and portfolio
+    // scores are refreshed by explicit list/manual refresh paths, avoiding
+    // route-wide rebuild churn while modal task creation is dismissing.
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    return task;
+  }
+
+  Future<String> deleteTask({
+    required String taskId,
+    required String planId,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskDeleteMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final message = await api.deleteTask(token: session.token, taskId: taskId);
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return message;
+  }
+
   Future<ProductionTask> updateTaskStatus({
     required String taskId,
     required String status,
@@ -749,14 +933,55 @@ class ProductionPlanActions {
     return task;
   }
 
+  Future<String> resetTaskHistory({
+    required String taskId,
+    required DateTime workDate,
+    required String staffId,
+    required String planId,
+    String? notes,
+  }) async {
+    final session = _ref.read(authSessionProvider);
+    if (session == null || !session.isTokenValid) {
+      AppDebug.log(
+        _logTag,
+        _sessionMissingMessage,
+        extra: {
+          _extraReasonKey: _reasonTaskResetHistoryMissing,
+          _extraPlanIdKey: planId,
+          _extraNextActionKey: _nextActionSignIn,
+        },
+      );
+      throw Exception(_sessionExpiredMessage);
+    }
+
+    final api = _ref.read(productionApiProvider);
+    final message = await api.resetTaskHistory(
+      token: session.token,
+      taskId: taskId,
+      workDate: workDate,
+      staffId: staffId,
+      notes: notes,
+    );
+
+    _ref.invalidate(productionPlanDetailProvider(planId));
+    _ref.invalidate(productionPlansProvider);
+    _ref.invalidate(productionPortfolioConfidenceProvider);
+    return message;
+  }
+
   Future<ProductionTaskProgressRecord> logTaskProgress({
     required String taskId,
     required DateTime workDate,
     String? staffId,
     String? unitId,
-    required num actualPlots,
+    bool createNewEntry = false,
+    num? actualPlots,
+    num? unitContribution,
+    List<ProductionTaskProgressProofInput> proofs = const [],
     String? quantityActivityType,
+    String? activityType,
     num? quantityAmount,
+    num? activityQuantity,
     String? quantityUnit,
     required String delayReason,
     required String notes,
@@ -782,9 +1007,14 @@ class ProductionPlanActions {
       workDate: workDate,
       staffId: staffId,
       unitId: unitId,
+      createNewEntry: createNewEntry,
       actualPlots: actualPlots,
+      unitContribution: unitContribution,
+      proofs: proofs,
       quantityActivityType: quantityActivityType,
+      activityType: activityType,
       quantityAmount: quantityAmount,
+      activityQuantity: activityQuantity,
       quantityUnit: quantityUnit,
       delayReason: delayReason,
       notes: notes,

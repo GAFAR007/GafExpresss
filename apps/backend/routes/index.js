@@ -23,6 +23,7 @@ const adminRoutes = require("./admin.routes");
 const businessRoutes = require("./business.routes");
 const chatRoutes = require("./chat.routes");
 const purchaseRequestRoutes = require("./purchase_request.routes");
+const tenantRequestPublicRoutes = require("./tenant_request.public.routes");
 
 // Public product routes (no auth needed)
 const productPublicRoutes = require("./product.public.routes");
@@ -38,10 +39,12 @@ const ROUTE_GROUPS = [
   ["/business", businessRoutes],
   ["/chat", chatRoutes],
   ["/purchase-requests", purchaseRequestRoutes],
+  ["/tenant-request-links", tenantRequestPublicRoutes],
   ["/products", productPublicRoutes],
   ["/orders", orderRoutes],
   ["/payments", paymentRoutes],
 ];
+const BACKEND_BUILD_TAG = "proof-backed-clockout-v2";
 
 module.exports = (app) => {
   debug("Routes module loaded", {
@@ -49,18 +52,37 @@ module.exports = (app) => {
   });
 
   /**
-   * HEALTH CHECK
+   * LIVENESS CHECK
    */
   app.get("/health", (req, res) => {
-    // WHY: Health must reflect process liveness and MongoDB readiness separately.
     const databaseStatus = getDatabaseStatus();
-    const isHealthy = isDatabaseReady();
 
-    res.status(isHealthy ? 200 : 503).json({
-      status: isHealthy ? "ok" : "degraded",
-      message: isHealthy
+    res.status(200).json({
+      status: databaseStatus.isReady ? "ok" : "degraded",
+      message: databaseStatus.isReady
         ? "Backend is alive"
         : "Backend is alive but database is unavailable",
+      buildTag: BACKEND_BUILD_TAG,
+      database: {
+        isReady: databaseStatus.isReady,
+        readyState: databaseStatus.readyState,
+        state: databaseStatus.state,
+      },
+    });
+  });
+
+  /**
+   * READINESS CHECK
+   */
+  app.get("/ready", (req, res) => {
+    const databaseStatus = getDatabaseStatus();
+
+    res.status(databaseStatus.isReady ? 200 : 503).json({
+      status: databaseStatus.isReady ? "ok" : "degraded",
+      message: databaseStatus.isReady
+        ? "Backend is ready"
+        : "Backend is alive but database is unavailable",
+      buildTag: BACKEND_BUILD_TAG,
       database: {
         isReady: databaseStatus.isReady,
         readyState: databaseStatus.readyState,

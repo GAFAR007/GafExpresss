@@ -19,22 +19,31 @@ import 'package:frontend/app/features/home/presentation/staff_attendance_model.d
 import 'package:frontend/app/theme/app_spacing.dart';
 
 const String _statusOpen = "OPEN";
-const String _statusClosed = "CLOSED";
+const String _statusPendingProof = "PENDING PROOF";
+const String _statusCompleted = "COMPLETED";
 const String _labelClockIn = "Clock in";
 const String _labelClockOut = "Clock out";
 const String _labelDuration = "Duration";
+const String _labelProof = "Proof";
 const String _minutesSuffix = " mins";
+const String _proofMissingLabel = "Missing proof";
+const String _proofCompleteLabel = "Proof complete";
+const String _proofNotRequiredLabel = "Proof not required";
+const String _uploadProofLabel = "Upload proof";
+const String _replaceProofLabel = "Replace proof";
 
 class StaffAttendanceListItem extends StatelessWidget {
   final StaffAttendanceRecord record;
   final String staffName;
   final String? staffRole;
+  final VoidCallback? onUploadProof;
 
   const StaffAttendanceListItem({
     super.key,
     required this.record,
     required this.staffName,
     required this.staffRole,
+    this.onUploadProof,
   });
 
   @override
@@ -43,7 +52,36 @@ class StaffAttendanceListItem extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     // WHY: Precompute derived values to keep widgets simple.
     final durationMinutes = record.effectiveDurationMinutes;
-    final statusLabel = record.isOpen ? _statusOpen : _statusClosed;
+    final statusLabel = record.isOpen
+        ? _statusOpen
+        : record.isPendingProof
+        ? _statusPendingProof
+        : _statusCompleted;
+    final proofLabel = record.needsProof
+        ? _proofMissingLabel
+        : record.effectiveProofs.isNotEmpty
+        ? _proofCompleteLabel
+        : _proofNotRequiredLabel;
+    final statusBackground = record.isOpen
+        ? colorScheme.errorContainer
+        : record.isPendingProof
+        ? colorScheme.tertiaryContainer
+        : colorScheme.primaryContainer;
+    final statusForeground = record.isOpen
+        ? colorScheme.onErrorContainer
+        : record.isPendingProof
+        ? colorScheme.onTertiaryContainer
+        : colorScheme.onPrimaryContainer;
+    final proofBackground = record.needsProof
+        ? colorScheme.errorContainer
+        : colorScheme.secondaryContainer;
+    final proofForeground = record.needsProof
+        ? colorScheme.onErrorContainer
+        : colorScheme.onSecondaryContainer;
+    final proofActionLabel = record.effectiveProofs.isEmpty
+        ? _uploadProofLabel
+        : _replaceProofLabel;
+    final canUploadProof = !record.isOpen && onUploadProof != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.md),
@@ -66,7 +104,11 @@ class StaffAttendanceListItem extends StatelessWidget {
                   ),
                 ),
               ),
-              _StatusChip(label: statusLabel, isOpen: record.isOpen),
+              _StatusChip(
+                label: statusLabel,
+                background: statusBackground,
+                foreground: statusForeground,
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -96,6 +138,30 @@ class StaffAttendanceListItem extends StatelessWidget {
               color: colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _StatusChip(
+                label: proofLabel,
+                background: proofBackground,
+                foreground: proofForeground,
+              ),
+              Text(
+                "$_labelProof: ${record.effectiveProofs.length}/${record.effectiveRequiredProofs}",
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (canUploadProof)
+                TextButton(
+                  onPressed: onUploadProof,
+                  child: Text(proofActionLabel),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -104,17 +170,17 @@ class StaffAttendanceListItem extends StatelessWidget {
 
 class _StatusChip extends StatelessWidget {
   final String label;
-  final bool isOpen;
+  final Color background;
+  final Color foreground;
 
-  const _StatusChip({required this.label, required this.isOpen});
+  const _StatusChip({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    // WHY: Use color coding to separate open vs closed sessions.
-    final background = isOpen ? colorScheme.error : colorScheme.primary;
-    final textColor = colorScheme.onPrimary;
-
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
@@ -127,9 +193,9 @@ class _StatusChip extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: textColor,
-              fontWeight: FontWeight.w700,
-            ),
+          color: foreground,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

@@ -1,0 +1,7 @@
+# Copy this file to key.properties on the build machine and fill in real
+# release signing values. key.properties and keystore files are intentionally
+# ignored by git.
+storeFile=app/upload-keystore.jks
+storePassword=replace-with-store-password
+keyAlias=upload
+keyPassword=replace-with-key-password

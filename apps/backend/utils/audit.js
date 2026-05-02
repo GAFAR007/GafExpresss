@@ -24,8 +24,9 @@ async function writeAuditLog({
   entityId,
   message,
   changes,
+  required = false,
 }) {
-  // WHY: Avoid breaking flows if audit logging fails.
+  // WHY: Avoid breaking flows if audit logging fails unless the caller is an audit-only action.
   try {
     const entry = await AuditLog.create({
       businessId: businessId || null,
@@ -44,8 +45,13 @@ async function writeAuditLog({
       entityType,
       entityId,
     });
+    return entry;
   } catch (err) {
     debug('AUDIT: failed to write entry', err.message);
+    if (required) {
+      throw err;
+    }
+    return null;
   }
 }
 

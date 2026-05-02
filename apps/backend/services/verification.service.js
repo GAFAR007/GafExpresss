@@ -157,8 +157,18 @@ async function sendEmailCode({ email, code }) {
 
     debug('EMAIL VERIFY: Brevo status', { status });
 
+    if (status === 401) {
+      throw new Error(
+        'Brevo authentication failed. Check BREVO_API_KEY in Render.',
+      );
+    }
+    if (status === 403) {
+      throw new Error(
+        'Brevo sender not authorized. Check EMAIL_FROM is verified in Brevo.',
+      );
+    }
     if (status < 200 || status >= 300) {
-      throw new Error('Email delivery failed');
+      throw new Error(`Email delivery failed with status ${status}`);
     }
 
     return;

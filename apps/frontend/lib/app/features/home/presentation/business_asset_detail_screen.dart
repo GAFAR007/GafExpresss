@@ -27,6 +27,7 @@ import 'package:frontend/app/features/home/presentation/business_asset_providers
 import 'package:frontend/app/features/home/presentation/business_tenant_providers.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
 import 'package:frontend/app/features/home/presentation/staff_role_helpers.dart';
+import 'package:frontend/app/features/home/presentation/role_access.dart';
 import 'package:frontend/app/core/formatters/currency_formatter.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 
@@ -311,7 +312,10 @@ class _BusinessAssetDetailScreenState
     required String actorRole,
     required String? staffRole,
   }) {
-    if (actorRole == 'business_owner') {
+    if (canUseBusinessOwnerEquivalentAccess(
+      role: actorRole,
+      staffRole: staffRole,
+    )) {
       return true;
     }
 
@@ -337,15 +341,14 @@ class _BusinessAssetDetailScreenState
       return "Unknown staff";
     }
 
-    final name = actor.name.trim().isEmpty ? "Unknown staff" : actor.name.trim();
+    final name = actor.name.trim().isEmpty
+        ? "Unknown staff"
+        : actor.name.trim();
     final role = actor.staffRole?.trim().isNotEmpty == true
-        ? formatStaffRoleLabel(
-            actor.staffRole!,
-            fallback: actor.actorRole,
-          )
+        ? formatStaffRoleLabel(actor.staffRole!, fallback: actor.actorRole)
         : actor.actorRole.trim().isNotEmpty
-            ? actor.actorRole
-            : '';
+        ? actor.actorRole
+        : '';
     if (role.trim().isEmpty) {
       return name;
     }
@@ -364,7 +367,10 @@ class _BusinessAssetDetailScreenState
   }
 
   String _formatUsageWindow(BusinessAssetProductionUsageRequest request) {
-    final dateLabel = formatDateLabel(request.productionDate, fallback: "No date");
+    final dateLabel = formatDateLabel(
+      request.productionDate,
+      fallback: "No date",
+    );
     final start = request.usageStartTime.trim();
     final end = request.usageEndTime.trim();
     if (start.isEmpty && end.isEmpty) {
@@ -393,10 +399,7 @@ class _BusinessAssetDetailScreenState
       }
     }
 
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: initial,
-    );
+    final picked = await showTimePicker(context: context, initialTime: initial);
     if (!mounted || picked == null) {
       return;
     }
@@ -489,8 +492,8 @@ class _BusinessAssetDetailScreenState
             requestType == 'usage'
                 ? "Tool usage approved successfully"
                 : requestType == 'audit'
-                    ? "Audit approved successfully"
-                    : "Equipment approved successfully",
+                ? "Audit approved successfully"
+                : "Equipment approved successfully",
           ),
         ),
       );
@@ -504,8 +507,8 @@ class _BusinessAssetDetailScreenState
             requestType == 'usage'
                 ? "Unable to approve tool usage"
                 : requestType == 'audit'
-                    ? "Unable to approve audit request"
-                    : "Unable to approve equipment request",
+                ? "Unable to approve audit request"
+                : "Unable to approve equipment request",
           ),
         ),
       );
@@ -564,15 +567,15 @@ class _BusinessAssetDetailScreenState
                     Text(
                       "Do an audit",
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       "Record the latest audit result for ${asset.name}. Staff submissions route to manager approval automatically.",
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 20),
                     TextField(
@@ -580,7 +583,8 @@ class _BusinessAssetDetailScreenState
                       readOnly: true,
                       showCursor: false,
                       enableInteractiveSelection: false,
-                      onTap: () => _pickDate(auditDateCtrl, field: "audit_date"),
+                      onTap: () =>
+                          _pickDate(auditDateCtrl, field: "audit_date"),
                       decoration: const InputDecoration(
                         labelText: "Audit date",
                         suffixIcon: Icon(Icons.calendar_today_outlined),
@@ -593,7 +597,10 @@ class _BusinessAssetDetailScreenState
                         labelText: "Resulting status",
                       ),
                       items: const [
-                        DropdownMenuItem(value: 'active', child: Text("Active")),
+                        DropdownMenuItem(
+                          value: 'active',
+                          child: Text("Active"),
+                        ),
                         DropdownMenuItem(
                           value: 'maintenance',
                           child: Text("Maintenance"),
@@ -705,7 +712,8 @@ class _BusinessAssetDetailScreenState
       }
       setState(() => _replaceAssetSnapshot(updated));
       final hasPendingRequest =
-          updated.farmProfile?.pendingAuditRequest?.status == 'pending_approval';
+          updated.farmProfile?.pendingAuditRequest?.status ==
+          'pending_approval';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -768,24 +776,24 @@ class _BusinessAssetDetailScreenState
               children: [
                 Text(
                   "Request tool usage",
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   "Track daily production usage for ${asset.name}. Farmers can submit requests and managers approve them.",
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   "Tracked quantity: $quantityAvailable ${(asset.farmProfile?.unitOfMeasure ?? 'units').trim()}",
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 TextField(
@@ -793,10 +801,8 @@ class _BusinessAssetDetailScreenState
                   readOnly: true,
                   showCursor: false,
                   enableInteractiveSelection: false,
-                  onTap: () => _pickDate(
-                    productionDateCtrl,
-                    field: "production_date",
-                  ),
+                  onTap: () =>
+                      _pickDate(productionDateCtrl, field: "production_date"),
                   decoration: const InputDecoration(
                     labelText: "Production date",
                     suffixIcon: Icon(Icons.calendar_today_outlined),
@@ -811,10 +817,8 @@ class _BusinessAssetDetailScreenState
                         readOnly: true,
                         showCursor: false,
                         enableInteractiveSelection: false,
-                        onTap: () => _pickTime(
-                          startTimeCtrl,
-                          field: "usage_start_time",
-                        ),
+                        onTap: () =>
+                            _pickTime(startTimeCtrl, field: "usage_start_time"),
                         decoration: const InputDecoration(
                           labelText: "Start time",
                           suffixIcon: Icon(Icons.access_time_outlined),
@@ -828,10 +832,8 @@ class _BusinessAssetDetailScreenState
                         readOnly: true,
                         showCursor: false,
                         enableInteractiveSelection: false,
-                        onTap: () => _pickTime(
-                          endTimeCtrl,
-                          field: "usage_end_time",
-                        ),
+                        onTap: () =>
+                            _pickTime(endTimeCtrl, field: "usage_end_time"),
                         decoration: const InputDecoration(
                           labelText: "End time",
                           suffixIcon: Icon(Icons.access_time_outlined),
@@ -875,9 +877,7 @@ class _BusinessAssetDetailScreenState
                 TextField(
                   controller: noteCtrl,
                   maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: "Usage note",
-                  ),
+                  decoration: const InputDecoration(labelText: "Usage note"),
                 ),
                 const SizedBox(height: 20),
                 Row(
@@ -898,9 +898,7 @@ class _BusinessAssetDetailScreenState
                           final requestedQty = _parseIntInput(
                             quantityRequestedCtrl.text,
                           );
-                          final usedQty = _parseIntInput(
-                            quantityUsedCtrl.text,
-                          );
+                          final usedQty = _parseIntInput(quantityUsedCtrl.text);
                           if (productionDate == null) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -982,7 +980,8 @@ class _BusinessAssetDetailScreenState
         return;
       }
       setState(() => _replaceAssetSnapshot(updated));
-      final latestUsage = updated.farmProfile?.productionUsageRequests.isNotEmpty == true
+      final latestUsage =
+          updated.farmProfile?.productionUsageRequests.isNotEmpty == true
           ? updated.farmProfile!.productionUsageRequests.first
           : null;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2080,9 +2079,8 @@ class _BusinessAssetDetailScreenState
     BusinessAsset asset, {
     required bool canApproveFarmRequests,
   }) {
-    final usageRequests = [
-      ...?asset.farmProfile?.productionUsageRequests,
-    ]..sort(
+    final usageRequests = [...?asset.farmProfile?.productionUsageRequests]
+      ..sort(
         (left, right) => (right.requestedAt ?? DateTime(1900)).compareTo(
           left.requestedAt ?? DateTime(1900),
         ),
@@ -2116,7 +2114,9 @@ class _BusinessAssetDetailScreenState
                 ),
               ),
               Text(
-                asset.farmProfile?.farmSection ?? asset.location ?? "Farm equipment",
+                asset.farmProfile?.farmSection ??
+                    asset.location ??
+                    "Farm equipment",
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -2153,10 +2153,7 @@ class _BusinessAssetDetailScreenState
                 OutlinedButton.icon(
                   onPressed: _isSaving
                       ? null
-                      : () => _approveFarmRequest(
-                            asset,
-                            requestType: 'asset',
-                          ),
+                      : () => _approveFarmRequest(asset, requestType: 'asset'),
                   icon: const Icon(Icons.approval_outlined),
                   label: const Text("Approve equipment"),
                 ),
@@ -2165,10 +2162,7 @@ class _BusinessAssetDetailScreenState
                 OutlinedButton.icon(
                   onPressed: _isSaving
                       ? null
-                      : () => _approveFarmRequest(
-                            asset,
-                            requestType: 'audit',
-                          ),
+                      : () => _approveFarmRequest(asset, requestType: 'audit'),
                   icon: const Icon(Icons.task_alt_outlined),
                   label: const Text("Approve audit"),
                 ),
@@ -2220,17 +2214,19 @@ class _BusinessAssetDetailScreenState
               ),
             ),
             const SizedBox(height: 8),
-            ...usageRequests.take(6).map(
-              (request) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _buildUsageRequestTile(
-                  theme,
-                  asset,
-                  request,
-                  canApproveFarmRequests: canApproveFarmRequests,
+            ...usageRequests
+                .take(6)
+                .map(
+                  (request) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildUsageRequestTile(
+                      theme,
+                      asset,
+                      request,
+                      canApproveFarmRequests: canApproveFarmRequests,
+                    ),
+                  ),
                 ),
-              ),
-            ),
           ] else ...[
             const SizedBox(height: 16),
             Text(
@@ -2336,10 +2332,10 @@ class _BusinessAssetDetailScreenState
                 onPressed: _isSaving
                     ? null
                     : () => _approveFarmRequest(
-                          asset,
-                          requestType: 'usage',
-                          requestId: request.id,
-                        ),
+                        asset,
+                        requestType: 'usage',
+                        requestId: request.id,
+                      ),
                 icon: const Icon(Icons.approval_outlined),
                 label: const Text("Approve usage"),
               ),
@@ -2394,10 +2390,7 @@ class _FarmInfoChip extends StatelessWidget {
   final String label;
   final String value;
 
-  const _FarmInfoChip({
-    required this.label,
-    required this.value,
-  });
+  const _FarmInfoChip({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {

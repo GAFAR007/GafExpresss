@@ -37,9 +37,9 @@ class SettingsSectionHeader extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           subtitle,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
     );
@@ -183,9 +183,9 @@ class SettingsProfileImageRow extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 hasImage ? "Image uploaded" : "Upload a profile photo",
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -193,11 +193,21 @@ class SettingsProfileImageRow extends StatelessWidget {
         // WHY: Keep the upload CTA visible even when an image exists.
         OutlinedButton.icon(
           onPressed: isUploading ? null : onUploadTap,
+          style: AppButtonStyles.outlined(
+            theme: Theme.of(context),
+            tone: AppStatusTone.info,
+          ),
           icon: isUploading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppButtonStyles.accentColor(
+                      theme: Theme.of(context),
+                      tone: AppStatusTone.info,
+                    ),
+                  ),
                 )
               : const Icon(Icons.upload, size: 16),
           label: Text(isUploading ? "Uploading..." : "Upload"),
@@ -248,6 +258,13 @@ class _VerificationButton extends StatelessWidget {
       );
     }
 
-    return OutlinedButton(onPressed: onTap, child: Text(label));
+    return OutlinedButton(
+      onPressed: onTap,
+      style: AppButtonStyles.outlined(
+        theme: Theme.of(context),
+        tone: AppStatusTone.info,
+      ),
+      child: Text(label),
+    );
   }
 }

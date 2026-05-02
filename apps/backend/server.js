@@ -85,12 +85,12 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
  * DATABASE READINESS GUARD
  * --------------------------------------------------
  * NOTE:
- * - Allows health checks to report degraded state
+ * - Allows liveness/readiness checks to stay reachable even when MongoDB is down
  * - Rejects application traffic quickly if MongoDB drops after startup
  */
 app.use((req, res, next) => {
-  // WHY: Health must stay reachable even when the database is down.
-  if (req.path === '/health') {
+  // WHY: Liveness/readiness checks must stay reachable even when the database is down.
+  if (req.path === '/health' || req.path === '/ready') {
     return next();
   }
 

@@ -48,6 +48,7 @@ const String _keyPlanId = "planId";
 const String _keyTaskId = "taskId";
 const String _keyNotes = "notes";
 const String _keyClockOutAudit = "clockOutAudit";
+const String _keyUnitIndex = "unitIndex";
 
 const String _attendancePath = "/business/staff/attendance";
 const String _clockInPath = "/business/staff/attendance/clock-in";
@@ -92,6 +93,14 @@ class StaffAttendanceApi {
     return value.toUtc().toIso8601String();
   }
 
+  String _toIsoDateString(DateTime value) {
+    final localValue = value.toLocal();
+    final year = localValue.year.toString().padLeft(4, "0");
+    final month = localValue.month.toString().padLeft(2, "0");
+    final day = localValue.day.toString().padLeft(2, "0");
+    return "$year-$month-$day";
+  }
+
   Map<String, dynamic> _buildClockPayload({
     String? staffProfileId,
     String? attendanceId,
@@ -116,7 +125,7 @@ class StaffAttendanceApi {
       payload[_keyClockOutAt] = _toIsoString(clockOutAt);
     }
     if (workDate != null) {
-      payload[_keyWorkDate] = _toIsoString(workDate);
+      payload[_keyWorkDate] = _toIsoDateString(workDate);
     }
     if (planId != null && planId.trim().isNotEmpty) {
       payload[_keyPlanId] = planId.trim();
@@ -371,6 +380,7 @@ class StaffAttendanceApi {
     required String attendanceId,
     required List<int> bytes,
     required String filename,
+    int unitIndex = 1,
     Map<String, dynamic>? clockOutAuditPayload,
   }) async {
     // WHY: Log intent so proof uploads are traceable alongside clock-outs.
@@ -384,6 +394,7 @@ class StaffAttendanceApi {
         "attendanceId": attendanceId,
         "bytes": bytes.length,
         "filename": filename,
+        "unitIndex": unitIndex,
       },
     );
 
@@ -395,6 +406,7 @@ class StaffAttendanceApi {
       final authOptions = _authOptions(token);
       final formData = FormData.fromMap({
         _keyProof: MultipartFile.fromBytes(bytes, filename: filename),
+        _keyUnitIndex: unitIndex.toString(),
         if (clockOutAuditPayload != null)
           _keyClockOutAudit: jsonEncode(clockOutAuditPayload),
       });

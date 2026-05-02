@@ -962,10 +962,6 @@ async function findStoredLifecycleProfile({
   domainContext = DEFAULT_PRODUCTION_DOMAIN_CONTEXT,
   source = null,
 }) {
-  if (!(await resolveLifecycleCacheCollectionAvailability())) {
-    return null;
-  }
-
   const query = {
     businessId,
     productKey,
@@ -1000,10 +996,6 @@ async function searchStoredLifecycleProfiles({
       Math.floor(Number(limit) || 8),
     ),
   );
-  if (!(await resolveLifecycleCacheCollectionAvailability())) {
-    return [];
-  }
-
   const rawRegex = new RegExp(
     escapeRegexPattern(trimmedQuery),
     "i",
