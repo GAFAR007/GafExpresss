@@ -36,6 +36,8 @@ const String _openCalendar = "open_calendar";
 const String _openArchive = "open_archive";
 const String _openDetail = "open_detail";
 const String _openPreorderMonitoring = "open_preorder_monitoring";
+const String _openStaffTasks = "open_staff_tasks";
+const String _openStats = "open_stats";
 const String _backTap = "back_tap";
 const String _selectDraftAction = "select_draft";
 const String _deleteDraftAction = "delete_draft";
@@ -50,6 +52,9 @@ const String _refreshTooltip = "Refresh";
 const String _calendarTooltip = "Calendar";
 const String _archiveTooltip = "Archive";
 const String _monitorTooltip = "Reservations";
+const String _staffTasksTooltip = "Staff tasks";
+const String _statsTooltip = "Stats";
+const String _moreTooltip = "More production actions";
 const String _createButtonLabel = "Create plan";
 const String _deleteSelectedTooltip = "Delete selected drafts";
 const String _clearSelectionTooltip = "Clear selection";
@@ -103,6 +108,7 @@ const double _cardRadius = 16;
 const double _cardTitleSpacing = 8;
 const double _cardRowSpacing = 4;
 const double _cardPadding = 16;
+const double _compactActionsWidth = 520;
 
 const String _staffRole = "staff";
 const String _staffRoleEstateManager = "estate_manager";
@@ -121,6 +127,8 @@ enum _PlanCardAction {
   archive,
   deleteDraft,
 }
+
+enum _ProductionListMenuAction { calendar, archive, reservations, refresh }
 
 class ProductionPlanListScreen extends ConsumerStatefulWidget {
   const ProductionPlanListScreen({super.key});
@@ -198,6 +206,144 @@ class _ProductionPlanListScreenState
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Widget _toolbarAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(onPressed: onPressed, icon: Icon(icon), tooltip: tooltip);
+  }
+
+  List<Widget> _productionActions({required bool canOpenMonitoring}) {
+    final isCompact = MediaQuery.sizeOf(context).width < _compactActionsWidth;
+    final primaryActions = <Widget>[
+      _toolbarAction(
+        icon: Icons.assignment_ind_outlined,
+        tooltip: _staffTasksTooltip,
+        onPressed: () {
+          AppDebug.log(_logTag, _openStaffTasks);
+          context.push(productionStaffTasksRoute);
+        },
+      ),
+      _toolbarAction(
+        icon: Icons.query_stats_outlined,
+        tooltip: _statsTooltip,
+        onPressed: () {
+          AppDebug.log(_logTag, _openStats);
+          context.push(productionStatsRoute);
+        },
+      ),
+    ];
+
+    if (isCompact) {
+      return [
+        ...primaryActions,
+        PopupMenuButton<_ProductionListMenuAction>(
+          tooltip: _moreTooltip,
+          onSelected: (action) =>
+              _handleProductionMenuAction(action, canOpenMonitoring),
+          itemBuilder: (context) {
+            return [
+              const PopupMenuItem(
+                value: _ProductionListMenuAction.calendar,
+                child: ListTile(
+                  leading: Icon(Icons.calendar_month_outlined),
+                  title: Text(_calendarTooltip),
+                ),
+              ),
+              const PopupMenuItem(
+                value: _ProductionListMenuAction.archive,
+                child: ListTile(
+                  leading: Icon(Icons.archive_outlined),
+                  title: Text(_archiveTooltip),
+                ),
+              ),
+              if (canOpenMonitoring)
+                const PopupMenuItem(
+                  value: _ProductionListMenuAction.reservations,
+                  child: ListTile(
+                    leading: Icon(Icons.list_alt_outlined),
+                    title: Text(_monitorTooltip),
+                  ),
+                ),
+              const PopupMenuItem(
+                value: _ProductionListMenuAction.refresh,
+                child: ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text(_refreshTooltip),
+                ),
+              ),
+            ];
+          },
+        ),
+      ];
+    }
+
+    return [
+      ...primaryActions,
+      _toolbarAction(
+        icon: Icons.calendar_month_outlined,
+        tooltip: _calendarTooltip,
+        onPressed: () {
+          AppDebug.log(_logTag, _openCalendar);
+          context.push(productionCalendarRoute);
+        },
+      ),
+      _toolbarAction(
+        icon: Icons.archive_outlined,
+        tooltip: _archiveTooltip,
+        onPressed: () {
+          AppDebug.log(_logTag, _openArchive);
+          context.push(productionPlanArchiveRoute);
+        },
+      ),
+      if (canOpenMonitoring)
+        _toolbarAction(
+          icon: Icons.list_alt_outlined,
+          tooltip: _monitorTooltip,
+          onPressed: () {
+            AppDebug.log(_logTag, _openPreorderMonitoring);
+            context.push(productionPreorderReservationsRoute);
+          },
+        ),
+      _toolbarAction(
+        icon: Icons.refresh,
+        tooltip: _refreshTooltip,
+        onPressed: () {
+          AppDebug.log(_logTag, _refreshAction);
+          ref.invalidate(productionPlansProvider);
+        },
+      ),
+    ];
+  }
+
+  void _handleProductionMenuAction(
+    _ProductionListMenuAction action,
+    bool canOpenMonitoring,
+  ) {
+    switch (action) {
+      case _ProductionListMenuAction.calendar:
+        AppDebug.log(_logTag, _openCalendar);
+        context.push(productionCalendarRoute);
+        return;
+      case _ProductionListMenuAction.archive:
+        AppDebug.log(_logTag, _openArchive);
+        context.push(productionPlanArchiveRoute);
+        return;
+      case _ProductionListMenuAction.reservations:
+        if (!canOpenMonitoring) {
+          return;
+        }
+        AppDebug.log(_logTag, _openPreorderMonitoring);
+        context.push(productionPreorderReservationsRoute);
+        return;
+      case _ProductionListMenuAction.refresh:
+        AppDebug.log(_logTag, _refreshAction);
+        ref.invalidate(productionPlansProvider);
+        return;
+    }
   }
 
   Future<void> _deleteDraftPlans(List<ProductionPlan> plans) async {
@@ -418,41 +564,7 @@ class _ProductionPlanListScreenState
                   tooltip: _deleteSelectedTooltip,
                 ),
               ]
-            : [
-                IconButton(
-                  onPressed: () {
-                    AppDebug.log(_logTag, _openCalendar);
-                    context.push(productionCalendarRoute);
-                  },
-                  icon: const Icon(Icons.calendar_month_outlined),
-                  tooltip: _calendarTooltip,
-                ),
-                IconButton(
-                  onPressed: () {
-                    AppDebug.log(_logTag, _openArchive);
-                    context.push(productionPlanArchiveRoute);
-                  },
-                  icon: const Icon(Icons.archive_outlined),
-                  tooltip: _archiveTooltip,
-                ),
-                if (canOpenMonitoring)
-                  IconButton(
-                    onPressed: () {
-                      AppDebug.log(_logTag, _openPreorderMonitoring);
-                      context.push(productionPreorderReservationsRoute);
-                    },
-                    icon: const Icon(Icons.list_alt_outlined),
-                    tooltip: _monitorTooltip,
-                  ),
-                IconButton(
-                  onPressed: () {
-                    AppDebug.log(_logTag, _refreshAction);
-                    ref.invalidate(productionPlansProvider);
-                  },
-                  icon: const Icon(Icons.refresh),
-                  tooltip: _refreshTooltip,
-                ),
-              ],
+            : [..._productionActions(canOpenMonitoring: canOpenMonitoring)],
       ),
       floatingActionButton: _selectionMode
           ? null

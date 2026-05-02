@@ -16,6 +16,8 @@ const String productionPlanAssistantRoute =
 const String productionPlanCreateRoute = "/business-production/create";
 const String productionPlanDraftStudioRoute =
     "/business-production/draft-studio";
+const String productionStaffTasksRoute = "/business-production/staff-tasks";
+const String productionStatsRoute = "/business-production/stats";
 const String productionPlanDetailRoute = "/business-production/:id";
 const String productionPlanTaskDetailRoute =
     "/business-production/:id/task/:taskId";

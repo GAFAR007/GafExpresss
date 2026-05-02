@@ -75,6 +75,8 @@ import 'package:frontend/app/features/home/presentation/production/production_pl
 import 'package:frontend/app/features/home/presentation/production/production_plan_insights_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_phase_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_presence_stats_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_staff_tasks_screen.dart';
+import 'package:frontend/app/features/home/presentation/production/production_stats_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_detail_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_plan_workspace_screen.dart';
 import 'package:frontend/app/features/home/presentation/production/production_preorder_reservations_screen.dart';
@@ -93,6 +95,9 @@ const String _routeBusinessLoginLog = "-> /business-login";
 const String _routeProductionListLog = "-> /business-production";
 const String _routeProductionArchiveLog = "-> /business-production/archive";
 const String _routeProductionCalendarLog = "-> /business-production/calendar";
+const String _routeProductionStaffTasksLog =
+    "-> /business-production/staff-tasks";
+const String _routeProductionStatsLog = "-> /business-production/stats";
 const String _routeProductionAssistantLog =
     "-> /business-production/create-assistant";
 const String _routeProductionCreateLog = "-> /business-production/create";
@@ -808,6 +813,22 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           AppDebug.log("ROUTER", _routeProductionCalendarLog);
           return const BusinessThemeWrapper(child: ProductionCalendarScreen());
+        },
+      ),
+      GoRoute(
+        path: productionStaffTasksRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionStaffTasksLog);
+          return const BusinessThemeWrapper(
+            child: ProductionStaffTasksScreen(),
+          );
+        },
+      ),
+      GoRoute(
+        path: productionStatsRoute,
+        builder: (context, state) {
+          AppDebug.log("ROUTER", _routeProductionStatsLog);
+          return const BusinessThemeWrapper(child: ProductionStatsScreen());
         },
       ),
       GoRoute(
