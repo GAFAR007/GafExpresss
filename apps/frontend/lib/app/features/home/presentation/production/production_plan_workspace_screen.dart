@@ -36,6 +36,7 @@ import 'package:frontend/app/features/home/presentation/production/production_pr
 import 'package:frontend/app/features/home/presentation/production/production_plan_widgets.dart';
 import 'package:frontend/app/features/home/presentation/production/production_presence_banner.dart';
 import 'package:frontend/app/features/home/presentation/production/production_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_local_video_preview.dart';
 import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_viewer.dart';
 import 'package:frontend/app/features/home/presentation/production/production_task_progress_proof_picker.dart';
@@ -72,8 +73,7 @@ const String _logClockOutWizardOpen = "clock_out_wizard_open";
 
 const String _screenTitle = "Production plan";
 const String _workspaceTitle = "Calendar workspace";
-const String _workspaceSubtitle =
-    "Use the calendar to assign staff, remove staff, and track progress day by day.";
+const String _workspaceSubtitle = "Assign staff and track daily progress.";
 const String _showCalendarTooltip = "Show calendar";
 const String _hideCalendarTooltip = "Hide calendar";
 const String _selectedDayTitle = "Selected day";
@@ -240,6 +240,9 @@ const String _clockOutWizardProofRequired =
     "Upload every required picture and video for the completed units.";
 const String _clockOutWizardProofNotAllowed =
     "Proof uploads are not allowed when the completed amount is 0.";
+const String _clockOutWizardLiveImageRequired =
+    "Upload an image for this unit.";
+const String _clockOutWizardLiveVideoRequired = "Upload a video for this unit.";
 const String _clockOutWizardFinishSaving = "Finishing clock-out...";
 const String _clockOutWizardActiveSessionMissing =
     "No active production session was found for this staff.";
@@ -466,7 +469,7 @@ class ProductionPlanWorkspaceScreen extends ConsumerStatefulWidget {
 
 class _ProductionPlanWorkspaceScreenState
     extends ConsumerState<ProductionPlanWorkspaceScreen> {
-  static const Duration _liveRefreshInterval = Duration(seconds: 3);
+  static const Duration _liveRefreshInterval = Duration(seconds: 15);
 
   DateTime? _visibleMonth;
   DateTime? _selectedDay;
@@ -478,8 +481,11 @@ class _ProductionPlanWorkspaceScreenState
   _WorkspaceCalendarMode _lastExpandedCalendarMode =
       _WorkspaceCalendarMode.month;
   Timer? _liveRefreshTimer;
+  ProviderSubscription<ProductionDraftPresenceState>? _presenceSubscription;
+  int _liveRefreshPauseDepth = 0;
   bool _detailRefreshInFlight = false;
   bool _selectedDaySummaryExpanded = false;
+  bool _productionProgressExpanded = false;
   final Set<String> _collapsedTaskIds = <String>{};
   final Set<String> _collapsedTaskProgressIds = <String>{};
   final Set<String> _collapsedTaskAssignmentIds = <String>{};
@@ -488,6 +494,7 @@ class _ProductionPlanWorkspaceScreenState
   @override
   void initState() {
     super.initState();
+    _startPresenceListener();
     _startLiveRefreshTimer();
   }
 
@@ -495,12 +502,14 @@ class _ProductionPlanWorkspaceScreenState
   void didUpdateWidget(covariant ProductionPlanWorkspaceScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.planId != widget.planId) {
+      _startPresenceListener();
       _startLiveRefreshTimer();
     }
   }
 
   @override
   void dispose() {
+    _presenceSubscription?.close();
     _liveRefreshTimer?.cancel();
     super.dispose();
   }
@@ -517,6 +526,25 @@ class _ProductionPlanWorkspaceScreenState
     });
   }
 
+  void _startPresenceListener() {
+    _presenceSubscription?.close();
+    _presenceSubscription = null;
+    final planId = widget.planId.trim();
+    if (planId.isEmpty) {
+      return;
+    }
+
+    _presenceSubscription = ref.listenManual<ProductionDraftPresenceState>(
+      productionDraftPresenceProvider(planId),
+      (previous, next) {
+        if (!mounted || previous?.updatedAt == next.updatedAt) {
+          return;
+        }
+        unawaited(_triggerLivePlanDetailRefresh(reason: "presence_update"));
+      },
+    );
+  }
+
   void _startLiveRefreshTimer() {
     _liveRefreshTimer?.cancel();
     final planId = widget.planId.trim();
@@ -525,13 +553,13 @@ class _ProductionPlanWorkspaceScreenState
     }
 
     _liveRefreshTimer = Timer.periodic(_liveRefreshInterval, (_) {
-      if (!mounted || widget.planId.trim().isEmpty) {
+      if (!mounted ||
+          widget.planId.trim().isEmpty ||
+          widget.planId.trim() != planId) {
         return;
       }
 
-      final presenceState = ref.read(
-        productionDraftPresenceProvider(widget.planId),
-      );
+      final presenceState = ref.read(productionDraftPresenceProvider(planId));
       if (!presenceState.isConnected) {
         return;
       }
@@ -543,6 +571,10 @@ class _ProductionPlanWorkspaceScreenState
   Future<void> _triggerLivePlanDetailRefresh({required String reason}) async {
     final planId = widget.planId.trim();
     if (planId.isEmpty || !mounted) {
+      return;
+    }
+
+    if (_shouldSkipAutomaticRefresh(reason)) {
       return;
     }
 
@@ -581,7 +613,12 @@ class _ProductionPlanWorkspaceScreenState
     );
     try {
       final _ = await ref.refresh(productionPlanDetailProvider(planId).future);
-      ref.invalidate(productionPlansProvider);
+      if (!mounted) {
+        return;
+      }
+      if (reason == "manual_button" || reason == "pull_to_refresh") {
+        ref.invalidate(productionPlansProvider);
+      }
     } catch (error) {
       AppDebug.log(
         _logTag,
@@ -596,6 +633,50 @@ class _ProductionPlanWorkspaceScreenState
       );
     } finally {
       _detailRefreshInFlight = false;
+    }
+  }
+
+  bool _shouldSkipAutomaticRefresh(String reason) {
+    if (reason == "manual_button" || reason == "pull_to_refresh") {
+      return false;
+    }
+
+    if (_liveRefreshPauseDepth > 0) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": widget.planId.trim(),
+          "reason": reason,
+          "skipReason": "workspace_modal_or_mutation_active",
+        },
+      );
+      return true;
+    }
+
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext != null && focusedContext.widget is EditableText) {
+      AppDebug.log(
+        _logTag,
+        _logLiveRefreshSkipped,
+        extra: {
+          "planId": widget.planId.trim(),
+          "reason": reason,
+          "skipReason": "text_input_active",
+        },
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<T> _withLiveRefreshPaused<T>(Future<T> Function() action) async {
+    _liveRefreshPauseDepth += 1;
+    try {
+      return await action();
+    } finally {
+      _liveRefreshPauseDepth = math.max(0, _liveRefreshPauseDepth - 1);
     }
   }
 
@@ -786,15 +867,6 @@ class _ProductionPlanWorkspaceScreenState
     final actorRole = profileRole.isNotEmpty ? profileRole : session?.user.role;
     final presenceState = ref.watch(
       productionDraftPresenceProvider(widget.planId),
-    );
-    ref.listen<ProductionDraftPresenceState>(
-      productionDraftPresenceProvider(widget.planId),
-      (previous, next) {
-        if (previous?.updatedAt == next.updatedAt) {
-          return;
-        }
-        unawaited(_triggerLivePlanDetailRefresh(reason: "presence_update"));
-      },
     );
 
     return Scaffold(
@@ -1009,18 +1081,20 @@ class _ProductionPlanWorkspaceScreenState
                 _showSnackSafe(_taskCreateFailure);
                 return;
               }
-              final input = await _showCreateWorkspaceTaskDialog(
-                context,
-                selectedDay: selectedDay,
-                phases: dialogPhases,
-                staffList: staffList,
-                workScopeSummary: workScopeSummary,
-                initialPhaseId: tasksForDay.isNotEmpty
-                    ? tasksForDay.first.phaseId
-                    : dialogPhases.first.id,
-                initialRoleRequired: tasksForDay.isNotEmpty
-                    ? tasksForDay.first.roleRequired
-                    : "",
+              final input = await _withLiveRefreshPaused(
+                () => _showCreateWorkspaceTaskDialog(
+                  context,
+                  selectedDay: selectedDay,
+                  phases: dialogPhases,
+                  staffList: staffList,
+                  workScopeSummary: workScopeSummary,
+                  initialPhaseId: tasksForDay.isNotEmpty
+                      ? tasksForDay.first.phaseId
+                      : dialogPhases.first.id,
+                  initialRoleRequired: tasksForDay.isNotEmpty
+                      ? tasksForDay.first.roleRequired
+                      : "",
+                ),
               );
               if (input == null) {
                 return;
@@ -1038,24 +1112,29 @@ class _ProductionPlanWorkspaceScreenState
               );
 
               try {
-                await ref
-                    .read(productionPlanActionsProvider)
-                    .createTask(
-                      planId: widget.planId,
-                      payload: {
-                        "phaseId": input.phaseId,
-                        "title": input.title,
-                        "roleRequired": input.roleRequired,
-                        "requiredHeadcount": input.requiredHeadcount,
-                        "weight": input.weight,
-                        "assignedStaffProfileIds":
-                            input.assignedStaffProfileIds,
-                        "instructions": input.instructions,
-                        "startDate": input.startDate.toUtc().toIso8601String(),
-                        "dueDate": input.dueDate.toUtc().toIso8601String(),
-                        "taskType": "event",
-                      },
-                    );
+                await _withLiveRefreshPaused(() async {
+                  await Future<void>.delayed(const Duration(milliseconds: 120));
+                  await ref
+                      .read(productionPlanActionsProvider)
+                      .createTask(
+                        planId: widget.planId,
+                        payload: {
+                          "phaseId": input.phaseId,
+                          "title": input.title,
+                          "roleRequired": input.roleRequired,
+                          "requiredHeadcount": input.requiredHeadcount,
+                          "weight": input.weight,
+                          "assignedStaffProfileIds":
+                              input.assignedStaffProfileIds,
+                          "instructions": input.instructions,
+                          "startDate": input.startDate
+                              .toUtc()
+                              .toIso8601String(),
+                          "dueDate": input.dueDate.toUtc().toIso8601String(),
+                          "taskType": "event",
+                        },
+                      );
+                });
                 _showSnackSafe(_taskCreateSuccess);
               } catch (error) {
                 _showSnackSafe(
@@ -1149,25 +1228,9 @@ class _ProductionPlanWorkspaceScreenState
                         : null,
                   ),
                   const SizedBox(height: _sectionSpacing),
-                  ProductionPresenceBanner(
-                    currentViewer: currentViewer,
-                    remoteViewers: presenceState.viewers,
-                    isConnected: presenceState.isConnected,
-                    isSharedRoom: widget.planId.trim().isNotEmpty,
-                    errorMessage: presenceState.error,
-                    planId: widget.planId,
-                    snapshotAt: presenceState.updatedAt,
-                    onOpenStats: widget.planId.trim().isEmpty
-                        ? null
-                        : () => context.push(
-                            productionPlanPresenceStatsPath(widget.planId),
-                          ),
-                  ),
-                  const SizedBox(height: _sectionSpacing),
                   _WorkspaceCalendarHeader(
                     title: _workspaceTitle,
-                    subtitle:
-                        "$_workspaceSubtitle Working on ${workScopeSummary.countLabel}.",
+                    subtitle: _workspaceSubtitle,
                     calendarVisible: showCalendarOverview,
                     onToggleCalendar: _toggleCalendarVisibility,
                   ),
@@ -1317,19 +1380,11 @@ class _ProductionPlanWorkspaceScreenState
                     onNextDay: () {
                       selectDay(selectedDay.add(const Duration(days: 1)));
                     },
+                    onCreateTask: canManageCalendar
+                        ? createTaskForSelectedDay
+                        : null,
                   ),
                   const SizedBox(height: _cardSpacing),
-                  if (canManageCalendar) ...[
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: FilledButton.tonalIcon(
-                        onPressed: createTaskForSelectedDay,
-                        icon: const Icon(Icons.add_task_outlined),
-                        label: const Text(_addTaskLabel),
-                      ),
-                    ),
-                    const SizedBox(height: _cardSpacing),
-                  ],
                   _SelectedDayMetricsRow(
                     plan: detail.plan,
                     selectedDay: selectedDay,
@@ -1340,12 +1395,34 @@ class _ProductionPlanWorkspaceScreenState
                     taskDayLedgers: detail.taskDayLedgers,
                     attendanceRecords: detail.attendanceRecords,
                     isSummaryExpanded: _selectedDaySummaryExpanded,
+                    isProgressExpanded: _productionProgressExpanded,
                     onToggleSummaryExpanded: () {
                       setState(() {
                         _selectedDaySummaryExpanded =
                             !_selectedDaySummaryExpanded;
                       });
                     },
+                    onToggleProgressExpanded: () {
+                      setState(() {
+                        _productionProgressExpanded =
+                            !_productionProgressExpanded;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: _cardSpacing),
+                  ProductionPresenceBanner(
+                    currentViewer: currentViewer,
+                    remoteViewers: presenceState.viewers,
+                    isConnected: presenceState.isConnected,
+                    isSharedRoom: widget.planId.trim().isNotEmpty,
+                    errorMessage: presenceState.error,
+                    planId: widget.planId,
+                    snapshotAt: presenceState.updatedAt,
+                    onOpenStats: widget.planId.trim().isEmpty
+                        ? null
+                        : () => context.push(
+                            productionPlanPresenceStatsPath(widget.planId),
+                          ),
                   ),
                   const SizedBox(height: _cardSpacing),
                   if (tasksForDay.isEmpty)
@@ -2319,6 +2396,32 @@ class _TaskUnitProgressSummary {
   );
 }
 
+String _resolveWorkspaceTaskDisplayStatus({
+  required ProductionTask task,
+  required _TaskUnitProgressSummary taskProgressSummary,
+  required List<ProductionTimelineRow> rowsForDay,
+}) {
+  final normalizedTaskStatus = task.status.trim().toLowerCase();
+  if (normalizedTaskStatus == _taskStatusDone) {
+    return _taskStatusDone;
+  }
+
+  // WHY: Progress approval is stored separately from task.status, but a
+  // fully approved day should not look pending in the operational workspace.
+  final completeApprovedDay =
+      taskProgressSummary.plannedAmount > 0 &&
+      taskProgressSummary.remainingAmount <= 0 &&
+      rowsForDay.isNotEmpty &&
+      rowsForDay.every(
+        (row) => row.approvalState.trim().toLowerCase() == "approved",
+      );
+  if (completeApprovedDay) {
+    return _taskStatusDone;
+  }
+
+  return task.status;
+}
+
 class _WorkspaceSummaryCard extends StatefulWidget {
   final ProductionPlanDetail detail;
   final ProductionPlan plan;
@@ -2962,32 +3065,101 @@ class _WorkspaceCalendarHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.55,
+    );
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: ProductionSectionHeader(title: title, subtitle: subtitle),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.02,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
-        const SizedBox(width: 12),
-        Tooltip(
-          message: calendarVisible
-              ? _hideCalendarTooltip
-              : _showCalendarTooltip,
-          child: IconButton(
-            onPressed: onToggleCalendar,
-            style: IconButton.styleFrom(
-              backgroundColor: colorScheme.surfaceContainerHigh,
-              foregroundColor: colorScheme.onSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceBlue,
+                lightTintAlpha: 0.07,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(10),
             ),
-            icon: Icon(
-              calendarVisible
-                  ? Icons.calendar_view_day_outlined
-                  : Icons.calendar_month_outlined,
+            child: Icon(
+              Icons.calendar_month_outlined,
+              size: 18,
+              color: foreground,
             ),
           ),
-        ),
-      ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: calendarVisible
+                ? _hideCalendarTooltip
+                : _showCalendarTooltip,
+            child: IconButton(
+              onPressed: onToggleCalendar,
+              style: IconButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                backgroundColor: colorScheme.surfaceContainerHigh,
+                foregroundColor: colorScheme.onSurface,
+              ),
+              icon: Icon(
+                calendarVisible
+                    ? Icons.calendar_view_day_outlined
+                    : Icons.calendar_month_outlined,
+                size: 20,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2999,6 +3171,7 @@ class _SelectedDaySectionHeader extends StatelessWidget {
   final VoidCallback onPreviousDay;
   final VoidCallback onToday;
   final VoidCallback onNextDay;
+  final VoidCallback? onCreateTask;
 
   const _SelectedDaySectionHeader({
     required this.title,
@@ -3007,46 +3180,175 @@ class _SelectedDaySectionHeader extends StatelessWidget {
     required this.onPreviousDay,
     required this.onToday,
     required this.onNextDay,
+    this.onCreateTask,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-
-    if (!showDayNavigation) {
-      return ProductionSectionHeader(title: title, subtitle: subtitle);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        Text(
-          subtitle,
-          style: textTheme.bodySmall?.copyWith(
-            color: colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            IconButton(
-              onPressed: onPreviousDay,
-              icon: const Icon(Icons.chevron_left),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceBlue,
+      darkMix: 0.55,
+    );
+    final navigationControls = showDayNavigation
+        ? Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              IconButton(
+                tooltip: "Previous day",
+                onPressed: onPreviousDay,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(38, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: colorScheme.surfaceContainerHigh,
+                  foregroundColor: colorScheme.onSurface,
+                ),
+                icon: const Icon(Icons.chevron_left, size: 22),
+              ),
+              TextButton(
+                onPressed: onToday,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text(_todayLabel),
+              ),
+              IconButton(
+                tooltip: "Next day",
+                onPressed: onNextDay,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(38, 38),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  backgroundColor: colorScheme.surfaceContainerHigh,
+                  foregroundColor: colorScheme.onSurface,
+                ),
+                icon: const Icon(Icons.chevron_right, size: 22),
+              ),
+            ],
+          )
+        : null;
+    final newTaskButton = onCreateTask == null
+        ? null
+        : FilledButton.tonalIcon(
+            onPressed: onCreateTask,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 40),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              visualDensity: VisualDensity.compact,
             ),
-            TextButton(onPressed: onToday, child: const Text(_todayLabel)),
-            IconButton(
-              onPressed: onNextDay,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
+            icon: const Icon(Icons.add_task_outlined, size: 18),
+            label: const Text(_addTaskLabel),
+          );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _workspaceToneSurface(
+          colorScheme: colorScheme,
+          accentColor: _workspaceBlue,
+          lightTintAlpha: 0.018,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
+              ? colorScheme.surfaceContainerHigh
+              : colorScheme.surface,
         ),
-      ],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stackControls = constraints.maxWidth < 560;
+          final titleBlock = Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: _workspaceBlue,
+                    lightTintAlpha: 0.07,
+                    darkTintAlpha: 0.16,
+                    baseColor: _workspaceIsDark(colorScheme)
+                        ? colorScheme.surfaceContainerHighest
+                        : colorScheme.surface,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.today_outlined, size: 18, color: foreground),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: _workspacePrimaryContentColor(colorScheme),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+          final controls = Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: stackControls ? WrapAlignment.start : WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (navigationControls != null) navigationControls,
+              if (newTaskButton != null) newTaskButton,
+            ],
+          );
+
+          if (navigationControls == null && newTaskButton == null) {
+            return titleBlock;
+          }
+
+          if (stackControls) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [titleBlock, const SizedBox(height: 10), controls],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: 12),
+              Flexible(child: controls),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -3932,7 +4234,9 @@ class _SelectedDayMetricsRow extends StatelessWidget {
   final List<ProductionTaskDayLedger> taskDayLedgers;
   final List<ProductionAttendanceRecord> attendanceRecords;
   final bool isSummaryExpanded;
+  final bool isProgressExpanded;
   final VoidCallback onToggleSummaryExpanded;
+  final VoidCallback onToggleProgressExpanded;
 
   const _SelectedDayMetricsRow({
     required this.plan,
@@ -3944,7 +4248,9 @@ class _SelectedDayMetricsRow extends StatelessWidget {
     required this.taskDayLedgers,
     required this.attendanceRecords,
     required this.isSummaryExpanded,
+    required this.isProgressExpanded,
     required this.onToggleSummaryExpanded,
+    required this.onToggleProgressExpanded,
   });
 
   @override
@@ -4025,6 +4331,9 @@ class _SelectedDayMetricsRow extends StatelessWidget {
         "${_formatProgressAmount(actualAmount)} / ${_formatProgressAmount(plannedAmount)}";
     final summaryLine =
         "${tasks.length} tasks | ${assignedStaffIds.length} assigned | $progressSummary progress";
+    final productionProgressSummary = quantityMetrics.isEmpty
+        ? null
+        : _resolveProductionProgressSummary(quantityMetrics);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -4151,25 +4460,16 @@ class _SelectedDayMetricsRow extends StatelessWidget {
             ],
             if (quantityMetrics.isNotEmpty) ...[
               const SizedBox(height: _cardSpacing),
-              Wrap(
-                spacing: _cardSpacing,
-                runSpacing: _cardSpacing,
-                children: quantityMetrics
-                    .map(
-                      (metric) => SizedBox(
-                        width: metricWidth,
-                        child: _WorkspaceDayMetricCard(
-                          label: metric.label,
-                          value: metric.value,
-                          helper: metric.helper,
-                          accentColor: metric.accentColor,
-                          softColor: metric.softColor,
-                          icon: metric.icon,
-                        ),
-                      ),
-                    )
-                    .toList(),
+              _ProductionProgressToggle(
+                isExpanded: isProgressExpanded,
+                summary: productionProgressSummary?.summary ?? "",
+                helper: productionProgressSummary?.helper ?? "",
+                onPressed: onToggleProgressExpanded,
               ),
+              if (isProgressExpanded) ...[
+                const SizedBox(height: 8),
+                _ProductionProgressRowsCard(metrics: quantityMetrics),
+              ],
             ],
           ],
         );
@@ -4296,6 +4596,291 @@ class _SelectedDaySummaryToggle extends StatelessWidget {
   }
 }
 
+class _ProductionProgressSummary {
+  final String summary;
+  final String helper;
+
+  const _ProductionProgressSummary({
+    required this.summary,
+    required this.helper,
+  });
+}
+
+class _ProductionProgressToggle extends StatelessWidget {
+  final bool isExpanded;
+  final String summary;
+  final String helper;
+  final VoidCallback onPressed;
+
+  const _ProductionProgressToggle({
+    required this.isExpanded,
+    required this.summary,
+    required this.helper,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foregroundColor = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: _workspaceTeal,
+      darkMix: 0.56,
+    );
+    return Tooltip(
+      message: isExpanded
+          ? "Hide production progress"
+          : "Show production progress",
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(16),
+          child: Ink(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: _workspaceTeal,
+                lightTintAlpha: 0.022,
+                darkTintAlpha: 0.1,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHigh
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _workspaceToneBorder(
+                  colorScheme: colorScheme,
+                  accentColor: _workspaceTeal,
+                  lightAlpha: 0.14,
+                  darkAlpha: 0.32,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _workspaceToneSurface(
+                      colorScheme: colorScheme,
+                      accentColor: _workspaceTeal,
+                      lightTintAlpha: 0.07,
+                      darkTintAlpha: 0.18,
+                      baseColor: _workspaceIsDark(colorScheme)
+                          ? colorScheme.surfaceContainerLow
+                          : colorScheme.surface,
+                    ),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(
+                    Icons.waterfall_chart_rounded,
+                    size: 19,
+                    color: foregroundColor,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Production progress",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (summary.trim().isNotEmpty)
+                            Text(
+                              summary,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          if (helper.trim().isNotEmpty) ...[
+                            const SizedBox(height: 1),
+                            Text(
+                              helper,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: foregroundColor,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  isExpanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductionProgressRowsCard extends StatelessWidget {
+  final List<_SelectedDayQuantityMetric> metrics;
+
+  const _ProductionProgressRowsCard({required this.metrics});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: _workspaceIsDark(colorScheme)
+            ? colorScheme.surfaceContainerHigh
+            : colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colorScheme.outlineVariant),
+      ),
+      child: Column(
+        children: [
+          for (var index = 0; index < metrics.length; index++) ...[
+            _ProductionProgressRow(metric: metrics[index]),
+            if (index != metrics.length - 1)
+              Divider(height: 14, color: colorScheme.outlineVariant),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ProductionProgressRow extends StatelessWidget {
+  final _SelectedDayQuantityMetric metric;
+
+  const _ProductionProgressRow({required this.metric});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: metric.accentColor,
+      darkMix: 0.62,
+    );
+    final progressValue = metric.progressFraction.clamp(0, 1).toDouble();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: metric.accentColor,
+                lightTintAlpha: 0.065,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(metric.icon, color: foreground, size: 17),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        metric.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: foreground,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        metric.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: _workspacePrimaryContentColor(colorScheme),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value: progressValue,
+                  minHeight: 5,
+                  borderRadius: BorderRadius.circular(999),
+                  backgroundColor: _workspaceToneSurface(
+                    colorScheme: colorScheme,
+                    accentColor: metric.accentColor,
+                    lightTintAlpha: 0.05,
+                    darkTintAlpha: 0.14,
+                    baseColor: colorScheme.surfaceContainerHighest,
+                  ),
+                  valueColor: AlwaysStoppedAnimation<Color>(foreground),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  metric.helper,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    height: 1.15,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _WorkspaceDayMetricCard extends StatelessWidget {
   final String label;
   final String value;
@@ -4320,51 +4905,54 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
     final accentForeground = _workspaceToneForeground(
       colorScheme: colorScheme,
       accentColor: accentColor,
-      darkMix: 0.66,
+      darkMix: 0.58,
     );
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: _workspaceToneSurface(
           colorScheme: colorScheme,
           accentColor: accentColor,
           lightColor: Color.alphaBlend(
-            softColor.withValues(alpha: 0.48),
+            softColor.withValues(alpha: 0.18),
             colorScheme.surface,
           ),
-          lightTintAlpha: 0.06,
-          darkTintAlpha: 0.12,
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
           baseColor: _workspaceIsDark(colorScheme)
               ? colorScheme.surfaceContainerHigh
               : colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: _workspaceToneBorder(
             colorScheme: colorScheme,
             accentColor: accentColor,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: BorderRadius.circular(14),
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
+              ),
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: Colors.white, size: 22),
+            child: Icon(icon, color: accentForeground, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -4376,23 +4964,25 @@ class _WorkspaceDayMetricCard extends StatelessWidget {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   value,
-                  style: theme.textTheme.titleLarge?.copyWith(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
                     color: _workspacePrimaryContentColor(colorScheme),
                     fontWeight: FontWeight.w900,
                   ),
                 ),
                 if (helper != null && helper!.trim().isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     helper!,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colorScheme.onSurfaceVariant,
-                      height: 1.3,
+                      height: 1.2,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -4410,6 +5000,10 @@ class _SelectedDayQuantityMetric {
   final String label;
   final String value;
   final String helper;
+  final num loggedAmount;
+  final num plannedAmount;
+  final num remainingAmount;
+  final String unitLabel;
   final Color accentColor;
   final Color softColor;
   final IconData icon;
@@ -4418,10 +5012,21 @@ class _SelectedDayQuantityMetric {
     required this.label,
     required this.value,
     required this.helper,
+    required this.loggedAmount,
+    required this.plannedAmount,
+    required this.remainingAmount,
+    required this.unitLabel,
     required this.accentColor,
     required this.softColor,
     required this.icon,
   });
+
+  double get progressFraction {
+    if (plannedAmount <= 0) {
+      return 0;
+    }
+    return (loggedAmount / plannedAmount).clamp(0, 1).toDouble();
+  }
 }
 
 class _AgendaTaskCard extends StatelessWidget {
@@ -4559,6 +5164,11 @@ class _AgendaTaskCard extends StatelessWidget {
       fallbackWorkUnitLabel: fallbackWorkUnitLabel,
       contextText: "$planContextText ${task.title} ${task.instructions}",
     );
+    final displayStatus = _resolveWorkspaceTaskDisplayStatus(
+      task: task,
+      taskProgressSummary: taskProgressSummary,
+      rowsForDay: rowsForDay,
+    );
     return Container(
       padding: const EdgeInsets.all(_agendaCardPadding),
       decoration: BoxDecoration(
@@ -4611,7 +5221,7 @@ class _AgendaTaskCard extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 alignment: WrapAlignment.end,
                 children: [
-                  ProductionStatusPill(label: task.status),
+                  ProductionStatusPill(label: displayStatus),
                   IconButton(
                     tooltip: taskExpanded
                         ? _collapseTaskTooltip
@@ -5533,162 +6143,567 @@ class _TaskSnapshotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final isDark = _workspaceIsDark(colorScheme);
     final accentForeground = _workspaceToneForeground(
       colorScheme: colorScheme,
       accentColor: accentColor,
-      darkMix: 0.66,
+      darkMix: 0.58,
     );
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: _workspaceToneSurface(
           colorScheme: colorScheme,
           accentColor: accentColor,
           lightColor: Color.alphaBlend(
-            softColor.withValues(alpha: 0.54),
+            softColor.withValues(alpha: 0.18),
             colorScheme.surface,
           ),
-          lightTintAlpha: 0.08,
-          darkTintAlpha: 0.14,
-          baseColor: isDark
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
+          baseColor: _workspaceIsDark(colorScheme)
               ? colorScheme.surfaceContainerHigh
               : colorScheme.surface,
         ),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: _workspaceToneBorder(
             colorScheme: colorScheme,
             accentColor: accentColor,
-            lightAlpha: 0.34,
-            darkAlpha: 0.44,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
           ),
-          width: 1.4,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: accentColor.withValues(alpha: isDark ? 0.16 : 0.14),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  accentColor,
-                  Color.alphaBlend(
-                    accentColor.withValues(alpha: 0.24),
-                    _workspaceNavy,
-                  ),
-                ],
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _workspaceIsDark(colorScheme)
+                    ? colorScheme.surfaceContainerHighest
+                    : colorScheme.surface,
               ),
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [
-                BoxShadow(
-                  color: accentColor.withValues(alpha: 0.18),
-                  blurRadius: 12,
-                  offset: const Offset(0, 5),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: accentForeground, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: accentForeground,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  helper,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                  ),
                 ),
               ],
             ),
-            child: Icon(icon, color: Colors.white, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProofUnitChecklistTile extends StatelessWidget {
+  final String title;
+  final int unitNumber;
+  final IconData unitIcon;
+  final bool imageReady;
+  final bool videoReady;
+  final ProductionTaskProgressProofInput? imageProof;
+  final ProductionTaskProgressProofInput? videoProof;
+  final bool isBusy;
+  final VoidCallback onCaptureImage;
+  final VoidCallback onCaptureVideo;
+  final VoidCallback? onRemoveImage;
+  final VoidCallback? onRemoveVideo;
+
+  const _ProofUnitChecklistTile({
+    required this.title,
+    required this.unitNumber,
+    required this.unitIcon,
+    required this.imageReady,
+    required this.videoReady,
+    required this.imageProof,
+    required this.videoProof,
+    required this.isBusy,
+    required this.onCaptureImage,
+    required this.onCaptureVideo,
+    required this.onRemoveImage,
+    required this.onRemoveVideo,
+  });
+
+  bool get _complete => imageReady && videoReady;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final accentColor = _workspaceBlue;
+    final statusColor = _complete ? _workspaceTeal : _workspaceBlue;
+    final foreground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.6,
+    );
+    final statusForeground = _workspaceToneForeground(
+      colorScheme: colorScheme,
+      accentColor: statusColor,
+      darkMix: 0.6,
+    );
+    final backgroundColor = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      lightTintAlpha: 0.025,
+      darkTintAlpha: 0.1,
+      baseColor: _workspaceIsDark(colorScheme)
+          ? colorScheme.surfaceContainerHigh
+          : colorScheme.surface,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: _complete ? 0.22 : 0.16,
+            darkAlpha: _complete ? 0.36 : 0.32,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: _workspaceToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.1,
+                darkTintAlpha: 0.18,
+                baseColor: colorScheme.surfaceContainerHighest,
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(unitIcon, size: 18, color: foreground),
+                Text(
+                  "$unitNumber",
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _workspaceToneSurface(
-                      colorScheme: colorScheme,
-                      accentColor: accentColor,
-                      lightTintAlpha: 0.14,
-                      darkTintAlpha: 0.18,
-                      baseColor: isDark
-                          ? colorScheme.surfaceContainerHighest
-                          : colorScheme.surface,
-                    ),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: _workspaceToneBorder(
-                        colorScheme: colorScheme,
-                        accentColor: accentColor,
-                        lightAlpha: 0.2,
-                        darkAlpha: 0.34,
-                      ),
-                    ),
-                  ),
-                  child: Text(
-                    label,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: accentForeground,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.1,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _workspaceToneSurface(
-                      colorScheme: colorScheme,
-                      accentColor: accentColor,
-                      lightColor: Colors.white.withValues(alpha: 0.72),
-                      lightTintAlpha: 0.0,
-                      darkTintAlpha: 0.16,
-                      baseColor: colorScheme.surfaceContainerHigh,
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: _workspaceToneBorder(
-                        colorScheme: colorScheme,
-                        accentColor: accentColor,
-                        lightAlpha: 0.22,
-                        darkAlpha: 0.36,
-                      ),
-                    ),
-                  ),
-                  child: Text(
-                    value,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      color: _workspacePrimaryContentColor(colorScheme),
-                      fontWeight: FontWeight.w900,
-                      height: 1.15,
-                    ),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: _workspacePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  helper,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _workspaceSecondaryContentColor(colorScheme),
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _ProofMediaStatusPill(
+                      icon: Icons.image_outlined,
+                      label: imageReady ? "Replace image" : "Upload image",
+                      statusLabel: imageReady ? "1/1 ready" : "0/1 image",
+                      ready: imageReady,
+                      accentColor: _workspaceTeal,
+                      onPressed: isBusy ? null : onCaptureImage,
+                      tooltip: imageReady
+                          ? "Replace image for $title"
+                          : "Upload image for $title",
+                    ),
+                    _ProofMediaStatusPill(
+                      icon: Icons.videocam_outlined,
+                      label: videoReady ? "Replace video" : "Upload video",
+                      statusLabel: videoReady ? "1/1 ready" : "0/1 video",
+                      ready: videoReady,
+                      accentColor: _workspaceBlue,
+                      onPressed: isBusy ? null : onCaptureVideo,
+                      tooltip: videoReady
+                          ? "Replace video for $title"
+                          : "Upload video for $title",
+                    ),
+                  ],
+                ),
+                if (imageProof != null || videoProof != null) ...[
+                  const SizedBox(height: 10),
+                  _ProofMediaPreviewStrip(
+                    imageProof: imageProof,
+                    videoProof: videoProof,
+                    onRemoveImage: onRemoveImage,
+                    onRemoveVideo: onRemoveVideo,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            _complete ? Icons.check_circle_rounded : Icons.lock_outline_rounded,
+            color: statusForeground,
+            size: 22,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProofMediaStatusPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String statusLabel;
+  final bool ready;
+  final Color accentColor;
+  final VoidCallback? onPressed;
+  final String tooltip;
+
+  const _ProofMediaStatusPill({
+    required this.icon,
+    required this.label,
+    required this.statusLabel,
+    required this.ready,
+    required this.accentColor,
+    required this.onPressed,
+    required this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = ready
+        ? _workspaceToneForeground(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            darkMix: 0.62,
+          )
+        : colorScheme.onSurfaceVariant;
+    final backgroundColor = _workspaceToneSurface(
+      colorScheme: colorScheme,
+      accentColor: ready ? accentColor : colorScheme.onSurfaceVariant,
+      lightTintAlpha: ready ? 0.08 : 0.03,
+      darkTintAlpha: ready ? 0.18 : 0.1,
+      baseColor: _workspaceIsDark(colorScheme)
+          ? colorScheme.surfaceContainerHighest
+          : colorScheme.surface,
+    );
+    final borderColor = ready
+        ? _workspaceToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.22,
+            darkAlpha: 0.4,
+          )
+        : colorScheme.outlineVariant;
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: 148,
+        height: 56,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(148, 56),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            foregroundColor: foreground,
+            disabledForegroundColor: foreground.withValues(alpha: 0.48),
+            iconColor: foreground,
+            disabledIconColor: foreground.withValues(alpha: 0.48),
+            backgroundColor: backgroundColor,
+            disabledBackgroundColor: backgroundColor,
+            side: BorderSide(color: borderColor),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      statusLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: foreground.withValues(alpha: 0.86),
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProofMediaPreviewStrip extends StatelessWidget {
+  final ProductionTaskProgressProofInput? imageProof;
+  final ProductionTaskProgressProofInput? videoProof;
+  final VoidCallback? onRemoveImage;
+  final VoidCallback? onRemoveVideo;
+
+  const _ProofMediaPreviewStrip({
+    required this.imageProof,
+    required this.videoProof,
+    required this.onRemoveImage,
+    required this.onRemoveVideo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final proofs = <Widget>[
+      if (imageProof != null)
+        _ProofMediaPreviewTile(
+          key: ValueKey("image-preview-${imageProof!.filename}"),
+          proof: imageProof!,
+          icon: Icons.image_outlined,
+          label: "Image",
+          onRemove: onRemoveImage,
+          removeTooltip: "Remove image proof",
+          child: Image.memory(
+            Uint8List.fromList(imageProof!.bytes),
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (context, error, stackTrace) {
+              return const _ProofMediaPreviewFallback(
+                icon: Icons.image_not_supported_outlined,
+              );
+            },
+          ),
+        ),
+      if (videoProof != null)
+        _ProofMediaPreviewTile(
+          key: ValueKey("video-preview-${videoProof!.filename}"),
+          proof: videoProof!,
+          icon: Icons.videocam_outlined,
+          label: "Video",
+          onRemove: onRemoveVideo,
+          removeTooltip: "Remove video proof",
+          child: ProductionLocalVideoPreview(proof: videoProof!),
+        ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useSideBySide = proofs.length > 1 && constraints.maxWidth >= 260;
+        final previewWidth = useSideBySide
+            ? math.min(180.0, (constraints.maxWidth - 8) / 2)
+            : math.min(180.0, constraints.maxWidth);
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: proofs
+              .map(
+                (preview) =>
+                    SizedBox(width: previewWidth, height: 104, child: preview),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _ProofMediaPreviewTile extends StatelessWidget {
+  final ProductionTaskProgressProofInput proof;
+  final IconData icon;
+  final String label;
+  final VoidCallback? onRemove;
+  final String removeTooltip;
+  final Widget child;
+
+  const _ProofMediaPreviewTile({
+    super.key,
+    required this.proof,
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+    required this.removeTooltip,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Tooltip(
+      message: proof.displayLabel,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () {
+          showProductionTaskProgressPickedProofPreview(context, proof: proof);
+        },
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: colorScheme.outlineVariant),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(9),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                child,
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: Tooltip(
+                    message: removeTooltip,
+                    child: Material(
+                      color: colorScheme.surface.withValues(alpha: 0.9),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: onRemove,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 15,
+                            color: colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 6,
+                  top: 6,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colorScheme.surface.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: colorScheme.outlineVariant),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            icon,
+                            size: 13,
+                            color: _workspacePrimaryContentColor(colorScheme),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            label,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: _workspacePrimaryContentColor(colorScheme),
+                              fontWeight: FontWeight.w900,
+                              height: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProofMediaPreviewFallback extends StatelessWidget {
+  final IconData icon;
+
+  const _ProofMediaPreviewFallback({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(icon, color: colorScheme.onSurfaceVariant, size: 28),
       ),
     );
   }
@@ -7332,6 +8347,10 @@ List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
           "${_formatProgressAmount(farmQuantitySummary.plantingLogged)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
       helper:
           "${_formatProgressAmount(farmQuantitySummary.plantingRemaining)} left ${farmQuantitySummary.plantingUnit}",
+      loggedAmount: farmQuantitySummary.plantingLogged,
+      plannedAmount: plantingTargets.plannedPlantingQuantity,
+      remainingAmount: farmQuantitySummary.plantingRemaining,
+      unitLabel: farmQuantitySummary.plantingUnit,
       accentColor: _workspaceTeal,
       softColor: _workspaceSoftTeal,
       icon: Icons.grass_outlined,
@@ -7342,6 +8361,10 @@ List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
           "${_formatProgressAmount(farmQuantitySummary.transplantLogged)} / ${_formatProgressAmount(plantingTargets.plannedPlantingQuantity)}",
       helper:
           "${_formatProgressAmount(farmQuantitySummary.transplantRemaining)} left ${farmQuantitySummary.plantingUnit}",
+      loggedAmount: farmQuantitySummary.transplantLogged,
+      plannedAmount: plantingTargets.plannedPlantingQuantity,
+      remainingAmount: farmQuantitySummary.transplantRemaining,
+      unitLabel: farmQuantitySummary.plantingUnit,
       accentColor: _workspaceBlue,
       softColor: _workspaceSoftBlue,
       icon: Icons.swap_horiz_outlined,
@@ -7352,6 +8375,10 @@ List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
           "${_formatProgressAmount(farmQuantitySummary.harvestLogged)} / ${_formatProgressAmount(plantingTargets.estimatedHarvestQuantity)}",
       helper:
           "${_formatProgressAmount(farmQuantitySummary.harvestRemaining)} left ${farmQuantitySummary.harvestUnit}",
+      loggedAmount: farmQuantitySummary.harvestLogged,
+      plannedAmount: plantingTargets.estimatedHarvestQuantity,
+      remainingAmount: farmQuantitySummary.harvestRemaining,
+      unitLabel: farmQuantitySummary.harvestUnit,
       accentColor: _workspaceAmber,
       softColor: _workspaceSoftAmber,
       icon: Icons.agriculture_outlined,
@@ -7366,6 +8393,19 @@ List<_SelectedDayQuantityMetric> _buildSelectedDayQuantityMetrics({
       .map((value) => metricsByActivityType[value])
       .whereType<_SelectedDayQuantityMetric>()
       .toList();
+}
+
+_ProductionProgressSummary _resolveProductionProgressSummary(
+  List<_SelectedDayQuantityMetric> metrics,
+) {
+  final primaryMetric = metrics.firstWhere(
+    (metric) => metric.loggedAmount > 0,
+    orElse: () => metrics.first,
+  );
+  return _ProductionProgressSummary(
+    summary: "${primaryMetric.label}: ${primaryMetric.value}",
+    helper: primaryMetric.helper,
+  );
 }
 
 Map<String, BusinessStaffProfileSummary> _buildStaffMap(
@@ -7950,6 +8990,9 @@ String _resolvePreferredProgressUnitStem({
   if (!_isGenericProgressUnitStem(fallbackStem)) {
     return fallbackStem;
   }
+  if (fallbackStem == "plot") {
+    return fallbackStem;
+  }
   return "";
 }
 
@@ -8027,6 +9070,19 @@ String _inferProgressUnitStemFromContext({
     return "hour";
   }
   return "";
+}
+
+IconData _proofUnitIcon(String unitLabel) {
+  final normalized = unitLabel.trim().toLowerCase();
+  if (normalized.contains("greenhouse") || normalized.contains("green house")) {
+    return Icons.home_work_outlined;
+  }
+  if (normalized.contains("acre") ||
+      normalized.contains("plot") ||
+      normalized.contains("field")) {
+    return Icons.crop_square_outlined;
+  }
+  return Icons.grid_view_rounded;
 }
 
 String _formatProgressAmountWithUnit({
@@ -8504,9 +9560,15 @@ Future<_CreateWorkspaceTaskInput?> _showCreateWorkspaceTaskDialog(
 
   final sortedPhases = [...phases]
     ..sort((left, right) => left.order.compareTo(right.order));
-  final activeStaff = staffList
-      .where((staff) => staff.status.trim().toLowerCase() != "terminated")
-      .toList();
+  final activeStaffById = <String, BusinessStaffProfileSummary>{};
+  for (final staff in staffList) {
+    final staffId = staff.id.trim();
+    if (staffId.isEmpty || staff.status.trim().toLowerCase() == "terminated") {
+      continue;
+    }
+    activeStaffById.putIfAbsent(staffId, () => staff);
+  }
+  final activeStaff = activeStaffById.values.toList();
   final normalizedInitialRole = _normalizeRole(initialRoleRequired ?? "");
   final roleOptions = <String>{
     for (final staff in activeStaff)
@@ -8519,20 +9581,18 @@ Future<_CreateWorkspaceTaskInput?> _showCreateWorkspaceTaskDialog(
   final weightController = TextEditingController(text: "1");
   final headcountController = TextEditingController(text: "1");
   final notesController = TextEditingController();
+  var selectedPhaseId = sortedPhases.any((phase) => phase.id == initialPhaseId)
+      ? initialPhaseId!.trim()
+      : sortedPhases.first.id;
+  var selectedRole = roleOptions.contains(normalizedInitialRole)
+      ? normalizedInitialRole
+      : roleOptions.first;
+  final selectedStaffIds = <String>{};
+  var validationError = "";
 
   final result = await showDialog<_CreateWorkspaceTaskInput>(
     context: context,
     builder: (dialogContext) {
-      var selectedPhaseId =
-          sortedPhases.any((phase) => phase.id == initialPhaseId)
-          ? initialPhaseId!.trim()
-          : sortedPhases.first.id;
-      var selectedRole = roleOptions.contains(normalizedInitialRole)
-          ? normalizedInitialRole
-          : roleOptions.first;
-      final selectedStaffIds = <String>{};
-      var validationError = "";
-
       return StatefulBuilder(
         builder: (context, setDialogState) {
           final staffCandidates = _staffCandidatesForRole(
@@ -8700,6 +9760,7 @@ Future<_CreateWorkspaceTaskInput?> _showCreateWorkspaceTaskDialog(
               ),
               FilledButton(
                 onPressed: () {
+                  FocusScope.of(dialogContext).unfocus();
                   final title = titleController.text.trim();
                   if (title.isEmpty) {
                     setDialogState(() {
@@ -8984,6 +10045,12 @@ Future<bool> _showWorkspaceClockOutWizard(
   return result ?? false;
 }
 
+typedef ProductionClockOutProofCapture =
+    Future<ProductionTaskProgressProofInput?> Function({
+      required bool isVideo,
+      required int unitNumber,
+    });
+
 class ProductionClockOutWizardSheet extends StatefulWidget {
   final DateTime workDate;
   final ProductionTask task;
@@ -8999,6 +10066,7 @@ class ProductionClockOutWizardSheet extends StatefulWidget {
   final String staffId;
   final Future<void> Function(ProductionTaskLogProgressInput input) onSubmit;
   final Future<List<ProductionTaskProgressProofInput>> Function()? onPickProofs;
+  final ProductionClockOutProofCapture? onCaptureProof;
 
   const ProductionClockOutWizardSheet({
     super.key,
@@ -9016,6 +10084,7 @@ class ProductionClockOutWizardSheet extends StatefulWidget {
     required this.staffId,
     required this.onSubmit,
     this.onPickProofs,
+    this.onCaptureProof,
   });
 
   @override
@@ -9033,6 +10102,10 @@ class _WorkspaceClockOutWizardState
   String _selectedDelayReason = _delayReasonNone;
   List<ProductionTaskProgressProofInput> _selectedProofs =
       <ProductionTaskProgressProofInput>[];
+  final Map<int, ProductionTaskProgressProofInput> _imageProofByUnit =
+      <int, ProductionTaskProgressProofInput>{};
+  final Map<int, ProductionTaskProgressProofInput> _videoProofByUnit =
+      <int, ProductionTaskProgressProofInput>{};
   _WorkspaceClockOutWizardStep _currentStep =
       _WorkspaceClockOutWizardStep.primary;
   String _inlineError = "";
@@ -9130,6 +10203,9 @@ class _WorkspaceClockOutWizardState
   int get _requiredProofCount =>
       requiredTaskProgressProofCount(_primaryAmountValue);
 
+  int get _requiredProofUnitCount =>
+      math.max(_requiredPhotoCount, _requiredVideoCount);
+
   bool get _existingSelectionHasRequiredProofMix {
     final existingRow = _existingSelectionRow;
     if (existingRow == null) {
@@ -9167,6 +10243,11 @@ class _WorkspaceClockOutWizardState
       ? _selectedProofs.where((proof) => proof.isVideo).length
       : (_existingSelectionRow?.proofs.where((proof) => proof.isVideo).length ??
             0);
+
+  bool get _hasLocalProofSelection =>
+      _selectedProofs.isNotEmpty ||
+      _imageProofByUnit.isNotEmpty ||
+      _videoProofByUnit.isNotEmpty;
 
   int get _proofBackedCompletedUnitCount {
     if (_readyProofCount <= 0) {
@@ -9216,12 +10297,17 @@ class _WorkspaceClockOutWizardState
   }
 
   void _syncFromExistingSelection() {
+    _primaryMaxOverride = null;
+    _activityMaxOverrides.clear();
+    _inlineError = "";
     final existingRow = _existingSelectionRow;
     final existingContribution =
         existingRow?.unitContribution ?? existingRow?.actualPlots;
-    _primaryController.text = existingContribution == null
+    final defaultContribution =
+        existingContribution ?? _defaultPrimaryAmountForNewSelection();
+    _primaryController.text = defaultContribution == null
         ? ""
-        : _formatProgressAmount(existingContribution);
+        : _formatProgressAmount(defaultContribution);
     final existingActivityType = existingRow == null
         ? ""
         : (existingRow.activityType.trim().isNotEmpty
@@ -9247,15 +10333,28 @@ class _WorkspaceClockOutWizardState
         : _delayReasonNone;
     _notesController.text = existingRow?.notes ?? "";
     _selectedProofs = <ProductionTaskProgressProofInput>[];
-    _primaryMaxOverride = null;
-    _activityMaxOverrides.clear();
-    _inlineError = "";
+    _imageProofByUnit.clear();
+    _videoProofByUnit.clear();
+  }
+
+  num? _defaultPrimaryAmountForNewSelection() {
+    final maxAmount = _maxPrimaryAmount;
+    if (maxAmount <= 0) {
+      return null;
+    }
+    // WHY: New clock-out sessions should start with the full currently
+    // available amount so staff only changes it when reporting less work.
+    return maxAmount;
   }
 
   void _setPrimaryAmount(num amount) {
     _primaryController.text = _formatProgressAmount(amount);
     if (_sameProgressAmount(amount, 0)) {
       _selectedProofs = <ProductionTaskProgressProofInput>[];
+      _imageProofByUnit.clear();
+      _videoProofByUnit.clear();
+    } else {
+      _pruneLocalProofSelectionToRequirement();
     }
     _inlineError = "";
   }
@@ -9345,12 +10444,15 @@ class _WorkspaceClockOutWizardState
     if (_requiredProofCount <= 0) {
       return _clockOutWizardNoProofNeeded;
     }
+    final unitCountLabel = _formatProgressAmountWithUnit(
+      amount: _requiredProofUnitCount,
+      singularUnitLabel: _progressUnitSingularLabel,
+    );
     if (_proofRequirementSatisfied) {
-      return "$_readyProofCount / $_requiredProofCount proofs ready. "
-          "$_readyPhotoCount / $_requiredPhotoCount pictures and "
-          "$_readyVideoCount / $_requiredVideoCount videos selected.";
+      return "$unitCountLabel ready: 1 image and 1 video each.";
     }
-    return buildTaskProgressProofRequirementText(_requiredProofCount);
+    final unitVerb = _requiredProofUnitCount == 1 ? "has" : "have";
+    return "Continue stays locked until $unitCountLabel $unitVerb 1 image and 1 video each.";
   }
 
   List<ProductionTaskProgressProofInput> _normalizePickedProofsForRequirement(
@@ -9381,6 +10483,105 @@ class _WorkspaceClockOutWizardState
     }
 
     return normalized;
+  }
+
+  List<ProductionTaskProgressProofInput> _sortedUnitProofs(
+    Map<int, ProductionTaskProgressProofInput> proofsByUnit,
+  ) {
+    final unitNumbers = proofsByUnit.keys.toList()..sort();
+    return unitNumbers
+        .map((unitNumber) => proofsByUnit[unitNumber])
+        .nonNulls
+        .toList();
+  }
+
+  void _syncSelectedProofsFromUnitProofs() {
+    _selectedProofs = <ProductionTaskProgressProofInput>[
+      ..._sortedUnitProofs(_imageProofByUnit),
+      ..._sortedUnitProofs(_videoProofByUnit),
+    ];
+  }
+
+  void _replaceSelectedProofs(List<ProductionTaskProgressProofInput> proofs) {
+    _imageProofByUnit.clear();
+    _videoProofByUnit.clear();
+
+    final imageProofs = proofs.where((proof) => proof.isImage).toList();
+    final videoProofs = proofs.where((proof) => proof.isVideo).toList();
+    final unitCount = _requiredProofUnitCount;
+    for (
+      var index = 0;
+      index < imageProofs.length && index < unitCount;
+      index++
+    ) {
+      _imageProofByUnit[index + 1] = imageProofs[index];
+    }
+    for (
+      var index = 0;
+      index < videoProofs.length && index < unitCount;
+      index++
+    ) {
+      _videoProofByUnit[index + 1] = videoProofs[index];
+    }
+
+    if (_imageProofByUnit.isEmpty && _videoProofByUnit.isEmpty) {
+      _selectedProofs = proofs;
+      return;
+    }
+    _syncSelectedProofsFromUnitProofs();
+  }
+
+  void _pruneLocalProofSelectionToRequirement() {
+    if (_requiredProofUnitCount <= 0) {
+      _imageProofByUnit.clear();
+      _videoProofByUnit.clear();
+      _selectedProofs = <ProductionTaskProgressProofInput>[];
+      return;
+    }
+
+    _imageProofByUnit.removeWhere(
+      (unitNumber, _) => unitNumber > _requiredProofUnitCount,
+    );
+    _videoProofByUnit.removeWhere(
+      (unitNumber, _) => unitNumber > _requiredProofUnitCount,
+    );
+
+    if (_imageProofByUnit.isNotEmpty || _videoProofByUnit.isNotEmpty) {
+      _syncSelectedProofsFromUnitProofs();
+      return;
+    }
+
+    if (_selectedProofs.length > _requiredProofCount) {
+      _replaceSelectedProofs(
+        _normalizePickedProofsForRequirement(_selectedProofs),
+      );
+    }
+  }
+
+  bool _unitImageProofReady(int unitNumber) {
+    if (_hasLocalProofSelection) {
+      return _imageProofByUnit.containsKey(unitNumber);
+    }
+    return _readyPhotoCount >= unitNumber;
+  }
+
+  bool _unitVideoProofReady(int unitNumber) {
+    if (_hasLocalProofSelection) {
+      return _videoProofByUnit.containsKey(unitNumber);
+    }
+    return _readyVideoCount >= unitNumber;
+  }
+
+  void _removeProofForUnit({required int unitNumber, required bool isVideo}) {
+    setState(() {
+      if (isVideo) {
+        _videoProofByUnit.remove(unitNumber);
+      } else {
+        _imageProofByUnit.remove(unitNumber);
+      }
+      _syncSelectedProofsFromUnitProofs();
+      _inlineError = "";
+    });
   }
 
   num _resolveQuantityTarget(String activityType) {
@@ -9655,47 +10856,55 @@ class _WorkspaceClockOutWizardState
     return true;
   }
 
-  Future<void> _pickProofs() async {
+  Future<void> _captureProofForUnit({
+    required int unitNumber,
+    required bool isVideo,
+  }) async {
+    if (_requiredProofCount <= 0) {
+      setState(() {
+        _inlineError = _clockOutWizardProofNotAllowed;
+      });
+      return;
+    }
     setState(() {
       _isPickingProofs = true;
-      _inlineError = "";
+      _inlineError = _clockOutWizardProofPicking;
     });
     try {
-      final pickProofs = widget.onPickProofs ?? pickTaskProgressProofImages;
-      final picked = await pickProofs();
-      if (!mounted) {
+      final captured = widget.onCaptureProof == null
+          ? await pickTaskProgressProofForKind(
+              kind: isVideo
+                  ? ProductionTaskProgressProofCaptureKind.video
+                  : ProductionTaskProgressProofCaptureKind.image,
+              unitNumber: unitNumber,
+            )
+          : await widget.onCaptureProof!(
+              isVideo: isVideo,
+              unitNumber: unitNumber,
+            );
+      if (!mounted || captured == null) {
         return;
       }
-      final normalizedPicked = _normalizePickedProofsForRequirement(picked);
-      final selectionWasTrimmed =
-          normalizedPicked.length != picked.length &&
-          hasRequiredTaskProgressProofMix(
-            normalizedPicked,
-            _requiredProofCount,
-          );
-      if (selectionWasTrimmed) {
-        AppDebug.log(
-          _logTag,
-          "clock_out_proof_selection_trimmed",
-          extra: {
-            "taskId": widget.task.id,
-            "staffId": widget.staffId,
-            "pickedCount": picked.length,
-            "keptCount": normalizedPicked.length,
-            "requiredProofCount": _requiredProofCount,
-          },
-        );
+      if (isVideo && !captured.isVideo) {
+        setState(() {
+          _inlineError = _clockOutWizardLiveVideoRequired;
+        });
+        return;
+      }
+      if (!isVideo && !captured.isImage) {
+        setState(() {
+          _inlineError = _clockOutWizardLiveImageRequired;
+        });
+        return;
       }
       setState(() {
-        _selectedProofs = normalizedPicked;
-        _inlineError = _requiredProofCount <= 0
-            ? ""
-            : hasRequiredTaskProgressProofMix(
-                normalizedPicked,
-                _requiredProofCount,
-              )
-            ? ""
-            : _clockOutWizardProofRequired;
+        if (isVideo) {
+          _videoProofByUnit[unitNumber] = captured;
+        } else {
+          _imageProofByUnit[unitNumber] = captured;
+        }
+        _syncSelectedProofsFromUnitProofs();
+        _inlineError = "";
       });
     } catch (error) {
       if (!mounted) {
@@ -9704,7 +10913,7 @@ class _WorkspaceClockOutWizardState
       setState(() {
         _inlineError = _resolveProductionWorkspaceErrorMessage(
           error,
-          fallback: "Unable to upload proof right now. Try again.",
+          fallback: "Unable to capture proof right now. Try again.",
         );
       });
     } finally {
@@ -10030,7 +11239,6 @@ class _WorkspaceClockOutWizardState
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = _workspaceIsDark(colorScheme);
-    final isCompact = MediaQuery.of(context).size.width < 720;
     final maxAllowedLabel = _formatProgressAmountWithUnit(
       amount: _maxPrimaryAmount,
       singularUnitLabel: _progressUnitSingularLabel,
@@ -10077,6 +11285,13 @@ class _WorkspaceClockOutWizardState
         icon: Icons.track_changes_outlined,
       ),
     ];
+    num? selectedPrimaryAmountOption;
+    for (final amount in _primaryAmountOptions) {
+      if (_sameProgressAmount(amount, _primaryAmountValue)) {
+        selectedPrimaryAmountOption = amount;
+        break;
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -10096,25 +11311,21 @@ class _WorkspaceClockOutWizardState
           ),
         ),
         const SizedBox(height: 12),
-        if (isCompact)
-          Column(
-            children: snapshotCards
-                .map(
-                  (card) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: SizedBox(width: double.infinity, child: card),
-                  ),
-                )
-                .toList(),
-          )
-        else
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: snapshotCards
-                .map((card) => SizedBox(width: 180, child: card))
-                .toList(),
-          ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final useThreeColumns = constraints.maxWidth >= 720;
+            final tileWidth = useThreeColumns
+                ? (constraints.maxWidth - 20) / 3
+                : constraints.maxWidth;
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: snapshotCards
+                  .map((card) => SizedBox(width: tileWidth, child: card))
+                  .toList(),
+            );
+          },
+        ),
         if (_assignedUnitIds.length > 1) ...[
           const SizedBox(height: 12),
           Text(
@@ -10161,30 +11372,45 @@ class _WorkspaceClockOutWizardState
         ),
         const SizedBox(height: 6),
         Text(
-          "Tap the completed amount. You can select up to $maxAllowedLabel.",
+          "Default is the maximum available amount. Choose a lower amount only if less was completed.",
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
         const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: _primaryAmountOptions.map((amount) {
-            final selected =
-                _sameProgressAmount(amount, _primaryAmountValue) &&
-                _primaryController.text.trim().isNotEmpty;
-            return _buildWizardChoiceChip(
-              theme: theme,
-              label: _formatProgressAmount(amount),
-              selected: selected,
-              onSelected: (_) {
-                setState(() {
-                  _setPrimaryAmount(amount);
-                });
-              },
+        DropdownButtonFormField<num>(
+          key: ValueKey(
+            "primary-amount-${_selectedUnitId ?? ''}-${_formatProgressAmount(_maxPrimaryAmount)}",
+          ),
+          initialValue: selectedPrimaryAmountOption,
+          isExpanded: true,
+          menuMaxHeight: 360,
+          decoration: InputDecoration(
+            labelText: "Completed amount",
+            helperText: "Maximum available: $maxAllowedLabel",
+            prefixIcon: const Icon(Icons.task_alt_outlined),
+          ),
+          items: _primaryAmountOptions.map((amount) {
+            return DropdownMenuItem<num>(
+              value: amount,
+              child: Text(
+                _formatProgressAmountWithUnit(
+                  amount: amount,
+                  singularUnitLabel: _progressUnitSingularLabel,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             );
           }).toList(),
+          onChanged: (value) {
+            if (value == null) {
+              return;
+            }
+            setState(() {
+              _setPrimaryAmount(value);
+            });
+          },
         ),
         const SizedBox(height: 12),
         Container(
@@ -10234,49 +11460,70 @@ class _WorkspaceClockOutWizardState
     if (_requiredProofCount <= 0) {
       return const SizedBox.shrink();
     }
-    final isCompact = MediaQuery.of(context).size.width < 720;
-    final proofCards = <Widget>[
-      _TaskSnapshotCard(
-        label: "Pictures",
-        value: "$_readyPhotoCount / $_requiredPhotoCount",
-        helper: "One picture per completed unit",
-        accentColor: _workspaceTeal,
-        softColor: _workspaceSoftTeal,
-        icon: Icons.image_outlined,
-      ),
-      _TaskSnapshotCard(
-        label: "Videos",
-        value: "$_readyVideoCount / $_requiredVideoCount",
-        helper: "One video per completed unit",
-        accentColor: _workspaceBlue,
-        softColor: _workspaceSoftBlue,
-        icon: Icons.videocam_outlined,
-      ),
-    ];
-    return isCompact
-        ? Column(
-            children: proofCards
-                .map(
-                  (card) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: SizedBox(width: double.infinity, child: card),
-                  ),
-                )
-                .toList(),
-          )
-        : Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: proofCards
-                .map((card) => SizedBox(width: 230, child: card))
-                .toList(),
-          );
+    final unitLabel = _singularizeUnitPhrase(
+      _progressUnitSingularLabel.trim().isEmpty
+          ? "work unit"
+          : _progressUnitSingularLabel,
+    );
+    final titleUnitLabel = _titleCaseProgressUnitLabel(unitLabel);
+    final unitIcon = _proofUnitIcon(unitLabel);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tileWidth = constraints.maxWidth >= 760
+            ? (constraints.maxWidth - 10) / 2
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: List.generate(_requiredProofUnitCount, (index) {
+            final unitNumber = index + 1;
+            return SizedBox(
+              width: tileWidth,
+              child: _ProofUnitChecklistTile(
+                title: "$titleUnitLabel $unitNumber",
+                unitNumber: unitNumber,
+                unitIcon: unitIcon,
+                imageReady: _unitImageProofReady(unitNumber),
+                videoReady: _unitVideoProofReady(unitNumber),
+                imageProof: _imageProofByUnit[unitNumber],
+                videoProof: _videoProofByUnit[unitNumber],
+                isBusy: _isPickingProofs,
+                onCaptureImage: () => _captureProofForUnit(
+                  unitNumber: unitNumber,
+                  isVideo: false,
+                ),
+                onCaptureVideo: () =>
+                    _captureProofForUnit(unitNumber: unitNumber, isVideo: true),
+                onRemoveImage: _imageProofByUnit.containsKey(unitNumber)
+                    ? () => _removeProofForUnit(
+                        unitNumber: unitNumber,
+                        isVideo: false,
+                      )
+                    : null,
+                onRemoveVideo: _videoProofByUnit.containsKey(unitNumber)
+                    ? () => _removeProofForUnit(
+                        unitNumber: unitNumber,
+                        isVideo: true,
+                      )
+                    : null,
+              ),
+            );
+          }),
+        );
+      },
+    );
   }
 
   Widget _buildProofStep(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final proofStatusText = _buildProofStatusText();
+    final proofInstructionUnitLabel = _singularizeUnitPhrase(
+      _progressUnitSingularLabel.trim().isEmpty
+          ? "work unit"
+          : _progressUnitSingularLabel,
+    ).toLowerCase();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -10292,10 +11539,7 @@ class _WorkspaceClockOutWizardState
         Text(
           _requiredProofCount <= 0
               ? _clockOutWizardNoProofNeeded
-              : buildTaskProgressProofRequirementText(
-                  _requiredProofCount,
-                  exact: false,
-                ),
+              : "Upload one image and one video for each $proofInstructionUnitLabel. Each upload replaces that unit’s previous file.",
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -10321,48 +11565,6 @@ class _WorkspaceClockOutWizardState
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _requiredProofCount <= 0 || _isPickingProofs
-              ? null
-              : _pickProofs,
-          icon: Icon(
-            _selectedProofs.isEmpty
-                ? Icons.add_photo_alternate_outlined
-                : Icons.refresh_outlined,
-          ),
-          label: Text(
-            _selectedProofs.isEmpty
-                ? _logDialogUploadProofLabel
-                : _logDialogReplaceProofLabel,
-          ),
-        ),
-        if (_selectedProofs.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _selectedProofs
-                .map(
-                  (proof) => ActionChip(
-                    avatar: Icon(
-                      proof.isVideo
-                          ? Icons.videocam_outlined
-                          : Icons.image_outlined,
-                      size: 18,
-                    ),
-                    label: Text(proof.displayLabel),
-                    onPressed: () {
-                      showProductionTaskProgressPickedProofPreview(
-                        context,
-                        proof: proof,
-                      );
-                    },
-                  ),
-                )
-                .toList(),
-          ),
-        ],
       ],
     );
   }

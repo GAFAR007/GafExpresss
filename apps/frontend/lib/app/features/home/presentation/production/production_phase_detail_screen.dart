@@ -113,14 +113,16 @@ const String _proofsLabel = "Proofs";
 const String _actualLabel = "Actual";
 const String _lastWorkLabel = "Last work";
 const String _progressLabel = "Progress";
+const String _instructionsLabel = "Instructions";
 const String _phaseDash = "—";
 const String _unassignedLabel = "Unassigned";
 const String _taskTypeFallback = "Task";
 const String _viewLatestProofLabel = "View latest proof";
-const double _pagePadding = 20;
-const double _sectionSpacing = 16;
-const double _cardRadius = 22;
-const double _compactRadius = 16;
+const String _openTaskLabel = "Open task";
+const double _pagePadding = 16;
+const double _sectionSpacing = 18;
+const double _cardRadius = 18;
+const double _compactRadius = 18;
 
 enum _PhaseTaskStatusFilter { all, approved, inProgress, assigned, attention }
 
@@ -583,12 +585,6 @@ class _ProductionPhaseDetailScreenState
                             completionPercent: completionPercent,
                           ),
                           const SizedBox(height: _sectionSpacing),
-                          _PhaseProgressCard(
-                            completedTasks: completedTasks,
-                            remainingTasks: remainingTasks,
-                            completionPercent: completionPercent,
-                          ),
-                          const SizedBox(height: _sectionSpacing),
                           _PhaseTasksSection(
                             allTasksCount: phaseTasks.length,
                             visibleTasksCount: filteredTasks.length,
@@ -634,6 +630,8 @@ class _ProductionPhaseDetailScreenState
                                           group: group.$1,
                                           count: group.$2.length,
                                           child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
                                             children: group.$2.map((task) {
                                               final activity =
                                                   taskActivityById[task.id] ??
@@ -704,28 +702,13 @@ class _PhaseHeroCard extends StatelessWidget {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
     final colorScheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
+    final isCompactPhone = MediaQuery.sizeOf(context).width <= 430;
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: EdgeInsets.all(isCompactPhone ? 16 : 20),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: LinearGradient(
-          colors: [
-            colorScheme.primary.withValues(alpha: isDark ? 0.22 : 0.10),
-            colorScheme.secondary.withValues(alpha: isDark ? 0.16 : 0.08),
-            _surfaceColor(context, elevated: true),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: _surfaceColor(context, elevated: true),
+        borderRadius: BorderRadius.circular(_cardRadius),
         border: Border.all(color: _borderColor(context)),
-        boxShadow: [
-          BoxShadow(
-            color: _shadowColor(context),
-            blurRadius: isDark ? 22 : 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -733,11 +716,11 @@ class _PhaseHeroCard extends StatelessWidget {
           Text(
             planTitle.trim().isEmpty ? "Untitled production plan" : planTitle,
             style: textTheme.labelLarge?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: colorScheme.primary,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: isCompactPhone ? 8 : 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -747,19 +730,26 @@ class _PhaseHeroCard extends StatelessWidget {
                   children: [
                     Text(
                       phase.name,
-                      style: textTheme.headlineSmall?.copyWith(
-                        color: colorScheme.onSurface,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                      ),
+                      style:
+                          (isCompactPhone
+                                  ? textTheme.titleLarge
+                                  : textTheme.headlineSmall)
+                              ?.copyWith(
+                                color: _phasePrimaryContentColor(colorScheme),
+                                fontWeight: FontWeight.w800,
+                              ),
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: isCompactPhone ? 6 : 8),
                     Text(
                       _heroSubtitle,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                        height: 1.45,
-                      ),
+                      style:
+                          (isCompactPhone
+                                  ? textTheme.bodySmall
+                                  : textTheme.bodyMedium)
+                              ?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                                height: 1.35,
+                              ),
                     ),
                   ],
                 ),
@@ -768,41 +758,78 @@ class _PhaseHeroCard extends StatelessWidget {
               ProductionStatusPill(label: phase.status),
             ],
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: isCompactPhone ? 14 : 16),
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              _PhaseMetaChip(
+              _PhaseSummaryPill(
                 icon: Icons.category_outlined,
                 label:
                     "$_typeLabel: ${formatProductionStatusLabel(phase.phaseType)}",
-                tone: AppStatusTone.neutral,
               ),
-              _PhaseMetaChip(
-                icon: Icons.calendar_month_outlined,
+              _PhaseSummaryPill(
+                icon: Icons.schedule_outlined,
                 label:
                     "$_windowLabel: ${_formatWindow(scheduledStart, scheduledEnd)}",
-                tone: AppStatusTone.info,
               ),
-              _PhaseMetaChip(
-                icon: Icons.task_alt_outlined,
-                label: "$_doneLabel: $completedTasks / $totalTasks",
-                tone: AppStatusTone.success,
-              ),
-              _PhaseMetaChip(
-                icon: Icons.pending_actions_outlined,
-                label: "$_leftLabel: $remainingTasks",
-                tone: remainingTasks > 0
-                    ? AppStatusTone.warning
-                    : AppStatusTone.success,
-              ),
-              _PhaseMetaChip(
-                icon: Icons.photo_library_outlined,
+              _PhaseSummaryPill(
+                icon: Icons.verified_outlined,
                 label: "$_proofRowsShortLabel: $proofRowCount",
-                tone: AppStatusTone.info,
               ),
             ],
+          ),
+          SizedBox(height: isCompactPhone ? 14 : 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wideTile = constraints.maxWidth >= 900;
+              final twoColumnTile = constraints.maxWidth >= 420;
+              final tileWidth = wideTile
+                  ? (constraints.maxWidth - 30) / 3
+                  : twoColumnTile
+                  ? (constraints.maxWidth - 10) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  SizedBox(
+                    width: tileWidth,
+                    child: _PhaseWorkspaceMetricTile(
+                      label: _doneLabel,
+                      value: "$completedTasks / $totalTasks",
+                      helper: "Completed in this phase",
+                      icon: Icons.task_alt_outlined,
+                      accentColor: AppColors.productionAccent,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _PhaseWorkspaceMetricTile(
+                      label: _leftLabel,
+                      value: "$remainingTasks",
+                      helper: remainingTasks == 0
+                          ? "Nothing open"
+                          : "Tasks still open",
+                      icon: Icons.pending_actions_outlined,
+                      accentColor: remainingTasks == 0
+                          ? AppColors.productionAccent
+                          : AppColors.warning,
+                    ),
+                  ),
+                  SizedBox(
+                    width: tileWidth,
+                    child: _PhaseWorkspaceMetricTile(
+                      label: _proofRowsShortLabel,
+                      value: "$proofRowCount",
+                      helper: "Saved proof rows",
+                      icon: Icons.photo_library_outlined,
+                      accentColor: AppColors.analyticsAccent,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -829,113 +856,64 @@ class _PhaseSnapshotSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final progressValue = completionPercent / 100;
     final items = [
       (
         _totalTasksLabel,
         "$totalTasks",
+        "Scheduled in phase",
         Icons.format_list_numbered_rounded,
-        AppStatusTone.info,
+        AppColors.analyticsAccent,
       ),
       (
         _doneInPhaseLabel,
         "$completedTasks",
+        "Completed tasks",
         Icons.check_circle_outline_rounded,
-        AppStatusTone.success,
+        AppColors.productionAccent,
       ),
       (
         _leftInPhaseLabel,
         "$remainingTasks",
+        remainingTasks == 0 ? "Nothing open" : "Still open",
         Icons.pending_actions_outlined,
-        remainingTasks > 0 ? AppStatusTone.warning : AppStatusTone.success,
+        remainingTasks > 0 ? AppColors.warning : AppColors.productionAccent,
       ),
       (
         _tasksWithProofLabel,
         "$proofTaskCount",
+        "Tasks with uploads",
         Icons.verified_outlined,
-        AppStatusTone.info,
+        AppColors.analyticsAccent,
       ),
       (
         _proofRowsLabel,
         "$proofRowCount",
+        "Saved proof rows",
         Icons.photo_library_outlined,
-        AppStatusTone.info,
+        AppColors.paid,
       ),
       (
         _completionPercentLabel,
         "$completionPercent%",
+        "Overall completion",
         Icons.insights_outlined,
         completionPercent >= 85
-            ? AppStatusTone.success
+            ? AppColors.productionAccent
             : completionPercent >= 60
-            ? AppStatusTone.warning
-            : AppStatusTone.info,
+            ? AppColors.warning
+            : AppColors.analyticsAccent,
       ),
     ];
 
-    return _PhaseSurfaceCard(
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const ProductionSectionHeader(
-            title: _snapshotTitle,
-            subtitle: _snapshotSubtitle,
-          ),
-          const SizedBox(height: 14),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final crossAxisCount = constraints.maxWidth >= 1100
-                  ? 6
-                  : constraints.maxWidth >= 880
-                  ? 3
-                  : constraints.maxWidth >= 560
-                  ? 2
-                  : 1;
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: items.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  mainAxisExtent: 112,
-                ),
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return ProductionKpiCard(
-                    label: item.$1,
-                    value: item.$2,
-                    icon: item.$3,
-                    tone: item.$4,
-                  );
-                },
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PhaseProgressCard extends StatelessWidget {
-  final int completedTasks;
-  final int remainingTasks;
-  final int completionPercent;
-
-  const _PhaseProgressCard({
-    required this.completedTasks,
-    required this.remainingTasks,
-    required this.completionPercent,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final progressValue = completionPercent / 100;
-    return _PhaseSurfaceCard(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+    return _PhaseCollapsibleSurface(
+      icon: Icons.analytics_outlined,
+      title: _snapshotTitle,
+      subtitle: _snapshotSubtitle,
+      summary: "$completionPercent%",
+      accentColor: AppColors.analyticsAccent,
+      initiallyExpanded: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -944,8 +922,8 @@ class _PhaseProgressCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   _progressTitle,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
@@ -958,20 +936,20 @@ class _PhaseProgressCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               value: progressValue.clamp(0, 1),
-              minHeight: 10,
+              minHeight: 8,
               color: AppColors.success,
               backgroundColor: _trackColor(context),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 18,
-            runSpacing: 10,
+            spacing: 16,
+            runSpacing: 8,
             children: [
               _PhaseLegendItem(
                 color: AppColors.success,
@@ -982,6 +960,32 @@ class _PhaseProgressCard extends StatelessWidget {
                 label: "$remainingTasks left",
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final metricWidth = constraints.maxWidth >= 980
+                  ? (constraints.maxWidth - 24) / 3
+                  : constraints.maxWidth >= 560
+                  ? (constraints.maxWidth - 12) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: items.map((item) {
+                  return SizedBox(
+                    width: metricWidth,
+                    child: _PhaseWorkspaceMetricTile(
+                      label: item.$1,
+                      value: item.$2,
+                      helper: item.$3,
+                      icon: item.$4,
+                      accentColor: item.$5,
+                    ),
+                  );
+                }).toList(),
+              );
+            },
           ),
         ],
       ),
@@ -1001,86 +1005,32 @@ class _PhaseDayTaskActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = AppStatusBadgeColors.fromTheme(
-      theme: theme,
-      tone: AppStatusTone.info,
-    );
-
-    return _PhaseSurfaceCard(
-      padding: const EdgeInsets.all(16),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 640;
-          final summary = Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: colors.background,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(
-                  Icons.add_task_rounded,
-                  color: colors.foreground,
-                  size: 22,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _phaseDayTaskCardTitle,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "$_phaseDayTaskCardSubtitle Suggested next day: ${formatDateInput(initialTaskDay)}.",
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-          final button = FilledButton.icon(
-            style: AppButtonStyles.tonal(
-              theme: theme,
-              tone: AppStatusTone.info,
-              minimumSize: const Size(0, 42),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    return _PhaseCollapsibleSurface(
+      icon: Icons.add_task_rounded,
+      title: _phaseDayTaskCardTitle,
+      subtitle: _phaseDayTaskCardSubtitle,
+      summary: formatDateInput(initialTaskDay),
+      accentColor: AppColors.analyticsAccent,
+      initiallyExpanded: true,
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 10,
+        children: [
+          Text(
+            "Suggested next day: ${formatDateInput(initialTaskDay)}.",
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.35,
             ),
+          ),
+          _PhaseInlineActionButton(
+            icon: Icons.add_rounded,
+            label: _phaseDayTaskButtonLabel,
+            tone: AppStatusTone.info,
             onPressed: onCreateTask,
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text(_phaseDayTaskButtonLabel),
-          );
-
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                summary,
-                const SizedBox(height: 12),
-                Align(alignment: Alignment.centerLeft, child: button),
-              ],
-            );
-          }
-
-          return Row(
-            children: [
-              Expanded(child: summary),
-              const SizedBox(width: 16),
-              button,
-            ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -1130,114 +1080,111 @@ class _PhaseTasksSection extends StatelessWidget {
         ? "$visibleTasksCount of $allTasksCount task(s) shown."
         : "$visibleTasksCount of $allTasksCount task(s) shown for ${formatDateInput(selectedDate)}.";
 
-    return _PhaseSurfaceCard(
-      padding: const EdgeInsets.all(18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _taskSectionTitle,
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.3,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _taskSectionTitle,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: _phasePrimaryContentColor(theme.colorScheme),
+            fontWeight: FontWeight.w800,
           ),
-          const SizedBox(height: 4),
-          Text(
-            _taskSectionSubtitle,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _taskSectionSubtitle,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 4),
-          Text(
-            countLabel,
-            style: theme.textTheme.bodyLarge?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          countLabel,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 16),
-          if (isSearchExpanded) ...[
-            _PhaseSearchField(
-              controller: searchController,
-              focusNode: searchFocusNode,
-              onChanged: onSearchChanged,
-              onClose: onToggleSearch,
-            ),
-            const SizedBox(height: 12),
-          ],
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // Keep the toolbar visually lighter on desktop so it reads like
-              // controls, not four equal-weight cards.
-              final compact = constraints.maxWidth < 900;
-              final fieldWidth = compact
-                  ? constraints.maxWidth
-                  : constraints.maxWidth >= 1180
-                  ? 228.0
-                  : 210.0;
-              return Wrap(
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  if (!isSearchExpanded)
-                    Tooltip(
-                      message: _searchLabel,
-                      child: IconButton(
-                        key: const ValueKey("phase-task-search-toggle"),
-                        style: AppButtonStyles.icon(
-                          theme: theme,
-                          tone: AppStatusTone.neutral,
-                        ),
-                        onPressed: onToggleSearch,
-                        icon: const Icon(Icons.search_rounded),
-                      ),
-                    ),
-                  SizedBox(
-                    width: fieldWidth,
-                    child: _PhaseDateField(
-                      value: selectedDateLabel,
-                      onTap: onPickDate,
-                      onClear: onClearDate,
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldWidth,
-                    child: _PhaseSelectField<_PhaseTaskStatusFilter>(
-                      label: _statusLabel,
-                      value: statusFilter,
-                      labels: const {
-                        _PhaseTaskStatusFilter.all: _allStatusesLabel,
-                        _PhaseTaskStatusFilter.approved: _approvedLabel,
-                        _PhaseTaskStatusFilter.inProgress: _inProgressLabel,
-                        _PhaseTaskStatusFilter.assigned: _assignedLabel,
-                        _PhaseTaskStatusFilter.attention: _attentionLabel,
-                      },
-                      onChanged: onStatusChanged,
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldWidth,
-                    child: _PhaseSelectField<_PhaseTaskSort>(
-                      label: _sortLabel,
-                      value: sort,
-                      labels: const {
-                        _PhaseTaskSort.latestActivity: _latestActivityLabel,
-                        _PhaseTaskSort.dueDate: _dueDateLabel,
-                        _PhaseTaskSort.approval: _approvalStateLabel,
-                      },
-                      onChanged: onSortChanged,
-                    ),
-                  ),
-                ],
-              );
-            },
+        ),
+        const SizedBox(height: 16),
+        if (isSearchExpanded) ...[
+          _PhaseSearchField(
+            controller: searchController,
+            focusNode: searchFocusNode,
+            onChanged: onSearchChanged,
+            onClose: onToggleSearch,
           ),
-          const SizedBox(height: 16),
-          child,
+          const SizedBox(height: 12),
         ],
-      ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // Keep the toolbar visually lighter on desktop so it reads like
+            // controls, not four equal-weight cards.
+            final compact = constraints.maxWidth < 900;
+            final fieldWidth = compact
+                ? constraints.maxWidth
+                : constraints.maxWidth >= 1180
+                ? 228.0
+                : 210.0;
+            return Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                if (!isSearchExpanded)
+                  Tooltip(
+                    message: _searchLabel,
+                    child: IconButton(
+                      key: const ValueKey("phase-task-search-toggle"),
+                      style: AppButtonStyles.icon(
+                        theme: theme,
+                        tone: AppStatusTone.neutral,
+                      ),
+                      onPressed: onToggleSearch,
+                      icon: const Icon(Icons.search_rounded),
+                    ),
+                  ),
+                SizedBox(
+                  width: fieldWidth,
+                  child: _PhaseDateField(
+                    value: selectedDateLabel,
+                    onTap: onPickDate,
+                    onClear: onClearDate,
+                  ),
+                ),
+                SizedBox(
+                  width: fieldWidth,
+                  child: _PhaseSelectField<_PhaseTaskStatusFilter>(
+                    label: _statusLabel,
+                    value: statusFilter,
+                    labels: const {
+                      _PhaseTaskStatusFilter.all: _allStatusesLabel,
+                      _PhaseTaskStatusFilter.approved: _approvedLabel,
+                      _PhaseTaskStatusFilter.inProgress: _inProgressLabel,
+                      _PhaseTaskStatusFilter.assigned: _assignedLabel,
+                      _PhaseTaskStatusFilter.attention: _attentionLabel,
+                    },
+                    onChanged: onStatusChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: fieldWidth,
+                  child: _PhaseSelectField<_PhaseTaskSort>(
+                    label: _sortLabel,
+                    value: sort,
+                    labels: const {
+                      _PhaseTaskSort.latestActivity: _latestActivityLabel,
+                      _PhaseTaskSort.dueDate: _dueDateLabel,
+                      _PhaseTaskSort.approval: _approvalStateLabel,
+                    },
+                    onChanged: onSortChanged,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 16),
+        child,
+      ],
     );
   }
 }
@@ -1256,41 +1203,19 @@ class _PhaseTaskGroupSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = _groupTone(group);
-    final colors = AppStatusBadgeColors.fromTheme(
-      theme: Theme.of(context),
-      tone: tone,
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                color: colors.foreground,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Text(
-              "${_groupLabel(group)}  $count",
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: colors.foreground,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        child,
-      ],
+    return _PhaseCollapsibleSurface(
+      icon: _groupIcon(group),
+      title: _groupLabel(group),
+      subtitle: "$count task${count == 1 ? '' : 's'}",
+      summary: "$count",
+      accentColor: _toneAccentColor(tone),
+      initiallyExpanded: true,
+      child: child,
     );
   }
 }
 
-class _PhaseTaskCard extends StatelessWidget {
+class _PhaseTaskCard extends StatefulWidget {
   final ProductionTask task;
   final _PhaseTaskActivitySummary activity;
   final VoidCallback onTap;
@@ -1304,8 +1229,24 @@ class _PhaseTaskCard extends StatelessWidget {
   });
 
   @override
+  State<_PhaseTaskCard> createState() => _PhaseTaskCardState();
+}
+
+class _PhaseTaskCardState extends State<_PhaseTaskCard> {
+  bool _expanded = false;
+
+  void _toggleExpanded() {
+    setState(() {
+      _expanded = !_expanded;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final task = widget.task;
+    final activity = widget.activity;
     final isClosed = _isTaskClosed(task, activity);
     final approvalLabel = _formatTaskApproval(task, activity);
     final approvalTone = _taskApprovalTone(task, activity);
@@ -1320,99 +1261,69 @@ class _PhaseTaskCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        onTap: _toggleExpanded,
         borderRadius: BorderRadius.circular(_compactRadius),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(16),
+        child: Ink(
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: _surfaceColor(context),
+            color: _phaseToneSurface(
+              colorScheme: colorScheme,
+              accentColor: progress.color,
+              lightTintAlpha: 0.025,
+              darkTintAlpha: 0.08,
+              baseColor: _surfaceColor(context),
+            ),
             borderRadius: BorderRadius.circular(_compactRadius),
-            border: Border.all(color: _borderColor(context)),
+            border: Border.all(
+              color: _phaseToneBorder(
+                colorScheme: colorScheme,
+                accentColor: progress.color,
+                lightAlpha: 0.12,
+                darkAlpha: 0.3,
+              ),
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final compact = constraints.maxWidth < 860;
-                  return compact
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _PhaseTaskHeader(
-                              task: task,
-                              activity: activity,
-                              headerSummary: headerSummary,
-                              approvalLabel: approvalLabel,
-                              approvalTone: approvalTone,
-                              isClosed: isClosed,
-                              onPreviewProof: onPreviewProof,
-                            ),
-                            const SizedBox(height: 14),
-                            _PhaseTaskMetricsWrap(
-                              task: task,
-                              activity: activity,
-                            ),
-                          ],
-                        )
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              flex: 4,
-                              child: _PhaseTaskHeader(
-                                task: task,
-                                activity: activity,
-                                headerSummary: headerSummary,
-                                approvalLabel: approvalLabel,
-                                approvalTone: approvalTone,
-                                isClosed: isClosed,
-                                onPreviewProof: onPreviewProof,
-                              ),
-                            ),
-                            const SizedBox(width: 18),
-                            Expanded(
-                              flex: 5,
-                              child: _PhaseTaskMetricsWrap(
-                                task: task,
-                                activity: activity,
-                              ),
-                            ),
-                          ],
-                        );
-                },
+              _PhaseTaskHeader(
+                task: task,
+                activity: activity,
+                headerSummary: headerSummary,
+                approvalLabel: approvalLabel,
+                approvalTone: approvalTone,
+                isClosed: isClosed,
+                isExpanded: _expanded,
+                onToggleExpanded: _toggleExpanded,
+                onOpenTask: widget.onTap,
+                onPreviewProof: widget.onPreviewProof,
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      "$_progressLabel: ${progress.label}",
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+              const SizedBox(height: 12),
+              _PhaseTaskProgressStrip(progress: progress),
+              if (_expanded) ...[
+                const SizedBox(height: 14),
+                _PhaseTaskMetricsWrap(task: task, activity: activity),
+                if (task.instructions.trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Divider(color: _borderColor(context)),
+                  const SizedBox(height: 10),
                   Text(
-                    "${(progress.value * 100).round()}%",
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: progress.color,
+                    _instructionsLabel,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  Text(
+                    task.instructions.trim(),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      height: 1.45,
+                    ),
+                  ),
                 ],
-              ),
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(999),
-                child: LinearProgressIndicator(
-                  value: progress.value,
-                  minHeight: 7,
-                  color: progress.color,
-                  backgroundColor: _trackColor(context),
-                ),
-              ),
+              ],
             ],
           ),
         ),
@@ -1428,6 +1339,9 @@ class _PhaseTaskHeader extends StatelessWidget {
   final String approvalLabel;
   final AppStatusTone approvalTone;
   final bool isClosed;
+  final bool isExpanded;
+  final VoidCallback onToggleExpanded;
+  final VoidCallback onOpenTask;
   final VoidCallback? onPreviewProof;
 
   const _PhaseTaskHeader({
@@ -1437,6 +1351,9 @@ class _PhaseTaskHeader extends StatelessWidget {
     required this.approvalLabel,
     required this.approvalTone,
     required this.isClosed,
+    required this.isExpanded,
+    required this.onToggleExpanded,
+    required this.onOpenTask,
     required this.onPreviewProof,
   });
 
@@ -1454,21 +1371,35 @@ class _PhaseTaskHeader extends StatelessWidget {
             ProductionStatusPill(label: isClosed ? "completed" : task.status),
           ],
         ),
-        if (onPreviewProof != null) ...[
-          const SizedBox(height: 8),
-          TextButton.icon(
-            style: TextButton.styleFrom(
-              foregroundColor: AppStatusBadgeColors.fromTheme(
-                theme: theme,
-                tone: AppStatusTone.info,
-              ).foreground,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            _PhaseSmallIconButton(
+              tooltip: _openTaskLabel,
+              icon: Icons.open_in_new_rounded,
+              tone: AppStatusTone.neutral,
+              onPressed: onOpenTask,
             ),
-            onPressed: onPreviewProof,
-            icon: const Icon(Icons.photo_library_outlined, size: 16),
-            label: const Text(_viewLatestProofLabel),
-          ),
-        ],
+            if (onPreviewProof != null)
+              _PhaseSmallIconButton(
+                tooltip: _viewLatestProofLabel,
+                icon: Icons.photo_library_outlined,
+                tone: AppStatusTone.info,
+                onPressed: onPreviewProof!,
+              ),
+            _PhaseSmallIconButton(
+              tooltip: isExpanded ? "Collapse task" : "Expand task",
+              icon: isExpanded
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.keyboard_arrow_down_rounded,
+              tone: AppStatusTone.neutral,
+              onPressed: onToggleExpanded,
+            ),
+          ],
+        ),
       ],
     );
 
@@ -1527,19 +1458,55 @@ class _PhaseTaskHeader extends StatelessWidget {
                   trailing,
                 ],
               ),
-            if (task.instructions.trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                task.instructions.trim(),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  height: 1.45,
-                ),
-              ),
-            ],
           ],
         );
       },
+    );
+  }
+}
+
+class _PhaseTaskProgressStrip extends StatelessWidget {
+  final _TaskProgressSnapshot progress;
+
+  const _PhaseTaskProgressStrip({required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                "$_progressLabel: ${progress.label}",
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              "${(progress.value * 100).round()}%",
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: progress.color,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 7),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: progress.value,
+            minHeight: 6,
+            color: progress.color,
+            backgroundColor: _trackColor(context),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1614,53 +1581,166 @@ class _PhaseTaskMetricTile extends StatelessWidget {
   }
 }
 
-class _PhaseMetaChip extends StatelessWidget {
+class _PhaseSummaryPill extends StatelessWidget {
   final IconData icon;
   final String label;
-  final AppStatusTone tone;
 
-  const _PhaseMetaChip({
-    required this.icon,
+  const _PhaseSummaryPill({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _phaseToneForeground(
+      colorScheme: colorScheme,
+      accentColor: AppColors.analyticsAccent,
+      darkMix: 0.52,
+    );
+    final maxWidth = math.min(
+      360.0,
+      math.max(132.0, MediaQuery.sizeOf(context).width - 64),
+    );
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: _phaseToneSurface(
+            colorScheme: colorScheme,
+            accentColor: AppColors.analyticsAccent,
+            lightTintAlpha: 0.025,
+            darkTintAlpha: 0.1,
+            baseColor: _surfaceColor(context),
+          ),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: _phaseToneBorder(
+              colorScheme: colorScheme,
+              accentColor: AppColors.analyticsAccent,
+              lightAlpha: 0.11,
+              darkAlpha: 0.24,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: foreground),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                softWrap: true,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: _phasePrimaryContentColor(colorScheme),
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhaseWorkspaceMetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final String helper;
+  final IconData icon;
+  final Color accentColor;
+
+  const _PhaseWorkspaceMetricTile({
     required this.label,
-    this.tone = AppStatusTone.neutral,
+    required this.value,
+    required this.helper,
+    required this.icon,
+    required this.accentColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = AppStatusBadgeColors.fromTheme(theme: theme, tone: tone);
-    final isNeutral = tone == AppStatusTone.neutral;
+    final colorScheme = theme.colorScheme;
+    final accentForeground = _phaseToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isNeutral ? _surfaceColor(context) : colors.background,
-        borderRadius: BorderRadius.circular(999),
+        color: _phaseToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightTintAlpha: 0.025,
+          darkTintAlpha: 0.08,
+          baseColor: _surfaceColor(context),
+        ),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isNeutral
-              ? _borderColor(context)
-              : colors.foreground.withValues(alpha: 0.18),
+          color: _phaseToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.14,
+            darkAlpha: 0.28,
+          ),
         ),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 16,
-            color: isNeutral ? theme.colorScheme.primary : colors.foreground,
-          ),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: isNeutral
-                    ? theme.colorScheme.onSurface
-                    : colors.foreground,
-                fontWeight: FontWeight.w600,
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: _phaseToneSurface(
+                colorScheme: colorScheme,
+                accentColor: accentColor,
+                lightTintAlpha: 0.08,
+                darkTintAlpha: 0.16,
+                baseColor: _surfaceColor(context),
               ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: accentForeground, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: accentForeground,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: _phasePrimaryContentColor(colorScheme),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  helper,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1725,6 +1805,260 @@ class _PhaseTonePill extends StatelessWidget {
   }
 }
 
+class _PhaseAccentPill extends StatelessWidget {
+  final String label;
+  final Color accentColor;
+
+  const _PhaseAccentPill({required this.label, required this.accentColor});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _phaseToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.58,
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _phaseToneSurface(
+          colorScheme: colorScheme,
+          accentColor: accentColor,
+          lightTintAlpha: 0.08,
+          darkTintAlpha: 0.18,
+          baseColor: _surfaceColor(context),
+        ),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: _phaseToneBorder(
+            colorScheme: colorScheme,
+            accentColor: accentColor,
+            lightAlpha: 0.18,
+            darkAlpha: 0.36,
+          ),
+        ),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: foreground,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _PhaseInlineActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final AppStatusTone tone;
+  final VoidCallback onPressed;
+
+  const _PhaseInlineActionButton({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      style: _phaseActionButtonStyle(
+        context,
+        accentColor: _toneAccentColor(tone),
+      ),
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      label: Text(label),
+    );
+  }
+}
+
+class _PhaseSmallIconButton extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final AppStatusTone tone;
+  final VoidCallback onPressed;
+
+  const _PhaseSmallIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.tone,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        style: IconButton.styleFrom(
+          foregroundColor: AppButtonStyles.accentColor(
+            theme: theme,
+            tone: tone,
+          ),
+          backgroundColor: _surfaceColor(context),
+          minimumSize: const Size(34, 34),
+          padding: const EdgeInsets.all(7),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11),
+            side: BorderSide(color: _borderColor(context)),
+          ),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 16),
+      ),
+    );
+  }
+}
+
+class _PhaseCollapsibleSurface extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String summary;
+  final Color accentColor;
+  final bool initiallyExpanded;
+  final Widget child;
+
+  const _PhaseCollapsibleSurface({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.summary,
+    required this.accentColor,
+    required this.initiallyExpanded,
+    required this.child,
+  });
+
+  @override
+  State<_PhaseCollapsibleSurface> createState() =>
+      _PhaseCollapsibleSurfaceState();
+}
+
+class _PhaseCollapsibleSurfaceState extends State<_PhaseCollapsibleSurface> {
+  late bool _expanded;
+
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.initiallyExpanded;
+  }
+
+  @override
+  void didUpdateWidget(covariant _PhaseCollapsibleSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.title != widget.title) {
+      _expanded = widget.initiallyExpanded;
+    }
+  }
+
+  void _toggleExpanded() {
+    setState(() {
+      _expanded = !_expanded;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final foreground = _phaseToneForeground(
+      colorScheme: colorScheme,
+      accentColor: widget.accentColor,
+      darkMix: 0.58,
+    );
+
+    return _PhaseSurfaceCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(_cardRadius),
+              onTap: _toggleExpanded,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: _phaseToneSurface(
+                          colorScheme: colorScheme,
+                          accentColor: widget.accentColor,
+                          lightTintAlpha: 0.08,
+                          darkTintAlpha: 0.18,
+                          baseColor: _surfaceColor(context),
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(widget.icon, color: foreground, size: 19),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: _phasePrimaryContentColor(colorScheme),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            widget.subtitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    if (widget.summary.trim().isNotEmpty)
+                      _PhaseAccentPill(
+                        label: widget.summary,
+                        accentColor: widget.accentColor,
+                      ),
+                    const SizedBox(width: 6),
+                    Icon(
+                      _expanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              child: widget.child,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PhaseSurfaceCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -1736,20 +2070,12 @@ class _PhaseSurfaceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
         color: _surfaceColor(context, elevated: true),
         borderRadius: BorderRadius.circular(_cardRadius),
         border: Border.all(color: _borderColor(context)),
-        boxShadow: [
-          BoxShadow(
-            color: _shadowColor(context),
-            blurRadius: isDark ? 18 : 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
       child: child,
     );
@@ -1803,18 +2129,11 @@ class _PhaseDateField extends StatelessWidget {
                 ),
               ),
               if (onClear != null)
-                TextButton(
-                  onPressed: onClear,
-                  style: AppButtonStyles.text(
-                    theme: theme,
-                    tone: AppStatusTone.neutral,
-                    minimumSize: const Size(0, 32),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                  ),
-                  child: const Text("All"),
+                _PhaseSmallIconButton(
+                  tooltip: _allDatesLabel,
+                  icon: Icons.close_rounded,
+                  tone: AppStatusTone.neutral,
+                  onPressed: onClear!,
                 )
               else
                 Icon(
@@ -2915,6 +3234,25 @@ AppStatusTone _groupTone(_PhaseTaskGroup group) {
   };
 }
 
+IconData _groupIcon(_PhaseTaskGroup group) {
+  return switch (group) {
+    _PhaseTaskGroup.approved => Icons.task_alt_outlined,
+    _PhaseTaskGroup.inProgress => Icons.timeline_outlined,
+    _PhaseTaskGroup.assigned => Icons.assignment_ind_outlined,
+    _PhaseTaskGroup.attention => Icons.priority_high_rounded,
+  };
+}
+
+Color _toneAccentColor(AppStatusTone tone) {
+  return switch (tone) {
+    AppStatusTone.success => AppColors.productionAccent,
+    AppStatusTone.info => AppColors.analyticsAccent,
+    AppStatusTone.warning => AppColors.warning,
+    AppStatusTone.danger => AppColors.error,
+    AppStatusTone.neutral => AppColors.recordsAccent,
+  };
+}
+
 DateTime _normalizeDay(DateTime value) {
   final local = value.toLocal();
   return DateTime(local.year, local.month, local.day);
@@ -2929,6 +3267,89 @@ bool _isSameDay(DateTime? left, DateTime? right) {
   return leftDay.year == rightDay.year &&
       leftDay.month == rightDay.month &&
       leftDay.day == rightDay.day;
+}
+
+bool _phaseIsDark(ColorScheme colorScheme) {
+  return colorScheme.brightness == Brightness.dark;
+}
+
+Color _phaseToneSurface({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  Color? baseColor,
+  double lightTintAlpha = 0.08,
+  double darkTintAlpha = 0.18,
+}) {
+  return Color.alphaBlend(
+    accentColor.withValues(
+      alpha: _phaseIsDark(colorScheme) ? darkTintAlpha : lightTintAlpha,
+    ),
+    baseColor ??
+        (_phaseIsDark(colorScheme)
+            ? colorScheme.surfaceContainerHigh
+            : colorScheme.surface),
+  );
+}
+
+Color _phaseToneBorder({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  double lightAlpha = 0.18,
+  double darkAlpha = 0.42,
+}) {
+  return accentColor.withValues(
+    alpha: _phaseIsDark(colorScheme) ? darkAlpha : lightAlpha,
+  );
+}
+
+Color _phaseToneForeground({
+  required ColorScheme colorScheme,
+  required Color accentColor,
+  double darkMix = 0.68,
+}) {
+  if (!_phaseIsDark(colorScheme)) {
+    return accentColor;
+  }
+  return Color.lerp(colorScheme.onSurface, accentColor, darkMix) ?? accentColor;
+}
+
+Color _phasePrimaryContentColor(ColorScheme colorScheme) {
+  return _phaseIsDark(colorScheme)
+      ? colorScheme.onSurface
+      : AppColors.primaryDark;
+}
+
+ButtonStyle _phaseActionButtonStyle(
+  BuildContext context, {
+  required Color accentColor,
+}) {
+  final colorScheme = Theme.of(context).colorScheme;
+  return OutlinedButton.styleFrom(
+    foregroundColor: _phaseToneForeground(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      darkMix: 0.6,
+    ),
+    backgroundColor: _phaseToneSurface(
+      colorScheme: colorScheme,
+      accentColor: accentColor,
+      lightTintAlpha: 0.1,
+      darkTintAlpha: 0.2,
+      baseColor: _surfaceColor(context),
+    ),
+    side: BorderSide(
+      color: _phaseToneBorder(
+        colorScheme: colorScheme,
+        accentColor: accentColor,
+        lightAlpha: 0.22,
+        darkAlpha: 0.46,
+      ),
+    ),
+    visualDensity: VisualDensity.compact,
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  );
 }
 
 Color _pageBackground(BuildContext context) {
@@ -2950,13 +3371,6 @@ Color _surfaceColor(BuildContext context, {bool elevated = false}) {
 
 Color _borderColor(BuildContext context) {
   return Theme.of(context).colorScheme.outlineVariant;
-}
-
-Color _shadowColor(BuildContext context) {
-  final theme = Theme.of(context);
-  return theme.colorScheme.shadow.withValues(
-    alpha: theme.brightness == Brightness.dark ? 0.22 : 0.07,
-  );
 }
 
 Color _trackColor(BuildContext context) {

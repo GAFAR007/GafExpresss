@@ -12,7 +12,7 @@
 /// 1) Render a home-style hero, search, category shortcuts, and product rows.
 /// 2) Allow browse-only discovery in guest mode.
 /// 3) Send cart-like actions to the sign-in sheet.
-/// 4) Login success -> navigate to /home (or ?next=...).
+/// 4) Login success -> navigate to /home, ?next=..., or the production list.
 /// -----------------------------------------------------------------
 library;
 
@@ -33,6 +33,7 @@ import 'package:frontend/app/features/home/presentation/home_promo_section.dart'
 import 'package:frontend/app/features/home/presentation/home_search_results_section.dart';
 import 'package:frontend/app/features/home/presentation/home_search_section.dart';
 import 'package:frontend/app/features/home/presentation/presentation/providers/auth_providers.dart';
+import 'package:frontend/app/features/home/presentation/production/production_routes.dart';
 import 'package:frontend/app/features/home/presentation/product_model.dart';
 import 'package:frontend/app/features/home/presentation/product_providers.dart'
     as product_providers;
@@ -40,6 +41,70 @@ import 'package:frontend/app/theme/app_radius.dart';
 import 'package:frontend/app/theme/app_spacing.dart';
 import 'package:frontend/app/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
+
+String? _resolveLoginRedirectTarget(String? rawRedirect) {
+  if (rawRedirect == null || rawRedirect.trim().isEmpty) {
+    return null;
+  }
+
+  final decodedRedirect = Uri.decodeComponent(rawRedirect.trim());
+  final internalRoute = _extractInternalAppRoute(decodedRedirect);
+  if (internalRoute == null) {
+    return null;
+  }
+
+  return _normalizeProductionLoginTarget(internalRoute);
+}
+
+String? _extractInternalAppRoute(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+
+  // WHY: Some web links preserve Flutter hash routes inside next= values.
+  if (trimmed.startsWith('/#/')) {
+    return trimmed.substring(2);
+  }
+  if (trimmed.startsWith('#/')) {
+    return trimmed.substring(1);
+  }
+  if (trimmed.startsWith('/')) {
+    return trimmed;
+  }
+
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null) {
+    return null;
+  }
+
+  final fragment = uri.fragment.trim();
+  if (fragment.startsWith('/')) {
+    return fragment;
+  }
+
+  final path = uri.path.trim();
+  if (!path.startsWith('/')) {
+    return null;
+  }
+  return uri.query.trim().isEmpty ? path : '$path?${uri.query}';
+}
+
+String _normalizeProductionLoginTarget(String route) {
+  final path = Uri.tryParse(route)?.path ?? route.split('?').first;
+  // WHY: Production protected links should open the active plans list after
+  // auth, so staff can choose the current active production plan deliberately.
+  if (path == productionPlansRoute ||
+      path.startsWith('$productionPlansRoute/')) {
+    return productionPlansRoute;
+  }
+  return route;
+}
+
+bool _isBusinessProductionRole(String role) {
+  final normalizedRole = role.trim();
+  return normalizedRole == 'business_owner' || normalizedRole == 'staff';
+}
 
 class LoginScreen extends ConsumerStatefulWidget {
   final String? redirectTo;
@@ -88,17 +153,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _selectedSubcategory != null;
 
   String? get _resolvedRedirectTarget {
-    final rawRedirect = widget.redirectTo;
-    if (rawRedirect == null || rawRedirect.trim().isEmpty) {
-      return null;
-    }
-
-    final decodedRedirect = Uri.decodeComponent(rawRedirect.trim());
-    return decodedRedirect.startsWith('/') ? decodedRedirect : null;
+    return _resolveLoginRedirectTarget(widget.redirectTo);
   }
 
   bool get _usesDirectSignIn =>
       widget.useDirectSignIn || _resolvedRedirectTarget != null;
+
+  bool get _usesProductionAccessSignIn {
+    final target = _resolvedRedirectTarget ?? '';
+    return target.startsWith(productionPlansRoute) ||
+        (target.isEmpty && widget.useDirectSignIn);
+  }
 
   @override
   void initState() {
@@ -415,6 +480,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         extra: {"userId": session.user.id},
       );
 
+      if (_usesProductionAccessSignIn &&
+          !_isBusinessProductionRole(session.user.role)) {
+        AppDebug.log(
+          "LOGIN",
+          "Blocked production login for unsupported role",
+          extra: {"role": session.user.role},
+        );
+        _setLoading(false, setModalState: setModalState);
+        _setLoginError(
+          "Use a staff or business owner account to access production. Customer accounts cannot use this link.",
+          setModalState: setModalState,
+        );
+        return;
+      }
+
       await storage.saveLastCredentials(email: email, password: password);
       _storedCredentials = _storedCredentials.withSavedPassword(
         email: email,
@@ -440,7 +520,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             extra: {"hasPendingInvite": true},
           );
         } else {
-          AppDebug.log("LOGIN", "No pending invite token");
+          if (_usesDirectSignIn) {
+            redirectTarget = productionPlansRoute;
+            AppDebug.log(
+              "LOGIN",
+              "Using protected login fallback target",
+              extra: {"target": productionPlansRoute},
+            );
+          } else {
+            AppDebug.log("LOGIN", "No pending invite token");
+          }
         }
       } else {
         final isInviteRedirect = redirectTarget.startsWith('/business-invite');
@@ -761,15 +850,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   _DirectLoginPresentation _resolveDirectLoginPresentation(ColorScheme scheme) {
     final target = _resolvedRedirectTarget ?? '';
-    if (target.startsWith('/business-production')) {
+    if (_usesProductionAccessSignIn) {
       return _DirectLoginPresentation(
         badgeLabel: 'Production access',
-        destinationLabel: 'production workspace',
-        title: 'Sign in to open the production page',
+        destinationLabel: 'active production plans',
+        title: 'Sign in to view active production',
         description:
-            'This report link points to a protected production screen. Use your email and password and the app will continue straight to it after login.',
+            'Use your email and password and the app will open the active production plans list after login.',
         helper:
-            'Use an account with staff or business access to the linked production plan.',
+            'Use an account with staff or business access, then choose the current production plan from the list.',
         icon: Icons.insights_rounded,
         accent: scheme.secondary,
         tone: AppStatusTone.info,
@@ -925,14 +1014,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 tone: presentation.tone,
                 icon: Icons.arrow_forward_rounded,
               ),
+              if (_usesProductionAccessSignIn)
+                AppStatusChip(
+                  label: "Staff and owners only",
+                  tone: AppStatusTone.success,
+                  icon: Icons.admin_panel_settings_rounded,
+                ),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
-          TextButton.icon(
-            onPressed: () => context.go('/login'),
-            icon: const Icon(Icons.storefront_rounded),
-            label: const Text("Use storefront sign-in instead"),
-          ),
+          if (!_usesProductionAccessSignIn) ...[
+            const SizedBox(height: AppSpacing.lg),
+            TextButton.icon(
+              onPressed: () => context.go('/login'),
+              icon: const Icon(Icons.storefront_rounded),
+              label: const Text("Use storefront sign-in instead"),
+            ),
+          ],
         ],
       ),
     );

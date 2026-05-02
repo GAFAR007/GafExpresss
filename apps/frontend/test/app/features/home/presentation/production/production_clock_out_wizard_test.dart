@@ -11,7 +11,6 @@ const _step3Title = "Step 3: Record activity";
 const _step4Title = "Step 4: Add notes";
 
 const _notesLabel = "Daily notes";
-const _addProofsLabel = "Add proofs";
 
 ProductionPlan _buildPlan() {
   return const ProductionPlan(
@@ -181,10 +180,83 @@ BusinessStaffProfileSummary _buildStaff() {
 }
 
 ProductionTaskProgressProofInput _proof(String filename) {
+  const transparentPngBytes = <int>[
+    137,
+    80,
+    78,
+    71,
+    13,
+    10,
+    26,
+    10,
+    0,
+    0,
+    0,
+    13,
+    73,
+    72,
+    68,
+    82,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    1,
+    8,
+    6,
+    0,
+    0,
+    0,
+    31,
+    21,
+    196,
+    137,
+    0,
+    0,
+    0,
+    13,
+    73,
+    68,
+    65,
+    84,
+    120,
+    156,
+    99,
+    248,
+    15,
+    4,
+    0,
+    9,
+    251,
+    3,
+    253,
+    167,
+    69,
+    129,
+    29,
+    0,
+    0,
+    0,
+    0,
+    73,
+    69,
+    78,
+    68,
+    174,
+    66,
+    96,
+    130,
+  ];
+  final bytes = filename.toLowerCase().endsWith(".mp4")
+      ? const <int>[0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]
+      : transparentPngBytes;
   return ProductionTaskProgressProofInput(
-    bytes: const [1, 2, 3, 4],
+    bytes: bytes,
     filename: filename,
-    sizeBytes: 4,
+    sizeBytes: bytes.length,
   );
 }
 
@@ -198,6 +270,52 @@ Future<void> _tapChoiceChip(WidgetTester tester, String label) async {
   await tester.pumpAndSettle();
   await tester.tap(chip);
   await tester.pumpAndSettle();
+}
+
+Finder _completedAmountDropdown() {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is DropdownButtonFormField<num> &&
+        widget.decoration.labelText == "Completed amount",
+  );
+}
+
+Future<void> _selectCompletedAmount(WidgetTester tester, num amount) async {
+  final dropdown = tester.widget<DropdownButtonFormField<num>>(
+    _completedAmountDropdown(),
+  );
+  dropdown.onChanged?.call(amount);
+  await tester.pumpAndSettle();
+}
+
+Future<ProductionTaskProgressProofInput?> _captureProof({
+  required bool isVideo,
+  required int unitNumber,
+}) async {
+  return _proof("proof-$unitNumber.${isVideo ? 'mp4' : 'jpg'}");
+}
+
+Future<void> _tapFirstProofButton(WidgetTester tester, String label) async {
+  final button = find.widgetWithText(OutlinedButton, label).first;
+  await tester.ensureVisible(button);
+  await tester.pumpAndSettle();
+  await tester.tap(button);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _tapFirstTooltip(WidgetTester tester, String message) async {
+  final control = find.byTooltip(message).first;
+  await tester.ensureVisible(control);
+  await tester.pumpAndSettle();
+  await tester.tap(control);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _captureProofsForUnits(WidgetTester tester, int unitCount) async {
+  for (var index = 0; index < unitCount; index++) {
+    await _tapFirstProofButton(tester, "Upload image");
+    await _tapFirstProofButton(tester, "Upload video");
+  }
 }
 
 Finder _textFieldWithLabel(String label) {
@@ -340,38 +458,67 @@ void main() {
     },
   );
 
-  testWidgets(
-    "clock-out wizard exposes decimal quick-pick options for low unit counts",
-    (tester) async {
-      await _pumpWizardHost(
-        tester,
-        size: const Size(1280, 900),
-        useBottomSheet: false,
-        wizard: ProductionClockOutWizardSheet(
-          workDate: workDate,
-          task: task,
-          plan: plan,
-          timelineRows: const <ProductionTimelineRow>[],
-          taskDayLedgers: [ledger],
-          attendanceRecords: [attendance],
-          activeAttendance: attendance,
-          staffMap: {staff.id: staff},
-          planUnitLabelById: const <String, String>{},
-          fallbackTotalUnits: 5,
-          fallbackWorkUnitLabel: "greenhouses",
-          staffId: staff.id,
-          onPickProofs: () async => const <ProductionTaskProgressProofInput>[],
-          onSubmit: (_) async {},
-        ),
-      );
+  testWidgets("clock-out wizard uses a compact dropdown for low unit counts", (
+    tester,
+  ) async {
+    await _pumpWizardHost(
+      tester,
+      size: const Size(1280, 900),
+      useBottomSheet: false,
+      wizard: ProductionClockOutWizardSheet(
+        workDate: workDate,
+        task: task,
+        plan: plan,
+        timelineRows: const <ProductionTimelineRow>[],
+        taskDayLedgers: [ledger],
+        attendanceRecords: [attendance],
+        activeAttendance: attendance,
+        staffMap: {staff.id: staff},
+        planUnitLabelById: const <String, String>{},
+        fallbackTotalUnits: 5,
+        fallbackWorkUnitLabel: "greenhouses",
+        staffId: staff.id,
+        onPickProofs: () async => const <ProductionTaskProgressProofInput>[],
+        onSubmit: (_) async {},
+      ),
+    );
 
-      expect(_choiceChipWithLabel("0"), findsOneWidget);
-      expect(_choiceChipWithLabel("0.1"), findsOneWidget);
-      expect(_choiceChipWithLabel("0.5"), findsOneWidget);
-      expect(_choiceChipWithLabel("0.7"), findsOneWidget);
-      expect(_choiceChipWithLabel("1"), findsOneWidget);
-    },
-  );
+    expect(_completedAmountDropdown(), findsOneWidget);
+    expect(_choiceChipWithLabel("0.1"), findsNothing);
+    expect(find.text("5 greenhouses"), findsWidgets);
+  });
+
+  testWidgets("clock-out wizard defaults the completed amount to the maximum", (
+    tester,
+  ) async {
+    await _pumpWizardHost(
+      tester,
+      size: const Size(1280, 900),
+      useBottomSheet: false,
+      wizard: ProductionClockOutWizardSheet(
+        workDate: workDate,
+        task: task,
+        plan: plan,
+        timelineRows: const <ProductionTimelineRow>[],
+        taskDayLedgers: [ledger],
+        attendanceRecords: [attendance],
+        activeAttendance: attendance,
+        staffMap: {staff.id: staff},
+        planUnitLabelById: const <String, String>{},
+        fallbackTotalUnits: 5,
+        fallbackWorkUnitLabel: "greenhouses",
+        staffId: staff.id,
+        onPickProofs: () async => const <ProductionTaskProgressProofInput>[],
+        onSubmit: (_) async {},
+      ),
+    );
+
+    expect(find.text("5 greenhouses"), findsWidgets);
+    expect(
+      find.text("After save, shared remaining will be 0 greenhouses."),
+      findsOneWidget,
+    );
+  });
 
   testWidgets(
     "clock-out wizard keeps heading and chip text readable in dark theme",
@@ -401,13 +548,12 @@ void main() {
 
       final titleText = tester.widget<Text>(find.text(_step1Title));
       final unitsTitle = tester.widget<Text>(find.text("Units completed now"));
-      final amountChip = tester.widget<ChoiceChip>(_choiceChipWithLabel("1"));
       final dialogContext = tester.element(find.text(_step1Title));
       final colorScheme = Theme.of(dialogContext).colorScheme;
 
       expect(titleText.style?.color, colorScheme.onSurface);
       expect(unitsTitle.style?.color, colorScheme.onSurface);
-      expect(amountChip.labelStyle?.color, colorScheme.onSurface);
+      expect(_completedAmountDropdown(), findsOneWidget);
     },
   );
 
@@ -433,10 +579,7 @@ void main() {
           fallbackTotalUnits: 5,
           fallbackWorkUnitLabel: "greenhouses",
           staffId: staff.id,
-          onPickProofs: () async => [
-            _proof("proof-1.jpg"),
-            _proof("proof-1.mp4"),
-          ],
+          onCaptureProof: _captureProof,
           onSubmit: (input) async {
             submittedInput = input;
           },
@@ -448,7 +591,7 @@ void main() {
       expect(find.text(_step3Title), findsNothing);
       expect(find.text(_step4Title), findsNothing);
 
-      await _tapChoiceChip(tester, "1");
+      await _selectCompletedAmount(tester, 1);
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
@@ -456,8 +599,7 @@ void main() {
       expect(find.text(_step2Title), findsOneWidget);
       expect(find.text(_step3Title), findsNothing);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-      await tester.pumpAndSettle();
+      await _captureProofsForUnits(tester, 1);
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
@@ -515,38 +657,80 @@ void main() {
           fallbackTotalUnits: 5,
           fallbackWorkUnitLabel: "greenhouses",
           staffId: staff.id,
-          onPickProofs: () async => [
-            _proof("proof-1.jpg"),
-            _proof("proof-1.mp4"),
-            _proof("proof-2.jpg"),
-            _proof("proof-2.mp4"),
-            _proof("proof-3.jpg"),
-            _proof("proof-3.mp4"),
-            _proof("proof-4.jpg"),
-            _proof("proof-4.mp4"),
-            _proof("proof-5.jpg"),
-            _proof("proof-5.mp4"),
-          ],
+          onCaptureProof: _captureProof,
           onSubmit: (_) async {},
         ),
       );
 
-      await _tapChoiceChip(tester, "5");
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
+      expect(find.text("Greenhouse 1"), findsOneWidget);
+      expect(find.text("Greenhouse 5"), findsOneWidget);
+      expect(find.text("0/1 image"), findsNWidgets(5));
+      expect(find.text("0/1 video"), findsNWidgets(5));
       expect(
-        find.text(
-          "Select exactly 10 proofs: 5 pictures and 5 videos of the greenhouse, plot, or unit.",
-        ),
-        findsOneWidget,
+        find.widgetWithText(OutlinedButton, "Upload image"),
+        findsNWidgets(5),
       );
-      expect(find.text("0 / 5"), findsNWidgets(2));
+      expect(
+        find.widgetWithText(OutlinedButton, "Upload video"),
+        findsNWidgets(5),
+      );
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, "Continue"))
+            .onPressed,
+        isNull,
+      );
 
-      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-      await tester.pumpAndSettle();
+      await _tapFirstProofButton(tester, "Upload image");
 
-      expect(find.text("5 / 5"), findsNWidgets(2));
+      expect(find.text("Image"), findsOneWidget);
+      expect(find.text("Video"), findsNothing);
+
+      await _tapFirstProofButton(tester, "Upload video");
+
+      expect(find.text("Image"), findsOneWidget);
+      expect(find.text("Video"), findsOneWidget);
+
+      await _captureProofsForUnits(tester, 4);
+
+      expect(find.text("1/1 ready"), findsNWidgets(10));
+      expect(find.text("Replace image"), findsNWidgets(5));
+      expect(find.text("Replace video"), findsNWidgets(5));
+      expect(find.text("Image"), findsNWidgets(5));
+      expect(find.text("Video"), findsNWidgets(5));
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, "Continue"))
+            .onPressed,
+        isNotNull,
+      );
+
+      await _tapFirstTooltip(tester, "Remove video proof");
+
+      expect(find.text("Replace image"), findsNWidgets(5));
+      expect(find.text("Replace video"), findsNWidgets(4));
+      expect(find.text("Upload video"), findsOneWidget);
+      expect(find.text("Video"), findsNWidgets(4));
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, "Continue"))
+            .onPressed,
+        isNull,
+      );
+
+      await _tapFirstProofButton(tester, "Upload video");
+
+      expect(find.text("Replace video"), findsNWidgets(5));
+      expect(find.text("Video"), findsNWidgets(5));
+      expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, "Continue"))
+            .onPressed,
+        isNotNull,
+      );
 
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
@@ -555,10 +739,48 @@ void main() {
     },
   );
 
+  testWidgets("proof checklist uses the configured work unit label", (
+    tester,
+  ) async {
+    await _pumpWizardHost(
+      tester,
+      size: const Size(1280, 900),
+      useBottomSheet: false,
+      wizard: ProductionClockOutWizardSheet(
+        workDate: workDate,
+        task: task,
+        plan: plan,
+        timelineRows: const <ProductionTimelineRow>[],
+        taskDayLedgers: [ledger],
+        attendanceRecords: [attendance],
+        activeAttendance: attendance,
+        staffMap: {staff.id: staff},
+        planUnitLabelById: const <String, String>{},
+        fallbackTotalUnits: 5,
+        fallbackWorkUnitLabel: "plots",
+        staffId: staff.id,
+        onPickProofs: () async => const <ProductionTaskProgressProofInput>[],
+        onSubmit: (_) async {},
+      ),
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, "Continue"));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Plot 1"), findsOneWidget);
+    expect(find.text("Plot 5"), findsOneWidget);
+    expect(
+      find.text(
+        "Upload one image and one video for each plot. Each upload replaces that unit’s previous file.",
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets("successful proof replacement clears a stale proof error banner", (
     tester,
   ) async {
-    var pickAttempts = 0;
+    var captureAttempts = 0;
 
     await _pumpWizardHost(
       tester,
@@ -577,44 +799,30 @@ void main() {
         fallbackTotalUnits: 5,
         fallbackWorkUnitLabel: "greenhouses",
         staffId: staff.id,
-        onPickProofs: () async {
-          pickAttempts += 1;
-          if (pickAttempts == 1) {
+        onCaptureProof: ({required isVideo, required unitNumber}) async {
+          captureAttempts += 1;
+          if (captureAttempts == 1) {
             throw Exception(
               "Upload every required picture and video for the completed units.",
             );
           }
-          return [
-            _proof("proof-1.jpg"),
-            _proof("proof-1.mp4"),
-            _proof("proof-2.jpg"),
-            _proof("proof-2.mp4"),
-            _proof("proof-3.jpg"),
-            _proof("proof-3.mp4"),
-            _proof("proof-4.jpg"),
-            _proof("proof-4.mp4"),
-            _proof("proof-5.jpg"),
-            _proof("proof-5.mp4"),
-          ];
+          return _proof("proof-$unitNumber.${isVideo ? 'mp4' : 'jpg'}");
         },
         onSubmit: (_) async {},
       ),
     );
 
-    await _tapChoiceChip(tester, "5");
     await tester.tap(find.widgetWithText(FilledButton, "Continue"));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-    await tester.pumpAndSettle();
+    await _tapFirstProofButton(tester, "Upload image");
 
     expect(
       find.textContaining("Upload every required picture and video"),
       findsOneWidget,
     );
 
-    await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-    await tester.pumpAndSettle();
+    await _captureProofsForUnits(tester, 5);
 
     expect(
       find.textContaining("Upload every required picture and video"),
@@ -625,7 +833,7 @@ void main() {
   testWidgets(
     "mobile clock-out sheet keeps the user in proof step after a failed upload and allows retry",
     (tester) async {
-      var pickAttempts = 0;
+      var captureAttempts = 0;
       var submitCalls = 0;
 
       await _pumpWizardHost(
@@ -645,12 +853,12 @@ void main() {
           fallbackTotalUnits: 5,
           fallbackWorkUnitLabel: "greenhouses",
           staffId: staff.id,
-          onPickProofs: () async {
-            pickAttempts += 1;
-            if (pickAttempts == 1) {
+          onCaptureProof: ({required isVideo, required unitNumber}) async {
+            captureAttempts += 1;
+            if (captureAttempts == 1) {
               throw Exception("Upload failed");
             }
-            return [_proof("proof-1.jpg"), _proof("proof-1.mp4")];
+            return _proof("proof-$unitNumber.${isVideo ? 'mp4' : 'jpg'}");
           },
           onSubmit: (_) async {
             submitCalls += 1;
@@ -658,26 +866,24 @@ void main() {
         ),
       );
 
-      await _tapChoiceChip(tester, "1");
+      await _selectCompletedAmount(tester, 1);
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
       expect(find.text(_step2Title), findsOneWidget);
       expect(find.text("Step 2 of 4"), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-      await tester.pumpAndSettle();
+      await _tapFirstProofButton(tester, "Upload image");
 
       expect(find.textContaining("Upload failed"), findsOneWidget);
       expect(find.text(_step2Title), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-      await tester.pumpAndSettle();
+      await _captureProofsForUnits(tester, 1);
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
       expect(find.text(_step3Title), findsOneWidget);
-      expect(pickAttempts, 2);
+      expect(captureAttempts, 3);
       expect(submitCalls, 0);
       expect(tester.takeException(), isNull);
     },
@@ -706,10 +912,7 @@ void main() {
           fallbackTotalUnits: 5,
           fallbackWorkUnitLabel: "greenhouses",
           staffId: staff.id,
-          onPickProofs: () async => [
-            _proof("proof-1.jpg"),
-            _proof("proof-1.mp4"),
-          ],
+          onCaptureProof: _captureProof,
           onSubmit: (input) async {
             submitAttempts += 1;
             if (submitAttempts == 1) {
@@ -720,12 +923,11 @@ void main() {
         ),
       );
 
-      await _tapChoiceChip(tester, "1");
+      await _selectCompletedAmount(tester, 1);
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(OutlinedButton, _addProofsLabel));
-      await tester.pumpAndSettle();
+      await _captureProofsForUnits(tester, 1);
       await tester.tap(find.widgetWithText(FilledButton, "Continue"));
       await tester.pumpAndSettle();
 

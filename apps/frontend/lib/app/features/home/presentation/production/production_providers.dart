@@ -777,9 +777,10 @@ class ProductionPlanActions {
       payload: payload,
     );
 
+    // Task creation changes the open plan detail. The plans list and portfolio
+    // scores are refreshed by explicit list/manual refresh paths, avoiding
+    // route-wide rebuild churn while modal task creation is dismissing.
     _ref.invalidate(productionPlanDetailProvider(planId));
-    _ref.invalidate(productionPlansProvider);
-    _ref.invalidate(productionPortfolioConfidenceProvider);
     return task;
   }
 

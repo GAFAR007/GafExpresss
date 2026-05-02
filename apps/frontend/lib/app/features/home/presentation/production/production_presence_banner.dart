@@ -21,7 +21,7 @@ import 'package:flutter/material.dart';
 import 'package:frontend/app/features/home/presentation/production/production_draft_presence.dart';
 import 'package:frontend/app/theme/app_colors.dart';
 
-class ProductionPresenceBanner extends StatelessWidget {
+class ProductionPresenceBanner extends StatefulWidget {
   final ProductionDraftPresenceViewer currentViewer;
   final List<ProductionDraftPresenceViewer> remoteViewers;
   final bool isConnected;
@@ -44,22 +44,46 @@ class ProductionPresenceBanner extends StatelessWidget {
   });
 
   @override
+  State<ProductionPresenceBanner> createState() =>
+      _ProductionPresenceBannerState();
+}
+
+class _ProductionPresenceBannerState extends State<ProductionPresenceBanner> {
+  bool _expanded = false;
+
+  @override
+  void didUpdateWidget(covariant ProductionPresenceBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if ((oldWidget.planId ?? "").trim() != (widget.planId ?? "").trim()) {
+      _expanded = false;
+    }
+  }
+
+  void _toggleExpanded() {
+    setState(() {
+      _expanded = !_expanded;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final viewers = _mergeProductionPresenceViewers(
-      currentViewer: currentViewer,
-      remoteViewers: remoteViewers,
+      currentViewer: widget.currentViewer,
+      remoteViewers: widget.remoteViewers,
     );
-    final normalizedPlanId = (planId ?? "").trim();
+    final normalizedPlanId = (widget.planId ?? "").trim();
     final roomId = draftPresenceRoomIdForPlanId(normalizedPlanId);
     final viewerCount = viewers.length;
-    final canOpenStats = onOpenStats != null && roomId.isNotEmpty;
-    final statusColor = isSharedRoom
-        ? (isConnected ? AppColors.productionAccent : AppColors.tenantAccent)
+    final canOpenStats = widget.onOpenStats != null && roomId.isNotEmpty;
+    final statusColor = widget.isSharedRoom
+        ? (widget.isConnected
+              ? AppColors.productionAccent
+              : AppColors.tenantAccent)
         : theme.colorScheme.tertiary;
-    final statusLabel = !isSharedRoom
+    final statusLabel = !widget.isSharedRoom
         ? "Local plan"
-        : isConnected
+        : widget.isConnected
         ? "Live"
         : "Connecting";
     final statusBackground = statusColor.withValues(
@@ -67,7 +91,7 @@ class ProductionPresenceBanner extends StatelessWidget {
     );
     final statsButton = canOpenStats
         ? OutlinedButton.icon(
-            onPressed: onOpenStats,
+            onPressed: widget.onOpenStats,
             icon: const Icon(Icons.bar_chart_rounded, size: 17),
             label: const Text("Stats"),
             style: OutlinedButton.styleFrom(
@@ -80,163 +104,163 @@ class ProductionPresenceBanner extends StatelessWidget {
             ),
           )
         : null;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
+    final statusChip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        color: statusBackground,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: statusColor.withValues(alpha: 0.36)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final stackHeader = constraints.maxWidth < 760;
-              final titleBlock = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          Icon(
+            widget.isConnected
+                ? Icons.wifi_tethering_outlined
+                : Icons.wifi_off_outlined,
+            size: 15,
+            color: statusColor,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            statusLabel,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: statusColor,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _toggleExpanded,
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Text(
-                    "Currently viewing",
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w800,
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(
+                        alpha: theme.brightness == Brightness.dark
+                            ? 0.18
+                            : 0.08,
+                      ),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: Icon(
+                      Icons.groups_2_outlined,
+                      size: 19,
+                      color: statusColor,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "$viewerCount viewer${viewerCount == 1 ? '' : 's'} on this plan",
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Live presence",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          "$viewerCount viewer${viewerCount == 1 ? '' : 's'}",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(width: 8),
+                  statusChip,
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+              if (_expanded) ...[
+                const SizedBox(height: 10),
+                Text(
+                  widget.isSharedRoom
+                      ? "Live room presence updates while the plan is open."
+                      : "Showing the signed-in account tied to this plan.",
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (statsButton != null) ...[
+                  const SizedBox(height: 10),
+                  statsButton,
+                ],
+                const SizedBox(height: 10),
+                StreamBuilder<DateTime>(
+                  stream: Stream<DateTime>.periodic(
+                    const Duration(seconds: 30),
+                    (_) => DateTime.now(),
+                  ),
+                  initialData: DateTime.now(),
+                  builder: (context, timeSnapshot) {
+                    final referenceTime = timeSnapshot.data ?? DateTime.now();
+                    return Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: viewers
+                          .map(
+                            (viewer) => _ProductionPresenceViewerChip(
+                              viewer: viewer,
+                              isSelf:
+                                  _productionPresenceViewerKey(viewer) ==
+                                  _productionPresenceViewerKey(
+                                    widget.currentViewer,
+                                  ),
+                              referenceTime: referenceTime,
+                              snapshotAt: widget.snapshotAt,
+                            ),
+                          )
+                          .toList(),
+                    );
+                  },
+                ),
+                if ((widget.errorMessage ?? "").trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
                   Text(
-                    isSharedRoom
-                        ? "Live room presence updates while the plan is open."
-                        : "Showing the signed-in account tied to this plan.",
+                    "Live presence is not connected yet. Showing the current viewer and plan state only.",
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ],
-              );
-
-              final statusChip = Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: statusBackground,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: statusColor.withValues(alpha: 0.42),
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isConnected
-                          ? Icons.wifi_tethering_outlined
-                          : Icons.wifi_off_outlined,
-                      size: 16,
-                      color: statusColor,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      statusLabel,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: statusColor,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-
-              if (stackHeader) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    titleBlock,
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        if (statsButton != null) statsButton,
-                        statusChip,
-                      ],
-                    ),
-                  ],
-                );
-              }
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: titleBlock),
-                  const SizedBox(width: 12),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    alignment: WrapAlignment.end,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (statsButton != null) statsButton,
-                      statusChip,
-                    ],
-                  ),
-                ],
-              );
-            },
+              ],
+            ],
           ),
-          const SizedBox(height: 12),
-          StreamBuilder<DateTime>(
-            stream: Stream<DateTime>.periodic(
-              const Duration(seconds: 30),
-              (_) => DateTime.now(),
-            ),
-            initialData: DateTime.now(),
-            builder: (context, timeSnapshot) {
-              final referenceTime = timeSnapshot.data ?? DateTime.now();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: viewers
-                        .map(
-                          (viewer) => _ProductionPresenceViewerChip(
-                            viewer: viewer,
-                            isSelf:
-                                _productionPresenceViewerKey(viewer) ==
-                                _productionPresenceViewerKey(currentViewer),
-                            referenceTime: referenceTime,
-                            snapshotAt: snapshotAt,
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ],
-              );
-            },
-          ),
-          if ((errorMessage ?? "").trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(
-              "Live presence is not connected yet. Showing the current viewer and plan state only.",
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }

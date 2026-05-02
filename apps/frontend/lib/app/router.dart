@@ -87,7 +87,9 @@ const String _productionPlanIdParam = "id";
 const String _productionPhaseIdParam = "phaseId";
 const String _productionTaskIdParam = "taskId";
 const String _staffProfileIdParam = "id";
+const String _businessLoginRoute = "/business-login";
 const String _routeRootLog = "-> /";
+const String _routeBusinessLoginLog = "-> /business-login";
 const String _routeProductionListLog = "-> /business-production";
 const String _routeProductionArchiveLog = "-> /business-production/archive";
 const String _routeProductionCalendarLog = "-> /business-production/calendar";
@@ -118,16 +120,66 @@ const String _routeChatThreadLog = "-> /chat/:id";
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 GoRouter? _previousRouter;
 
-String _resolveInitialRouterLocation() {
-  final previousLocation = _previousRouter
-      ?.routerDelegate
-      .currentConfiguration
-      .uri
-      .toString();
-  if (previousLocation != null && previousLocation.trim().isNotEmpty) {
-    return previousLocation;
+String? _resolveAuthRedirectTarget(String? rawRedirect) {
+  if (rawRedirect == null || rawRedirect.trim().isEmpty) {
+    return null;
   }
 
+  final decodedRedirect = Uri.decodeComponent(rawRedirect.trim());
+  final internalRoute = _extractInternalAppRoute(decodedRedirect);
+  if (internalRoute == null) {
+    return null;
+  }
+
+  return _normalizeProductionAuthTarget(internalRoute);
+}
+
+String? _extractInternalAppRoute(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+
+  // WHY: External protected links can carry Flutter hash routes in next=.
+  if (trimmed.startsWith('/#/')) {
+    return trimmed.substring(2);
+  }
+  if (trimmed.startsWith('#/')) {
+    return trimmed.substring(1);
+  }
+  if (trimmed.startsWith('/')) {
+    return trimmed;
+  }
+
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null) {
+    return null;
+  }
+
+  final fragment = uri.fragment.trim();
+  if (fragment.startsWith('/')) {
+    return fragment;
+  }
+
+  final path = uri.path.trim();
+  if (!path.startsWith('/')) {
+    return null;
+  }
+  return uri.query.trim().isEmpty ? path : '$path?${uri.query}';
+}
+
+String _normalizeProductionAuthTarget(String route) {
+  final path = Uri.tryParse(route)?.path ?? route.split('?').first;
+  // WHY: Production protected login should land staff on the active plans list,
+  // not a stale deep workspace URL from an earlier shared link.
+  if (path == productionPlansRoute ||
+      path.startsWith('$productionPlansRoute/')) {
+    return productionPlansRoute;
+  }
+  return route;
+}
+
+String _resolveInitialRouterLocation() {
   // WHY: Browser refresh on Flutter web keeps the active hash route in the
   // fragment. Seed GoRouter from that fragment so reloads stay on the same
   // production page instead of falling back to login/home.
@@ -172,6 +224,17 @@ String _resolveInitialRouterLocation() {
     return routeFromPath;
   }
 
+  final previousLocation = _previousRouter
+      ?.routerDelegate
+      .currentConfiguration
+      .uri
+      .toString();
+  // WHY: Only reuse the previous in-memory route when the address bar has no
+  // explicit route. Production links must not be overridden by a stale /home.
+  if (previousLocation != null && previousLocation.trim().isNotEmpty) {
+    return previousLocation;
+  }
+
   if (rememberedRoute != null && rememberedRoute.trim().isNotEmpty) {
     return rememberedRoute;
   }
@@ -200,8 +263,12 @@ final routerProvider = Provider<GoRouter>((ref) {
     overridePlatformDefaultLocation: true,
     redirect: (context, state) {
       final String path = state.matchedLocation;
+      final bool isBusinessLoginRoute = path == _businessLoginRoute;
       final bool isAuthRoute =
-          path == '/login' || path == '/register' || path == '/forgot-password';
+          path == '/login' ||
+          isBusinessLoginRoute ||
+          path == '/register' ||
+          path == '/forgot-password';
       final bool isPublicProduct = path.startsWith('/product/');
       final bool isPaymentSuccess = path == '/payment-success';
       final bool isBusinessInvite = path.startsWith('/business-invite');
@@ -238,6 +305,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           "redirect -> /login",
           extra: {"from": path, "next": nextTarget},
         );
+        if (path.startsWith(productionPlansRoute)) {
+          return '$_businessLoginRoute?next=${Uri.encodeComponent(nextTarget)}';
+        }
         return '/login?next=${Uri.encodeComponent(nextTarget)}';
       }
 
@@ -245,12 +315,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (isAuthed && isAuthRoute) {
         final nextParam = state.uri.queryParameters['next'];
         final tokenParam = state.uri.queryParameters['token'];
-        final decodedNext = nextParam == null || nextParam.trim().isEmpty
-            ? null
-            : Uri.decodeComponent(nextParam.trim());
-        String? nextTarget = decodedNext != null && decodedNext.startsWith('/')
-            ? decodedNext
-            : null;
+        final hasRawNext = nextParam != null && nextParam.trim().isNotEmpty;
+        String? nextTarget = _resolveAuthRedirectTarget(nextParam);
         // WHY: Recover invite token when next params are not encoded properly.
         if ((nextTarget == null || nextTarget.isEmpty) &&
             tokenParam != null &&
@@ -263,10 +329,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         }
         // WHY: Use pending invite token if present (synchronous router redirect).
         final pendingInvite = ref.read(pendingInviteTokenProvider);
-        final resolvedTarget =
-            pendingInvite != null && pendingInvite.trim().isNotEmpty
+        final resolvedTarget = isBusinessLoginRoute
+            ? productionPlansRoute
+            : pendingInvite != null && pendingInvite.trim().isNotEmpty
             ? '/business-invite?token=${pendingInvite.trim()}'
-            : nextTarget ?? '/home';
+            : nextTarget ?? (hasRawNext ? productionPlansRoute : '/home');
         final safeTarget = resolvedTarget.startsWith('/business-invite')
             ? '/business-invite?token=***'
             : resolvedTarget;
@@ -363,6 +430,19 @@ final routerProvider = Provider<GoRouter>((ref) {
             extra: {"isAuthed": isAuthed, "to": safeTarget},
           );
           return target;
+        },
+      ),
+      GoRoute(
+        path: _businessLoginRoute,
+        builder: (context, state) {
+          final nextParam = state.uri.queryParameters['next'];
+          final emailParam = state.uri.queryParameters['email'];
+          AppDebug.log("ROUTER", _routeBusinessLoginLog);
+          return LoginScreen(
+            redirectTo: nextParam ?? productionPlansRoute,
+            initialEmail: emailParam,
+            useDirectSignIn: true,
+          );
         },
       ),
       GoRoute(
