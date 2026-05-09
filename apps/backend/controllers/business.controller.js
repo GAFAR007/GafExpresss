@@ -27,6 +27,10 @@ const businessTenantService = require("../services/business.tenant.service");
 const tenantContactDocumentService = require("../services/tenant_contact_document.service");
 const staffAttendanceProofService = require("../services/staff_attendance_proof.service");
 const {
+  notifyStaffAttendanceEvent,
+  notifyProductionApproval,
+} = require("../services/management_notification.service");
+const {
   SHARED_ACTIVITY_NONE,
   SHARED_ACTIVITY_PLANTED,
   SHARED_ACTIVITY_TRANSPLANTED,
@@ -11740,6 +11744,13 @@ async function clockInStaff(req, res) {
         note: auditNote || null,
       },
     });
+    await notifyStaffAttendanceEvent({
+      businessId,
+      actor,
+      attendance,
+      staffProfile: targetProfile,
+      eventType: "clock_in",
+    });
 
     // CONFIDENCE-SCORE
     // WHY: Clock-in changes real staff availability and should refresh active-plan confidence in this estate scope.
@@ -11955,6 +11966,13 @@ async function clockOutStaff(req, res) {
         manualEntry: canManage && manualClockOutAt != null,
         note: auditNote || null,
       },
+    });
+    await notifyStaffAttendanceEvent({
+      businessId,
+      actor,
+      attendance,
+      staffProfile: targetProfile,
+      eventType: "clock_out",
     });
 
     // CONFIDENCE-SCORE
@@ -12217,6 +12235,13 @@ async function clockOutStaffWithProof(req, res) {
         manualEntry: canManage && manualClockOutAt != null,
         note: auditNote || null,
       },
+    });
+    await notifyStaffAttendanceEvent({
+      businessId,
+      actor,
+      attendance,
+      staffProfile: targetProfile,
+      eventType: "clock_out_with_proof",
     });
 
     try {
@@ -22273,6 +22298,12 @@ async function approveTaskProgress(req, res) {
       planId: progress.planId,
       context: "task_progress_approved",
     });
+    await notifyProductionApproval({
+      businessId,
+      actor,
+      progress,
+      approvalType: "task_progress",
+    });
 
     return res.status(200).json({
       message: PRODUCTION_COPY.TASK_PROGRESS_APPROVED,
@@ -22510,6 +22541,12 @@ async function approveProductionTask(req, res) {
     task.reviewedAt = new Date();
     task.rejectionReason = "";
     await task.save();
+    await notifyProductionApproval({
+      businessId,
+      actor,
+      task,
+      approvalType: "production_task",
+    });
 
     debug("BUSINESS CONTROLLER: approveProductionTask - success", {
       actorId: actor._id,

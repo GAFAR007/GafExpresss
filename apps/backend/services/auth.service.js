@@ -9,6 +9,9 @@ const User = require('../models/User');
 const BusinessStaffProfile = require('../models/BusinessStaffProfile');
 const USER_ROLES = User.USER_ROLES;
 const { signToken } = require('../config/jwt');
+const {
+  notifyStaffLogin,
+} = require('./management_notification.service');
 
 // WHY: Basic validation rules keep registration consistent and secure.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -574,6 +577,7 @@ async function loginUser(payload) {
   }
 
   const staffRole = await resolveLoginStaffRole(user);
+  await notifyStaffLogin({ user });
 
   debug('================ LOGIN SERVICE END (SUCCESS) ================');
 

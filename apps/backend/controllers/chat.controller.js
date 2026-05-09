@@ -19,6 +19,9 @@ const chatService = require("../services/chat.service");
 const chatCallService = require("../services/chat_call.service");
 const purchaseRequestService = require("../services/purchase_request.service");
 const {
+  notifyChatMessage,
+} = require("../services/management_notification.service");
+const {
   emitMessageCreated,
   emitMessageRead,
   emitCallIncoming,
@@ -290,6 +293,11 @@ async function sendMessage(req, res) {
     });
 
     emitMessages(conversationId, [message]);
+    await notifyChatMessage({
+      actor,
+      conversation,
+      message,
+    });
 
     let followUpMessages = [];
     try {
